@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex Live Explorer — local harness</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body { color: #272925; background: #e8e6df; font: 13px/1.4 "Segoe UI", sans-serif; }
+      .demo-bar { display: flex; align-items: center; gap: 7px; height: 42px; padding: 0 12px; border-bottom: 1px solid #bab9b2; background: #f6f4ed; }
+      .demo-bar strong { margin-right: auto; font-family: Bahnschrift, sans-serif; letter-spacing: .04em; }
+      .demo-bar button { padding: 4px 8px; color: inherit; background: transparent; border: 1px solid #aaa9a1; border-radius: 1px; cursor: pointer; }
+      .demo-bar button:hover { background: #dfddd4; }
+      .codex-shell { display: flex; min-width: 0; height: calc(100% - 42px); }
+      .task-rail { flex: 0 0 214px; padding: 16px 12px; background: #eeece5; border-right: 1px solid #c6c4bc; }
+      .task-rail h1 { margin: 0 0 18px; font: 600 17px Bahnschrift, sans-serif; }
+      .task { display: block; width: 100%; margin: 0 0 5px; padding: 9px; text-align: left; background: transparent; border: 0; }
+      .task[aria-current="page"] { background: #dcdad2; box-shadow: inset 2px 0 #2b6d91; }
+      main.main-surface { position: relative; display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; background: #fbfaf6; }
+      .conversation-header { position: absolute; z-index: 30; inset: 0 0 auto; display: flex; align-items: center; gap: 12px; height: 46px; padding: 0 18px; border-bottom: 1px solid #d1cfc7; background: #fbfaf6; }
+      .conversation-header strong { font-weight: 600; }
+      .conversation-header span { color: #74756f; }
+      .main-content { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: 78px 34px 34px; }
+      .conversation-context { display: flex; flex-direction: column; gap: 18px; width: min(660px, 100%); min-height: 100%; }
+      .message { max-width: 660px; padding: 18px 20px; background: #efede7; border: 1px solid #d1cfc7; }
+      .message h2 { margin: 0 0 6px; font: 600 18px Bahnschrift, sans-serif; }
+      .composer { margin-top: auto; padding: 12px; border: 1px solid #d1cfc7; background: #fff; }
+      .composer label { display: block; margin-bottom: 6px; color: #74756f; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+      .composer textarea { display: block; width: 100%; min-height: 62px; resize: vertical; color: inherit; background: transparent; border: 0; outline-offset: 4px; font: inherit; }
+      html[data-theme="dark"] body { color: #ece9df; background: #151715; }
+      html[data-theme="dark"] .demo-bar, html[data-theme="dark"] .task-rail { background: #202320; border-color: #393d39; }
+      html[data-theme="dark"] .demo-bar button { border-color: #565b55; }
+      html[data-theme="dark"] .demo-bar button:hover, html[data-theme="dark"] .task[aria-current="page"] { background: #303430; }
+      html[data-theme="dark"] main.main-surface, html[data-theme="dark"] .conversation-header { background: #191b19; }
+      html[data-theme="dark"] .conversation-header, html[data-theme="dark"] .message, html[data-theme="dark"] .composer { border-color: #393d39; }
+      html[data-theme="dark"] .conversation-header span, html[data-theme="dark"] .composer label { color: #aaa9a3; }
+      html[data-theme="dark"] .message { background: #222522; border-color: #393d39; }
+      html[data-theme="dark"] .composer { background: #202320; }
+      @media (max-width: 820px) { .task-rail { flex-basis: 150px; } }
+    </style>
+  </head>
+  <body>
+    <button data-app-shell-sidebar-trigger hidden aria-hidden="true"></button>
+    <header class="demo-bar">
+      <strong>LOCAL INJECTION HARNESS</strong>
+      <button data-demo="add">Add file</button>
+      <button data-demo="modify">Modify file</button>
+      <button data-demo="rename">Rename file</button>
+      <button data-demo="delete">Delete file</button>
+      <button data-demo="theme">Dark theme</button>
+    </header>
+    <div class="codex-shell">
+      <aside class="task-rail app-shell-left-panel" aria-label="Tasks">
+        <h1>Codex</h1>
+        <button class="task" aria-current="page" data-thread-id="11111111-1111-4111-8111-111111111111"
+          data-app-action-sidebar-thread-active="true" data-app-action-sidebar-thread-host-id="local"
+          data-app-action-sidebar-thread-id="local:11111111-1111-4111-8111-111111111111"
+          data-app-action-sidebar-thread-kind="local">Explorer UI build</button>
+        <button class="task" data-thread-id="demo-thread-0002">A task without files</button>
+      </aside>
+      <main class="main-surface" data-codex-main>
+        <header class="conversation-header" data-app-shell-header-edge-scroll>
+          <strong>Conversation</strong>
+          <span>Explorer UI build</span>
+        </header>
+        <section class="main-content" aria-label="Conversation">
+          <div class="conversation-context">
+            <article class="message" data-response-annotation-conversation="11111111-1111-4111-8111-111111111111">
+              <h2>Build the injected project explorer</h2>
+              <p>Select files to open bounded text previews as tabs in this main view. The harness never reads a real workspace.</p>
+            </article>
+            <div class="composer" data-above-composer-conversation-id="11111111-1111-4111-8111-111111111111">
+              <label for="demo-reply">Reply</label>
+              <textarea id="demo-reply">This draft remains mounted while a file preview is active.</textarea>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="./demo.js"></script>
+  </body>
+</html>

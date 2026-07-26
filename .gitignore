@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# TypeScript / Node
+**/node_modules/
+**/dist/
+**/coverage/
+*.tsbuildinfo
+
+# Release output
+/artifacts/
+/installer/bin/
+/installer/obj/
+
+# Local diagnostics and settings
+/.codex-live-explorer/
+*.log
+
+# Editors and operating systems
+.idea/
+.vscode/*.log
+.DS_Store
+Thumbs.db

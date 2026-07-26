@@ -1,0 +1,35 @@
+name: Codex compatibility report
+description: Report a Codex Desktop version where Live Explorer does not load safely.
+title: "[Compatibility]: "
+labels: [compatibility]
+body:
+  - type: input
+    id: explorer-version
+    attributes:
+      label: Live Explorer version
+    validations:
+      required: true
+  - type: input
+    id: codex-version
+    attributes:
+      label: Codex Desktop package version
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version and build
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Do not include project paths, source code, credentials, or session data.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Paste only the version/error-code output from `codex-live-explorer diagnose`.

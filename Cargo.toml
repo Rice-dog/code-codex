@@ -1,0 +1,53 @@
+[workspace]
+members = [
+    "crates/cdp-client",
+    "crates/context-resolver",
+    "crates/launcher",
+    "crates/workspace-service",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.20"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+async-trait = "0.1"
+base64 = "0.22"
+clap = { version = "4.5", features = ["derive", "env"] }
+constant_time_eq = "0.4"
+directories = "6.0"
+dunce = "1.0"
+futures-util = "0.3"
+ignore = "0.4"
+notify = "8.2"
+process-wrap = { version = "8.2.1", default-features = false, features = ["creation-flags", "job-object", "kill-on-drop", "tokio1"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tempfile = "3.20"
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = "0.27"
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+url = "2.5"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            packages/explorer-ui/package-lock.json
+            demo-video/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify source and release metadata
+        shell: pwsh
+        run: ./scripts/test.ps1
+
+      - name: Build release binary
+        run: cargo build --workspace --release --locked
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-live-explorer-windows-x64
+          path: target/release/codex-live-explorer.exe
+          if-no-files-found: error

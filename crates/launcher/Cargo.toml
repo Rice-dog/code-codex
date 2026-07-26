@@ -1,0 +1,68 @@
+[package]
+name = "codex-live-explorer"
+description = "Windows-first launcher and supervisor for Codex Live Explorer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+default-run = "codex-live-explorer"
+autobins = false
+
+[[bin]]
+name = "codex-live-explorer"
+path = "src/main.rs"
+
+[[bin]]
+name = "codex-live-explorer-launcher"
+path = "src/bin/codex-live-explorer-launcher.rs"
+
+[[bin]]
+name = "codex-live-explorer-shim"
+path = "src/bin/codex-live-explorer-shim.rs"
+
+[[bin]]
+name = "codex-live-explorer-setup"
+path = "src/bin/codex-live-explorer-setup.rs"
+
+[[bin]]
+name = "codex-live-explorer-uninstall"
+path = "src/bin/codex-live-explorer-uninstall.rs"
+
+[[bin]]
+name = "codex-live-explorer-shortcut"
+path = "src/bin/codex-live-explorer-shortcut.rs"
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+cdp-client = { path = "../cdp-client" }
+clap.workspace = true
+context-resolver = { path = "../context-resolver" }
+dunce.workspace = true
+process-wrap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+same-file = "1.0.6"
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+workspace-service = { path = "../workspace-service" }
+
+[target.'cfg(windows)'.dependencies]
+known-folders = "1.4.2"
+win32job = "2.0.3"
+windows-permissions = "0.2.4"
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+junction = "2.0.0"
+
+[build-dependencies]
+embed-resource = "3.0.11"
+
+[lints]
+workspace = true

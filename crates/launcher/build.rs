@@ -1,0 +1,20 @@
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+
+    println!("cargo:rerun-if-changed=resources/windows-manifest.rc");
+    println!("cargo:rerun-if-changed=resources/application.manifest");
+    embed_resource::compile_for(
+        "resources/windows-manifest.rc",
+        [
+            "codex-live-explorer-launcher",
+            "codex-live-explorer-shim",
+            "codex-live-explorer-setup",
+            "codex-live-explorer-uninstall",
+        ],
+        embed_resource::NONE,
+    )
+    .manifest_required()
+    .expect("the Windows asInvoker manifest is required");
+}
