@@ -487,7 +487,7 @@ fn trusted_windows_path() -> Result<std::ffi::OsString, DiscoveryError> {
 }
 
 #[cfg(windows)]
-const STAGE_ROOT_NAME: &str = "codex-live-explorer-app-server";
+const STAGE_ROOT_NAME: &str = "code-codex-app-server";
 #[cfg(windows)]
 const STAGE_DIRECTORY_PREFIX: &str = "stage-";
 #[cfg(windows)]

@@ -25,7 +25,7 @@ $tempPrefix = $tempBase.TrimEnd(
     [IO.Path]::AltDirectorySeparatorChar
 ) + [IO.Path]::DirectorySeparatorChar
 $testRoot = [IO.Path]::GetFullPath((Join-Path $tempBase (
-    "CodexLiveExplorer-MsiCleanupTest-" + [Guid]::NewGuid().ToString("N")
+    "CodeCodex-MsiCleanupTest-" + [Guid]::NewGuid().ToString("N")
 )))
 if (-not $testRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Unsafe MSI cleanup test path: $testRoot"
@@ -60,9 +60,9 @@ try {
     }
 
     foreach ($acceptedName in @(
-        "CodexLiveExplorer.exe",
-        "codex-live-explorer.exe",
-        "CODEXLIVEEXPLORER.EXE"
+        "CodeCodex.exe",
+        "code-codex.exe",
+        "CODECODEX.EXE"
     )) {
         & $testExecutable --blocked-process-name $acceptedName
         if ($LASTEXITCODE -ne 0) {
@@ -71,8 +71,8 @@ try {
     }
     foreach ($rejectedName in @(
         "Codex.exe",
-        "codex-live-explorer-helper.exe",
-        "codex-live-explorer.exe.bak"
+        "code-codex-helper.exe",
+        "code-codex.exe.bak"
     )) {
         & $testExecutable --blocked-process-name $rejectedName
         if ($LASTEXITCODE -ne 1) {
@@ -87,10 +87,10 @@ try {
         }
     }
 
-    $missingInstallRoot = Join-Path $testRoot "ownership-missing\Codex Live Explorer"
+    $missingInstallRoot = Join-Path $testRoot "ownership-missing\Code-Codex"
     Assert-InstallOwnership $missingInstallRoot 0 "A missing install root was not accepted."
 
-    $ownedInstallRoot = Join-Path $testRoot "ownership-regular\Codex Live Explorer"
+    $ownedInstallRoot = Join-Path $testRoot "ownership-regular\Code-Codex"
     New-Item -ItemType Directory -Path $ownedInstallRoot -Force | Out-Null
     $installTypeMarker = Join-Path $ownedInstallRoot "install-type"
     "msi" | Set-Content -LiteralPath $installTypeMarker -Encoding ascii
@@ -114,14 +114,14 @@ try {
 
     $ownershipParentTarget = Join-Path $testRoot "ownership-parent-target"
     $ownershipParentJunction = Join-Path $testRoot "ownership-parent-junction"
-    $ownershipParentInstall = Join-Path $ownershipParentJunction "Codex Live Explorer"
-    New-Item -ItemType Directory -Path (Join-Path $ownershipParentTarget "Codex Live Explorer") -Force | Out-Null
-    "msi" | Set-Content -LiteralPath (Join-Path $ownershipParentTarget "Codex Live Explorer\install-type") -Encoding ascii
+    $ownershipParentInstall = Join-Path $ownershipParentJunction "Code-Codex"
+    New-Item -ItemType Directory -Path (Join-Path $ownershipParentTarget "Code-Codex") -Force | Out-Null
+    "msi" | Set-Content -LiteralPath (Join-Path $ownershipParentTarget "Code-Codex\install-type") -Encoding ascii
     New-Item -ItemType Junction -Path $ownershipParentJunction -Target $ownershipParentTarget | Out-Null
     $createdJunctions.Add($ownershipParentJunction)
     Assert-InstallOwnership $ownershipParentInstall 3 "A reparse-point Programs parent was accepted."
 
-    $blockedProcessPath = Join-Path $testRoot "CodexLiveExplorer.exe"
+    $blockedProcessPath = Join-Path $testRoot "CodeCodex.exe"
     Copy-Item -LiteralPath (Join-Path $env:WINDIR "System32\ping.exe") -Destination $blockedProcessPath
     $blockedProcess = Start-Process `
         -FilePath $blockedProcessPath `
@@ -153,7 +153,7 @@ try {
         }
     }
 
-    $regularRoot = Join-Path $testRoot "regular\CodexLiveExplorer"
+    $regularRoot = Join-Path $testRoot "regular\CodeCodex"
     New-Item -ItemType Directory -Path $regularRoot -Force | Out-Null
     $settingsFile = Join-Path $regularRoot "settings.json"
     $legacyTemp = Join-Path $regularRoot "settings.json.tmp"
@@ -178,7 +178,7 @@ try {
 
     $junctionTarget = Join-Path $testRoot "junction-target"
     $junctionParent = Join-Path $testRoot "junction-parent"
-    $settingsJunction = Join-Path $junctionParent "CodexLiveExplorer"
+    $settingsJunction = Join-Path $junctionParent "CodeCodex"
     New-Item -ItemType Directory -Path $junctionTarget, $junctionParent | Out-Null
     $targetSettings = Join-Path $junctionTarget "settings.json"
     $targetLegacyTemp = Join-Path $junctionTarget "settings.json.tmp"
@@ -194,7 +194,7 @@ try {
     Assert-Exists $targetLegacyTemp "Settings cleanup traversed a root junction to settings.json.tmp."
     Assert-Exists $targetOrphan "Settings cleanup traversed a root junction to a crash orphan."
 
-    $orphanReparseRoot = Join-Path $testRoot "orphan-reparse\CodexLiveExplorer"
+    $orphanReparseRoot = Join-Path $testRoot "orphan-reparse\CodeCodex"
     $orphanReparseTarget = Join-Path $testRoot "orphan-reparse-target"
     New-Item -ItemType Directory -Path $orphanReparseRoot, $orphanReparseTarget -Force | Out-Null
     $orphanReparseSentinel = Join-Path $orphanReparseTarget "sentinel.txt"
@@ -206,7 +206,7 @@ try {
     Assert-Exists $orphanReparse "Crash-orphan cleanup removed a non-regular reparse entry."
     Assert-Exists $orphanReparseSentinel "Crash-orphan cleanup traversed a child junction."
 
-    $unexpectedRoot = Join-Path $testRoot "unexpected\CodexLiveExplorer"
+    $unexpectedRoot = Join-Path $testRoot "unexpected\CodeCodex"
     $unexpectedSettingsDirectory = Join-Path $unexpectedRoot "settings.json"
     New-Item -ItemType Directory -Path $unexpectedSettingsDirectory -Force | Out-Null
     $unexpectedSentinel = Join-Path $unexpectedSettingsDirectory "sentinel.txt"
@@ -215,13 +215,13 @@ try {
     Assert-Exists $unexpectedSentinel "Settings cleanup recursively removed an unexpected settings directory."
 
     $raceAncestor = Join-Path $testRoot "ancestor-race"
-    $raceSettingsRoot = Join-Path $raceAncestor "nested\CodexLiveExplorer"
+    $raceSettingsRoot = Join-Path $raceAncestor "nested\CodeCodex"
     $raceSettingsFile = Join-Path $raceSettingsRoot "settings.json"
     New-Item -ItemType Directory -Path $raceSettingsRoot -Force | Out-Null
     "settings" | Set-Content -LiteralPath $raceSettingsFile -Encoding UTF8
     $eventSuffix = [Guid]::NewGuid().ToString("N")
-    $readyEventName = "Local\CodexLiveExplorer-CleanupReady-$eventSuffix"
-    $continueEventName = "Local\CodexLiveExplorer-CleanupContinue-$eventSuffix"
+    $readyEventName = "Local\CodeCodex-CleanupReady-$eventSuffix"
+    $continueEventName = "Local\CodeCodex-CleanupContinue-$eventSuffix"
     $readyEvent = [Threading.EventWaitHandle]::new(
         $false,
         [Threading.EventResetMode]::ManualReset,
@@ -285,7 +285,7 @@ try {
         $readyEvent.Dispose()
     }
 
-    $boundedRoot = Join-Path $testRoot "bounded\CodexLiveExplorer"
+    $boundedRoot = Join-Path $testRoot "bounded\CodeCodex"
     New-Item -ItemType Directory -Path $boundedRoot -Force | Out-Null
     foreach ($number in 0..69) {
         $token = "{0:D16}" -f $number
@@ -302,7 +302,7 @@ try {
         throw "Crash-orphan cleanup must be bounded to 64 candidates; found $($remainingOrphans.Count) remaining."
     }
 
-    $emptyAfterCleanup = Join-Path $testRoot "empty\CodexLiveExplorer"
+    $emptyAfterCleanup = Join-Path $testRoot "empty\CodeCodex"
     New-Item -ItemType Directory -Path $emptyAfterCleanup -Force | Out-Null
     "settings" | Set-Content -LiteralPath (Join-Path $emptyAfterCleanup "settings.json") -Encoding UTF8
     "orphan" | Set-Content -LiteralPath (

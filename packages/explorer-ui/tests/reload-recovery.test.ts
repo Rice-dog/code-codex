@@ -27,12 +27,12 @@ describe("renderer reload recovery", () => {
     vi.resetModules();
     const requests: BridgeRequest[] = [];
     let threadAAttempts = 0;
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "stale-retry-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         requests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -70,12 +70,12 @@ describe("renderer reload recovery", () => {
     vi.resetModules();
     const oldSettings = deferred<{ panelWidth: number; collapsed: boolean }>();
     const oldRequests: BridgeRequest[] = [];
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "old-settings-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         oldRequests.push(message);
         if (message.method === "explorer.settings.get") return oldSettings.promise;
@@ -87,16 +87,16 @@ describe("renderer reload recovery", () => {
     const oldBundle = await import("../src/inject");
     oldBundle.installInjector();
     await vi.waitFor(() => expect(oldRequests.map((request) => request.method)).toEqual(["explorer.settings.get"]));
-    const explorer = document.querySelector<HTMLElement>("codex-live-explorer");
+    const explorer = document.querySelector<HTMLElement>("code-codex");
 
     const newSettings = deferred<{ panelWidth: number; collapsed: boolean }>();
     const newRequests: BridgeRequest[] = [];
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "new-settings-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         newRequests.push(message);
         if (message.method === "explorer.settings.get") return newSettings.promise;
@@ -119,7 +119,7 @@ describe("renderer reload recovery", () => {
 
     newSettings.resolve({ panelWidth: 280, collapsed: false });
     await vi.waitFor(() => {
-      expect(document.querySelector("codex-live-explorer")).toBe(explorer);
+      expect(document.querySelector("code-codex")).toBe(explorer);
       expect(explorer?.shadowRoot?.querySelector(".project-name")?.textContent).toBe("New startup");
       expect(explorer?.shadowRoot?.querySelector('[data-path="new.ts"]')).not.toBeNull();
     });
@@ -136,12 +136,12 @@ describe("renderer reload recovery", () => {
     vi.resetModules();
     const initialRequests: BridgeRequest[] = [];
     let initialLists = 0;
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "old-reattach-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         initialRequests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -160,19 +160,19 @@ describe("renderer reload recovery", () => {
 
     const firstBundle = await import("../src/inject");
     firstBundle.installInjector();
-    const explorer = document.querySelector("codex-live-explorer");
+    const explorer = document.querySelector("code-codex");
     await vi.waitFor(() => expect(explorer?.shadowRoot?.querySelector(".project-name")?.textContent).toBe("Before reconnect"));
 
     explorer?.shadowRoot?.querySelector<HTMLButtonElement>(".refresh")?.click();
     await vi.waitFor(() => expect(initialLists).toBe(2));
 
     const reattachedRequests: BridgeRequest[] = [];
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "new-reattach-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         reattachedRequests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -189,7 +189,7 @@ describe("renderer reload recovery", () => {
     const reattachedBundle = await import("../src/inject");
     reattachedBundle.installInjector();
     await vi.waitFor(() => {
-      expect(document.querySelector("codex-live-explorer")).toBe(explorer);
+      expect(document.querySelector("code-codex")).toBe(explorer);
       expect(explorer?.shadowRoot?.querySelector(".project-name")?.textContent).toBe("After reconnect");
       expect(explorer?.shadowRoot?.querySelector('[data-path="after.txt"]')).not.toBeNull();
     });
@@ -203,9 +203,9 @@ describe("renderer reload recovery", () => {
     expect(reattachedRequests.some((request) => request.token === "old-reattach-secret")).toBe(false);
 
     explorer?.shadowRoot?.querySelector<HTMLButtonElement>(".disable")?.click();
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector("code-codex")).toBeNull());
 
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "post-dismiss-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
@@ -215,6 +215,6 @@ describe("renderer reload recovery", () => {
     postDismissBundle.installInjector();
     document.body.append(document.createElement("span"));
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    expect(document.querySelector("codex-live-explorer")).toBeNull();
+    expect(document.querySelector("code-codex")).toBeNull();
   });
 });

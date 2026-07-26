@@ -111,10 +111,10 @@ export interface ObjectBridge {
 
 declare global {
   interface Window {
-    __CODEX_LIVE_EXPLORER_BOOTSTRAP__?: BootstrapConfig;
-    __codexLiveExplorer?: ((payload: string) => unknown) | ObjectBridge;
-    __codexLiveExplorerNative?: ((payload: string) => unknown) | ObjectBridge;
-    __codexLiveExplorerReceive?: (message: BridgeMessage | string) => void;
-    __codexLiveExplorerInject?: () => HTMLElement | null;
+    __CODE_CODEX_BOOTSTRAP__?: BootstrapConfig;
+    __codeCodex?: ((payload: string) => unknown) | ObjectBridge;
+    __codeCodexNative?: ((payload: string) => unknown) | ObjectBridge;
+    __codeCodexReceive?: (message: BridgeMessage | string) => void;
+    __codeCodexInject?: () => HTMLElement | null;
   }
 }

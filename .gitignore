@@ -14,7 +14,7 @@
 /installer/obj/
 
 # Local diagnostics and settings
-/.codex-live-explorer/
+/.code-codex/
 *.log
 
 # Editors and operating systems

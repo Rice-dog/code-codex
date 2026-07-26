@@ -14,8 +14,8 @@ function Assert-NotContains([string]$Text, [string]$Pattern, [string]$Message) {
 }
 
 foreach ($scriptPath in @(
-    (Join-Path $installerRoot "Install-CodexLiveExplorer.ps1"),
-    (Join-Path $installerRoot "Uninstall-CodexLiveExplorer.ps1"),
+    (Join-Path $installerRoot "Install-CodeCodex.ps1"),
+    (Join-Path $installerRoot "Uninstall-CodeCodex.ps1"),
     (Join-Path $installerRoot "Finalize-Uninstall.ps1"),
     (Join-Path $PSScriptRoot "build-msi.ps1"),
     (Join-Path $PSScriptRoot "package.ps1"),
@@ -42,8 +42,8 @@ $wixPath = Join-Path $installerRoot "Package.wxs"
 $namespace = New-Object System.Xml.XmlNamespaceManager($wix.NameTable)
 $namespace.AddNamespace("w", "http://wixtoolset.org/schemas/v4/wxs")
 
-$expectedReleaseVersion = "0.1.19"
-$expectedUpgradeCode = "{A7E56376-831E-4F97-ACF6-BE40704F6176}"
+$expectedReleaseVersion = "0.1.20"
+$expectedUpgradeCode = "{0437781B-3005-4322-A8C7-932CCE4914BA}"
 $packageNode = $wix.SelectSingleNode("/w:Wix/w:Package", $namespace)
 if ($null -eq $packageNode -or
     $packageNode.Version -ne '$(var.ProductVersion)' -or
@@ -75,7 +75,7 @@ $portableInstallLaunch = $wix.SelectSingleNode(
 if ($null -eq $portableInstallProperty -or
     $null -eq $portableInstallSearch -or
     $portableInstallSearch.Root -ne "HKCU" -or
-    $portableInstallSearch.Key -ne 'Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexLiveExplorer' -or
+    $portableInstallSearch.Key -ne 'Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex' -or
     $portableInstallSearch.Name -ne "DisplayName" -or
     $portableInstallSearch.Type -ne "raw" -or
     $null -eq $portableInstallLaunch -or
@@ -105,7 +105,7 @@ if ($wix.SelectNodes("//w:Shortcut", $namespace).Count -ne 0 -or
     $null -ne $wix.SelectSingleNode("//w:Feature/w:ComponentRef[@Id='StartMenuShortcut']", $namespace) -or
     $null -ne $wix.SelectSingleNode("//w:Feature/w:ComponentRef[@Id='DesktopShortcut']", $namespace) -or
     $null -ne $wix.SelectSingleNode("//w:Feature/w:ComponentRef[@Id='AutoStart']", $namespace)) {
-    throw "MSI must redirect the existing Codex desktop link without creating separate Live Explorer or sign-in shortcuts."
+    throw "MSI must redirect the existing Codex desktop link without creating separate Code-Codex or sign-in shortcuts."
 }
 
 $versionFolder = $wix.SelectSingleNode("//w:Directory[@Id='VersionFolder']", $namespace)
@@ -117,15 +117,15 @@ if ($null -eq $versionFolder -or
     $null -eq $runtimeLauncherPayload -or
     $commandLinePayload.ParentNode.Id -ne "VersionFolder" -or
     $runtimeLauncherPayload.ParentNode.Id -ne "VersionFolder" -or
-    $null -eq $commandLinePayload.SelectSingleNode("w:File[@Id='CommandLineExecutable' and @Name='codex-live-explorer.exe']", $namespace) -or
-    $null -eq $runtimeLauncherPayload.SelectSingleNode("w:File[@Id='RuntimeLauncherExecutable' and @Name='CodexLiveExplorer.exe']", $namespace)) {
+    $null -eq $commandLinePayload.SelectSingleNode("w:File[@Id='CommandLineExecutable' and @Name='code-codex.exe']", $namespace) -or
+    $null -eq $runtimeLauncherPayload.SelectSingleNode("w:File[@Id='RuntimeLauncherExecutable' and @Name='CodeCodex.exe']", $namespace)) {
     throw "MSI runtime executables must live only under versions\\ProductVersion."
 }
 $productFiles = $wix.SelectSingleNode("//w:Component[@Id='ProductFiles']", $namespace)
 foreach ($requiredRootFile in @(
-    @{ Id = "RootLauncherExecutable"; Name = "CodexLiveExplorer.exe" },
-    @{ Id = "ShortcutIntegrationExecutable"; Name = "CodexLiveExplorer.Shortcut.exe" },
-    @{ Id = "UninstallExecutable"; Name = "Uninstall-CodexLiveExplorer.exe" },
+    @{ Id = "RootLauncherExecutable"; Name = "CodeCodex.exe" },
+    @{ Id = "ShortcutIntegrationExecutable"; Name = "CodeCodex.Shortcut.exe" },
+    @{ Id = "UninstallExecutable"; Name = "Uninstall-CodeCodex.exe" },
     @{ Id = "CurrentVersionFile"; Name = "current-version" },
     @{ Id = "InstallTypeFile"; Name = "install-type" }
 )) {
@@ -265,15 +265,15 @@ foreach ($releaseVersion in $releaseVersions.GetEnumerator()) {
         throw "$($releaseVersion.Key) version must be $expectedReleaseVersion; found $($releaseVersion.Value)."
     }
 }
-if ($releaseWorkflowText -notmatch '(?m)^\s*default:\s*0\.1\.14\s*$') {
+if ($releaseWorkflowText -notmatch "(?m)^\s*default:\s*$([regex]::Escape($expectedReleaseVersion))\s*$") {
     throw "Release workflow default version must be $expectedReleaseVersion."
 }
 
 $settingsComponent = $wix.SelectSingleNode("//w:Component[@Id='SettingsCleanup']", $namespace)
 if ($null -eq $settingsComponent) { throw "MSI SettingsCleanup component is missing." }
 $settingsDirectory = $settingsComponent.ParentNode
-if ($settingsDirectory.Id -ne "SettingsFolder" -or $settingsDirectory.Name -ne "CodexLiveExplorer") {
-    throw "MSI settings cleanup is not rooted at LocalAppDataFolder\CodexLiveExplorer."
+if ($settingsDirectory.Id -ne "SettingsFolder" -or $settingsDirectory.Name -ne "CodeCodex") {
+    throw "MSI settings cleanup is not rooted at LocalAppDataFolder\CodeCodex."
 }
 if ($settingsDirectory.SelectNodes(".//w:RemoveFile", $namespace).Count -ne 0) {
     throw "MSI settings cleanup must not use RemoveFile because it can traverse a reparse-point settings root."
@@ -323,7 +323,7 @@ if ($null -eq $cleanupSequence -or
     throw "MSI settings cleanup must run post-commit on explicit full removal and skip major-upgrade removal."
 }
 
-$uninstallerPath = Join-Path $installerRoot "Uninstall-CodexLiveExplorer.ps1"
+$uninstallerPath = Join-Path $installerRoot "Uninstall-CodeCodex.ps1"
 $uninstaller = Get-Content -LiteralPath $uninstallerPath -Raw -Encoding UTF8
 Assert-Contains $uninstaller '\[switch\]\$KeepSettings' "Portable uninstaller must expose -KeepSettings."
 Assert-Contains $uninstaller 'if \(-not \$KeepSettings -or \$PurgeSettings\)' "Settings must be removed by default and retained only by explicit opt-out."
@@ -332,13 +332,13 @@ Assert-Contains $uninstaller '\^\\\.settings\\\.json\\\.\[A-Za-z0-9\]\{16\}\\\.t
 Assert-Contains $uninstaller 'Select-Object -First 64' "Portable crash-orphan cleanup must be bounded."
 Assert-Contains $uninstaller 'Remove-SettingsEntry \$crashOrphanPath -RegularFileOnly' "Portable crash-orphan cleanup must preserve directories and reparse points."
 Assert-Contains $uninstaller 'Get-CimInstance Win32_Process' "Portable uninstaller process preflight is missing."
-Assert-Contains $uninstaller 'codex-live-explorer\.exe' "Portable uninstaller must fail closed for product-named processes without a readable path."
+Assert-Contains $uninstaller 'code-codex\.exe' "Portable uninstaller must fail closed for product-named processes without a readable path."
 Assert-Contains $uninstaller 'Test-ReparsePoint \$installItem' "Portable uninstaller must reject a reparse-point install root."
 Assert-Contains $uninstaller 'Test-ReparsePoint \$finalizerItem' "Portable uninstaller must reject a reparse-point finalizer."
-Assert-Contains $uninstaller '\$shortcutTool = Join-Path \$InstallFullPath "CodexLiveExplorer\.Shortcut\.exe"' "Portable uninstall must use the installed shortcut ownership tool."
+Assert-Contains $uninstaller '\$shortcutTool = Join-Path \$InstallFullPath "CodeCodex\.Shortcut\.exe"' "Portable uninstall must use the installed shortcut ownership tool."
 Assert-Contains $uninstaller '& \$shortcutTool restore --install-root \$InstallFullPath' "Portable uninstall must restore the original Codex shortcut before cleanup."
-Assert-Contains $uninstaller 'No Live Explorer files were removed' "Shortcut conflicts must fail closed before product cleanup."
-Assert-NotContains $uninstaller '-LiteralPath "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\CodexLiveExplorer"' "The foreground uninstaller must retain ARP until file removal succeeds."
+Assert-Contains $uninstaller 'No Code-Codex files were removed' "Shortcut conflicts must fail closed before product cleanup."
+Assert-NotContains $uninstaller '-LiteralPath "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\CodeCodex"' "The foreground uninstaller must retain ARP until file removal succeeds."
 Assert-Contains $uninstaller 'Test-ReparsePoint \$installTypeItem' "Uninstall must reject an unsafe ownership marker."
 Assert-Contains $uninstaller '\^\\\{\[0-9A-Fa-f\]\{8\}-\[0-9A-Fa-f\]\{4\}-\[0-9A-Fa-f\]\{4\}-\[0-9A-Fa-f\]\{4\}-\[0-9A-Fa-f\]\{12\}\\\}\$' "MSI delegation must accept only a structurally valid product-code key."
 Assert-Contains $uninstaller '\[string\]\$_.WindowsInstaller -eq "1"' "MSI delegation must select only Windows Installer registrations."
@@ -388,11 +388,11 @@ Assert-Contains $finalizer '\[string\]\$MsiProductCode' "The detached finalizer 
 Assert-Contains $finalizer 'Wait-ForProcessExit \$LauncherPid' "MSI delegation must not start until the installed launcher releases its executable."
 Assert-Contains $finalizer 'Join-Path \$systemDirectory "msiexec\.exe"' "MSI delegation must resolve Windows Installer from the trusted system directory."
 Assert-Contains $finalizer '\[int\]\$msiProcess.ExitCode -notin @\(0, 1641, 3010\)' "MSI success and reboot-success exit codes must all be accepted."
-Assert-Contains $finalizer '\$portableUninstallKey = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\CodexLiveExplorer"' "Portable ARP must be owned by the detached finalizer."
+Assert-Contains $finalizer '\$portableUninstallKey = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\CodeCodex"' "Portable ARP must be owned by the detached finalizer."
 $launcherWaitIndex = $finalizer.IndexOf('Wait-ForProcessExit $LauncherPid', [StringComparison]::Ordinal)
 $msiLaunchIndex = $finalizer.IndexOf('$msiProcess = Start-Process', [StringComparison]::Ordinal)
 $portableRemovalIndex = $finalizer.IndexOf('Remove-SafeTree $InstallFullPath', [StringComparison]::Ordinal)
-$arpRemovalIndex = $finalizer.IndexOf('$portableUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexLiveExplorer"', [StringComparison]::Ordinal)
+$arpRemovalIndex = $finalizer.IndexOf('$portableUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex"', [StringComparison]::Ordinal)
 if ($launcherWaitIndex -lt 0 -or
     $msiLaunchIndex -lt 0 -or
     $launcherWaitIndex -ge $msiLaunchIndex -or
@@ -440,8 +440,8 @@ foreach ($msiInput in @(
 Assert-Contains $buildMsi '\[IO\.File\]::WriteAllText\(\$currentVersionPath, \$Version' "MSI must generate its stable-launcher version pointer from ProductVersion."
 Assert-Contains $buildMsi '\[IO\.File\]::WriteAllText\(\$installTypePath, "msi' "The physical uninstaller must be able to delegate MSI-owned removal."
 
-$portableInstaller = Get-Content -LiteralPath (Join-Path $installerRoot "Install-CodexLiveExplorer.ps1") -Raw -Encoding UTF8
-Assert-Contains $portableInstaller '\[string\]\$Version = "0\.1\.14"' "Portable installer default version is stale."
+$portableInstaller = Get-Content -LiteralPath (Join-Path $installerRoot "Install-CodeCodex.ps1") -Raw -Encoding UTF8
+Assert-Contains $portableInstaller '\[string\]\$Version = "0\.1\.20"' "Portable installer default version is stale."
 foreach ($sourceName in @(
     "SourceBinary",
     "SourceRuntimeLauncher",
@@ -457,13 +457,13 @@ Assert-Contains $portableInstaller '\$VersionsRoot = Join-Path \$InstallRoot "ve
 Assert-Contains $portableInstaller '\$VersionRoot = Join-Path \$VersionsRoot \$Version' "Portable release directory must be selected by the validated version."
 Assert-Contains $portableInstaller 'Get-FileHash[^\r\n]+-Algorithm SHA256' "Equal-version installs must verify immutable payload hashes."
 Assert-Contains $portableInstaller '\[IO\.Directory\]::Move\(\$stagingVersion, \$VersionRoot\)' "A versioned payload must become visible through an atomic directory move."
-Assert-Contains $portableInstaller 'Copy-AtomicFile \$SourceShim \(Join-Path \$InstallRoot "CodexLiveExplorer\.exe"\)' "The stable root launcher must be installed atomically."
-Assert-Contains $portableInstaller 'Copy-AtomicFile \$SourceShortcutTool \(Join-Path \$InstallRoot "CodexLiveExplorer\.Shortcut\.exe"\)' "The shortcut ownership tool must be installed at the stable root."
-Assert-Contains $portableInstaller 'Copy-AtomicFile \$SourceUninstallerExecutable \(Join-Path \$InstallRoot "Uninstall-CodexLiveExplorer\.exe"\)' "The clickable uninstaller must be installed at the stable root."
+Assert-Contains $portableInstaller 'Copy-AtomicFile \$SourceShim \(Join-Path \$InstallRoot "CodeCodex\.exe"\)' "The stable root launcher must be installed atomically."
+Assert-Contains $portableInstaller 'Copy-AtomicFile \$SourceShortcutTool \(Join-Path \$InstallRoot "CodeCodex\.Shortcut\.exe"\)' "The shortcut ownership tool must be installed at the stable root."
+Assert-Contains $portableInstaller 'Copy-AtomicFile \$SourceUninstallerExecutable \(Join-Path \$InstallRoot "Uninstall-CodeCodex\.exe"\)' "The clickable uninstaller must be installed at the stable root."
 Assert-Contains $portableInstaller 'Write-AtomicText \(Join-Path \$InstallRoot "current-version"\)' "Portable setup must update the stable launcher's version pointer atomically."
 Assert-Contains $portableInstaller 'Write-AtomicText \(Join-Path \$InstallRoot "install-type"\) "portable' "Portable setup must identify its ownership for uninstall."
 Assert-Contains $portableInstaller '& \$installedShortcutTool install --install-root \$InstallRoot --version \$Version' "Portable setup must redirect the existing Codex shortcut through the ownership tool."
-Assert-Contains $portableInstaller 'Windows\\CurrentVersion\\Uninstall\\CodexLiveExplorer' "Portable setup must register its clickable uninstaller in Apps & Features."
+Assert-Contains $portableInstaller 'Windows\\CurrentVersion\\Uninstall\\CodeCodex' "Portable setup must register its clickable uninstaller in Apps & Features."
 Assert-Contains $portableInstaller 'UninstallString' "Portable Apps & Features registration must invoke the physical uninstaller executable."
 Assert-Contains $portableInstaller '\$installTypePath = Join-Path \$InstallRoot "install-type"' "Portable setup must inspect an existing ownership marker."
 Assert-Contains $portableInstaller '\(Get-Content -LiteralPath \$installTypePath[^\r\n]+\)\.Trim\(\) -eq "msi"' "Portable setup must reject an MSI-owned install root."
@@ -480,7 +480,7 @@ Assert-Contains $portableInstaller '\$destinationItem -isnot \[IO\.DirectoryInfo
 Assert-Contains $portableInstaller '\$destinationItem -isnot \[IO\.FileInfo\]' "Portable documentation copy must reject non-file destination nodes."
 Assert-NotContains $portableInstaller '(?im)^\s*Copy-Item\b[^\r\n]*-Recurse' "Portable setup must not recursively copy documentation through Copy-Item."
 Assert-NotContains $portableInstaller 'Get-CimInstance Win32_Process' "Versioned portable upgrades must not require the previous runtime to exit."
-Assert-NotContains $portableInstaller 'New-Object -ComObject WScript\.Shell' "Portable setup must not create ad hoc Live Explorer shortcuts."
+Assert-NotContains $portableInstaller 'New-Object -ComObject WScript\.Shell' "Portable setup must not create ad hoc Code-Codex shortcuts."
 $payloadPreflightIndex = $portableInstaller.IndexOf('$requiredPayload = @(', [StringComparison]::Ordinal)
 $programsPreflightIndex = $portableInstaller.IndexOf('$programsItem = Get-ExistingItem', [StringComparison]::Ordinal)
 $installPreflightIndex = $portableInstaller.IndexOf('$existingInstall = Get-ExistingItem', [StringComparison]::Ordinal)
@@ -492,7 +492,7 @@ $shortcutPreflightIndex = $portableInstaller.IndexOf('& $SourceShortcutTool pref
 $installMutationIndex = $portableInstaller.IndexOf('New-Item -ItemType Directory -Path $VersionsRoot', [StringComparison]::Ordinal)
 $versionPublishIndex = $portableInstaller.IndexOf('[IO.Directory]::Move($stagingVersion, $VersionRoot)', [StringComparison]::Ordinal)
 $pointerPublishIndex = $portableInstaller.IndexOf('Write-AtomicText (Join-Path $InstallRoot "current-version")', [StringComparison]::Ordinal)
-$arpRegistrationIndex = $portableInstaller.IndexOf('$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexLiveExplorer"', [StringComparison]::Ordinal)
+$arpRegistrationIndex = $portableInstaller.IndexOf('$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex"', [StringComparison]::Ordinal)
 $arpRegistrationCompleteIndex = $portableInstaller.IndexOf('New-ItemProperty -Path $uninstallKey -Name "NoRepair"', [StringComparison]::Ordinal)
 $shortcutInstallIndex = $portableInstaller.IndexOf('& $installedShortcutTool install --install-root $InstallRoot --version $Version', [StringComparison]::Ordinal)
 if ($payloadPreflightIndex -lt 0 -or
@@ -538,7 +538,7 @@ if ($payloadPreflightIndex -lt 0 -or
     $tokens = $null
     $parseErrors = $null
     $installerAst = [System.Management.Automation.Language.Parser]::ParseFile(
-        (Join-Path $installerRoot "Install-CodexLiveExplorer.ps1"),
+        (Join-Path $installerRoot "Install-CodeCodex.ps1"),
         [ref]$tokens,
         [ref]$parseErrors
     )
@@ -682,15 +682,15 @@ foreach ($text in @($portableInstaller, $packageScript)) {
     Assert-Contains $text 'Finalize-Uninstall\.ps1' "Portable payload must include the uninstall finalizer."
 }
 foreach ($releaseBinary in @(
-    "codex-live-explorer-shim.exe",
-    "codex-live-explorer-shortcut.exe",
-    "codex-live-explorer-setup.exe",
-    "codex-live-explorer-uninstall.exe"
+    "code-codex-shim.exe",
+    "code-codex-shortcut.exe",
+    "code-codex-setup.exe",
+    "code-codex-uninstall.exe"
 )) {
     Assert-Contains $packageScript ([regex]::Escape($releaseBinary)) "Release packaging must include $releaseBinary."
 }
-Assert-Contains $packageScript 'Install-CodexLiveExplorer\.exe' "The extracted ZIP must expose a clickable setup executable."
-Assert-Contains $packageScript 'CodexLiveExplorer-\$Version-x64-setup\.exe' "Release packaging must produce a standalone one-click setup executable."
+Assert-Contains $packageScript 'Install-CodeCodex\.exe' "The extracted ZIP must expose a clickable setup executable."
+Assert-Contains $packageScript 'CodeCodex-\$Version-x64-setup\.exe' "Release packaging must produce a standalone one-click setup executable."
 Assert-Contains $packageScript 'GetBytes\("CLEXZIP1"\)' "Standalone setup must append the self-extracting payload footer."
 Assert-Contains $packageScript '\$footerWriter\.Write\(\[uint64\]\$setupStub\.LongLength\)' "Standalone setup must record its payload offset without truncation."
 Assert-Contains $packageScript '\$footerWriter\.Write\(\[uint64\]\$setupPayload\.LongLength\)' "Standalone setup must record its payload length without truncation."
@@ -699,28 +699,28 @@ Assert-Contains $releaseWorkflowText 'artifacts/\*-setup\.exe' "The release work
 
 $launcherManifest = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\Cargo.toml") -Raw -Encoding UTF8
 foreach ($binaryName in @(
-    "codex-live-explorer-shim",
-    "codex-live-explorer-setup",
-    "codex-live-explorer-uninstall",
-    "codex-live-explorer-shortcut"
+    "code-codex-shim",
+    "code-codex-setup",
+    "code-codex-uninstall",
+    "code-codex-shortcut"
 )) {
     Assert-Contains $launcherManifest ('name = "' + [regex]::Escape($binaryName) + '"') "Launcher manifest must declare the $binaryName executable."
 }
 
-$setupWrapper = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\src\bin\codex-live-explorer-setup.rs") -Raw -Encoding UTF8
-$uninstallWrapper = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\src\bin\codex-live-explorer-uninstall.rs") -Raw -Encoding UTF8
-$stableShim = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\src\bin\codex-live-explorer-shim.rs") -Raw -Encoding UTF8
-$shortcutTool = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\src\bin\codex-live-explorer-shortcut.rs") -Raw -Encoding UTF8
+$setupWrapper = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\src\bin\code-codex-setup.rs") -Raw -Encoding UTF8
+$uninstallWrapper = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\src\bin\code-codex-uninstall.rs") -Raw -Encoding UTF8
+$stableShim = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\src\bin\code-codex-shim.rs") -Raw -Encoding UTF8
+$shortcutTool = Get-Content -LiteralPath (Join-Path $RepoRoot "crates\launcher\src\bin\code-codex-shortcut.rs") -Raw -Encoding UTF8
 foreach ($wrapper in @($setupWrapper, $uninstallWrapper, $stableShim)) {
     Assert-Contains $wrapper 'windows_subsystem = "windows"' "Clickable setup, uninstall, and stable launch entry points must not open console windows."
 }
 Assert-Contains $setupWrapper 'const FOOTER_MAGIC: &\[u8; 8\] = b"CLEXZIP1"' "The one-click setup executable must carry an identifiable embedded payload."
-Assert-Contains $setupWrapper 'const INSTALL_SCRIPT: &str = "Install-CodexLiveExplorer\.ps1"' "The one-click setup executable must invoke the audited setup script."
+Assert-Contains $setupWrapper 'const INSTALL_SCRIPT: &str = "Install-CodeCodex\.ps1"' "The one-click setup executable must invoke the audited setup script."
 Assert-Contains $setupWrapper 'fn portable_executable_layout' "Standalone setup must distinguish the PE image and Authenticode certificate table from an appended payload."
 Assert-Contains $setupWrapper 'match inspect_setup_source\(&executable\)' "Standalone setup must select its embedded payload before considering a sibling script."
 Assert-Contains $setupWrapper 'fn appended_data_with_a_missing_or_corrupt_footer_never_falls_back' "Standalone setup must test fail-closed handling of malformed overlays."
 Assert-Contains $setupWrapper 'fn signed_embedded_payload_is_classified_and_extracted' "Standalone setup must test an embedded payload followed by an Authenticode certificate table."
-Assert-Contains $uninstallWrapper 'Uninstall-CodexLiveExplorer\.ps1' "The physical uninstaller must invoke the audited uninstall script."
+Assert-Contains $uninstallWrapper 'Uninstall-CodeCodex\.ps1' "The physical uninstaller must invoke the audited uninstall script."
 Assert-Contains $stableShim 'const POINTER_FILE: &str = "current-version"' "The stable launcher must select its immutable version through current-version."
 Assert-Contains $stableShim '\.join\("versions"\)' "The stable launcher must resolve only a versioned runtime payload."
 Assert-Contains $shortcutTool 'const CODEX_AUMID: &str = "OpenAI\.Codex_2p2nqsd0c76g0!App"' "Shortcut replacement must validate the official Stable Codex AppX identity."

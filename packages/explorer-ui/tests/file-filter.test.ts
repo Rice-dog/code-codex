@@ -21,7 +21,7 @@ function node(path: string, kind: TreeNodeInput["kind"], depth: number): FlatTre
 
 const rows: FlatTreeRow[] = [
   node("installer", "directory", 1),
-  node("installer/Install-CodexLiveExplorer.ps1", "file", 2),
+  node("installer/Install-CodeCodex.ps1", "file", 2),
   node("installer/SettingsCleanupCA.cpp", "file", 2),
   node("docs", "directory", 1),
   node("docs/README.md", "file", 2),
@@ -36,7 +36,7 @@ describe("loaded file filtering", () => {
   it("keeps matching files and their visible ancestors", () => {
     expect(filterLoadedTreeRows(rows, "ps1").map((row) => row.path)).toEqual([
       "installer",
-      "installer/Install-CodexLiveExplorer.ps1",
+      "installer/Install-CodeCodex.ps1",
     ]);
     expect(countLoadedTreeMatches(rows, "ps1")).toBe(1);
   });

@@ -1,7 +1,7 @@
 import { getFileIcon, icons } from "./icons";
 import { MAX_SYNTAX_SOURCE_UNITS, highlightSyntaxForPath, type SyntaxHighlight } from "./syntax-highlight";
 
-export const MAIN_PREVIEW_TAG = "codex-live-explorer-main-preview";
+export const MAIN_PREVIEW_TAG = "code-codex-main-preview";
 export const MAIN_PREVIEW_ACTIVATE_EVENT = "cle-main-preview-activate";
 export const MAIN_PREVIEW_CLOSE_EVENT = "cle-main-preview-close";
 export const MAIN_PREVIEW_DRAFT_EVENT = "cle-main-preview-draft";
@@ -789,7 +789,7 @@ function restoreAttribute(element: Element, name: string, value: string | null):
   else element.setAttribute(name, value);
 }
 
-export class CodexLiveExplorerMainPreviewElement extends HTMLElement {
+export class CodeCodexMainPreviewElement extends HTMLElement {
   readonly #shadow: ShadowRoot;
   readonly #tabList: HTMLElement;
   readonly #panelMount: HTMLElement;
@@ -1476,13 +1476,13 @@ export class CodexLiveExplorerMainPreviewElement extends HTMLElement {
 
 export function registerMainPreviewElement(): void {
   if (!customElements.get(MAIN_PREVIEW_TAG)) {
-    customElements.define(MAIN_PREVIEW_TAG, CodexLiveExplorerMainPreviewElement);
+    customElements.define(MAIN_PREVIEW_TAG, CodeCodexMainPreviewElement);
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    "codex-live-explorer-main-preview": CodexLiveExplorerMainPreviewElement;
+    "code-codex-main-preview": CodeCodexMainPreviewElement;
   }
 
   interface HTMLElementEventMap {

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.19",
+    [string]$Version = "0.1.20",
     [string]$BinaryPath,
     [string]$GuiBinaryPath,
     [string]$ShimBinaryPath,
@@ -44,22 +44,22 @@ if ($versionParts[0] -gt 255 -or $versionParts[1] -gt 255 -or $versionParts[2] -
 }
 
 if ([string]::IsNullOrWhiteSpace($BinaryPath)) {
-    $BinaryPath = Join-Path $RepoRoot "target\release\codex-live-explorer.exe"
+    $BinaryPath = Join-Path $RepoRoot "target\release\code-codex.exe"
 }
 if ([string]::IsNullOrWhiteSpace($GuiBinaryPath)) {
-    $GuiBinaryPath = Join-Path $RepoRoot "target\release\codex-live-explorer-launcher.exe"
+    $GuiBinaryPath = Join-Path $RepoRoot "target\release\code-codex-launcher.exe"
 }
 if ([string]::IsNullOrWhiteSpace($ShimBinaryPath)) {
-    $ShimBinaryPath = Join-Path $RepoRoot "target\release\codex-live-explorer-shim.exe"
+    $ShimBinaryPath = Join-Path $RepoRoot "target\release\code-codex-shim.exe"
 }
 if ([string]::IsNullOrWhiteSpace($ShortcutBinaryPath)) {
-    $ShortcutBinaryPath = Join-Path $RepoRoot "target\release\codex-live-explorer-shortcut.exe"
+    $ShortcutBinaryPath = Join-Path $RepoRoot "target\release\code-codex-shortcut.exe"
 }
 if ([string]::IsNullOrWhiteSpace($UninstallBinaryPath)) {
-    $UninstallBinaryPath = Join-Path $RepoRoot "target\release\codex-live-explorer-uninstall.exe"
+    $UninstallBinaryPath = Join-Path $RepoRoot "target\release\code-codex-uninstall.exe"
 }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path $RepoRoot "artifacts\CodexLiveExplorer-$Version-x64.msi"
+    $OutputPath = Join-Path $RepoRoot "artifacts\CodeCodex-$Version-x64.msi"
 }
 
 $BinaryPath = [IO.Path]::GetFullPath($BinaryPath)
@@ -72,7 +72,7 @@ $readmePath = Join-Path $RepoRoot "README.md"
 $licensePath = Join-Path $RepoRoot "LICENSE"
 $securityPath = Join-Path $RepoRoot "SECURITY.md"
 $docsPath = Join-Path $RepoRoot "docs"
-$demoVideoName = "CodexLiveExplorer-0.1.0-demo.mp4"
+$demoVideoName = "CodeCodex-0.1.0-demo.mp4"
 $demoVideoPath = Join-Path $docsPath "demo\$demoVideoName"
 if ([string]::IsNullOrWhiteSpace($ThirdPartyPath)) {
     $ThirdPartyPath = Join-Path $RepoRoot "THIRD_PARTY.md"
@@ -89,7 +89,7 @@ $SbomPath = [IO.Path]::GetFullPath($SbomPath)
 $sourcePath = Join-Path $RepoRoot "installer\Package.wxs"
 $settingsCleanupProject = Join-Path $RepoRoot "installer\SettingsCleanupCA.vcxproj"
 $settingsCleanupSource = Join-Path $RepoRoot "installer\SettingsCleanupCA.cpp"
-$uninstallScriptPath = Join-Path $RepoRoot "installer\Uninstall-CodexLiveExplorer.ps1"
+$uninstallScriptPath = Join-Path $RepoRoot "installer\Uninstall-CodeCodex.ps1"
 $finalizerScriptPath = Join-Path $RepoRoot "installer\Finalize-Uninstall.ps1"
 
 foreach ($requiredPath in @(
@@ -124,7 +124,7 @@ foreach ($requiredPath in @(
 }
 
 if ([string]::IsNullOrWhiteSpace($WixPath)) {
-    $toolRoot = Join-Path $env:TEMP "CodexLiveExplorer-Wix\$WixVersion"
+    $toolRoot = Join-Path $env:TEMP "CodeCodex-Wix\$WixVersion"
     $WixPath = Join-Path $toolRoot "wix.exe"
     if (-not (Test-Path -LiteralPath $WixPath -PathType Leaf)) {
         $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -152,7 +152,7 @@ $tempPrefix = $tempBase.TrimEnd(
     [IO.Path]::AltDirectorySeparatorChar
 ) + [IO.Path]::DirectorySeparatorChar
 $customActionBuildRoot = Join-Path $tempBase (
-    "CodexLiveExplorer-MsiCA-" + [Guid]::NewGuid().ToString("N")
+    "CodeCodex-MsiCA-" + [Guid]::NewGuid().ToString("N")
 )
 $customActionBuildRoot = [IO.Path]::GetFullPath($customActionBuildRoot)
 if (-not $customActionBuildRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -168,8 +168,8 @@ if (-not $customActionBuildItem.PSIsContainer -or
 try {
     $currentVersionPath = Join-Path $customActionBuildRoot "current-version"
     $installTypePath = Join-Path $customActionBuildRoot "install-type"
-    $commandLineComponentGuid = Get-DeterministicComponentGuid "CodexLiveExplorer|CommandLinePayload|$Version"
-    $runtimeLauncherComponentGuid = Get-DeterministicComponentGuid "CodexLiveExplorer|RuntimeLauncherPayload|$Version"
+    $commandLineComponentGuid = Get-DeterministicComponentGuid "CodeCodex|CommandLinePayload|$Version"
+    $runtimeLauncherComponentGuid = Get-DeterministicComponentGuid "CodeCodex|RuntimeLauncherPayload|$Version"
     [IO.File]::WriteAllText($currentVersionPath, $Version + "`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($installTypePath, "msi`n", [Text.UTF8Encoding]::new($false))
 

@@ -1,6 +1,6 @@
 # Security policy
 
-Codex Live Explorer is deliberately narrow: it shows path metadata for one local
+Code-Codex is deliberately narrow: it shows path metadata for one local
 workspace, watches that workspace, and provides bounded preview/save plus exact
 create, rename, move, delete, and reveal operations. It does not expose a general
 `readFile`, `writeFile`, import, shell, credential, model, authentication, or
@@ -22,7 +22,7 @@ or unredacted absolute paths in a public issue.
 ## Security boundaries
 
 - CDP listens on `127.0.0.1` on a randomly selected port and is active only for
-  the Codex process launched by Live Explorer.
+  the Codex process launched by Code-Codex.
 - The renderer bridge requires a per-launch random capability token and accepts
   only the documented `explorer.*` method allowlist.
 - The renderer sends only relative paths. Native code rejects absolute, parent,
@@ -117,7 +117,7 @@ Selected preview text crosses into the official Codex renderer. The active file
 is placed in an open Shadow DOM, and inactive open tabs remain in bounded
 renderer memory. Renderer scripts or a same-user process that can inspect the
 debug session may therefore read it. Closing a tab or clearing the workbench
-removes Live Explorer's references but cannot guarantee immediate erasure of
+removes Code-Codex's references but cannot guarantee immediate erasure of
 every renderer-memory copy. Do not treat the tab limit or sensitive-name
 denylist as a confidentiality boundary.
 
@@ -134,6 +134,6 @@ change during the deletion pass can still leave a partially deleted subtree
 inside the workspace. Neither path follows a reparse point or escapes the
 retained root. Source control remains the recovery boundary for item mutations.
 
-Live Explorer is an unofficial community tool. It does not modify the Codex
+Code-Codex is an unofficial community tool. It does not modify the Codex
 installation, but Codex updates can break undocumented renderer integration. Stop
 using a build whose compatibility gate or target verification fails.

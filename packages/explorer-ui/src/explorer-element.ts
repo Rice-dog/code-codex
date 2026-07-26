@@ -3,7 +3,7 @@ import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, E
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
 import { getFileIcon, icons } from "./icons";
 import {
-  CodexLiveExplorerMainPreviewElement,
+  CodeCodexMainPreviewElement,
   MAIN_PREVIEW_TAG,
   registerMainPreviewElement,
   type MainPreviewFileView,
@@ -40,9 +40,9 @@ const CONTEXT_MENU_ITEM_HEIGHT = 30;
 const CONTEXT_DIALOG_HEIGHT = 164;
 const ACTION_NOTICE_DURATION_MS = 2_800;
 const DROP_EXPAND_DELAY_MS = 650;
-const INTERNAL_DRAG_TYPE = "application/x-codex-live-explorer-entry";
+const INTERNAL_DRAG_TYPE = "application/x-code-codex-entry";
 const DEFAULT_SETTINGS: ExplorerSettings = { width: 260, collapsed: false, showHidden: true, showIgnored: true };
-const SETTINGS_KEY = "codex-live-explorer:ui-settings:v1";
+const SETTINGS_KEY = "code-codex:ui-settings:v1";
 
 type StateCopy = { title: string; copy: string; action?: string };
 type PreviewUnavailableReason = "binary" | "invalid-utf8" | "sensitive" | "unsupported-type" | "unknown";
@@ -147,7 +147,7 @@ function clearDetachedEditDraft(): void {
   detachedEditDraft = undefined;
 }
 
-export class CodexLiveExplorerElement extends HTMLElement {
+export class CodeCodexElement extends HTMLElement {
   readonly #shadow: ShadowRoot;
   readonly #model = new TreeModel();
   readonly #tracker = new ActiveThreadTracker();
@@ -180,7 +180,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
   #activePreviewPath: string | null = null;
   #previewSessionRevision = 0;
   #nextPreviewInstanceId = 1;
-  #mainPreview: CodexLiveExplorerMainPreviewElement | undefined;
+  #mainPreview: CodeCodexMainPreviewElement | undefined;
   #mainPreviewSurface: HTMLElement | undefined;
   #editingPath: string | null = null;
   #editDraft = "";
@@ -255,13 +255,13 @@ export class CodexLiveExplorerElement extends HTMLElement {
         <header class="masthead" data-root-visible="true">
           <div class="identity">
             <div class="eyebrow"><button class="edit-mode-toggle" type="button" aria-pressed="false" disabled>Read only</button></div>
-            <h2 class="project-name">Live Explorer</h2>
+            <h2 class="project-name">Code-Codex</h2>
             <div class="root-label">Waiting for local task</div>
           </div>
           <div class="masthead-actions">
             <button class="icon-button refresh" type="button" title="Refresh visible directories" aria-label="Refresh visible directories">${icons.refresh}</button>
             <button class="icon-button collapse" type="button" title="Collapse explorer" aria-label="Collapse explorer">${icons.collapse}</button>
-            <button class="icon-button disable" type="button" title="Hide until a conversation is selected" aria-label="Hide Live Explorer until a conversation is selected">${icons.close}</button>
+            <button class="icon-button disable" type="button" title="Hide until a conversation is selected" aria-label="Hide Code-Codex until a conversation is selected">${icons.close}</button>
           </div>
         </header>
         <div class="file-search-toolbar" hidden>
@@ -282,7 +282,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
         <div class="context-menu" role="menu" aria-label="Explorer actions" aria-busy="false" hidden></div>
         <div class="resize-handle" role="separator" aria-label="Resize explorer" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="260" tabindex="0"></div>
       </div>
-      <button class="collapsed-tab" type="button" title="Open Live Explorer" aria-label="Open Live Explorer">${icons.collapse}</button>
+      <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
 
@@ -398,12 +398,12 @@ export class CodexLiveExplorerElement extends HTMLElement {
   async disable(): Promise<void> {
     if (this.#disableButton.disabled) return;
     this.#closeContextMenu(false);
-    if (!this.#leaveEditing("Hide Live Explorer and discard your unsaved changes?")) return;
+    if (!this.#leaveEditing("Hide Code-Codex and discard your unsaved changes?")) return;
     this.#disableButton.disabled = true;
     this.#dismissed = true;
     this.#purgePreviewTabs(false);
     dismissExplorerForSession();
-    window.dispatchEvent(new Event("codex-live-explorer:dismiss"));
+    window.dispatchEvent(new Event("code-codex:dismiss"));
     this.#generation += 1;
     this.#tracker.stop();
     const bridge = this.#bridge;
@@ -469,11 +469,11 @@ export class CodexLiveExplorerElement extends HTMLElement {
     }
     if (this.#editSaving) {
       this.#queuedNativeReconnect = bootstrap;
-      this.#announce("Live Explorer will reconnect after the current save finishes");
+      this.#announce("Code-Codex will reconnect after the current save finishes");
       return;
     }
     if (this.#editingPath && this.#isEditDirty() &&
-      !this.#confirmDiscardEditing("Reconnect Live Explorer and discard your unsaved changes?")) {
+      !this.#confirmDiscardEditing("Reconnect Code-Codex and discard your unsaved changes?")) {
       this.#queuedNativeReconnect = bootstrap;
       return;
     }
@@ -843,7 +843,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
     this.#clearSelection(false);
     this.#rows = [];
     this.#allRowCount = 0;
-    this.#setHeader("Live Explorer", "No local project detected");
+    this.#setHeader("Code-Codex", "No local project detected");
     this.#setState("no-project");
   }
 
@@ -926,7 +926,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
       const object = asRecord(params);
       const threadId = typeof object?.threadId === "string" ? object.threadId : null;
       if (threadId) {
-        window.dispatchEvent(new CustomEvent("codex-live-explorer:thread-change", {
+        window.dispatchEvent(new CustomEvent("code-codex:thread-change", {
           detail: { threadId, hostId: "local", kind: "local" },
         }));
       }
@@ -1017,7 +1017,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
     if (state !== "ready") this.#clearDragState();
     if ((state === "error" || state === "incompatible" || state === "no-project") && this.#previewTabs.length) {
       if (this.#isEditDirty()) {
-        this.#editError = "Live Explorer stopped before these changes were saved. Your draft is still available.";
+        this.#editError = "Code-Codex stopped before these changes were saved. Your draft is still available.";
         this.#syncMainPreview();
       } else {
         this.#purgePreviewTabs();
@@ -1074,10 +1074,10 @@ export class CodexLiveExplorerElement extends HTMLElement {
     if (this.#state === "loading") return { title: "Switching project", copy: "Resolving the selected task and its local workspace." };
     if (this.#state === "no-project") return { title: "No local project", copy: "The selected task is not bound to a local workspace. Choose a local Codex task to show its files." };
     if (this.#state === "empty") return { title: "No visible files", copy: "This project is empty, or all top-level entries are filtered by the workspace rules." };
-    if (this.#state === "incompatible") return { title: "Version not supported", copy: this.#stateDetail || "Live Explorer stopped safely because this Codex version has not been verified.", action: "Close explorer" };
+    if (this.#state === "incompatible") return { title: "Version not supported", copy: this.#stateDetail || "Code-Codex stopped safely because this Codex version has not been verified.", action: "Close explorer" };
     const code = this.#stateDetail;
     if (code === "NO_BRIDGE") {
-      return { title: "Explorer is not connected", copy: "Restart Codex using the Live Explorer launcher to enable the local bridge." };
+      return { title: "Explorer is not connected", copy: "Restart Codex using the Code-Codex launcher to enable the local bridge." };
     }
     if (code === "ACCESS_DENIED") return { title: "Project is unavailable", copy: "Windows denied access to this directory. Check the project permissions, then retry.", action: "Retry" };
     if (code === "NOT_FOUND") return { title: "Project moved", copy: "The workspace directory no longer exists at its registered location.", action: "Retry" };
@@ -2705,7 +2705,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
     const context = this.#context;
     const mainPreview = this.#mainPreview;
     if (!bridge?.available || !context || !mainPreview?.isConnected) {
-      this.#editError = "Live Explorer is disconnected. Your draft has been kept.";
+      this.#editError = "Code-Codex is disconnected. Your draft has been kept.";
       this.#syncMainPreview();
       return;
     }
@@ -2774,7 +2774,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
     tab: PreviewTab,
     bridge: ExplorerBridge,
     context: ExplorerContext,
-    mainPreview: CodexLiveExplorerMainPreviewElement,
+    mainPreview: CodeCodexMainPreviewElement,
     generation: number,
     sessionRevision: number,
     instanceId: number,
@@ -2800,7 +2800,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
     saved: NormalizedPreview,
     bridge: ExplorerBridge,
     context: ExplorerContext,
-    mainPreview: CodexLiveExplorerMainPreviewElement,
+    mainPreview: CodeCodexMainPreviewElement,
     generation: number,
     sessionRevision: number,
     instanceId: number,
@@ -3051,7 +3051,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
     tab: PreviewTab,
     bridge: ExplorerBridge,
     context: ExplorerContext,
-    mainPreview: CodexLiveExplorerMainPreviewElement,
+    mainPreview: CodeCodexMainPreviewElement,
     generation: number,
     sessionRevision: number,
     instanceId: number,
@@ -3105,7 +3105,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
     tab: PreviewTab,
     bridge: ExplorerBridge,
     context: ExplorerContext,
-    mainPreview: CodexLiveExplorerMainPreviewElement,
+    mainPreview: CodeCodexMainPreviewElement,
     generation: number,
     sessionRevision: number,
     instanceId: number,
@@ -3205,7 +3205,7 @@ export class CodexLiveExplorerElement extends HTMLElement {
     this.#syncEditModeButton();
   }
 
-  #ensureMainPreview(): CodexLiveExplorerMainPreviewElement | undefined {
+  #ensureMainPreview(): CodeCodexMainPreviewElement | undefined {
     const surface = this.#mainPreviewSurface;
     if (!surface?.isConnected || this.#dismissed) return undefined;
     const qualifiedSurfaces = document.querySelectorAll("main.main-surface");
@@ -3213,8 +3213,8 @@ export class CodexLiveExplorerElement extends HTMLElement {
     if (this.#mainPreview?.parentElement === surface) return this.#mainPreview;
     this.#detachMainPreview(false);
     registerMainPreviewElement();
-    const preview = document.createElement(MAIN_PREVIEW_TAG) as CodexLiveExplorerMainPreviewElement;
-    preview.dataset.codexLiveExplorerOwned = "true";
+    const preview = document.createElement(MAIN_PREVIEW_TAG) as CodeCodexMainPreviewElement;
+    preview.dataset.codeCodexOwned = "true";
     this.#mirrorThemeToMainPreview(preview);
     preview.addEventListener("cle-main-preview-activate", this.#onMainPreviewActivate as EventListener);
     preview.addEventListener("cle-main-preview-close", this.#onMainPreviewClose as EventListener);
@@ -3595,7 +3595,7 @@ function editSaveError(error: unknown): string {
   if (code === "NOT_EDITABLE" || code === "UNSUPPORTED_TYPE") {
     return "This file is no longer eligible for editing. Reload it to continue.";
   }
-  if (code === "NO_BRIDGE") return "Live Explorer is disconnected. Your draft has been kept.";
+  if (code === "NO_BRIDGE") return "Code-Codex is disconnected. Your draft has been kept.";
   return "Changes could not be saved. Try again or reload the file.";
 }
 
@@ -3752,7 +3752,7 @@ function contextActionError(action: ContextMenuAction | "move", error: unknown):
   if (code === "OUTSIDE_WORKSPACE") return "The item is outside the active workspace.";
   if (code === "CANCELLED") return "The action was cancelled.";
   if (code === "TIMEOUT") return "The action is taking longer than expected. Refresh before trying again.";
-  if (code === "NO_BRIDGE") return "Live Explorer is disconnected.";
+  if (code === "NO_BRIDGE") return "Code-Codex is disconnected.";
   return `${subject} action could not be completed.`;
 }
 

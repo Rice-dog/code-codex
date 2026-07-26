@@ -9,10 +9,10 @@ import type {
 } from "./types";
 import { codex26715Adapter } from "./adapters/codex-26.715";
 
-const MESSAGE_EVENT = "codex-live-explorer:message";
+const MESSAGE_EVENT = "code-codex:message";
 
 function consumeBootstrap(): Readonly<BootstrapConfig> {
-  const source = window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__;
+  const source = window.__CODE_CODEX_BOOTSTRAP__;
   const copy: BootstrapConfig = source
     ? {
         ...(typeof source.token === "string" ? { token: source.token } : {}),
@@ -34,10 +34,10 @@ function consumeBootstrap(): Readonly<BootstrapConfig> {
     }
   }
   try {
-    delete window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__;
+    delete window.__CODE_CODEX_BOOTSTRAP__;
   } catch {
     try {
-      Object.defineProperty(window, "__CODEX_LIVE_EXPLORER_BOOTSTRAP__", {
+      Object.defineProperty(window, "__CODE_CODEX_BOOTSTRAP__", {
         configurable: true,
         value: undefined,
       });
@@ -84,7 +84,7 @@ export class ExplorerBridgeError extends Error {
 
 export class BridgeUnavailableError extends Error {
   constructor() {
-    super("Live Explorer is not connected. Restart Codex with the Live Explorer launcher.");
+    super("Code-Codex is not connected. Restart Codex with the Code-Codex launcher.");
     this.name = "BridgeUnavailableError";
   }
 }
@@ -104,7 +104,7 @@ export class ExplorerBridge extends EventTarget {
   readonly #capabilityToken: string;
   readonly #receive: (message: BridgeMessage | string) => void;
   readonly #eventListener: EventListener;
-  readonly #previousReceiver: typeof window.__codexLiveExplorerReceive;
+  readonly #previousReceiver: typeof window.__codeCodexReceive;
   #unsubscribeObjectBridge?: () => void;
   #sequence = 0;
   #disposed = false;
@@ -117,8 +117,8 @@ export class ExplorerBridge extends EventTarget {
     this.#eventListener = ((event: CustomEvent<BridgeMessage | string>) => {
       this.#handle(event.detail);
     }) as EventListener;
-    this.#previousReceiver = window.__codexLiveExplorerReceive;
-    window.__codexLiveExplorerReceive = this.#receive;
+    this.#previousReceiver = window.__codeCodexReceive;
+    window.__codeCodexReceive = this.#receive;
     window.addEventListener(MESSAGE_EVENT, this.#eventListener);
 
     const binding = this.#binding();
@@ -179,9 +179,9 @@ export class ExplorerBridge extends EventTarget {
     if (this.#disposed) return;
     this.#disposed = true;
     window.removeEventListener(MESSAGE_EVENT, this.#eventListener);
-    if (window.__codexLiveExplorerReceive === this.#receive) {
-      if (this.#previousReceiver) window.__codexLiveExplorerReceive = this.#previousReceiver;
-      else delete window.__codexLiveExplorerReceive;
+    if (window.__codeCodexReceive === this.#receive) {
+      if (this.#previousReceiver) window.__codeCodexReceive = this.#previousReceiver;
+      else delete window.__codeCodexReceive;
     }
     this.#unsubscribeObjectBridge?.();
     this.#listeners.clear();
@@ -192,11 +192,11 @@ export class ExplorerBridge extends EventTarget {
     this.#pending.clear();
   }
 
-  #binding(): typeof window.__codexLiveExplorer {
-    return window.__codexLiveExplorer ?? window.__codexLiveExplorerNative;
+  #binding(): typeof window.__codeCodex {
+    return window.__codeCodex ?? window.__codeCodexNative;
   }
 
-  #send(binding: NonNullable<typeof window.__codexLiveExplorer>, request: BridgeRequest): unknown {
+  #send(binding: NonNullable<typeof window.__codeCodex>, request: BridgeRequest): unknown {
     if (typeof binding === "function") return binding(JSON.stringify(request));
     const objectBridge = binding as ObjectBridge;
     if (typeof objectBridge.request === "function") return objectBridge.request(request);

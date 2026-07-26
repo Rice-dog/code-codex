@@ -1,36 +1,36 @@
 [package]
-name = "codex-live-explorer"
-description = "Windows-first launcher and supervisor for Codex Live Explorer"
+name = "code-codex"
+description = "Windows-first launcher and supervisor for Code-Codex"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-default-run = "codex-live-explorer"
+default-run = "code-codex"
 autobins = false
 
 [[bin]]
-name = "codex-live-explorer"
+name = "code-codex"
 path = "src/main.rs"
 
 [[bin]]
-name = "codex-live-explorer-launcher"
-path = "src/bin/codex-live-explorer-launcher.rs"
+name = "code-codex-launcher"
+path = "src/bin/code-codex-launcher.rs"
 
 [[bin]]
-name = "codex-live-explorer-shim"
-path = "src/bin/codex-live-explorer-shim.rs"
+name = "code-codex-shim"
+path = "src/bin/code-codex-shim.rs"
 
 [[bin]]
-name = "codex-live-explorer-setup"
-path = "src/bin/codex-live-explorer-setup.rs"
+name = "code-codex-setup"
+path = "src/bin/code-codex-setup.rs"
 
 [[bin]]
-name = "codex-live-explorer-uninstall"
-path = "src/bin/codex-live-explorer-uninstall.rs"
+name = "code-codex-uninstall"
+path = "src/bin/code-codex-uninstall.rs"
 
 [[bin]]
-name = "codex-live-explorer-shortcut"
-path = "src/bin/codex-live-explorer-shortcut.rs"
+name = "code-codex-shortcut"
+path = "src/bin/code-codex-shortcut.rs"
 
 [dependencies]
 async-trait.workspace = true

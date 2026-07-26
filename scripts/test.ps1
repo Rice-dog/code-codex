@@ -39,7 +39,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "cargo test failed" }
 
     $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-    $metadataTemp = Join-Path $tempBase ("CodexLiveExplorer-metadata-" + [guid]::NewGuid().ToString("N"))
+    $metadataTemp = Join-Path $tempBase ("CodeCodex-metadata-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $metadataTemp -Force | Out-Null
     try {
         $testSbom = Join-Path $metadataTemp "sbom.spdx.json"

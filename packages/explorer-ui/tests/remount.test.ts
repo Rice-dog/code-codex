@@ -19,13 +19,13 @@ function shell(threadId: string, shellClass: string, includeMain = true): string
 describe("document remount guard", () => {
   it("reinjects once after a same-document shell replacement and coalesces mutation bursts", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "remount-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
     const requests: BridgeRequest[] = [];
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         requests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false, showHidden: false, showIgnored: false };
@@ -46,31 +46,31 @@ describe("document remount guard", () => {
 
     const { installInjector } = await import("../src/inject");
     installInjector();
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")?.shadowRoot?.querySelector(".project-name")?.textContent).toBe("Shell A"));
-    const firstExplorer = document.querySelector("codex-live-explorer");
+    await vi.waitFor(() => expect(document.querySelector("code-codex")?.shadowRoot?.querySelector(".project-name")?.textContent).toBe("Shell A"));
+    const firstExplorer = document.querySelector("code-codex");
     const firstMain = document.querySelector("main.main-surface");
     firstExplorer?.shadowRoot?.querySelector<HTMLElement>('[data-path="README.md"]')?.click();
-    await vi.waitFor(() => expect(firstMain?.querySelector("codex-live-explorer-main-preview")).not.toBeNull());
-    const firstPreview = firstMain?.querySelector("codex-live-explorer-main-preview");
+    await vi.waitFor(() => expect(firstMain?.querySelector("code-codex-main-preview")).not.toBeNull());
+    const firstPreview = firstMain?.querySelector("code-codex-main-preview");
 
     document.body.innerHTML = shell(THREAD_B, "shell-b");
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")?.shadowRoot?.querySelector(".project-name")?.textContent).toBe("Shell B"));
-    const remountedExplorer = document.querySelector("codex-live-explorer");
+    await vi.waitFor(() => expect(document.querySelector("code-codex")?.shadowRoot?.querySelector(".project-name")?.textContent).toBe("Shell B"));
+    const remountedExplorer = document.querySelector("code-codex");
     expect(remountedExplorer).not.toBe(firstExplorer);
-    expect(document.querySelectorAll("codex-live-explorer")).toHaveLength(1);
+    expect(document.querySelectorAll("code-codex")).toHaveLength(1);
     expect(remountedExplorer?.parentElement).toBe(document.querySelector(".shell-b"));
     expect(remountedExplorer?.nextElementSibling).toBe(document.querySelector("main.main-surface"));
     expect(firstPreview?.isConnected).toBe(false);
-    expect(firstMain?.querySelector("codex-live-explorer-main-preview")).toBeNull();
-    expect(document.querySelector("main.main-surface > codex-live-explorer-main-preview")).toBeNull();
+    expect(firstMain?.querySelector("code-codex-main-preview")).toBeNull();
+    expect(document.querySelector("main.main-surface > code-codex-main-preview")).toBeNull();
 
     const contextsAfterRemount = requests.filter((request) => request.method === "explorer.context").length;
     const burst = document.createDocumentFragment();
     for (let index = 0; index < 64; index += 1) burst.append(document.createElement("span"));
     document.querySelector("main.main-surface")?.append(burst);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    expect(document.querySelector("codex-live-explorer")).toBe(remountedExplorer);
-    expect(document.querySelectorAll("codex-live-explorer")).toHaveLength(1);
+    expect(document.querySelector("code-codex")).toBe(remountedExplorer);
+    expect(document.querySelectorAll("code-codex")).toHaveLength(1);
     expect(requests.filter((request) => request.method === "explorer.context")).toHaveLength(contextsAfterRemount);
 
     const inlineParent = document.querySelector<HTMLElement>(".shell-b");
@@ -87,27 +87,27 @@ describe("document remount guard", () => {
     expect(remountedExplorer?.parentElement).toBe(document.body);
     document.body.append(document.createElement("i"));
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    expect(document.querySelector("codex-live-explorer")?.parentElement).toBe(document.body);
+    expect(document.querySelector("code-codex")?.parentElement).toBe(document.body);
 
     if (inlineParent) inlineParent.style.display = "flex";
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")?.parentElement).toBe(inlineParent));
+    await vi.waitFor(() => expect(document.querySelector("code-codex")?.parentElement).toBe(inlineParent));
 
     remountedExplorer?.shadowRoot?.querySelector<HTMLButtonElement>(".disable")?.click();
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector("code-codex")).toBeNull());
     expect(requests.some((request) => request.method === "explorer.context.clear")).toBe(true);
     document.body.append(document.createElement("strong"));
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    expect(document.querySelector("codex-live-explorer")).toBeNull();
+    expect(document.querySelector("code-codex")).toBeNull();
   });
 
   it("recovers an unsaved editor when the replacement main surface arrives after context", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "remount-draft-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
         if (message.method === "explorer.context") {
@@ -134,12 +134,12 @@ describe("document remount guard", () => {
 
     const { installInjector } = await import("../src/inject");
     installInjector();
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")?.getAttribute("data-state")).toBe("ready"));
-    const firstExplorer = document.querySelector("codex-live-explorer");
+    await vi.waitFor(() => expect(document.querySelector("code-codex")?.getAttribute("data-state")).toBe("ready"));
+    const firstExplorer = document.querySelector("code-codex");
     firstExplorer?.shadowRoot?.querySelector<HTMLElement>('[data-path="draft.txt"]')?.click();
     await vi.waitFor(() => expect(firstExplorer?.shadowRoot?.querySelector<HTMLButtonElement>(".edit-mode-toggle")?.disabled).toBe(false));
     firstExplorer?.shadowRoot?.querySelector<HTMLButtonElement>(".edit-mode-toggle")?.click();
-    const firstEditor = document.querySelector("codex-live-explorer-main-preview")?.shadowRoot?.querySelector<HTMLTextAreaElement>(".code-editor");
+    const firstEditor = document.querySelector("code-codex-main-preview")?.shadowRoot?.querySelector<HTMLTextAreaElement>(".code-editor");
     if (firstEditor) {
       firstEditor.value = "recovered draft\n";
       firstEditor.dispatchEvent(new Event("input", { bubbles: true }));
@@ -147,24 +147,24 @@ describe("document remount guard", () => {
 
     document.body.innerHTML = shell(THREAD_A, "draft-shell-b", false);
     await vi.waitFor(() => {
-      const explorer = document.querySelector("codex-live-explorer");
+      const explorer = document.querySelector("code-codex");
       expect(explorer).not.toBe(firstExplorer);
       expect(explorer?.getAttribute("data-state")).toBe("ready");
-      expect(document.querySelector("codex-live-explorer-main-preview")).toBeNull();
+      expect(document.querySelector("code-codex-main-preview")).toBeNull();
     });
     const delayedMain = document.createElement("main");
     delayedMain.className = "main-surface";
     document.querySelector(".draft-shell-b")?.append(delayedMain);
     await vi.waitFor(() => {
-      const explorer = document.querySelector("codex-live-explorer");
+      const explorer = document.querySelector("code-codex");
       expect(explorer).not.toBe(firstExplorer);
       expect(explorer?.getAttribute("data-state")).toBe("ready");
-      expect(document.querySelector("codex-live-explorer-main-preview")?.shadowRoot?.querySelector<HTMLTextAreaElement>(".code-editor")?.value)
+      expect(document.querySelector("code-codex-main-preview")?.shadowRoot?.querySelector<HTMLTextAreaElement>(".code-editor")?.value)
         .toBe("recovered draft\n");
     });
-    const recovered = document.querySelector("codex-live-explorer");
+    const recovered = document.querySelector("code-codex");
     expect(recovered?.shadowRoot?.querySelector(".edit-mode-toggle")?.textContent).toBe("Editing");
-    expect(document.querySelector("codex-live-explorer-main-preview")?.shadowRoot?.querySelector(".editor-error")?.textContent)
+    expect(document.querySelector("code-codex-main-preview")?.shadowRoot?.querySelector(".editor-error")?.textContent)
       .toContain("recovered");
   });
 });

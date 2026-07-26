@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $DemoRoot = Join-Path $RepoRoot "demo-video"
-$DemoPath = Join-Path $RepoRoot "docs\demo\CodexLiveExplorer-0.1.0-demo.mp4"
+$DemoPath = Join-Path $RepoRoot "docs\demo\CodeCodex-0.1.0-demo.mp4"
 $Ffprobe = Join-Path $DemoRoot "node_modules\@remotion\compositor-win32-x64-msvc\ffprobe.exe"
 
 if (-not (Test-Path -LiteralPath $DemoPath -PathType Leaf)) {

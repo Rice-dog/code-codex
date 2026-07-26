@@ -27,6 +27,6 @@ fallback baseline and used App Server `0.145.0-alpha.18` with `thread/read`.
 Unknown versions must leave the official interface untouched and report
 `UNSUPPORTED_VERSION`. Add support by capturing a redacted DOM fixture, creating
 a versioned adapter, and passing selector contract and manual smoke tests. Open
-the checked-in [compatibility report form](https://github.com/codex-live-explorer/codex-live-explorer/issues/new?template=compatibility.yml)
+the checked-in [compatibility report form](https://github.com/code-codex/code-codex/issues/new?template=compatibility.yml)
 directly; this works from packaged documentation without relying on a configured
 Git remote.

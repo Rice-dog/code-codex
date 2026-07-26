@@ -14,8 +14,8 @@ mod gui_support;
 #[path = "../script_wrapper.rs"]
 mod script_wrapper;
 
-const TITLE: &str = "Codex Live Explorer setup";
-const INSTALL_SCRIPT: &str = "Install-CodexLiveExplorer.ps1";
+const TITLE: &str = "Code-Codex setup";
+const INSTALL_SCRIPT: &str = "Install-CodeCodex.ps1";
 const FOOTER_MAGIC: &[u8; 8] = b"CLEXZIP1";
 const FOOTER_LENGTH: u64 = 24;
 const EXPAND_ARCHIVE_SCRIPT: &str = "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:CLE_ARCHIVE_PATH -DestinationPath $env:CLE_DESTINATION_PATH -Force";
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
         Ok(status) if status.success() => {
             gui_support::show_dialog(
                 TITLE,
-                "Codex Live Explorer was installed successfully. Restart Codex to use Live Explorer.",
+                "Code-Codex was installed successfully. Restart Codex to use Code-Codex.",
                 false,
             );
             ExitCode::SUCCESS
@@ -55,7 +55,7 @@ fn main() -> ExitCode {
             gui_support::show_dialog(
                 TITLE,
                 &format!(
-                    "Codex Live Explorer setup failed {detail}. No successful installation was reported."
+                    "Code-Codex setup failed {detail}. No successful installation was reported."
                 ),
                 true,
             );
@@ -64,7 +64,7 @@ fn main() -> ExitCode {
         Err(error) => {
             gui_support::show_dialog(
                 TITLE,
-                &format!("Codex Live Explorer setup failed: {error}"),
+                &format!("Code-Codex setup failed: {error}"),
                 true,
             );
             ExitCode::FAILURE
@@ -90,7 +90,7 @@ fn run_setup(arguments: &[OsString]) -> Result<ExitStatus, String> {
         SetupSource::Sibling => {
             script_wrapper::run_sibling_script(INSTALL_SCRIPT, arguments.iter().cloned())?
                 .ok_or_else(|| {
-                    "the plain setup program requires Install-CodexLiveExplorer.ps1 next to it"
+                    "the plain setup program requires Install-CodeCodex.ps1 next to it"
                         .to_owned()
                 })
         }
@@ -105,7 +105,7 @@ fn run_embedded_setup(
     arguments: &[OsString],
 ) -> Result<ExitStatus, String> {
     let temporary_directory = tempfile::Builder::new()
-        .prefix("CodexLiveExplorer-Setup-")
+        .prefix("CodeCodex-Setup-")
         .tempdir()
         .map_err(|error| format!("a temporary setup directory could not be created: {error}"))?;
     let archive = temporary_directory.path().join("payload.zip");

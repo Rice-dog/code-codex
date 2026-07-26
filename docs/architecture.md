@@ -1,6 +1,6 @@
 # Architecture
 
-Codex Live Explorer adds a project tree, bounded item actions, and bounded text
+Code-Codex adds a project tree, bounded item actions, and bounded text
 preview/editing to a Codex Desktop renderer without changing the installed package. A
 companion launcher owns every native resource for the complete debug-enabled
 Codex lifetime and exits after Codex closes.
@@ -44,7 +44,7 @@ flowchart LR
    general file reader, writer, import, or command API is exposed.
 7. Same-origin top-frame reload triggers idempotent reinjection. Navigation away
    revokes the session. Codex or launcher exit stops the watcher, closes CDP,
-   terminates the debug-enabled process job, and exits Live Explorer.
+   terminates the debug-enabled process job, and exits Code-Codex.
 
 ## Crate responsibilities
 

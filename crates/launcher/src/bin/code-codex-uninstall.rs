@@ -10,16 +10,16 @@ mod gui_support;
 #[path = "../script_wrapper.rs"]
 mod script_wrapper;
 
-const TITLE: &str = "Codex Live Explorer uninstall";
+const TITLE: &str = "Code-Codex uninstall";
 
 fn main() -> ExitCode {
     let result = script_wrapper::run_sibling_script(
-        "Uninstall-CodexLiveExplorer.ps1",
+        "Uninstall-CodeCodex.ps1",
         env::args_os().skip(1),
     )
     .and_then(|status| {
         status.ok_or_else(|| {
-            "the required script Uninstall-CodexLiveExplorer.ps1 was not found next to this program"
+            "the required script Uninstall-CodeCodex.ps1 was not found next to this program"
                 .to_owned()
         })
     });
@@ -33,7 +33,7 @@ fn main() -> ExitCode {
             gui_support::show_dialog(
                 TITLE,
                 &format!(
-                    "Codex Live Explorer could not be uninstalled ({detail}). Installed files were left in place where possible."
+                    "Code-Codex could not be uninstalled ({detail}). Installed files were left in place where possible."
                 ),
                 true,
             );
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
         Err(error) => {
             gui_support::show_dialog(
                 TITLE,
-                &format!("Codex Live Explorer could not be uninstalled: {error}"),
+                &format!("Code-Codex could not be uninstalled: {error}"),
                 true,
             );
             ExitCode::FAILURE

@@ -201,8 +201,8 @@ impl AppServerClient {
                 "initialize",
                 json!({
                     "clientInfo": {
-                        "name": "codex-live-explorer",
-                        "title": "Codex Live Explorer",
+                        "name": "code-codex",
+                        "title": "Code-Codex",
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "capabilities": { "experimentalApi": false }

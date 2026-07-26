@@ -87,13 +87,13 @@ describe("file type icons", () => {
 
   it("renders icon metadata for files without changing directory, link, or inaccessible icons", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "icon-secret",
       codexVersion: "26.715.4045.0",
       compatible: true,
       manualWorkspace: true,
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         if (message.method === "explorer.settings.get") return { panelWidth: 300, collapsed: false };
         if (message.method === "explorer.context") {
@@ -113,7 +113,7 @@ describe("file type icons", () => {
         return { ok: true };
       },
     };
-    document.body.innerHTML = `<section data-codex-live-explorer-mount></section><main></main>`;
+    document.body.innerHTML = `<section data-code-codex-mount></section><main></main>`;
 
     const { injectExplorer } = await import("../src/inject");
     const explorer = injectExplorer();

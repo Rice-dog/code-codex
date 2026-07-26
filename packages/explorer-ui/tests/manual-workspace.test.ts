@@ -5,13 +5,13 @@ describe("manual workspace bootstrap", () => {
   it("loads the fixed workspace without an active Codex task row", async () => {
     vi.resetModules();
     const requests: BridgeRequest[] = [];
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "manual-secret",
       codexVersion: "26.715.4045.0",
       compatible: true,
       manualWorkspace: true,
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         requests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -29,7 +29,7 @@ describe("manual workspace bootstrap", () => {
         return { ok: true };
       },
     };
-    document.body.innerHTML = `<section data-codex-live-explorer-mount></section><main></main>`;
+    document.body.innerHTML = `<section data-code-codex-mount></section><main></main>`;
     expect(document.querySelector("[data-app-action-sidebar-thread-active='true']")).toBeNull();
 
     const { injectExplorer } = await import("../src/inject");
@@ -48,13 +48,13 @@ describe("manual workspace bootstrap", () => {
     const requests: BridgeRequest[] = [];
     let contextAttempts = 0;
     let rootListAttempts = 0;
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "manual-retry-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
       manualWorkspace: true,
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         requests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -80,7 +80,7 @@ describe("manual workspace bootstrap", () => {
         return { ok: true };
       },
     };
-    document.body.innerHTML = `<section data-codex-live-explorer-mount></section><main></main>`;
+    document.body.innerHTML = `<section data-code-codex-mount></section><main></main>`;
 
     const { injectExplorer } = await import("../src/inject");
     const explorer = injectExplorer();

@@ -1,6 +1,6 @@
 //! Windowless entry point used by shortcuts and optional sign-in launch.
 //!
-//! The console-subsystem `codex-live-explorer.exe` remains available for
+//! The console-subsystem `code-codex.exe` remains available for
 //! diagnostics and scripted use. This tiny GUI-subsystem wrapper starts that
 //! same executable without allocating a console window, forwards its exit
 //! status, and presents categorized startup failures to shortcut users.
@@ -17,14 +17,14 @@ use std::os::windows::process::CommandExt as _;
 #[path = "../exit_codes.rs"]
 mod exit_codes;
 
-const ERROR_TITLE: &str = "Codex Live Explorer";
+const ERROR_TITLE: &str = "Code-Codex";
 
 fn main() -> ExitCode {
     let Ok(current) = env::current_exe() else {
         show_error(message_for_exit_code(None));
         return ExitCode::FAILURE;
     };
-    let command_line = current.with_file_name("codex-live-explorer.exe");
+    let command_line = current.with_file_name("code-codex.exe");
     if !command_line.is_file() {
         show_error(message_for_exit_code(None));
         return ExitCode::FAILURE;
@@ -59,16 +59,16 @@ fn main() -> ExitCode {
 fn message_for_exit_code(code: Option<i32>) -> &'static str {
     match code.and_then(|code| u8::try_from(code).ok()) {
         Some(exit_codes::UNSUPPORTED_VERSION) => {
-            "This Codex Desktop version is not supported by Codex Live Explorer. Run codex-live-explorer.exe diagnose from a terminal for compatibility details."
+            "This Codex Desktop version is not supported by Code-Codex. Run code-codex.exe diagnose from a terminal for compatibility details."
         }
         Some(exit_codes::ALREADY_RUNNING) => {
-            "Codex Desktop is already running without Live Explorer. Close Codex Desktop, then start it again from the official Codex desktop shortcut."
+            "Codex Desktop is already running without Code-Codex. Close Codex Desktop, then start it again from the official Codex desktop shortcut."
         }
         Some(exit_codes::STARTUP_FAILURE) => {
-            "Codex Live Explorer could not start its App Server or another required startup component. Run codex-live-explorer.exe diagnose from a terminal for details."
+            "Code-Codex could not start its App Server or another required startup component. Run code-codex.exe diagnose from a terminal for details."
         }
         _ => {
-            "Codex Live Explorer stopped because of an unexpected error. Run codex-live-explorer.exe from a terminal for diagnostic output."
+            "Code-Codex stopped because of an unexpected error. Run code-codex.exe from a terminal for diagnostic output."
         }
     }
 }

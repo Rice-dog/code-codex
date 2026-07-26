@@ -50,7 +50,7 @@ const dependencyIds = new Set((document.relationships ?? [])
   .filter((relationship) => relationship.relationshipType === "DEPENDS_ON")
   .map((relationship) => relationship.relatedSpdxElement));
 for (const pkg of document.packages) {
-  if (pkg.name !== "codex-live-explorer" && !dependencyIds.has(pkg.SPDXID)) {
+  if (pkg.name !== "code-codex" && !dependencyIds.has(pkg.SPDXID)) {
     fail(`package has no dependency relationship: ${pkg.name}@${pkg.versionInfo}`);
   }
 }

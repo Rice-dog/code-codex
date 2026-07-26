@@ -37,7 +37,7 @@ use workspace_service::{SettingsStore, Workspace, WorkspaceError};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "codex-live-explorer",
+    name = "code-codex",
     version,
     about = "Live project tree and bounded file editor for Codex Desktop"
 )]
@@ -148,7 +148,7 @@ enum AppError {
     #[error("Codex Desktop could not be launched")]
     Launch,
     #[error(
-        "Codex Desktop is already running without this launcher; close it and start Codex Live Explorer again"
+        "Codex Desktop is already running without this launcher; close it and start Code-Codex again"
     )]
     AlreadyRunning,
     #[error("a security-sensitive Codex launch argument was rejected")]
@@ -622,7 +622,7 @@ mod tests {
         assert!(matches!(implicit.channel, ChannelPreference::Stable));
 
         let parsed =
-            Cli::try_parse_from(["codex-live-explorer", "run"]).expect("parse default run command");
+            Cli::try_parse_from(["code-codex", "run"]).expect("parse default run command");
         let Some(Commands::Run(explicit)) = parsed.command else {
             panic!("run command was not parsed");
         };

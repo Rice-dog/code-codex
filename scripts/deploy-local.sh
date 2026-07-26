@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Deploy the locally built main binary into the installed Codex Live Explorer
+# Deploy the locally built main binary into the installed Code-Codex
 # so that clicking the desktop Codex icon immediately runs the latest build.
 #
 # The installed launcher (shim -> versioned launcher -> main binary) reads the
-# main binary from versions/<current-version>/codex-live-explorer.exe.
+# main binary from versions/<current-version>/code-codex.exe.
 set -euo pipefail
 
-SRC="e:/Python_Project/Codex Live Explorer/target/release/codex-live-explorer.exe"
-INSTALL_ROOT="C:/Users/lenovo/AppData/Local/Programs/Codex Live Explorer"
+SRC="e:/Python_Project/Code-Codex/target/release/code-codex.exe"
+INSTALL_ROOT="C:/Users/lenovo/AppData/Local/Programs/Code-Codex"
 POINTER="$INSTALL_ROOT/current-version"
 
 if [[ ! -f "$SRC" ]]; then
@@ -21,7 +21,7 @@ fi
 
 VERSION="$(tr -d '\r\n' < "$POINTER")"
 DST_DIR="$INSTALL_ROOT/versions/$VERSION"
-DST="$DST_DIR/codex-live-explorer.exe"
+DST="$DST_DIR/code-codex.exe"
 
 if [[ ! -d "$DST_DIR" ]]; then
   echo "ERROR: installed version dir not found: $DST_DIR" >&2
@@ -29,8 +29,8 @@ if [[ ! -d "$DST_DIR" ]]; then
 fi
 
 # Stop any running instance so the file is not locked.
-taskkill //F //IM codex-live-explorer.exe >/dev/null 2>&1 || true
-taskkill //F //IM CodexLiveExplorer.exe >/dev/null 2>&1 || true
+taskkill //F //IM code-codex.exe >/dev/null 2>&1 || true
+taskkill //F //IM CodeCodex.exe >/dev/null 2>&1 || true
 sleep 1
 
 cp "$SRC" "$DST"

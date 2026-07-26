@@ -8,10 +8,10 @@ fn main() {
     embed_resource::compile_for(
         "resources/windows-manifest.rc",
         [
-            "codex-live-explorer-launcher",
-            "codex-live-explorer-shim",
-            "codex-live-explorer-setup",
-            "codex-live-explorer-uninstall",
+            "code-codex-launcher",
+            "code-codex-shim",
+            "code-codex-setup",
+            "code-codex-uninstall",
         ],
         embed_resource::NONE,
     )

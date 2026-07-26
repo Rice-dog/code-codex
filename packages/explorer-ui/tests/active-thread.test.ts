@@ -102,8 +102,8 @@ describe("26.715 active-thread adapter", () => {
     tracker.start(listener);
     expect(listener).toHaveBeenLastCalledWith(THREAD);
 
-    window.dispatchEvent(new CustomEvent("codex-live-explorer:thread-change", { detail: { threadId: OTHER } }));
-    window.dispatchEvent(new CustomEvent("codex-live-explorer:thread-change", {
+    window.dispatchEvent(new CustomEvent("code-codex:thread-change", { detail: { threadId: OTHER } }));
+    window.dispatchEvent(new CustomEvent("code-codex:thread-change", {
       detail: { threadId: OTHER, hostId: "local", kind: "local" },
     }));
     await Promise.resolve();

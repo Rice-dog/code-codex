@@ -1,11 +1,14 @@
-# Codex Live Explorer
+# Code-Codex
 
-**A local-first project tree with bounded file actions, text preview, and editing
-in Codex Desktop.** It follows the selected local task and leaves the official
-Codex installation untouched.
+English | [简体中文](README.zh-CN.md)
+
+**Code-Codex gives Codex Desktop the project file tree it is missing, and makes
+opening and previewing project files effortless.** It is a local-first tree with
+bounded file actions, text preview, and editing that follows the selected local
+task and leaves the official Codex installation untouched.
 
 > [!IMPORTANT]
-> Codex Live Explorer is an unofficial community project. It is not affiliated
+> Code-Codex is an unofficial community project. It is not affiliated
 > with, endorsed by, or supported by OpenAI. OpenAI, ChatGPT, and Codex may be
 > trademarks of OpenAI.
 
@@ -13,7 +16,7 @@ Codex installation untouched.
 
 - Launches the installed Windows Codex Desktop package with a random,
   loopback-only Chrome DevTools endpoint.
-- Injects one isolated `<codex-live-explorer>` Shadow DOM panel between the native
+- Injects one isolated `<code-codex>` Shadow DOM panel between the native
   task sidebar and conversation surface.
 - Reads the selected local thread ID from a versioned renderer adapter and resolves
   its `cwd` through the official Codex App Server protocol.
@@ -22,7 +25,8 @@ Codex installation untouched.
   native-allowlisted text files
   open as line-numbered tabs across the top of the Codex main surface.
 - Lets an existing, complete preview-eligible UTF-8 file up to 64 KiB be edited
-  and saved with optimistic version checking.
+  and saved with optimistic version checking. Markdown (`.md`) and other UTF-8
+  text render correctly regardless of language, including Chinese content.
 - Provides a compact file/folder context menu for preview, empty file/folder
   creation, same-parent rename, confirmed delete, relative-path copy, reveal in
   Windows Explorer, and targeted refresh. Existing workspace files and folders
@@ -68,25 +72,25 @@ double-click, done. This build works with **any** Codex Desktop version.
 
 ### One-click setup
 
-Double-click `CodexLiveExplorer-<version>-x64-setup.exe`, or run
-`CodexLiveExplorer-<version>-x64.msi`. Both install for the current user under
-`%LOCALAPPDATA%\Programs\Codex Live Explorer` without administrator privileges.
+Double-click `CodeCodex-<version>-x64-setup.exe`, or run
+`CodeCodex-<version>-x64.msi`. Both install for the current user under
+`%LOCALAPPDATA%\Programs\Code-Codex` without administrator privileges.
 Use the same format for later upgrades. To switch between setup EXE/ZIP and
 MSI ownership, uninstall the existing copy first; setup stops before changing
 files when it detects the other installer type.
 
 Setup keeps the existing desktop shortcut named **Codex**, preserves its
-official icon, and redirects it through Live Explorer. It does not add a
+official icon, and redirects it through Code-Codex. It does not add a
 separate desktop or Start Menu shortcut. The original AppX shortcut is backed up
 byte for byte for uninstall.
 
 ### Portable ZIP
 
-The portable ZIP includes `Install-CodexLiveExplorer.exe` for one-click setup
+The portable ZIP includes `Install-CodeCodex.exe` for one-click setup
 after extraction, plus the audited PowerShell entry point for scripted setup:
 
 ```powershell
-./Install-CodexLiveExplorer.ps1
+./Install-CodeCodex.ps1
 ```
 
 Release artifacts include SHA-256 checksums, an SPDX inventory of the shipped
@@ -104,7 +108,7 @@ executables before distribution.
 
 Setup and upgrades can finish while Codex is open. Restart Codex afterward, then
 launch **Codex** from the same desktop shortcut you already use. That shortcut
-now starts verified Stable Codex through Live Explorer, so the panel is
+now starts verified Stable Codex through Code-Codex, so the panel is
 available after Codex opens; no server or separate launcher shortcut is
 required.
 
@@ -113,14 +117,14 @@ Beta remains available explicitly; `--channel any` prefers Stable and falls
 back to Beta only when Stable is unavailable:
 
 ```powershell
-codex-live-explorer.exe
-codex-live-explorer.exe run --channel stable
-codex-live-explorer.exe run --channel beta
-codex-live-explorer.exe diagnose --channel stable
+code-codex.exe
+code-codex.exe run --channel stable
+code-codex.exe run --channel beta
+code-codex.exe diagnose --channel stable
 ```
 
 The desktop shortcut targets the stable, unversioned
-`%LOCALAPPDATA%\Programs\Codex Live Explorer\CodexLiveExplorer.exe` GUI launcher,
+`%LOCALAPPDATA%\Programs\Code-Codex\CodeCodex.exe` GUI launcher,
 so no console window remains open and upgrades do not need a version-specific
 shortcut. `current-version` selects the payload under `versions`; the
 command-line executable remains available there for `diagnose`, scripting, and
@@ -130,21 +134,21 @@ Useful development-only modes:
 
 ```powershell
 # Pin a workspace while testing the file service and renderer.
-codex-live-explorer.exe run --channel stable --workspace C:\work\demo
+code-codex.exe run --channel stable --workspace C:\work\demo
 
 # Attach to a loopback CDP endpoint owned by an installed official Codex package.
-codex-live-explorer.exe attach --port 9222 --codex-version 26.715.10079.0 --channel stable
+code-codex.exe attach --port 9222 --codex-version 26.715.10079.0 --channel stable
 ```
 
-Live Explorer refuses caller-supplied CDP flags in `--codex-arg`, absolute paths
+Code-Codex refuses caller-supplied CDP flags in `--codex-arg`, absolute paths
 from the renderer, unverified attach listeners, and unsupported versions unless
 the explicit development override is supplied. Diagnostics print redacted
 versions and counts; default runtime logs omit project paths and file names.
 
-Use the header close control to hide Live Explorer and stop its watcher. Select
+Use the header close control to hide Code-Codex and stop its watcher. Select
 or reselect a local task in the Codex sidebar to show it again. Closing the panel
 affects only the current task selection; launching Codex again from the desktop
-shortcut starts Live Explorer again.
+shortcut starts Code-Codex again.
 
 Select a supported file, or focus it and press Enter, to open it in the main
 Codex surface. The top subject bar keeps **Conversation** first and adds one tab
@@ -254,7 +258,7 @@ Read [architecture](docs/architecture.md), [bridge protocol](docs/protocol.md),
 Preview text crosses the capability-protected CDP bridge into the official Codex
 renderer and may remain in memory while its file tab is open. The UI bounds its
 live tab set and purges every tab on task/context changes, dismissal, or renderer
-disconnect. Text is not written to Live Explorer settings or logs, but the
+disconnect. Text is not written to Code-Codex settings or logs, but the
 renderer is not a confidentiality boundary: renderer scripts and other processes
 running as the same Windows user may be able to inspect displayed text. File
 selection, the **Read only** toggle, context-menu activation, and delete
@@ -274,17 +278,17 @@ untrusted account.
 ## Uninstall
 
 Use Windows **Installed apps** or double-click
-`%LOCALAPPDATA%\Programs\Codex Live Explorer\Uninstall-CodexLiveExplorer.exe`.
-Scripted installations can also run `Uninstall-CodexLiveExplorer.ps1`; pass
+`%LOCALAPPDATA%\Programs\Code-Codex\Uninstall-CodeCodex.exe`.
+Scripted installations can also run `Uninstall-CodeCodex.ps1`; pass
 `-KeepSettings` only when you deliberately want to preserve panel preferences
 for a later reinstall.
 
 Uninstall validates the saved shortcut hash and confirms that the current
-desktop link still targets Live Explorer before restoring the original
+desktop link still targets Code-Codex before restoring the original
 `Codex.lnk` byte for byte. If the shortcut was changed after installation, the
 uninstaller leaves it untouched and reports the conflict instead of overwriting
-someone else's change, and no Live Explorer files are removed. After a successful
-shortcut restore, uninstall removes only Live Explorer files and UI settings;
+someone else's change, and no Code-Codex files are removed. After a successful
+shortcut restore, uninstall removes only Code-Codex files and UI settings;
 Codex, local projects, credentials, and conversations remain untouched. Close
 Codex before uninstalling.
 

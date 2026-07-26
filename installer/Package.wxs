@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
-    Name="Codex Live Explorer"
-    Manufacturer="Codex Live Explorer contributors"
+    Name="Code-Codex"
+    Manufacturer="Code-Codex contributors"
     Version="$(var.ProductVersion)"
-    UpgradeCode="{A7E56376-831E-4F97-ACF6-BE40704F6176}"
+    UpgradeCode="{0437781B-3005-4322-A8C7-932CCE4914BA}"
     Language="1033"
     Codepage="1252"
     Scope="perUser"
@@ -12,11 +12,11 @@
 
     <SummaryInformation
       Description="Live workspace explorer and bounded file editor for Codex Desktop"
-      Manufacturer="Codex Live Explorer contributors" />
+      Manufacturer="Code-Codex contributors" />
 
     <MajorUpgrade
       AllowSameVersionUpgrades="yes"
-      DowngradeErrorMessage="A newer version of Codex Live Explorer is already installed."
+      DowngradeErrorMessage="A newer version of Code-Codex is already installed."
       Schedule="afterInstallFinalize" />
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="ProductIcon" SourceFile="$(var.UninstallBinaryPath)" />
@@ -127,15 +127,15 @@
       <RegistrySearch
         Id="PortableInstallRegistrationSearch"
         Root="HKCU"
-        Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexLiveExplorer"
+        Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex"
         Name="DisplayName"
         Type="raw" />
     </Property>
     <Launch
       Condition="Installed OR NOT PORTABLEINSTALLDETECTED"
-      Message="A standalone installation of Codex Live Explorer is already present. Uninstall it through Windows Installed apps before installing the MSI." />
+      Message="A standalone installation of Code-Codex is already present. Uninstall it through Windows Installed apps before installing the MSI." />
 
-    <Feature Id="Complete" Title="Codex Live Explorer" Level="1">
+    <Feature Id="Complete" Title="Code-Codex" Level="1">
       <ComponentRef Id="ProductFiles" />
       <ComponentRef Id="CommandLinePayload" />
       <ComponentRef Id="RuntimeLauncherPayload" />
@@ -146,27 +146,27 @@
 
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="LocalProgramsFolder" Name="Programs">
-        <Directory Id="INSTALLFOLDER" Name="Codex Live Explorer">
+        <Directory Id="INSTALLFOLDER" Name="Code-Codex">
           <Component Id="ProductFiles" Guid="{F44B8D83-89A2-4BE9-AAD9-5C8EE69496D8}">
             <File
               Id="RootLauncherExecutable"
               Source="$(var.ShimBinaryPath)"
-              Name="CodexLiveExplorer.exe"
+              Name="CodeCodex.exe"
               Checksum="yes" />
             <File
               Id="ShortcutIntegrationExecutable"
               Source="$(var.ShortcutBinaryPath)"
-              Name="CodexLiveExplorer.Shortcut.exe"
+              Name="CodeCodex.Shortcut.exe"
               Checksum="yes" />
             <File
               Id="UninstallExecutable"
               Source="$(var.UninstallBinaryPath)"
-              Name="Uninstall-CodexLiveExplorer.exe"
+              Name="Uninstall-CodeCodex.exe"
               Checksum="yes" />
             <File
               Id="PortableUninstallScript"
               Source="$(var.UninstallScriptPath)"
-              Name="Uninstall-CodexLiveExplorer.ps1" />
+              Name="Uninstall-CodeCodex.ps1" />
             <File
               Id="UninstallFinalizerScript"
               Source="$(var.FinalizerScriptPath)"
@@ -184,7 +184,7 @@
             <File Id="SbomFile" Source="$(var.SbomPath)" Name="sbom.spdx.json" />
             <RegistryValue
               Root="HKCU"
-              Key="Software\CodexLiveExplorer"
+              Key="Software\CodeCodex"
               Name="InstallPath"
               Type="string"
               Value="[INSTALLFOLDER]"
@@ -192,7 +192,7 @@
             <RemoveRegistryKey
               Id="RemoveProductRegistryKey"
               Root="HKCU"
-              Key="Software\CodexLiveExplorer"
+              Key="Software\CodeCodex"
               Action="removeOnUninstall" />
             <RemoveFile
               Id="RemoveGeneratedCodexIcon"
@@ -200,7 +200,7 @@
               On="uninstall" />
             <RemoveFile
               Id="RemoveLegacyRootCommandLine"
-              Name="codex-live-explorer.exe"
+              Name="code-codex.exe"
               On="uninstall" />
             <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
             <RemoveFolder Id="RemoveLocalProgramsFolder" Directory="LocalProgramsFolder" On="uninstall" />
@@ -212,11 +212,11 @@
                 <File
                   Id="CommandLineExecutable"
                   Source="$(var.BinaryPath)"
-                  Name="codex-live-explorer.exe"
+                  Name="code-codex.exe"
                   Checksum="yes" />
                 <RegistryValue
                   Root="HKCU"
-                  Key="Software\CodexLiveExplorer\Versions\$(var.ProductVersion)"
+                  Key="Software\CodeCodex\Versions\$(var.ProductVersion)"
                   Name="CommandLinePayload"
                   Type="integer"
                   Value="1"
@@ -228,11 +228,11 @@
                 <File
                   Id="RuntimeLauncherExecutable"
                   Source="$(var.GuiBinaryPath)"
-                  Name="CodexLiveExplorer.exe"
+                  Name="CodeCodex.exe"
                   Checksum="yes" />
                 <RegistryValue
                   Root="HKCU"
-                  Key="Software\CodexLiveExplorer\Versions\$(var.ProductVersion)"
+                  Key="Software\CodeCodex\Versions\$(var.ProductVersion)"
                   Name="RuntimeLauncherPayload"
                   Type="integer"
                   Value="1"
@@ -252,7 +252,7 @@
               <RemoveFolder Id="RemoveDocumentationFolder" Directory="DocumentationFolder" On="uninstall" />
               <RegistryValue
                 Root="HKCU"
-                Key="Software\CodexLiveExplorer"
+                Key="Software\CodeCodex"
                 Name="Documentation"
                 Type="integer"
                 Value="1"
@@ -265,7 +265,7 @@
                 <RemoveFolder Id="RemoveDemoDocumentationFolder" Directory="DemoDocumentationFolder" On="uninstall" />
                 <RegistryValue
                   Root="HKCU"
-                  Key="Software\CodexLiveExplorer"
+                  Key="Software\CodeCodex"
                   Name="DemoDocumentation"
                   Type="integer"
                   Value="1"
@@ -275,13 +275,13 @@
           </Directory>
         </Directory>
       </Directory>
-      <Directory Id="SettingsFolder" Name="CodexLiveExplorer">
+      <Directory Id="SettingsFolder" Name="CodeCodex">
         <Component Id="SettingsCleanup" Guid="{E19D3378-5F12-4F11-A85A-8AC4318F831B}">
           <CreateFolder />
           <RemoveFolder Id="RemoveSettingsFolder" Directory="SettingsFolder" On="uninstall" />
           <RegistryValue
             Root="HKCU"
-            Key="Software\CodexLiveExplorer"
+            Key="Software\CodeCodex"
             Name="SettingsCleanup"
             Type="integer"
             Value="1"

@@ -139,7 +139,7 @@ the project uses semantic versioning.
 
 - Make the existing desktop **Codex** shortcut launch Stable Codex through Live
   Explorer while preserving its name and official icon. Installation no longer
-  creates separate desktop or Start Menu shortcuts for Live Explorer.
+  creates separate desktop or Start Menu shortcuts for Code-Codex.
 - Keep the shortcut target and setup tools at a stable installation root while
   placing release payloads under `versions\0.1.4` for predictable upgrades.
 - Reject in-place switches between portable and MSI ownership before changing
@@ -151,7 +151,7 @@ the project uses semantic versioning.
   shortcut, and replace or restore links atomically.
 - Refuse to overwrite a desktop shortcut changed by another program or the user;
   uninstall restores the backup only while the current link is still owned by
-  Live Explorer.
+  Code-Codex.
 - Prefer the standalone setup executable's embedded release payload over files
   beside it, and preserve the prior shortcut state if an MSI install rolls back.
 - Reject unsafe documentation destinations and physical cross-installer ownership
@@ -163,7 +163,7 @@ the project uses semantic versioning.
 
 ### Fixed
 
-- Preserve Codex's native user-message navigation rail while Live Explorer is
+- Preserve Codex's native user-message navigation rail while Code-Codex is
   expanded by reserving its responsive conversation lane without replacing or
   intercepting the native controls.
 - Keep the conversation content and composer centered to the same bounded width
@@ -215,7 +215,7 @@ the project uses semantic versioning.
 - Remove the duplicate explorer root label when it matches the project title.
 - Extend the active file-tab background through its close button.
 - Replace equal-version development installations correctly and stop both MSI
-  and portable installs before mutation when Live Explorer is still running.
+  and portable installs before mutation when Code-Codex is still running.
 
 ### Security
 

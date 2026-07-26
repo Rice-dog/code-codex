@@ -1,4 +1,4 @@
-# Codex Live Explorer 设计提案
+# Code-Codex 设计提案
 
 > 版本：0.1 Draft<br>
 > 日期：2026-07-21<br>
@@ -8,7 +8,7 @@
 
 ## 1. 摘要
 
-Codex Live Explorer 是一个面向 Codex Desktop 的轻量文件树增强工具。用户通过 `CodexLiveExplorer.exe` 启动官方 Codex Desktop 后，工具会在原有 Codex 窗口内注入一个可折叠、可调整宽度的项目文件树。
+Code-Codex 是一个面向 Codex Desktop 的轻量文件树增强工具。用户通过 `CodeCodex.exe` 启动官方 Codex Desktop 后，工具会在原有 Codex 窗口内注入一个可折叠、可调整宽度的项目文件树。
 
 文件树自动跟随当前选中的 Codex 任务：任务切换到哪个本地项目或 worktree，文件树就切换到对应工作目录；当 Codex、外部编辑器或其他进程创建、修改、重命名、移动或删除文件时，界面实时刷新并标记变化。
 
@@ -42,7 +42,7 @@ Codex Desktop 以任务和对话为核心，适合委派、跟踪和审查 Agent
 ### 3.1 产品目标
 
 1. 在官方 Codex Desktop 原窗口内增加文件树面板。
-2. 用户启动 Live Explorer 时自动启动官方 Codex Desktop。
+2. 用户启动 Code-Codex 时自动启动官方 Codex Desktop。
 3. 自动识别当前任务的 `threadId` 和工作目录 `cwd`。
 4. 切换任务时自动切换文件树，不需要手动选目录。
 5. 监听项目文件系统变化并局部刷新树节点。
@@ -66,11 +66,11 @@ Codex Desktop 以任务和对话为核心，适合委派、跟踪和审查 Agent
 
 ### 4.1 桌面布局
 
-Live Explorer 作为原生任务侧栏和对话区域之间的新面板出现：
+Code-Codex 作为原生任务侧栏和对话区域之间的新面板出现：
 
 ```text
 ┌──────────────┬────────────────────┬─────────────────────────────┐
-│ Codex 原侧栏 │ Codex Live Explorer│ 当前对话                    │
+│ Codex 原侧栏 │ Code-Codex│ 当前对话                    │
 │              │                    │                             │
 │ 项目/任务    │ ▼ project-root     │ 用户消息                    │
 │ 历史对话     │   ▶ src            │ Codex 回复                  │
@@ -109,13 +109,13 @@ Live Explorer 作为原生任务侧栏和对话区域之间的新面板出现：
 - **无本地项目**：显示“当前任务未绑定本地项目”。
 - **目录不可用**：显示路径已移动、删除或失去权限。
 - **版本不兼容**：不注入完整面板，只显示可关闭的兼容性提示。
-- **Codex 已在普通模式启动**：提示用户重启 Codex 以启用 Live Explorer。
+- **Codex 已在普通模式启动**：提示用户重启 Codex 以启用 Code-Codex。
 
 ## 5. 总体架构
 
 ```mermaid
 flowchart LR
-    U["用户点击 Codex Live Explorer"] --> L["Rust Launcher / Supervisor"]
+    U["用户点击 Code-Codex"] --> L["Rust Launcher / Supervisor"]
     L --> C["官方 Codex Desktop"]
     L --> D["CDP Connector"]
     D --> R["Codex Renderer"]
@@ -162,7 +162,7 @@ flowchart LR
 
 推荐使用 TypeScript，并编译为单个可注入资源：
 
-- Custom Element：`<codex-live-explorer>`
+- Custom Element：`<code-codex>`
 - Shadow DOM：隔离样式和事件
 - 轻量状态管理：自定义 store 或 Preact signals
 - 虚拟列表：只渲染可见节点
@@ -176,12 +176,12 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant User as 用户
-    participant Launcher as Live Explorer Launcher
+    participant Launcher as Code-Codex Launcher
     participant Codex as 官方 Codex Desktop
     participant CDP as CDP Connector
     participant UI as Explorer UI
 
-    User->>Launcher: 启动 Codex Live Explorer
+    User->>Launcher: 启动 Code-Codex
     Launcher->>Launcher: 动态发现 Codex 安装位置
     Launcher->>Codex: 使用本机 CDP 参数启动
     Launcher->>CDP: 等待 renderer target
@@ -459,7 +459,7 @@ DOM；renderer 不是保密边界，同一 Windows 用户下能检查 CDP 的进
 
 ## 13. 官方更新兼容策略
 
-Live Explorer 安装在独立目录，不修改官方 Codex 文件，因此官方更新不会删除它。但更新可能改变 DOM、路由、renderer 或 CDP 行为，使面板暂时无法注入。
+Code-Codex 安装在独立目录，不修改官方 Codex 文件，因此官方更新不会删除它。但更新可能改变 DOM、路由、renderer 或 CDP 行为，使面板暂时无法注入。
 
 兼容措施：
 
@@ -482,7 +482,7 @@ Live Explorer 安装在独立目录，不修改官方 Codex 文件，因此官�
 
 建议每个正式版本提供：
 
-- `CodexLiveExplorer-Setup-x64.exe` 或 `.msi`
+- `CodeCodex-Setup-x64.exe` 或 `.msi`
 - 可选便携版 ZIP
 - `SHA256SUMS.txt`
 - SBOM
@@ -495,25 +495,25 @@ Live Explorer 安装在独立目录，不修改官方 Codex 文件，因此官�
 
 1. 安装到用户级应用目录，不要求管理员权限。
 2. 不复制或捆绑官方 Codex Desktop。
-3. 创建“Codex Live Explorer”开始菜单和桌面快捷方式。
+3. 创建“Code-Codex”开始菜单和桌面快捷方式。
 4. 提供可选的登录启动，不默认强制开启。
 5. 提供一键禁用、诊断和完整卸载。
 6. 保留官方 Codex 原快捷方式。
 
 ### 14.3 正常启动
 
-用户点击 Live Explorer 快捷方式，工具启动官方 Codex 并完成注入。若用户通过官方快捷方式启动 Codex，则不会出现 Live Explorer，除非未来实现经用户授权的预启动后台助手。
+用户点击 Code-Codex 快捷方式，工具启动官方 Codex 并完成注入。若用户通过官方快捷方式启动 Codex，则不会出现 Code-Codex，除非未来实现经用户授权的预启动后台助手。
 
 ### 14.4 卸载
 
-卸载只删除 Live Explorer 自身程序、快捷方式和设置，不修改 Codex、本地项目或对话数据。
+卸载只删除 Code-Codex 自身程序、快捷方式和设置，不修改 Codex、本地项目或对话数据。
 
 ## 15. 仓库与许可证
 
 推荐仓库：
 
 ```text
-codex-live-explorer/
+code-codex/
 ├─ README.md
 ├─ LICENSE
 ├─ SECURITY.md
@@ -541,7 +541,7 @@ codex-live-explorer/
 
 若全部代码独立实现且不复制第三方受限代码，可考虑 MIT 或 Apache-2.0。仓库必须声明：
 
-> Codex Live Explorer 是非官方社区项目，与 OpenAI 无隶属、合作或背书关系。OpenAI、ChatGPT 和 Codex 可能是 OpenAI 的商标。
+> Code-Codex 是非官方社区项目，与 OpenAI 无隶属、合作或背书关系。OpenAI、ChatGPT 和 Codex 可能是 OpenAI 的商标。
 
 不得在仓库或安装包中包含：
 
@@ -584,7 +584,7 @@ codex-live-explorer/
 
 在明确支持的 Codex Desktop 版本上验证：
 
-1. Live Explorer 启动 Codex。
+1. Code-Codex 启动 Codex。
 2. 面板出现在正确位置。
 3. 当前任务映射到正确项目。
 4. 切换任务后文件树切换。
@@ -674,7 +674,7 @@ codex-live-explorer/
 
 MVP 必须同时满足：
 
-- [ ] 用户通过 Live Explorer 快捷方式启动官方 Codex。
+- [ ] 用户通过 Code-Codex 快捷方式启动官方 Codex。
 - [ ] 不修改官方 Codex 安装文件。
 - [ ] 文件树嵌入原窗口且可折叠、可调整宽度。
 - [ ] 当前任务能映射到正确的本地项目目录。

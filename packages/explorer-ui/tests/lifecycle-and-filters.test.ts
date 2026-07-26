@@ -13,7 +13,7 @@ function deferred<T>() {
 describe("explorer lifecycle and file search", () => {
   it("stops A before loading B, always shows every entry, and clears cloud context", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "lifecycle-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
@@ -29,7 +29,7 @@ describe("explorer lifecycle and file search", () => {
     let blockClear = false;
     const settings = { panelWidth: 260, collapsed: false, showHidden: false, showIgnored: false };
 
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         requests.push(message);
         const path = typeof message.params.relativePath === "string" ? message.params.relativePath : "";
@@ -230,13 +230,13 @@ describe("explorer lifecycle and file search", () => {
 
   it("clears native context even when disabling encounters a rate-limited watcher stop", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "disable-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
     const requests: BridgeRequest[] = [];
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         requests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -267,7 +267,7 @@ describe("explorer lifecycle and file search", () => {
     const explorer = injectExplorer();
     await vi.waitFor(() => expect(explorer?.dataset.state).toBe("ready"));
     explorer?.shadowRoot?.querySelector<HTMLButtonElement>(".disable")?.click();
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector("code-codex")).toBeNull());
 
     const methods = requests.map((request) => request.method);
     expect(methods.filter((method) => method === "explorer.watch.stop")).toHaveLength(1);
@@ -277,7 +277,7 @@ describe("explorer lifecycle and file search", () => {
 
   it("refreshes the loaded rename parent within 500 ms without scanning an unloaded source", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "rename-refresh-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
@@ -285,7 +285,7 @@ describe("explorer lifecycle and file search", () => {
     const listeners = new Set<(message: BridgeMessage) => void>();
     const listRequests: Array<{ path: string; at: number }> = [];
     let renamed = false;
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
         if (message.method === "explorer.context") {

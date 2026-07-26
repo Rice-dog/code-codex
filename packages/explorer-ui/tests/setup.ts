@@ -32,18 +32,18 @@ if (typeof Element.prototype.setPointerCapture !== "function") {
 
 afterEach(() => {
   document.body.replaceChildren();
-  document.head.querySelectorAll('style[data-codex-live-explorer-shell-layout]').forEach((style) => style.remove());
+  document.head.querySelectorAll('style[data-code-codex-shell-layout]').forEach((style) => style.remove());
   document.documentElement.removeAttribute("class");
   document.documentElement.removeAttribute("data-theme");
   localStorage.clear();
   sessionStorage.clear();
   history.replaceState(null, "", "/");
-  delete window.__codexLiveExplorer;
-  delete window.__codexLiveExplorerNative;
-  delete window.__codexLiveExplorerReceive;
-  delete window.__codexLiveExplorerInject;
-  delete window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__;
-  delete (window as unknown as Record<PropertyKey, unknown>)[Symbol.for("codex-live-explorer:dismissed")];
+  delete window.__codeCodex;
+  delete window.__codeCodexNative;
+  delete window.__codeCodexReceive;
+  delete window.__codeCodexInject;
+  delete window.__CODE_CODEX_BOOTSTRAP__;
+  delete (window as unknown as Record<PropertyKey, unknown>)[Symbol.for("code-codex:dismissed")];
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024, writable: true });
   vi.useRealTimers();
 });

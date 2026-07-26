@@ -8,8 +8,7 @@ on:
       version:
         description: Version without the leading v
         required: true
-        default: 0.1.17
-
+        default: 0.1.20
 permissions:
   contents: write
 
@@ -85,7 +84,7 @@ jobs:
             artifacts/sbom.spdx.json
             artifacts/THIRD_PARTY.md
             artifacts/THIRD_PARTY_LICENSES.txt
-            artifacts/CodexLiveExplorer-*-demo.mp4
+            artifacts/CodeCodex-*-demo.mp4
           body: |
             > [!WARNING]
             > The executables and MSI in this release are unsigned. Verify the published SHA-256 checksums before running them; Windows may show an unknown-publisher warning.

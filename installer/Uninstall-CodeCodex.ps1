@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Codex Live Explorer"
+$InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Code-Codex"
 $ProgramsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
 $AllowedRoot = $ProgramsRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 $InstallFullPath = [IO.Path]::GetFullPath($InstallRoot)
@@ -93,8 +93,8 @@ if ($null -ne $installItem) {
     $processSnapshot = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     foreach ($process in $processSnapshot) {
         $knownProductName = [string]$process.Name -in @(
-            "codex-live-explorer.exe",
-            "CodexLiveExplorer.exe"
+            "code-codex.exe",
+            "CodeCodex.exe"
         )
         if ([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) {
             if ($knownProductName) { $running += $process.ProcessId }
@@ -113,7 +113,7 @@ if ($null -ne $installItem) {
     }
     $running = @($running | Sort-Object -Unique)
     if ($running.Count -gt 0) {
-        throw "Codex Live Explorer is still running. Close Codex Desktop, then run the uninstaller again."
+        throw "Code-Codex is still running. Close Codex Desktop, then run the uninstaller again."
     }
 
     $currentProcessRecord = $processSnapshot |
@@ -126,8 +126,8 @@ if ($null -ne $installItem) {
             } |
             Select-Object -First 1
         if ($null -ne $parentProcessRecord -and
-            [string]$parentProcessRecord.Name -ieq "Uninstall-CodexLiveExplorer.exe") {
-            $expectedUninstaller = Join-Path $InstallFullPath "Uninstall-CodexLiveExplorer.exe"
+            [string]$parentProcessRecord.Name -ieq "Uninstall-CodeCodex.exe") {
+            $expectedUninstaller = Join-Path $InstallFullPath "Uninstall-CodeCodex.exe"
             if ([string]::IsNullOrWhiteSpace([string]$parentProcessRecord.ExecutablePath) -or
                 (Test-SamePath ([string]$parentProcessRecord.ExecutablePath) $expectedUninstaller)) {
                 $uninstallerLauncherPid = [int]$parentProcessRecord.ProcessId
@@ -154,7 +154,7 @@ if ($null -ne $installItem) {
         throw "Trusted Windows PowerShell executable was not found."
     }
 
-    $finalizerCopy = Join-Path $env:TEMP ("CodexLiveExplorer-Uninstall-{0}.ps1" -f [Guid]::NewGuid().ToString("N"))
+    $finalizerCopy = Join-Path $env:TEMP ("CodeCodex-Uninstall-{0}.ps1" -f [Guid]::NewGuid().ToString("N"))
     try {
         Copy-Item -LiteralPath $finalizerSource -Destination $finalizerCopy
         $finalizerCopyItem = Get-ExistingItem $finalizerCopy
@@ -172,7 +172,7 @@ if ($null -ne $installItem) {
 }
 
 if ($null -eq $installItem) {
-    Write-Host "Codex Live Explorer is not installed."
+    Write-Host "Code-Codex is not installed."
     return
 }
 
@@ -193,7 +193,7 @@ try {
                     "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" `
                     -ErrorAction Stop |
                 Where-Object {
-                    $_.DisplayName -eq "Codex Live Explorer" -and
+                    $_.DisplayName -eq "Code-Codex" -and
                     [string]$_.PSChildName -match $msiProductCodePattern -and
                     [string]$_.WindowsInstaller -eq "1"
                 }
@@ -223,27 +223,27 @@ try {
         }
         Start-Process -FilePath $powerShellPath -WindowStyle Hidden -ArgumentList $delegateArguments
         $finalizerLaunched = $true
-        Write-Host "Windows Installer will remove Codex Live Explorer after this window closes."
+        Write-Host "Windows Installer will remove Code-Codex after this window closes."
         return
     }
 
-$shortcutTool = Join-Path $InstallFullPath "CodexLiveExplorer.Shortcut.exe"
+$shortcutTool = Join-Path $InstallFullPath "CodeCodex.Shortcut.exe"
 $shortcutToolItem = Get-ExistingItem $shortcutTool
 if ($null -eq $shortcutToolItem -or $shortcutToolItem.PSIsContainer -or (Test-ReparsePoint $shortcutToolItem)) {
     throw "The verified shortcut restoration tool is missing. No files were removed."
 }
 & $shortcutTool restore --install-root $InstallFullPath
 if ($LASTEXITCODE -ne 0) {
-    throw "The original Codex shortcut could not be restored. No Live Explorer files were removed."
+    throw "The original Codex shortcut could not be restored. No Code-Codex files were removed."
 }
 
 Remove-ItemProperty `
     -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
-    -Name "CodexLiveExplorer" `
+    -Name "CodeCodex" `
     -ErrorAction SilentlyContinue
 
 if (-not $KeepSettings -or $PurgeSettings) {
-    $settingsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "CodexLiveExplorer"))
+    $settingsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "CodeCodex"))
     $allowedLocal = [IO.Path]::GetFullPath($env:LOCALAPPDATA) + [IO.Path]::DirectorySeparatorChar
     if (-not $settingsRoot.StartsWith($allowedLocal, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to remove unexpected settings path: $settingsRoot"
@@ -301,7 +301,7 @@ if ($uninstallerLauncherPid -gt 0) {
 Start-Process -FilePath $powerShellPath -WindowStyle Hidden -ArgumentList $finalizerArguments
 $finalizerLaunched = $true
 
-Write-Host "The original Codex shortcut was restored. Live Explorer will be removed after this window closes."
+Write-Host "The original Codex shortcut was restored. Code-Codex will be removed after this window closes."
 }
 catch {
     if (-not $finalizerLaunched -and

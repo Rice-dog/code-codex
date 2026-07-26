@@ -27,7 +27,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-pub const PRIMARY_BINDING_NAME: &str = "__codexLiveExplorer";
+pub const PRIMARY_BINDING_NAME: &str = "__codeCodex";
 // A 64 KiB UTF-8 edit expands to about 86 KiB as Base64. Keep ingress tightly
 // bounded while leaving room for the authenticated JSON request envelope.
 const MAX_BINDING_PAYLOAD_BYTES: usize = 96 * 1024;
@@ -1935,7 +1935,7 @@ fn delivery_expression(message: &Value) -> Result<String, CdpError> {
     let serialized = serde_json::to_string(message).map_err(|_| CdpError::Protocol)?;
     let quoted = serde_json::to_string(&serialized).map_err(|_| CdpError::Protocol)?;
     Ok(format!(
-        "(()=>{{const m=JSON.parse({quoted});if(typeof window.__codexLiveExplorerReceive==='function'){{window.__codexLiveExplorerReceive(m);}}else{{window.dispatchEvent(new CustomEvent('codex-live-explorer:message',{{detail:m}}));}}}})()"
+        "(()=>{{const m=JSON.parse({quoted});if(typeof window.__codeCodexReceive==='function'){{window.__codeCodexReceive(m);}}else{{window.dispatchEvent(new CustomEvent('code-codex:message',{{detail:m}}));}}}})()"
     ))
 }
 
@@ -2857,7 +2857,7 @@ mod tests {
         }))
         .expect("expression");
         assert!(expression.contains("JSON.parse"));
-        assert!(expression.contains("__codexLiveExplorerReceive"));
+        assert!(expression.contains("__codeCodexReceive"));
     }
 
     #[tokio::test]
@@ -2928,7 +2928,7 @@ mod tests {
                         .await
                         .expect("binding event");
                 } else if method == "Runtime.evaluate"
-                    && expression.contains("__codexLiveExplorerReceive")
+                    && expression.contains("__codeCodexReceive")
                 {
                     return expression.to_owned();
                 }

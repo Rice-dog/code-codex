@@ -1,12 +1,12 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.19"
+    [string]$Version = "0.1.20"
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Artifacts = Join-Path $RepoRoot "artifacts"
-$Stage = Join-Path $Artifacts "CodexLiveExplorer-$Version-x64"
+$Stage = Join-Path $Artifacts "CodeCodex-$Version-x64"
 $ExpectedStageRoot = [IO.Path]::GetFullPath($Artifacts) + [IO.Path]::DirectorySeparatorChar
 
 $cargoManifest = Get-Content -LiteralPath (Join-Path $RepoRoot "Cargo.toml") -Raw -Encoding UTF8
@@ -42,7 +42,7 @@ $thirdPartyNotices = Join-Path $Artifacts "THIRD_PARTY.md"
 $thirdPartyLicenses = Join-Path $Artifacts "THIRD_PARTY_LICENSES.txt"
 & node (Join-Path $PSScriptRoot "generate-third-party.mjs") $thirdPartyNotices $thirdPartyLicenses
 if ($LASTEXITCODE -ne 0) { throw "Third-party notice generation failed" }
-$demoVideoName = "CodexLiveExplorer-0.1.0-demo.mp4"
+$demoVideoName = "CodeCodex-0.1.0-demo.mp4"
 $demoVideoSource = Join-Path $RepoRoot "docs\demo\$demoVideoName"
 $demoVideo = Join-Path $Artifacts $demoVideoName
 if (-not (Test-Path -LiteralPath $demoVideoSource -PathType Leaf)) {
@@ -50,12 +50,12 @@ if (-not (Test-Path -LiteralPath $demoVideoSource -PathType Leaf)) {
 }
 Copy-Item -LiteralPath $demoVideoSource -Destination $demoVideo -Force
 
-$binary = Join-Path $RepoRoot "target\release\codex-live-explorer.exe"
-$guiBinary = Join-Path $RepoRoot "target\release\codex-live-explorer-launcher.exe"
-$shimBinary = Join-Path $RepoRoot "target\release\codex-live-explorer-shim.exe"
-$shortcutBinary = Join-Path $RepoRoot "target\release\codex-live-explorer-shortcut.exe"
-$setupBinary = Join-Path $RepoRoot "target\release\codex-live-explorer-setup.exe"
-$uninstallBinary = Join-Path $RepoRoot "target\release\codex-live-explorer-uninstall.exe"
+$binary = Join-Path $RepoRoot "target\release\code-codex.exe"
+$guiBinary = Join-Path $RepoRoot "target\release\code-codex-launcher.exe"
+$shimBinary = Join-Path $RepoRoot "target\release\code-codex-shim.exe"
+$shortcutBinary = Join-Path $RepoRoot "target\release\code-codex-shortcut.exe"
+$setupBinary = Join-Path $RepoRoot "target\release\code-codex-setup.exe"
+$uninstallBinary = Join-Path $RepoRoot "target\release\code-codex-uninstall.exe"
 foreach ($expectedBinary in @(
     $binary,
     $guiBinary,
@@ -74,7 +74,7 @@ Copy-Item -LiteralPath $guiBinary -Destination $StageFullPath
 Copy-Item -LiteralPath $shimBinary -Destination $StageFullPath
 Copy-Item -LiteralPath $shortcutBinary -Destination $StageFullPath
 Copy-Item -LiteralPath $uninstallBinary -Destination $StageFullPath
-Copy-Item -LiteralPath $setupBinary -Destination (Join-Path $StageFullPath "Install-CodexLiveExplorer.exe")
+Copy-Item -LiteralPath $setupBinary -Destination (Join-Path $StageFullPath "Install-CodeCodex.exe")
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.md") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "SECURITY.md") -Destination $StageFullPath
@@ -82,15 +82,15 @@ Copy-Item -LiteralPath (Join-Path $RepoRoot "docs") -Destination $StageFullPath 
 Copy-Item -LiteralPath $thirdPartyNotices -Destination $StageFullPath
 Copy-Item -LiteralPath $thirdPartyLicenses -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $Artifacts "sbom.spdx.json") -Destination $StageFullPath
-Copy-Item -LiteralPath (Join-Path $RepoRoot "installer\Install-CodexLiveExplorer.ps1") -Destination $StageFullPath
-Copy-Item -LiteralPath (Join-Path $RepoRoot "installer\Uninstall-CodexLiveExplorer.ps1") -Destination $StageFullPath
+Copy-Item -LiteralPath (Join-Path $RepoRoot "installer\Install-CodeCodex.ps1") -Destination $StageFullPath
+Copy-Item -LiteralPath (Join-Path $RepoRoot "installer\Uninstall-CodeCodex.ps1") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "installer\Finalize-Uninstall.ps1") -Destination $StageFullPath
 
-$zip = Join-Path $Artifacts "CodexLiveExplorer-$Version-x64.zip"
+$zip = Join-Path $Artifacts "CodeCodex-$Version-x64.zip"
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -LiteralPath $StageFullPath -DestinationPath $zip -CompressionLevel Optimal
 
-$setup = Join-Path $Artifacts "CodexLiveExplorer-$Version-x64-setup.exe"
+$setup = Join-Path $Artifacts "CodeCodex-$Version-x64-setup.exe"
 if (Test-Path -LiteralPath $setup) { Remove-Item -LiteralPath $setup -Force }
 $setupStub = [IO.File]::ReadAllBytes($setupBinary)
 $setupPayload = [IO.File]::ReadAllBytes($zip)
@@ -113,7 +113,7 @@ finally {
     $setupStream.Dispose()
 }
 
-$msi = Join-Path $Artifacts "CodexLiveExplorer-$Version-x64.msi"
+$msi = Join-Path $Artifacts "CodeCodex-$Version-x64.msi"
 & (Join-Path $PSScriptRoot "build-msi.ps1") `
     -Version $Version `
     -BinaryPath $binary `

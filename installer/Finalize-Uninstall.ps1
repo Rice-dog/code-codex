@@ -93,12 +93,12 @@ function Wait-ForProcessExit([int]$ProcessId, [string]$Description) {
 }
 
 function Show-UninstallFailure([string]$Detail) {
-    $message = "Codex Live Explorer could not be fully removed. Close Codex and Live Explorer, then run the uninstaller again.`r`n`r`n$Detail"
+    $message = "Code-Codex could not be fully removed. Close Codex and Code-Codex, then run the uninstaller again.`r`n`r`n$Detail"
     try {
         Add-Type -AssemblyName System.Windows.Forms
         [void][System.Windows.Forms.MessageBox]::Show(
             $message,
-            "Codex Live Explorer uninstall",
+            "Code-Codex uninstall",
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Error
         )
@@ -108,12 +108,12 @@ function Show-UninstallFailure([string]$Detail) {
 
     try {
         $shell = New-Object -ComObject WScript.Shell
-        [void]$shell.Popup($message, 0, "Codex Live Explorer uninstall", 16)
+        [void]$shell.Popup($message, 0, "Code-Codex uninstall", 16)
         return
     }
     catch {}
 
-    $failureLog = Join-Path $env:TEMP ("CodexLiveExplorer-Uninstall-Failure-{0}.txt" -f [Guid]::NewGuid().ToString("N"))
+    $failureLog = Join-Path $env:TEMP ("CodeCodex-Uninstall-Failure-{0}.txt" -f [Guid]::NewGuid().ToString("N"))
     $message | Set-Content -LiteralPath $failureLog -Encoding UTF8
     $notepad = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) "notepad.exe"
     if (Test-Path -LiteralPath $notepad -PathType Leaf) {
@@ -156,7 +156,7 @@ try {
             -Wait `
             -PassThru
         if ([int]$msiProcess.ExitCode -notin @(0, 1641, 3010)) {
-            throw "Windows Installer could not remove Codex Live Explorer (exit code $($msiProcess.ExitCode))."
+            throw "Windows Installer could not remove Code-Codex (exit code $($msiProcess.ExitCode))."
         }
     }
     else {
@@ -178,7 +178,7 @@ try {
         }
 
         # Keep the recovery entry until installed files are confirmed gone.
-        $portableUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexLiveExplorer"
+        $portableUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex"
         if (Test-Path -LiteralPath $portableUninstallKey) {
             Remove-Item `
                 -LiteralPath $portableUninstallKey `

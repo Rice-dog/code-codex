@@ -83,7 +83,7 @@ pub fn build_bootstrap(
     };
     let metadata = serde_json::to_string(&metadata).map_err(|_| BootstrapError::InvalidBundle)?;
     Ok(format!(
-        "(()=>{{'use strict';if(window!==window.top||location.protocol!=='app:'||location.host!=='-'){{return;}}const bootstrap=Object.freeze({metadata});Object.defineProperty(window,'__CODEX_LIVE_EXPLORER_BOOTSTRAP__',{{value:bootstrap,writable:false,configurable:true,enumerable:false}});try{{\n{bundle}\n}}finally{{try{{delete window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__;}}catch(_error){{}}}}}})();\n//# sourceURL=codex-live-explorer://explorer.js"
+        "(()=>{{'use strict';if(window!==window.top||location.protocol!=='app:'||location.host!=='-'){{return;}}const bootstrap=Object.freeze({metadata});Object.defineProperty(window,'__CODE_CODEX_BOOTSTRAP__',{{value:bootstrap,writable:false,configurable:true,enumerable:false}});try{{\n{bundle}\n}}finally{{try{{delete window.__CODE_CODEX_BOOTSTRAP__;}}catch(_error){{}}}}}})();\n//# sourceURL=code-codex://explorer.js"
     ))
 }
 
@@ -113,8 +113,8 @@ mod tests {
         assert!(source.contains(token.expose()));
         assert!(source.contains("26.715.3651.0"));
         assert!(source.contains("\"manualWorkspace\":false"));
-        assert!(source.contains("__CODEX_LIVE_EXPLORER_BOOTSTRAP__"));
-        assert!(source.contains("delete window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__"));
+        assert!(source.contains("__CODE_CODEX_BOOTSTRAP__"));
+        assert!(source.contains("delete window.__CODE_CODEX_BOOTSTRAP__"));
         let guard = source.find("window!==window.top").expect("top-frame guard");
         let exposed_token = source.find(token.expose()).expect("token metadata");
         assert!(guard < exposed_token);

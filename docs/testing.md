@@ -106,7 +106,7 @@ avoid the scan-and-repair behavior of a default list request.
 Use an isolated Stable launch or a disposable Windows profile; never interrupt
 another active Codex session. Confirm:
 
-1. Live Explorer launches the selected Codex package with loopback-only CDP.
+1. Code-Codex launches the selected Codex package with loopback-only CDP.
 2. Exactly one panel mounts between the native sidebar and conversation. Confirm
    only one project/root label is visible when both names are equal.
 3. The root matches the selected local task and changes after switching tasks.
@@ -149,7 +149,7 @@ another active Codex session. Confirm:
    native conversation is restored.
 15. Select a cloud or ordinary chat; no local root, file tab, preview text, or
     edit draft is retained.
-16. Exit Codex; the watcher and Live Explorer supervisor exit.
+16. Exit Codex; the watcher and Code-Codex supervisor exit.
 
 Record only versions, error codes, timings, and redacted selector outcomes. Do not
 publish paths, titles, preview text, conversation content, credentials, or session

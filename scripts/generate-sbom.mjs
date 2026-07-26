@@ -49,7 +49,7 @@ const cargoMetadata = JSON.parse(execFileSync(
 const activeCargoTree = execFileSync(
   cargoExecutable,
   [
-    "tree", "--locked", "--offline", "--package", "codex-live-explorer",
+    "tree", "--locked", "--offline", "--package", "code-codex",
     "--target", rustTarget, "--edges", "normal,build", "--prefix", "none",
     "--format", "{p}",
   ],
@@ -130,15 +130,15 @@ const namespaceSeed = createHash("sha256")
   .update(JSON.stringify(npmLock))
   .digest("hex")
   .slice(0, 24);
-const rootId = "SPDXRef-Package-codex-live-explorer";
+const rootId = "SPDXRef-Package-code-codex";
 const dependencyPackages = [...packages.values()].sort((a, b) => a.SPDXID.localeCompare(b.SPDXID));
 
 const document = {
   spdxVersion: "SPDX-2.3",
   dataLicense: "CC0-1.0",
   SPDXID: "SPDXRef-DOCUMENT",
-  name: "Codex Live Explorer dependency SBOM",
-  documentNamespace: `https://github.com/codex-live-explorer/codex-live-explorer/sbom/${namespaceSeed}`,
+  name: "Code-Codex dependency SBOM",
+  documentNamespace: `https://github.com/code-codex/code-codex/sbom/${namespaceSeed}`,
   creationInfo: {
     created: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     creators: ["Tool: scripts/generate-sbom.mjs"],
@@ -146,13 +146,13 @@ const document = {
   packages: [
     {
       SPDXID: rootId,
-      name: "codex-live-explorer",
+      name: "code-codex",
       versionInfo: workspaceVersion,
       downloadLocation: "NOASSERTION",
       filesAnalyzed: false,
       licenseConcluded: "MIT",
       licenseDeclared: "MIT",
-      copyrightText: "Copyright (c) 2026 Codex Live Explorer contributors",
+      copyrightText: "Copyright (c) 2026 Code-Codex contributors",
     },
     ...dependencyPackages,
   ],

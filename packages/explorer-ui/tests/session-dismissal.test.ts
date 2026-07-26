@@ -13,12 +13,12 @@ describe("session dismissal lifetime", () => {
   it("survives fresh renderer realms in one window but not a new Codex window session", async () => {
     vi.resetModules();
     const requests: BridgeRequest[] = [];
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "dismiss-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message: BridgeRequest) {
         requests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -40,10 +40,10 @@ describe("session dismissal lifetime", () => {
 
     const firstBundle = await import("../src/inject");
     firstBundle.installInjector();
-    const explorer = document.querySelector<HTMLElement>("codex-live-explorer");
+    const explorer = document.querySelector<HTMLElement>("code-codex");
     await vi.waitFor(() => expect(explorer?.dataset.state).toBe("empty"));
     explorer?.shadowRoot?.querySelector<HTMLButtonElement>(".disable")?.click();
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector("code-codex")).toBeNull());
 
     const { isExplorerDismissedForSession, SESSION_DISMISSAL_PREFIX, SESSION_ID_KEY } = await import("../src/session-state");
     const sessionId = sessionStorage.getItem(SESSION_ID_KEY);
@@ -71,8 +71,8 @@ describe("session dismissal lifetime", () => {
 
     // Remove the realm-local fast path before evaluating a replacement bundle;
     // persistence must come from the guarded sessionStorage record.
-    delete (window as unknown as Record<PropertyKey, unknown>)[Symbol.for("codex-live-explorer:dismissed")];
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    delete (window as unknown as Record<PropertyKey, unknown>)[Symbol.for("code-codex:dismissed")];
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "reload-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
@@ -82,13 +82,13 @@ describe("session dismissal lifetime", () => {
     reloadedBundle.installInjector();
     document.body.append(document.createElement("span"));
     await twoAnimationFrames();
-    expect(document.querySelector("codex-live-explorer")).toBeNull();
+    expect(document.querySelector("code-codex")).toBeNull();
     expect(isExplorerDismissedForSession()).toBe(true);
 
     // A real click on the still-active local row is a deliberate re-selection,
     // even though Codex does not need to change its active-row attributes.
     document.querySelector<HTMLElement>(`[data-app-action-sidebar-thread-id="local:${THREAD}"]`)?.click();
-    await vi.waitFor(() => expect(document.querySelector<HTMLElement>("codex-live-explorer")?.dataset.state).toBe("empty"));
+    await vi.waitFor(() => expect(document.querySelector<HTMLElement>("code-codex")?.dataset.state).toBe("empty"));
     expect(isExplorerDismissedForSession()).toBe(false);
     expect(sessionStorage.getItem(`${SESSION_DISMISSAL_PREFIX}${sessionId}`)).toBeNull();
     expect(requests.filter((request) => request.method === "explorer.context")).toHaveLength(2);
@@ -114,12 +114,12 @@ describe("session dismissal lifetime", () => {
 
   it("restores only from a primary click on a validated local row inside the Codex sidebar", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+    window.__CODE_CODEX_BOOTSTRAP__ = {
       token: "validated-click-secret",
       codexVersion: "26.715.3651.0",
       channel: "beta",
     };
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message: BridgeRequest) {
         if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
         if (message.method === "explorer.context") {
@@ -150,24 +150,24 @@ describe("session dismissal lifetime", () => {
 
     const bundle = await import("../src/inject");
     bundle.installInjector();
-    const explorer = document.querySelector<HTMLElement>("codex-live-explorer");
+    const explorer = document.querySelector<HTMLElement>("code-codex");
     await vi.waitFor(() => expect(explorer?.dataset.state).toBe("empty"));
     explorer?.shadowRoot?.querySelector<HTMLButtonElement>(".disable")?.click();
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector("code-codex")).toBeNull());
 
     for (const selector of ["#outside", "#cloud", "#malformed", "#pin-chat", "#archive-chat"]) {
       document.querySelector<HTMLElement>(selector)?.click();
       await twoAnimationFrames();
-      expect(document.querySelector("codex-live-explorer")).toBeNull();
+      expect(document.querySelector("code-codex")).toBeNull();
     }
     document.querySelector<HTMLElement>("#active-local")?.dispatchEvent(
       new MouseEvent("click", { bubbles: true, button: 1 }),
     );
     await twoAnimationFrames();
-    expect(document.querySelector("codex-live-explorer")).toBeNull();
+    expect(document.querySelector("code-codex")).toBeNull();
 
     document.querySelector<HTMLElement>("#active-local")?.click();
-    await vi.waitFor(() => expect(document.querySelector<HTMLElement>("codex-live-explorer")?.dataset.state).toBe("empty"));
+    await vi.waitFor(() => expect(document.querySelector<HTMLElement>("code-codex")?.dataset.state).toBe("empty"));
   });
 
   it("does not throw when page-session storage is blocked", async () => {

@@ -1,6 +1,6 @@
 # Third-party software
 
-Codex Live Explorer is independently implemented and does not copy, unpack, or
+Code-Codex is independently implemented and does not copy, unpack, or
 redistribute Codex Desktop application code or assets.
 
 This inventory is generated from the x86_64-pc-windows-msvc production Cargo dependency graph and the

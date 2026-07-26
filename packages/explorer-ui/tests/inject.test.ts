@@ -6,7 +6,7 @@ const THREAD = "11111111-1111-4111-8111-111111111111";
 describe("injector and explorer element", () => {
   it("uses the verified 26.715 seam, injects once, and virtualizes a large page", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = { token: "secret", codexVersion: "26.715.4045.0", channel: "stable" };
+    window.__CODE_CODEX_BOOTSTRAP__ = { token: "secret", codexVersion: "26.715.4045.0", channel: "stable" };
     const listeners = new Set<(message: BridgeMessage) => void>();
     const requests: BridgeRequest[] = [];
     const rootEntries = [
@@ -16,7 +16,7 @@ describe("injector and explorer element", () => {
         return { name, relativePath: name, kind: "file" };
       }),
     ];
-    window.__codexLiveExplorer = {
+    window.__codeCodex = {
       request(message) {
         requests.push(message);
         if (message.method === "explorer.settings.get") return { panelWidth: 270, collapsed: false };
@@ -58,11 +58,11 @@ describe("injector and explorer element", () => {
     const explorer = injectExplorer();
     const nativeHeader = document.querySelector("header[data-app-shell-header-edge-scroll]");
     const shiftedHeaderSelector =
-      'codex-live-explorer[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + main.main-surface > header[data-app-shell-header-edge-scroll]';
+      'code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + main.main-surface > header[data-app-shell-header-edge-scroll]';
     const reservedConversationLaneSelector =
-      'codex-live-explorer[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + main.main-surface .thread-scroll-container[data-app-action-timeline-scroll] > div > [data-mcp-app-portal-target="true"]';
+      'code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + main.main-surface .thread-scroll-container[data-app-action-timeline-scroll] > div > [data-mcp-app-portal-target="true"]';
     const alignedComposerSelector =
-      'codex-live-explorer[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + main.main-surface .thread-scroll-container[data-app-action-timeline-scroll] [data-pip-obstacle="thread-footer"]';
+      'code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + main.main-surface .thread-scroll-container[data-app-action-timeline-scroll] [data-pip-obstacle="thread-footer"]';
     const conversationTarget = document.querySelector<HTMLElement>(
       '.thread-scroll-container > div > [data-mcp-app-portal-target="true"]',
     );
@@ -73,17 +73,17 @@ describe("injector and explorer element", () => {
     expect(explorer?.previousElementSibling).toBe(document.querySelector("aside.app-shell-left-panel"));
     expect(explorer?.nextElementSibling).toBe(document.querySelector("main.main-surface"));
     expect(explorer?.dataset.mountStrategy).toBe("known:main.main-surface");
-    expect(document.querySelectorAll('style[data-codex-live-explorer-shell-layout="codex-26.715"]')).toHaveLength(1);
+    expect(document.querySelectorAll('style[data-code-codex-shell-layout="codex-26.715"]')).toHaveLength(1);
     expect(nativeHeader?.matches(shiftedHeaderSelector)).toBe(true);
     expect(conversationTarget?.matches(reservedConversationLaneSelector)).toBe(true);
     expect(composer?.matches(alignedComposerSelector)).toBe(true);
     expect(nestedTarget?.matches(reservedConversationLaneSelector)).toBe(false);
     expect(outsideTarget?.matches(reservedConversationLaneSelector)).toBe(false);
-    expect(document.querySelector<HTMLStyleElement>('style[data-codex-live-explorer-shell-layout="codex-26.715"]')?.textContent).toContain(
+    expect(document.querySelector<HTMLStyleElement>('style[data-code-codex-shell-layout="codex-26.715"]')?.textContent).toContain(
       'max-width: min(var(--thread-content-max-width), calc(100% - 100px)) !important;',
     );
     expect(injectExplorer()).toBe(explorer);
-    expect(document.querySelectorAll('style[data-codex-live-explorer-shell-layout="codex-26.715"]')).toHaveLength(1);
+    expect(document.querySelectorAll('style[data-code-codex-shell-layout="codex-26.715"]')).toHaveLength(1);
 
     await vi.waitFor(() => {
       expect(explorer?.shadowRoot?.querySelector(".project-name")?.textContent).toBe("Fixture project");
@@ -219,7 +219,7 @@ describe("injector and explorer element", () => {
 
   it("fails closed for a present unsupported Codex version", async () => {
     vi.resetModules();
-    window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = { token: "secret", codexVersion: "27.100.1", compatible: false };
+    window.__CODE_CODEX_BOOTSTRAP__ = { token: "secret", codexVersion: "27.100.1", compatible: false };
     const { assessBootstrapCompatibility } = await import("../src/bridge");
     expect(assessBootstrapCompatibility()).toEqual({
       supported: false,

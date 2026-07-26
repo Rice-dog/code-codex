@@ -1,7 +1,7 @@
 {
   "name": "demo-video",
   "version": "0.1.20",
-  "description": "Reproducible 90-second Codex Live Explorer product demo",
+  "description": "Reproducible 90-second Code-Codex product demo",
   "repository": {},
   "license": "MIT",
   "private": true,
@@ -24,7 +24,7 @@
     "build": "remotion bundle",
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc",
-    "render": "remotion render CodexLiveExplorer90 ../docs/demo/CodexLiveExplorer-0.1.0-demo.mp4 --codec h264 --crf 22 --muted"
+    "render": "remotion render CodeCodex90 ../docs/demo/CodeCodex-0.1.0-demo.mp4 --codec h264 --crf 22 --muted"
   },
   "sideEffects": [
     "*.css"

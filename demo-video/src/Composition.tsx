@@ -172,8 +172,8 @@ const AppMock = ({ frame }: { frame: number }) => {
         <div style={{ borderRight: `1px solid ${colors.rule}`, position: "relative", overflow: "hidden" }}>
           <div style={{ padding: "22px 24px", borderBottom: `1px solid ${colors.rule}` }}>
             <div style={{ color: colors.signal, font: "12px 'Cascadia Mono', monospace", letterSpacing: 1.5 }}>LIVE PROJECT / READ ONLY</div>
-            <div style={{ marginTop: 8, font: "600 25px Bahnschrift, sans-serif" }}>Codex Live Explorer</div>
-            <div style={{ color: colors.paperMuted, font: "14px 'Cascadia Mono', monospace", marginTop: 5 }}>E:\…\Codex Live Explorer</div>
+            <div style={{ marginTop: 8, font: "600 25px Bahnschrift, sans-serif" }}>Code-Codex</div>
+            <div style={{ color: colors.paperMuted, font: "14px 'Cascadia Mono', monospace", marginTop: 5 }}>E:\…\Code-Codex</div>
           </div>
           <div style={{ paddingTop: 10 }}>
             {treeRows.map((row, index) => {
@@ -344,7 +344,7 @@ const Release = ({ duration }: { duration: number }) => {
   return (
     <Scene duration={duration}>
       <div style={{ position: "absolute", left: 150, right: 150, top: 220, opacity: progress, transform: `translateY(${(1 - progress) * 30}px)` }}>
-        <Eyebrow>Codex Live Explorer 0.1.0</Eyebrow>
+        <Eyebrow>Code-Codex 0.1.0</Eyebrow>
         <div style={{ marginTop: 18, font: "700 94px/1 Bahnschrift, sans-serif", letterSpacing: -3 }}>Read-only. Local-first. Live.</div>
         <div style={{ marginTop: 48, color: colors.paperMuted, font: "31px/1.45 Bahnschrift, sans-serif", maxWidth: 1120 }}>Launch the verified Codex Beta package. Select a local task. Keep the project structure in sight while the agent works.</div>
         <div style={{ marginTop: 58, display: "flex", gap: 14, flexWrap: "wrap" }}>
@@ -361,7 +361,7 @@ const Release = ({ duration }: { duration: number }) => {
 
 type Segment = { from: number; duration: number; component: ReactNode };
 
-export const CodexLiveExplorerDemo: React.FC = () => {
+export const CodeCodexDemo: React.FC = () => {
   const { fps } = useVideoConfig();
   const seconds = (value: number) => Math.round(value * fps);
   const segments: Segment[] = [

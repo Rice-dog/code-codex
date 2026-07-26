@@ -1,12 +1,12 @@
 import "./index.css";
 import { Composition } from "remotion";
-import { CodexLiveExplorerDemo } from "./Composition";
+import { CodeCodexDemo } from "./Composition";
 
 export const RemotionRoot: React.FC = () => {
   return (
     <Composition
-      id="CodexLiveExplorer90"
-      component={CodexLiveExplorerDemo}
+      id="CodeCodex90"
+      component={CodeCodexDemo}
       durationInFrames={2700}
       fps={30}
       width={1920}

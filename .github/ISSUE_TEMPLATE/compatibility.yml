@@ -1,12 +1,12 @@
 name: Codex compatibility report
-description: Report a Codex Desktop version where Live Explorer does not load safely.
+description: Report a Codex Desktop version where Code-Codex does not load safely.
 title: "[Compatibility]: "
 labels: [compatibility]
 body:
   - type: input
     id: explorer-version
     attributes:
-      label: Live Explorer version
+      label: Code-Codex version
     validations:
       required: true
   - type: input
@@ -32,4 +32,4 @@ body:
     id: diagnostics
     attributes:
       label: Redacted diagnostics
-      description: Paste only the version/error-code output from `codex-live-explorer diagnose`.
+      description: Paste only the version/error-code output from `code-codex diagnose`.

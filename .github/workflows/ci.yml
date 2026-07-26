@@ -39,6 +39,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: codex-live-explorer-windows-x64
-          path: target/release/codex-live-explorer.exe
+          name: code-codex-windows-x64
+          path: target/release/code-codex.exe
           if-no-files-found: error

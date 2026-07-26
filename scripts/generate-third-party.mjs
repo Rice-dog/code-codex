@@ -38,7 +38,7 @@ const metadata = JSON.parse(execFileSync(
 const activeCargoTree = execFileSync(
   cargoExecutable,
   [
-    "tree", "--locked", "--offline", "--package", "codex-live-explorer",
+    "tree", "--locked", "--offline", "--package", "code-codex",
     "--target", rustTarget, "--edges", "normal,build", "--prefix", "none",
     "--format", "{p}",
   ],
@@ -174,7 +174,7 @@ const packageTable = (rows, includeTexts) => [
 
 const notices = `# Third-party software
 
-Codex Live Explorer is independently implemented and does not copy, unpack, or
+Code-Codex is independently implemented and does not copy, unpack, or
 redistribute Codex Desktop application code or assets.
 
 This inventory is generated from the ${rustTarget} production Cargo dependency graph and the

@@ -1,8 +1,8 @@
-const DISMISSED_STATE = Symbol.for("codex-live-explorer:dismissed");
+const DISMISSED_STATE = Symbol.for("code-codex:dismissed");
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export const SESSION_ID_KEY = "codex-live-explorer:session-id:v1";
-export const SESSION_DISMISSAL_PREFIX = "codex-live-explorer:dismissed:v1:";
+export const SESSION_ID_KEY = "code-codex:session-id:v1";
+export const SESSION_DISMISSAL_PREFIX = "code-codex:dismissed:v1:";
 
 type SessionWindow = Pick<Window, "crypto" | "sessionStorage"> & Record<PropertyKey, unknown>;
 

@@ -1,4 +1,4 @@
-# Codex Live Explorer 90-second demo
+# Code-Codex 90-second demo
 
 This Remotion composition is the reproducible product walkthrough required by
 the M4 design milestone. It uses only generated UI geometry and system fonts;
@@ -12,7 +12,7 @@ npm run render
 ```
 
 The 1920×1080, 30 fps composition is exactly 2,700 frames (90 seconds). The
-render command writes `docs/demo/CodexLiveExplorer-0.1.0-demo.mp4`.
+render command writes `docs/demo/CodeCodex-0.1.0-demo.mp4`.
 
 <p align="center">
   <a href="https://github.com/remotion-dev/logo">

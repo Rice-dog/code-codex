@@ -15,8 +15,8 @@
 namespace {
 
 constexpr std::array<std::wstring_view, 2> blockedProcessNames{
-    L"CodexLiveExplorer.exe",
-    L"codex-live-explorer.exe",
+    L"CodeCodex.exe",
+    L"code-codex.exe",
 };
 
 enum class ProcessCheckResult {
@@ -385,7 +385,7 @@ bool LockSettingsPath(
     LockedSettingsPath& locked) {
     std::wstring canonical;
     if (!CanonicalDrivePath(requestedRoot, canonical) || canonical.size() <= 3) {
-        LogMessage(install, L"Codex Live Explorer settings were left in place because the settings path was not a canonical drive path.");
+        LogMessage(install, L"Code-Codex settings were left in place because the settings path was not a canonical drive path.");
         return false;
     }
 
@@ -395,7 +395,7 @@ bool LockSettingsPath(
     while (cursor < canonical.size()) {
         const size_t separator = canonical.find(L'\\', cursor);
         if (separator == cursor) {
-            LogMessage(install, L"Codex Live Explorer settings were left in place because the settings path was malformed.");
+            LogMessage(install, L"Code-Codex settings were left in place because the settings path was malformed.");
             return false;
         }
         if (separator == std::wstring::npos) {
@@ -417,20 +417,20 @@ bool LockSettingsPath(
         ScopedHandle component = OpenWithoutFollowing(extendedComponent, access, error);
         if (!component.valid()) {
             if (!isRoot || !IsMissingError(error)) {
-                LogMessage(install, L"Codex Live Explorer settings were left in place because a settings-path component could not be locked safely.");
+                LogMessage(install, L"Code-Codex settings were left in place because a settings-path component could not be locked safely.");
             }
             return false;
         }
 
         DWORD attributes = 0;
         if (!QueryAttributes(component.get(), attributes)) {
-            LogMessage(install, L"Codex Live Explorer settings were left in place because a settings-path component could not be verified.");
+            LogMessage(install, L"Code-Codex settings were left in place because a settings-path component could not be verified.");
             return false;
         }
         const bool isDirectory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         const bool isReparsePoint = (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
         if (!isRoot && (!isDirectory || isReparsePoint)) {
-            LogMessage(install, L"Codex Live Explorer settings were left in place because a settings-path ancestor was not a regular directory.");
+            LogMessage(install, L"Code-Codex settings were left in place because a settings-path ancestor was not a regular directory.");
             return false;
         }
 
@@ -438,7 +438,7 @@ bool LockSettingsPath(
             locked.rootPath = extendedComponent;
             locked.root = std::move(component);
             if (!GetFileInformationByHandle(locked.root.get(), &locked.identity)) {
-                LogMessage(install, L"Codex Live Explorer settings were left in place because the settings-root identity could not be captured.");
+                LogMessage(install, L"Code-Codex settings were left in place because the settings-root identity could not be captured.");
                 return false;
             }
         }
@@ -510,30 +510,30 @@ void RemoveKnownChild(
         error);
     if (!child.valid()) {
         if (!IsMissingError(error)) {
-            LogMessage(install, L"Codex Live Explorer left a settings file in place because it could not be opened safely.");
+            LogMessage(install, L"Code-Codex left a settings file in place because it could not be opened safely.");
         }
         return;
     }
 
     DWORD attributes = 0;
     if (!QueryAttributes(child.get(), attributes)) {
-        LogMessage(install, L"Codex Live Explorer left a settings file in place because its attributes could not be verified.");
+        LogMessage(install, L"Code-Codex left a settings file in place because its attributes could not be verified.");
         return;
     }
 
     const bool isDirectory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     const bool isReparsePoint = (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
     if (regularFilesOnly && (isDirectory || isReparsePoint)) {
-        LogMessage(install, L"Codex Live Explorer left a non-regular crash-candidate entry in place.");
+        LogMessage(install, L"Code-Codex left a non-regular crash-candidate entry in place.");
         return;
     }
     if (isDirectory && !isReparsePoint) {
-        LogMessage(install, L"Codex Live Explorer left an unexpected settings directory in place.");
+        LogMessage(install, L"Code-Codex left an unexpected settings directory in place.");
         return;
     }
 
     if (!MarkForDeletion(child.get())) {
-        LogMessage(install, L"Codex Live Explorer could not remove a settings file; it was left in place.");
+        LogMessage(install, L"Code-Codex could not remove a settings file; it was left in place.");
     }
 }
 
@@ -575,7 +575,7 @@ void RemoveCrashOrphans(MSIHANDLE install, const std::wstring& root) {
     if (!find.valid()) {
         const DWORD error = GetLastError();
         if (!IsMissingError(error) && error != ERROR_NO_MORE_FILES) {
-            LogMessage(install, L"Codex Live Explorer could not enumerate settings crash candidates safely.");
+            LogMessage(install, L"Code-Codex could not enumerate settings crash candidates safely.");
         }
         return;
     }
@@ -583,7 +583,7 @@ void RemoveCrashOrphans(MSIHANDLE install, const std::wstring& root) {
     size_t inspected = 0;
     do {
         if (inspected >= maximumCandidates) {
-            LogMessage(install, L"Codex Live Explorer bounded settings crash-candidate cleanup at 64 entries.");
+            LogMessage(install, L"Code-Codex bounded settings crash-candidate cleanup at 64 entries.");
             break;
         }
         ++inspected;
@@ -626,7 +626,7 @@ void CleanupSettingsRoot(MSIHANDLE install, const std::wstring& rootPath) {
 
     DWORD attributes = 0;
     if (!QueryAttributes(locked.root.get(), attributes)) {
-        LogMessage(install, L"Codex Live Explorer settings were left in place because the settings root could not be verified.");
+        LogMessage(install, L"Code-Codex settings were left in place because the settings root could not be verified.");
         return;
     }
 
@@ -634,18 +634,18 @@ void CleanupSettingsRoot(MSIHANDLE install, const std::wstring& rootPath) {
     const bool isReparsePoint = (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
     if (isReparsePoint) {
         if (!MarkForDeletion(locked.root.get())) {
-            LogMessage(install, L"Codex Live Explorer could not unlink the settings reparse point; it was left in place.");
+            LogMessage(install, L"Code-Codex could not unlink the settings reparse point; it was left in place.");
         }
         return;
     }
     if (!isDirectory) {
-        LogMessage(install, L"Codex Live Explorer left an unexpected non-directory settings root in place.");
+        LogMessage(install, L"Code-Codex left an unexpected non-directory settings root in place.");
         return;
     }
 
     PauseForAncestorRaceTest();
     if (!RecheckRootIdentity(locked)) {
-        LogMessage(install, L"Codex Live Explorer settings were left in place because the settings-root identity changed.");
+        LogMessage(install, L"Code-Codex settings were left in place because the settings-root identity changed.");
         return;
     }
 
@@ -657,7 +657,7 @@ void CleanupSettingsRoot(MSIHANDLE install, const std::wstring& rootPath) {
         RemoveKnownChild(install, locked.rootPath, name);
     }
     if (!RecheckRootIdentity(locked)) {
-        LogMessage(install, L"Codex Live Explorer stopped before crash-candidate cleanup because the settings-root identity changed.");
+        LogMessage(install, L"Code-Codex stopped before crash-candidate cleanup because the settings-root identity changed.");
         return;
     }
     RemoveCrashOrphans(install, locked.rootPath);
@@ -737,12 +737,12 @@ extern "C" __declspec(dllexport) UINT __stdcall BlockCrossFormatInstall(
             }
             ReportInstallerError(
                 install,
-                L"Setup could not verify the existing Codex Live Explorer installation owner. No files were changed.");
+                L"Setup could not verify the existing Code-Codex installation owner. No files were changed.");
             return ERROR_INSTALL_FAILURE;
         }
 
         const std::wstring installRoot =
-            std::wstring(localAppData) + L"\\Programs\\Codex Live Explorer";
+            std::wstring(localAppData) + L"\\Programs\\Code-Codex";
         CoTaskMemFree(localAppData);
         switch (CheckInstallOwnership(installRoot)) {
         case InstallOwnershipResult::Missing:
@@ -751,20 +751,20 @@ extern "C" __declspec(dllexport) UINT __stdcall BlockCrossFormatInstall(
         case InstallOwnershipResult::Portable:
             ReportInstallerError(
                 install,
-                L"A standalone installation of Codex Live Explorer is already present. Uninstall it through Windows Installed apps before installing the MSI.");
+                L"A standalone installation of Code-Codex is already present. Uninstall it through Windows Installed apps before installing the MSI.");
             return ERROR_INSTALL_FAILURE;
         case InstallOwnershipResult::Invalid:
         case InstallOwnershipResult::Failed:
             ReportInstallerError(
                 install,
-                L"Setup could not verify the existing Codex Live Explorer installation owner. Repair or remove the existing installation before installing the MSI.");
+                L"Setup could not verify the existing Code-Codex installation owner. Repair or remove the existing installation before installing the MSI.");
             return ERROR_INSTALL_FAILURE;
         }
     }
     catch (...) {
         ReportInstallerError(
             install,
-            L"Setup could not verify the existing Codex Live Explorer installation owner. No files were changed.");
+            L"Setup could not verify the existing Code-Codex installation owner. No files were changed.");
     }
     return ERROR_INSTALL_FAILURE;
 }
@@ -778,19 +778,19 @@ extern "C" __declspec(dllexport) UINT __stdcall BlockInstallIfExplorerRunning(
         case ProcessCheckResult::Running:
             ReportInstallerError(
                 install,
-                L"Codex Live Explorer is still running. Close Codex and Codex Live Explorer completely, then run this installer again.");
+                L"Code-Codex is still running. Close Codex and Code-Codex completely, then run this installer again.");
             return ERROR_INSTALL_FAILURE;
         case ProcessCheckResult::Failed:
             ReportInstallerError(
                 install,
-                L"Setup could not verify whether Codex Live Explorer is running. Close Codex and Codex Live Explorer completely, then run this installer again.");
+                L"Setup could not verify whether Code-Codex is running. Close Codex and Code-Codex completely, then run this installer again.");
             return ERROR_INSTALL_FAILURE;
         }
     }
     catch (...) {
         ReportInstallerError(
             install,
-            L"Setup could not verify whether Codex Live Explorer is running. Close Codex and Codex Live Explorer completely, then run this installer again.");
+            L"Setup could not verify whether Code-Codex is running. Close Codex and Code-Codex completely, then run this installer again.");
     }
     return ERROR_INSTALL_FAILURE;
 }
@@ -804,19 +804,19 @@ extern "C" __declspec(dllexport) UINT __stdcall CleanupMsiSettings(MSIHANDLE ins
             nullptr,
             &localAppData);
         if (FAILED(result) || localAppData == nullptr) {
-            LogMessage(install, L"Codex Live Explorer settings were left in place because Local AppData could not be resolved.");
+            LogMessage(install, L"Code-Codex settings were left in place because Local AppData could not be resolved.");
             if (localAppData != nullptr) {
                 CoTaskMemFree(localAppData);
             }
             return ERROR_SUCCESS;
         }
 
-        const std::wstring settingsRoot = std::wstring(localAppData) + L"\\CodexLiveExplorer";
+        const std::wstring settingsRoot = std::wstring(localAppData) + L"\\CodeCodex";
         CoTaskMemFree(localAppData);
         CleanupSettingsRoot(install, settingsRoot);
     }
     catch (...) {
-        LogMessage(install, L"Codex Live Explorer settings cleanup stopped safely after an unexpected error.");
+        LogMessage(install, L"Code-Codex settings cleanup stopped safely after an unexpected error.");
     }
     return ERROR_SUCCESS;
 }

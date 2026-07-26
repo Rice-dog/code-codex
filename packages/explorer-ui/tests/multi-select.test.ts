@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodexLiveExplorerElement } from "../src/explorer-element";
+import type { CodeCodexElement } from "../src/explorer-element";
 import type { BridgeMessage, BridgeRequest, TreeNodeInput } from "../src/types";
 
 const THREAD_A = "11111111-1111-4111-8111-111111111111";
 
 interface Fixture {
-  explorer: CodexLiveExplorerElement;
+  explorer: CodeCodexElement;
   shadow: ShadowRoot;
   requests: BridgeRequest[];
   listeners: Set<(message: BridgeMessage) => void>;
@@ -13,7 +13,7 @@ interface Fixture {
 
 async function mountFixture(root?: TreeNodeInput[]): Promise<Fixture> {
   vi.resetModules();
-  window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+  window.__CODE_CODEX_BOOTSTRAP__ = {
     token: "multi-select-secret",
     codexVersion: "26.715.4045.0",
     compatible: true,
@@ -27,7 +27,7 @@ async function mountFixture(root?: TreeNodeInput[]): Promise<Fixture> {
   const requests: BridgeRequest[] = [];
   const listeners = new Set<(message: BridgeMessage) => void>();
 
-  window.__codexLiveExplorer = {
+  window.__codeCodex = {
     request(message) {
       requests.push(message);
       if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };

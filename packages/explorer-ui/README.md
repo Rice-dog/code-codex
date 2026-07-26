@@ -1,26 +1,26 @@
 # Explorer UI
 
-Dependency-light `<codex-live-explorer>` renderer panel for Codex Desktop 26.715.x. The production build is a single self-injecting IIFE at `dist/explorer.js`; it has no runtime packages, fonts, or image assets.
+Dependency-light `<code-codex>` renderer panel for Codex Desktop 26.715.x. The production build is a single self-injecting IIFE at `dist/explorer.js`; it has no runtime packages, fonts, or image assets.
 
 ## Bridge contract
 
 Before evaluating the bundle, the native injector sets a one-use bootstrap object:
 
 ```js
-window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+window.__CODE_CODEX_BOOTSTRAP__ = {
   token: "per-launch-capability-token",
   codexVersion: "26.715.10079.0",
   channel: "stable"
 };
 ```
 
-The bundle freezes and removes that object as soon as it loads. Requests call `window.__codexLiveExplorer` (with `__codexLiveExplorerNative` accepted as a compatibility fallback) using this JSON envelope:
+The bundle freezes and removes that object as soon as it loads. Requests call `window.__codeCodex` (with `__codeCodexNative` accepted as a compatibility fallback) using this JSON envelope:
 
 ```json
 {"id":"cle-…","token":"…","method":"explorer.list","params":{"relativePath":"src","limit":500}}
 ```
 
-Native code delivers responses or notifications through `window.__codexLiveExplorerReceive(messageOrJson)`. Dispatching the same payload as the detail of a `codex-live-explorer:message` `CustomEvent` is also supported.
+Native code delivers responses or notifications through `window.__codeCodexReceive(messageOrJson)`. Dispatching the same payload as the detail of a `code-codex:message` `CustomEvent` is also supported.
 
 The UI uses context, directory listing, bounded text preview/save, exact-schema
 workspace item actions, watcher lifecycle, and UI-settings methods.

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   MAIN_PREVIEW_TAG,
-  CodexLiveExplorerMainPreviewElement,
+  CodeCodexMainPreviewElement,
   registerMainPreviewElement,
   type MainPreviewFileView,
   type MainPreviewState,
@@ -19,7 +19,7 @@ const textView = (path: string, text = "const answer = 42;\n"): MainPreviewFileV
 function mount(state: MainPreviewState = { activePath: null, tabs: [] }): {
   main: HTMLElement;
   conversation: HTMLElement;
-  element: CodexLiveExplorerMainPreviewElement;
+  element: CodeCodexMainPreviewElement;
   shadow: ShadowRoot;
 } {
   const main = document.createElement("main");

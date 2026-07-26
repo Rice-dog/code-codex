@@ -1,6 +1,6 @@
 # Native bridge protocol
 
-The CDP connector installs one binding named `__codexLiveExplorer`. The injected
+The CDP connector installs one binding named `__codeCodex`. The injected
 bundle reads a one-time bootstrap capability and immediately removes the bootstrap
 object from `window`.
 
@@ -16,7 +16,7 @@ object from `window`.
 ```
 
 The native side returns data by evaluating
-`window.__codexLiveExplorerReceive(message)`. Successful and failed responses are:
+`window.__codeCodexReceive(message)`. Successful and failed responses are:
 
 ```json
 { "id": "req-42", "ok": true, "result": {} }

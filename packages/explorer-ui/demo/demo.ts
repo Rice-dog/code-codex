@@ -43,9 +43,9 @@ const directories = new Map<string, TreeNodeInput[]>([
 
 const listeners = new Set<(message: BridgeMessage) => void>();
 const previewText = new Map<string, string>([
-  ["README.md", "# Codex Live Explorer\n\nA project tree with bounded file preview and editing in Codex Desktop.\n"],
-  ["package.json", '{\n  "name": "@codex-live-explorer/explorer-ui",\n  "private": true\n}\n'],
-  ["src/explorer-element.ts", "export class CodexLiveExplorerElement extends HTMLElement {\n  // Local demo preview\n}\n"],
+  ["README.md", "# Code-Codex\n\nA project tree with bounded file preview and editing in Codex Desktop.\n"],
+  ["package.json", '{\n  "name": "@code-codex/explorer-ui",\n  "private": true\n}\n'],
+  ["src/explorer-element.ts", "export class CodeCodexElement extends HTMLElement {\n  // Local demo preview\n}\n"],
   ["src/bridge.ts", "export class ExplorerBridge extends EventTarget {}\n"],
   ["src/tree-model.ts", "export class TreeModel {\n  // Lazy, virtualized file tree model\n}\n"],
 ]);
@@ -145,8 +145,8 @@ const bridge: ObjectBridge = {
     if (method === "explorer.context") {
       return {
         threadId: String(params.threadId),
-        projectName: "Codex Live Explorer",
-        rootName: "Codex Live Explorer",
+        projectName: "Code-Codex",
+        rootName: "Code-Codex",
         compatible: true,
       };
     }
@@ -201,15 +201,15 @@ const bridge: ObjectBridge = {
   },
 };
 
-window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+window.__CODE_CODEX_BOOTSTRAP__ = {
   token: "local-demo-token",
   codexVersion: "26.715.10079.0",
   channel: "demo",
 };
-window.__codexLiveExplorer = bridge;
+window.__codeCodex = bridge;
 
 await import("../src/index");
-window.dispatchEvent(new CustomEvent("codex-live-explorer:thread-change", {
+window.dispatchEvent(new CustomEvent("code-codex:thread-change", {
   detail: { threadId: "11111111-1111-4111-8111-111111111111", hostId: "local", kind: "local" },
 }));
 

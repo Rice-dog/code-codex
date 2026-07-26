@@ -113,13 +113,13 @@ impl SettingsStore {
             let local = std::env::var_os("LOCALAPPDATA").ok_or(WorkspaceError::Internal)?;
             Ok(Self::new(
                 PathBuf::from(local)
-                    .join("CodexLiveExplorer")
+                    .join("CodeCodex")
                     .join("settings.json"),
             ))
         }
         #[cfg(not(windows))]
         {
-            let directories = ProjectDirs::from("dev", "CodexLiveExplorer", "CodexLiveExplorer")
+            let directories = ProjectDirs::from("dev", "CodeCodex", "CodeCodex")
                 .ok_or(WorkspaceError::Internal)?;
             Ok(Self::new(directories.config_dir().join("settings.json")))
         }

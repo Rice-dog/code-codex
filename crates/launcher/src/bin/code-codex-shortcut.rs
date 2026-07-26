@@ -1,4 +1,4 @@
-//! Audited integration of Codex Live Explorer with the user's existing Codex shortcut.
+//! Audited integration of Code-Codex with the user's existing Codex shortcut.
 //!
 //! The installer invokes this console binary. It deliberately owns only the desktop
 //! `Codex.lnk` and legacy shortcuts that can be tied back to this installation root.
@@ -31,8 +31,8 @@ const CODEX_PACKAGE_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
 const CODEX_APPLICATION_ID: &str = "App";
 const CODEX_AUMID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
 const SHORTCUT_NAME: &str = "Codex.lnk";
-const LEGACY_SHORTCUT_NAME: &str = "Codex Live Explorer.lnk";
-const LAUNCHER_NAME: &str = "CodexLiveExplorer.exe";
+const LEGACY_SHORTCUT_NAME: &str = "Code-Codex.lnk";
+const LAUNCHER_NAME: &str = "CodeCodex.exe";
 const DEFAULT_ICON_NAME: &str = "Codex.ico";
 const INTEGRATION_DIRECTORY: &str = "integration";
 const BACKUP_NAME: &str = "Codex.original.lnk";
@@ -40,22 +40,22 @@ const MANIFEST_NAME: &str = "shortcut-manifest.json";
 const INSTALL_ROLLBACK_NAME: &str = "install-rollback.json";
 const MANIFEST_SCHEMA: u32 = 1;
 const INSTALL_ROLLBACK_SCHEMA: u32 = 1;
-const MANIFEST_OWNER: &str = "codex-live-explorer";
-const OWNER_MARKER: &str = "Managed by Codex Live Explorer (codex-live-explorer/v1)";
-const LEGACY_DESCRIPTION: &str = "Launch Codex Desktop with Live Explorer file preview and editing";
+const MANIFEST_OWNER: &str = "code-codex";
+const OWNER_MARKER: &str = "Managed by Code-Codex (code-codex/v1)";
+const LEGACY_DESCRIPTION: &str = "Launch Codex Desktop with Code-Codex file preview and editing";
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "codex-live-explorer-shortcut",
+    name = "code-codex-shortcut",
     version,
-    about = "Safely integrate Codex Live Explorer with the desktop Codex shortcut"
+    about = "Safely integrate Code-Codex with the desktop Codex shortcut"
 )]
 struct Cli {
     /// Desktop directory override for isolated installer tests.
     #[arg(
         long,
         global = true,
-        env = "CODEX_LIVE_EXPLORER_DESKTOP",
+        env = "CODE_CODEX_DESKTOP",
         value_name = "DIRECTORY"
     )]
     desktop: Option<PathBuf>,
@@ -63,7 +63,7 @@ struct Cli {
     #[arg(
         long,
         global = true,
-        env = "CODEX_LIVE_EXPLORER_START_MENU",
+        env = "CODE_CODEX_START_MENU",
         value_name = "DIRECTORY"
     )]
     start_menu: Option<PathBuf>,
@@ -95,7 +95,7 @@ enum Commands {
         #[arg(long, value_name = "DIRECTORY")]
         install_root: PathBuf,
     },
-    /// Back up the official AppX shortcut and replace it with the Live Explorer launcher.
+    /// Back up the official AppX shortcut and replace it with the Code-Codex launcher.
     Install {
         #[arg(long, value_name = "DIRECTORY")]
         install_root: PathBuf,
@@ -282,12 +282,12 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("codex-live-explorer-shortcut: {error}");
+                eprintln!("code-codex-shortcut: {error}");
                 ExitCode::FAILURE
             }
         },
         Err(error) => {
-            eprintln!("codex-live-explorer-shortcut: {error}");
+            eprintln!("code-codex-shortcut: {error}");
             ExitCode::FAILURE
         }
     }
@@ -1436,7 +1436,7 @@ fn remove_verified_legacy_shortcuts(
     let mut legacy_start_menu_directory = None;
     if let Some(start_menu) = paths.start_menu.as_ref() {
         candidates.push(start_menu.join(LEGACY_SHORTCUT_NAME));
-        let product_directory = start_menu.join("Codex Live Explorer");
+        let product_directory = start_menu.join("Code-Codex");
         candidates.push(product_directory.join(LEGACY_SHORTCUT_NAME));
         legacy_start_menu_directory = Some(product_directory);
     }
@@ -2349,7 +2349,7 @@ mod tests {
     fn preflight_accepts_official_shortcut_without_creating_install_state() {
         let temporary = tempfile::tempdir().expect("temporary root");
         let missing_parent = temporary.path().join("missing-parent");
-        let install_root = missing_parent.join("Programs").join("Codex Live Explorer");
+        let install_root = missing_parent.join("Programs").join("Code-Codex");
         let desktop = temporary.path().join("desktop");
         let start_menu = temporary.path().join("start-menu");
         fs::create_dir(&desktop).expect("desktop");
@@ -2725,7 +2725,7 @@ mod tests {
             .start_menu
             .as_ref()
             .expect("start menu")
-            .join("Codex Live Explorer");
+            .join("Code-Codex");
         fs::create_dir(&legacy_product_directory).expect("legacy product directory");
         let nested_owned_legacy = legacy_product_directory.join(LEGACY_SHORTCUT_NAME);
         write_fixture(

@@ -1,18 +1,18 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.19"
+    [string]$Version = "0.1.20"
 )
 
 $ErrorActionPreference = "Stop"
 $SourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$SourceBinary = Join-Path $SourceRoot "codex-live-explorer.exe"
-$SourceRuntimeLauncher = Join-Path $SourceRoot "codex-live-explorer-launcher.exe"
-$SourceShim = Join-Path $SourceRoot "codex-live-explorer-shim.exe"
-$SourceShortcutTool = Join-Path $SourceRoot "codex-live-explorer-shortcut.exe"
-$SourceUninstallerExecutable = Join-Path $SourceRoot "codex-live-explorer-uninstall.exe"
-$SourceUninstaller = Join-Path $SourceRoot "Uninstall-CodexLiveExplorer.ps1"
+$SourceBinary = Join-Path $SourceRoot "code-codex.exe"
+$SourceRuntimeLauncher = Join-Path $SourceRoot "code-codex-launcher.exe"
+$SourceShim = Join-Path $SourceRoot "code-codex-shim.exe"
+$SourceShortcutTool = Join-Path $SourceRoot "code-codex-shortcut.exe"
+$SourceUninstallerExecutable = Join-Path $SourceRoot "code-codex-uninstall.exe"
+$SourceUninstaller = Join-Path $SourceRoot "Uninstall-CodeCodex.ps1"
 $SourceFinalizer = Join-Path $SourceRoot "Finalize-Uninstall.ps1"
-$InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Codex Live Explorer"
+$InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Code-Codex"
 $ProgramsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
 $VersionsRoot = Join-Path $InstallRoot "versions"
 $VersionRoot = Join-Path $VersionsRoot $Version
@@ -262,7 +262,7 @@ if ($null -ne $installTypeItem) {
         throw "Refusing to read a non-file or reparse-point installation ownership marker: $installTypePath"
     }
     if ((Get-Content -LiteralPath $installTypePath -Raw -Encoding UTF8).Trim() -eq "msi") {
-        throw "Codex Live Explorer is owned by Windows Installer. Uninstall it through Windows Installed apps before using the standalone installer."
+        throw "Code-Codex is owned by Windows Installer. Uninstall it through Windows Installed apps before using the standalone installer."
     }
 }
 
@@ -273,14 +273,14 @@ $existingMsiRegistration = $null
 if (Test-Path -LiteralPath $uninstallRegistryRoot) {
     $existingMsiRegistration = Get-ItemProperty $uninstallRegistryPattern -ErrorAction Stop |
         Where-Object {
-            $_.DisplayName -eq "Codex Live Explorer" -and
+            $_.DisplayName -eq "Code-Codex" -and
             [string]$_.PSChildName -match $msiProductCodePattern -and
             [string]$_.WindowsInstaller -eq "1"
         } |
         Select-Object -First 1
 }
 if ($null -ne $existingMsiRegistration) {
-    throw "Codex Live Explorer is registered with Windows Installer. Uninstall it through Windows Installed apps before using the standalone installer."
+    throw "Code-Codex is registered with Windows Installer. Uninstall it through Windows Installed apps before using the standalone installer."
 }
 
 & $SourceShortcutTool preflight --install-root $InstallRoot --version $Version
@@ -300,8 +300,8 @@ if (Test-Path -LiteralPath $VersionRoot) {
         throw "The release path must be a regular directory: $VersionRoot"
     }
     foreach ($pair in @(
-        @($SourceBinary, (Join-Path $VersionRoot "codex-live-explorer.exe")),
-        @($SourceRuntimeLauncher, (Join-Path $VersionRoot "CodexLiveExplorer.exe"))
+        @($SourceBinary, (Join-Path $VersionRoot "code-codex.exe")),
+        @($SourceRuntimeLauncher, (Join-Path $VersionRoot "CodeCodex.exe"))
     )) {
         if (-not (Test-Path -LiteralPath $pair[1] -PathType Leaf) -or
             (Get-FileHash -LiteralPath $pair[0] -Algorithm SHA256).Hash -ne
@@ -314,8 +314,8 @@ else {
     $stagingVersion = Join-Path $VersionsRoot (".{0}.{1}.tmp" -f $Version, [Guid]::NewGuid().ToString("N"))
     try {
         New-Item -ItemType Directory -Path $stagingVersion | Out-Null
-        Copy-Item -LiteralPath $SourceBinary -Destination (Join-Path $stagingVersion "codex-live-explorer.exe")
-        Copy-Item -LiteralPath $SourceRuntimeLauncher -Destination (Join-Path $stagingVersion "CodexLiveExplorer.exe")
+        Copy-Item -LiteralPath $SourceBinary -Destination (Join-Path $stagingVersion "code-codex.exe")
+        Copy-Item -LiteralPath $SourceRuntimeLauncher -Destination (Join-Path $stagingVersion "CodeCodex.exe")
         [IO.Directory]::Move($stagingVersion, $VersionRoot)
     }
     finally {
@@ -325,10 +325,10 @@ else {
     }
 }
 
-Copy-AtomicFile $SourceShim (Join-Path $InstallRoot "CodexLiveExplorer.exe")
-Copy-AtomicFile $SourceShortcutTool (Join-Path $InstallRoot "CodexLiveExplorer.Shortcut.exe")
-Copy-AtomicFile $SourceUninstallerExecutable (Join-Path $InstallRoot "Uninstall-CodexLiveExplorer.exe")
-Copy-AtomicFile $SourceUninstaller (Join-Path $InstallRoot "Uninstall-CodexLiveExplorer.ps1")
+Copy-AtomicFile $SourceShim (Join-Path $InstallRoot "CodeCodex.exe")
+Copy-AtomicFile $SourceShortcutTool (Join-Path $InstallRoot "CodeCodex.Shortcut.exe")
+Copy-AtomicFile $SourceUninstallerExecutable (Join-Path $InstallRoot "Uninstall-CodeCodex.exe")
+Copy-AtomicFile $SourceUninstaller (Join-Path $InstallRoot "Uninstall-CodeCodex.ps1")
 Copy-AtomicFile $SourceFinalizer (Join-Path $InstallRoot "Finalize-Uninstall.ps1")
 
 foreach ($documentCopy in $documentCopies) {
@@ -343,28 +343,28 @@ Write-AtomicText (Join-Path $InstallRoot "current-version") ($Version + "`n")
 Write-AtomicText (Join-Path $InstallRoot "install-type") "portable`n"
 
 # Remove the obsolete sign-in launch entry. The existing Codex shortcut is now
-# the single user-controlled entry point for both Codex and Live Explorer.
+# the single user-controlled entry point for both Codex and Code-Codex.
 Remove-ItemProperty `
     -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
-    -Name "CodexLiveExplorer" `
+    -Name "CodeCodex" `
     -ErrorAction SilentlyContinue
 
-$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexLiveExplorer"
+$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex"
 New-Item -Path $uninstallKey -Force | Out-Null
-New-ItemProperty -Path $uninstallKey -Name "DisplayName" -PropertyType String -Value "Codex Live Explorer" -Force | Out-Null
+New-ItemProperty -Path $uninstallKey -Name "DisplayName" -PropertyType String -Value "Code-Codex" -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -PropertyType String -Value $Version -Force | Out-Null
-New-ItemProperty -Path $uninstallKey -Name "Publisher" -PropertyType String -Value "Codex Live Explorer contributors" -Force | Out-Null
+New-ItemProperty -Path $uninstallKey -Name "Publisher" -PropertyType String -Value "Code-Codex contributors" -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "InstallLocation" -PropertyType String -Value $InstallRoot -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -PropertyType String -Value (Join-Path $InstallRoot "Codex.ico") -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "UninstallString" -PropertyType String `
-    -Value ('"{0}"' -f (Join-Path $InstallRoot "Uninstall-CodexLiveExplorer.exe")) -Force | Out-Null
+    -Value ('"{0}"' -f (Join-Path $InstallRoot "Uninstall-CodeCodex.exe")) -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "NoModify" -PropertyType DWord -Value 1 -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "NoRepair" -PropertyType DWord -Value 1 -Force | Out-Null
 
-$installedShortcutTool = Join-Path $InstallRoot "CodexLiveExplorer.Shortcut.exe"
+$installedShortcutTool = Join-Path $InstallRoot "CodeCodex.Shortcut.exe"
 & $installedShortcutTool install --install-root $InstallRoot --version $Version
 if ($LASTEXITCODE -ne 0) {
     throw "The Codex desktop shortcut could not be redirected (exit code $LASTEXITCODE)."
 }
 
-Write-Host "Installed Codex Live Explorer $Version. The existing Codex desktop shortcut now starts Live Explorer."
+Write-Host "Installed Code-Codex $Version. The existing Codex desktop shortcut now starts Code-Codex."

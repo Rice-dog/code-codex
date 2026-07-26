@@ -15,9 +15,9 @@ use std::process::{Command, ExitCode, Stdio};
 #[path = "../gui_support.rs"]
 mod gui_support;
 
-const TITLE: &str = "Codex Live Explorer";
+const TITLE: &str = "Code-Codex";
 const POINTER_FILE: &str = "current-version";
-const VERSIONED_LAUNCHER: &str = "CodexLiveExplorer.exe";
+const VERSIONED_LAUNCHER: &str = "CodeCodex.exe";
 const MAX_POINTER_BYTES: u64 = 64;
 const MAX_VERSION_LENGTH: usize = 32;
 
@@ -28,7 +28,7 @@ fn main() -> ExitCode {
             gui_support::show_dialog(
                 TITLE,
                 &format!(
-                    "Codex Live Explorer could not start: {error}\n\nRun the Codex Live Explorer installer again to repair this installation."
+                    "Code-Codex could not start: {error}\n\nRun the Code-Codex installer again to repair this installation."
                 ),
                 true,
             );
@@ -150,7 +150,7 @@ mod tests {
             Ok(root
                 .join("versions")
                 .join("0.1.4")
-                .join("CodexLiveExplorer.exe"))
+                .join("CodeCodex.exe"))
         );
         assert_eq!(validate_version_pointer("2026.7.23\n"), Ok("2026.7.23"));
     }

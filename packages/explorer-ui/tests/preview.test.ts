@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodexLiveExplorerElement } from "../src/explorer-element";
-import type { CodexLiveExplorerMainPreviewElement, MainPreviewState } from "../src/main-preview";
+import type { CodeCodexElement } from "../src/explorer-element";
+import type { CodeCodexMainPreviewElement, MainPreviewState } from "../src/main-preview";
 import type { BridgeMessage, BridgeRequest, TreeNodeInput } from "../src/types";
 
 const THREAD_A = "11111111-1111-4111-8111-111111111111";
 const THREAD_B = "22222222-2222-4222-8222-222222222222";
-const MAIN_PREVIEW_TAG = "codex-live-explorer-main-preview";
+const MAIN_PREVIEW_TAG = "code-codex-main-preview";
 
 class Deferred<T> {
   readonly promise: Promise<T>;
@@ -19,7 +19,7 @@ class Deferred<T> {
 type PreviewHandler = (message: BridgeRequest) => unknown;
 
 interface PreviewFixture {
-  explorer: CodexLiveExplorerElement;
+  explorer: CodeCodexElement;
   shadow: ShadowRoot;
   main: HTMLElement;
   conversation: HTMLElement;
@@ -41,7 +41,7 @@ async function mountPreviewFixture(
 ): Promise<PreviewFixture> {
   vi.resetModules();
   if (options.theme) document.documentElement.dataset.theme = options.theme;
-  window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+  window.__CODE_CODEX_BOOTSTRAP__ = {
     token: "preview-secret",
     codexVersion: "26.715.3651.0",
     channel: "beta",
@@ -49,7 +49,7 @@ async function mountPreviewFixture(
   };
   const requests: BridgeRequest[] = [];
   const listeners = new Set<(message: BridgeMessage) => void>();
-  window.__codexLiveExplorer = {
+  window.__codeCodex = {
     request(message) {
       requests.push(message);
       if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -110,8 +110,8 @@ function clickRow(shadow: ShadowRoot, path: string): void {
   row.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
 }
 
-function previewHost(main: HTMLElement): CodexLiveExplorerMainPreviewElement | null {
-  return main.querySelector<CodexLiveExplorerMainPreviewElement>(`:scope > ${MAIN_PREVIEW_TAG}`);
+function previewHost(main: HTMLElement): CodeCodexMainPreviewElement | null {
+  return main.querySelector<CodeCodexMainPreviewElement>(`:scope > ${MAIN_PREVIEW_TAG}`);
 }
 
 function previewShadow(main: HTMLElement): ShadowRoot {
@@ -431,7 +431,7 @@ describe("main-window file previews", () => {
     clickRow(replacement.shadow, "new.txt");
     await waitForPreviewRequests(replacement.requests, 1);
     replacement.shadow.querySelector<HTMLButtonElement>(".disable")?.click();
-    await vi.waitFor(() => expect(document.querySelector("codex-live-explorer")).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector("code-codex")).toBeNull());
     expect(previewHost(replacement.main)).toBeNull();
   });
 
@@ -854,13 +854,13 @@ describe("main-window file previews", () => {
     expect(previewShadow(fixture.main).querySelector<HTMLTextAreaElement>("textarea.code-editor")?.value).toBe("task draft\n");
 
     active?.setAttribute("data-app-action-sidebar-thread-id", `local:${THREAD_A}`);
-    window.dispatchEvent(new CustomEvent("codex-live-explorer:thread-change", {
+    window.dispatchEvent(new CustomEvent("code-codex:thread-change", {
       detail: { threadId: THREAD_A, hostId: "local", kind: "local" },
     }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     confirm.mockReturnValue(true);
     active?.setAttribute("data-app-action-sidebar-thread-id", `local:${THREAD_B}`);
-    window.dispatchEvent(new CustomEvent("codex-live-explorer:thread-change", {
+    window.dispatchEvent(new CustomEvent("code-codex:thread-change", {
       detail: { threadId: THREAD_B, hostId: "local", kind: "local" },
     }));
     await vi.waitFor(() => expect(fixture.requests.some(
@@ -890,7 +890,7 @@ describe("main-window file previews", () => {
     active?.setAttribute("data-app-action-sidebar-thread-id", `local:${THREAD_B}`);
     await vi.waitFor(() => expect(confirm).toHaveBeenCalled());
     active?.setAttribute("data-app-action-sidebar-thread-id", `local:${THREAD_A}`);
-    window.dispatchEvent(new CustomEvent("codex-live-explorer:thread-change", {
+    window.dispatchEvent(new CustomEvent("code-codex:thread-change", {
       detail: { threadId: THREAD_A, hostId: "local", kind: "local" },
     }));
     await new Promise((resolve) => setTimeout(resolve, 0));

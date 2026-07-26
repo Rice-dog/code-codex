@@ -7,8 +7,8 @@ import {
   plausibleThreadId,
 } from "./adapters/codex-26.715";
 
-const ROUTE_EVENT = "codex-live-explorer:route";
-const EXPLICIT_EVENT = "codex-live-explorer:thread-change";
+const ROUTE_EVENT = "code-codex:route";
+const EXPLICIT_EVENT = "code-codex:thread-change";
 
 const SELECTED_THREAD_SELECTORS = [
   ACTIVE_THREAD_MARKER_SELECTOR,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodexLiveExplorerElement } from "../src/explorer-element";
+import type { CodeCodexElement } from "../src/explorer-element";
 import type { BridgeMessage, BridgeRequest, TreeNodeInput } from "../src/types";
 
 const THREAD_A = "11111111-1111-4111-8111-111111111111";
@@ -19,7 +19,7 @@ class Deferred<T> {
 }
 
 interface ContextMenuFixture {
-  explorer: CodexLiveExplorerElement;
+  explorer: CodeCodexElement;
   shadow: ShadowRoot;
   main: HTMLElement;
   requests: BridgeRequest[];
@@ -34,7 +34,7 @@ interface ContextMenuFixtureOptions {
 
 async function mountFixture(options: ContextMenuFixtureOptions = {}): Promise<ContextMenuFixture> {
   vi.resetModules();
-  window.__CODEX_LIVE_EXPLORER_BOOTSTRAP__ = {
+  window.__CODE_CODEX_BOOTSTRAP__ = {
     token: "context-menu-secret",
     codexVersion: "26.715.4045.0",
     compatible: true,
@@ -49,7 +49,7 @@ async function mountFixture(options: ContextMenuFixtureOptions = {}): Promise<Co
   const requests: BridgeRequest[] = [];
   const listeners = new Set<(message: BridgeMessage) => void>();
 
-  window.__codexLiveExplorer = {
+  window.__codeCodex = {
     request(message) {
       requests.push(message);
       if (message.method === "explorer.settings.get") return { panelWidth: 260, collapsed: false };
@@ -449,13 +449,13 @@ describe("explorer context menu", () => {
     expect(entryRequests(fixture.requests, "explorer.entry.delete")).toHaveLength(0);
 
     clickRow(fixture.shadow, "notes.txt");
-    await vi.waitFor(() => expect(fixture.main.querySelector("codex-live-explorer-main-preview")).not.toBeNull());
+    await vi.waitFor(() => expect(fixture.main.querySelector("code-codex-main-preview")).not.toBeNull());
     openRowMenu(fixture.shadow, "notes.txt");
     menuAction(fixture.shadow, "delete").click();
     submitDialog(fixture.shadow);
     await vi.waitFor(() => expect(entryRequests(fixture.requests, "explorer.entry.delete")).toHaveLength(1));
     expect(entryRequests(fixture.requests, "explorer.entry.delete")[0]?.params).toEqual({ relativePath: "notes.txt" });
-    await vi.waitFor(() => expect(fixture.main.querySelector("codex-live-explorer-main-preview")).toBeNull());
+    await vi.waitFor(() => expect(fixture.main.querySelector("code-codex-main-preview")).toBeNull());
     expect(actionNotice(fixture.shadow).textContent).toContain("notes.txt deleted");
   });
 
@@ -706,7 +706,7 @@ describe("explorer context menu", () => {
       (request) => request.method === "explorer.preview" && request.params.relativePath === "src/nested.txt",
     )).toBe(true));
     fixture.shadow.querySelector<HTMLButtonElement>(".edit-mode-toggle")?.click();
-    const preview = fixture.main.querySelector("codex-live-explorer-main-preview");
+    const preview = fixture.main.querySelector("code-codex-main-preview");
     const editor = preview?.shadowRoot?.querySelector<HTMLTextAreaElement>("textarea.code-editor");
     if (!editor) throw new Error("Editable descendant preview is missing.");
     editor.value = "unsaved descendant\n";
@@ -732,7 +732,7 @@ describe("explorer context menu", () => {
       relativePath: "src",
       newName: "source",
     });
-    await vi.waitFor(() => expect(fixture.main.querySelector("codex-live-explorer-main-preview")).toBeNull());
+    await vi.waitFor(() => expect(fixture.main.querySelector("code-codex-main-preview")).toBeNull());
   });
 
   it.each(["rename", "delete"] as const)("keeps an unsaved draft when %s is rejected", async (action) => {
@@ -753,7 +753,7 @@ describe("explorer context menu", () => {
       (request) => request.method === "explorer.preview" && request.params.relativePath === "notes.txt",
     )).toBe(true));
     fixture.shadow.querySelector<HTMLButtonElement>(".edit-mode-toggle")?.click();
-    const preview = fixture.main.querySelector("codex-live-explorer-main-preview");
+    const preview = fixture.main.querySelector("code-codex-main-preview");
     const editor = preview?.shadowRoot?.querySelector<HTMLTextAreaElement>("textarea.code-editor");
     if (!editor) throw new Error("Editable preview is missing.");
     editor.value = "draft that must survive\n";
@@ -790,7 +790,7 @@ describe("explorer context menu", () => {
     openRowMenu(fixture.shadow, "notes.txt");
     const active = document.querySelector<HTMLElement>("[data-app-action-sidebar-thread-active]");
     active?.setAttribute("data-app-action-sidebar-thread-id", `local:${THREAD_B}`);
-    window.dispatchEvent(new CustomEvent("codex-live-explorer:thread-change", {
+    window.dispatchEvent(new CustomEvent("code-codex:thread-change", {
       detail: { threadId: THREAD_B, hostId: "local", kind: "local" },
     }));
     await vi.waitFor(() => expect(menu(fixture.shadow).hidden).toBe(true));
@@ -814,7 +814,7 @@ describe("explorer drag and drop", () => {
     const started = dispatchDrag(source, "dragstart", transfer);
     expect(started.defaultPrevented).toBe(false);
     expect(transfer.effectAllowed).toBe("move");
-    expect(transfer.getData("application/x-codex-live-explorer-entry")).toBe("notes.txt");
+    expect(transfer.getData("application/x-code-codex-entry")).toBe("notes.txt");
     expect(source.dataset.dragSource).toBe("true");
 
     const hovered = dispatchDrag(destination, "dragover", transfer);
@@ -992,7 +992,7 @@ describe("explorer drag and drop", () => {
       (request) => request.method === "explorer.preview" && request.params.relativePath === "notes.txt",
     )).toBe(true));
     fixture.shadow.querySelector<HTMLButtonElement>(".edit-mode-toggle")?.click();
-    const preview = fixture.main.querySelector("codex-live-explorer-main-preview");
+    const preview = fixture.main.querySelector("code-codex-main-preview");
     const editor = preview?.shadowRoot?.querySelector<HTMLTextAreaElement>("textarea.code-editor");
     if (!editor) throw new Error("Move draft fixture is missing its editor.");
     editor.value = "draft that must survive a rejected move\n";
