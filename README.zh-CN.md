@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="releases/"><img alt="版本" src="https://img.shields.io/badge/version-0.1.29-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.1.29"><img alt="版本" src="https://img.shields.io/badge/version-0.1.29-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="平台" src="https://img.shields.io/badge/platform-Windows%2011-lightgrey">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -30,12 +30,13 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ## 安装方式一：直接下载 EXE
 
-可以从 [`releases`](releases/) 下载已经生成好的安装包：
+可以从 [GitHub Releases](https://github.com/Rice-dog/code-codex/releases/tag/v0.1.29)
+下载已经生成好的安装包：
 
-- 推荐：`CodeCodex-0.1.29-x64-setup.exe`
-- 备选：`CodeCodex-0.1.29-x64.msi`
-- 便携包：`CodeCodex-0.1.29-x64.zip`
-- 独立卸载程序：`Uninstall-CodeCodex.exe`
+- 推荐：[`CodeCodex-0.1.29-x64-setup.exe`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.29/CodeCodex-0.1.29-x64-setup.exe)
+- 备选：[`CodeCodex-0.1.29-x64.msi`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.29/CodeCodex-0.1.29-x64.msi)
+- 便携包：[`CodeCodex-0.1.29-x64.zip`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.29/CodeCodex-0.1.29-x64.zip)
+- 独立卸载程序：[`Uninstall-CodeCodex.exe`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.29/Uninstall-CodeCodex.exe)
 
 可以用下面的命令校验下载文件：
 
@@ -43,7 +44,9 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 Get-FileHash .\CodeCodex-0.1.29-x64-setup.exe -Algorithm SHA256
 ```
 
-然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
+然后和
+[`SHA256SUMS.txt`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.29/SHA256SUMS.txt)
+中的值对比。
 
 如果已经安装官方 Codex/ChatGPT Desktop，安装器会先检查桌面上的 `Codex` 快捷方式，
 再检查 `ChatGPT` 快捷方式。只有这两个官方快捷方式都不存在时，才会创建新的托管
