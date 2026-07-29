@@ -1,0 +1,2 @@
+# Preserve upstream legal texts byte-for-byte, including original spacing.
+THIRD_PARTY_LICENSES.txt -text -whitespace

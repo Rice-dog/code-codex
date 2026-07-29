@@ -1,0 +1,24 @@
+{
+  "name": "@code-codex/explorer-ui",
+  "version": "0.1.29",
+  "private": true,
+  "description": "Dependency-light renderer UI injected into Codex Desktop.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:watch": "node scripts/build.mjs --watch",
+    "demo": "node scripts/demo-server.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.15",
+    "esbuild": "^0.25.8",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
