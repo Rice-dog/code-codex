@@ -3,6 +3,10 @@
 English | [简体中文](README.zh-CN.md)
 
 <p align="center">
+  <img src="crates/launcher/resources/code-codex.ico" alt="Code-Codex icon" width="96">
+</p>
+
+<p align="center">
   <em>Add a local project file tree, preview tabs, and bounded editing to Codex Desktop.</em>
 </p>
 

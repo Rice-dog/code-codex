@@ -3,6 +3,10 @@
 [English](README.md) | 简体中文
 
 <p align="center">
+  <img src="crates/launcher/resources/code-codex.ico" alt="Code-Codex 图标" width="96">
+</p>
+
+<p align="center">
   <em>为 Codex Desktop 添加本地项目文件树、预览标签页和受限编辑能力。</em>
 </p>
 
