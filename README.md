@@ -2,6 +2,19 @@
 
 English | [简体中文](README.zh-CN.md)
 
+<p align="center">
+  <em>Add a local project file tree, preview tabs, and bounded editing to Codex Desktop.</em>
+</p>
+
+<p align="center">
+  <a href="releases/"><img alt="Version" src="https://img.shields.io/badge/version-0.1.29-blue"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2011-lightgrey">
+  <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
+  <img alt="Status" src="https://img.shields.io/badge/status-preview-yellow">
+</p>
+
 Code-Codex is an unofficial community project that adds a local project file tree
 to Codex Desktop. It demonstrates a local Windows companion app, a bounded
 workspace bridge, and an injected TypeScript explorer UI for file preview,

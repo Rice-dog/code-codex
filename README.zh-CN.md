@@ -2,6 +2,19 @@
 
 [English](README.md) | 简体中文
 
+<p align="center">
+  <em>为 Codex Desktop 添加本地项目文件树、预览标签页和受限编辑能力。</em>
+</p>
+
+<p align="center">
+  <a href="releases/"><img alt="版本" src="https://img.shields.io/badge/version-0.1.29-blue"></a>
+  <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="平台" src="https://img.shields.io/badge/platform-Windows%2011-lightgrey">
+  <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
+  <img alt="状态" src="https://img.shields.io/badge/status-preview-yellow">
+</p>
+
 Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地项目文件树。它展示了一个 Windows 本地辅助程序、受限工作区 bridge，以及注入式 TypeScript explorer UI，用于文件预览、编辑、导航和文件操作。
 
 > [!IMPORTANT]
