@@ -2,11 +2,11 @@
 
 This folder contains ready-made downloadable packages.
 
-## v0.1.29
+## v0.1.30
 
-- `CodeCodex-0.1.29-x64-setup.exe`: recommended installer.
-- `CodeCodex-0.1.29-x64.msi`: MSI installer.
-- `CodeCodex-0.1.29-x64.zip`: portable package, including
+- `CodeCodex-0.1.30-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.30-x64.msi`: MSI installer.
+- `CodeCodex-0.1.30-x64.zip`: portable package, including
   `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
 - `Uninstall-CodeCodex.exe`: standalone uninstaller for an existing install.
 - `SHA256SUMS.txt`: SHA-256 checksums for the downloadable files.
@@ -19,5 +19,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.29
+./scripts/package.ps1 -Version 0.1.30
 ```

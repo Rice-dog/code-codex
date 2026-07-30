@@ -77,7 +77,10 @@ export interface SyntaxHighlight {
   readonly limited: boolean;
 }
 
-export const MAX_SYNTAX_RUNS = 4096;
+// A typical 64 KiB source preview can exceed 4,096 alternating styled/plain
+// runs long before reaching the preview-size boundary. Keep pathological DOM
+// output bounded, but leave enough room to highlight ordinary previews fully.
+export const MAX_SYNTAX_RUNS = 16_384;
 export const MAX_SYNTAX_SOURCE_UNITS = 65_536;
 
 const exactLanguages = new Map<string, SyntaxLanguage>([
