@@ -1,9 +1,15 @@
-use std::path::Path;
 #[cfg(windows)]
-use std::process::Command;
+use std::ffi::OsString;
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
+#[cfg(windows)]
+use std::thread;
 use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -14,6 +20,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{HWND, LPARAM, RPC_E_CHANGED_MODE, S_FALSE, S_OK};
+#[cfg(windows)]
+use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
+#[cfg(windows)]
+use windows_sys::Win32::UI::Shell::{
+    ILFree, SHOpenFolderAndSelectItems, SHParseDisplayName, ShellExecuteW,
+};
+#[cfg(windows)]
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GetClassNameW,
+    GetForegroundWindow, GetWindowTextW, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST,
+    IsWindowVisible, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+    SetForegroundWindow, SetWindowPos, ShowWindowAsync,
+};
+#[cfg(windows)]
+use windows_sys::core::BOOL;
 use workspace_service::{
     CreateEntryKind, ErrorCode, ListOptions, ListPage, MAX_PREVIEW_BYTES, PreparedSettings,
     PreviewResult, Settings, SettingsPatch, SettingsStore, WatchSubscription, WatchVisibility,
@@ -398,7 +421,8 @@ impl NativeBridge {
                 results.push(entry);
             }
 
-            return serde_json::to_value(json!({ "entries": results })).map_err(|_| internal_error());
+            return serde_json::to_value(json!({ "entries": results }))
+                .map_err(|_| internal_error());
         }
 
         // Fall back to single-entry move for backward compatibility
@@ -960,24 +984,239 @@ fn cancelled_error() -> BridgeError {
 
 #[cfg(windows)]
 fn reveal_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
-    build_reveal_command(target)?
-        .spawn()
-        .map_err(|_| WorkspaceError::Internal)?;
+    let existing_explorer_windows = visible_explorer_windows();
+    demote_foreground_codex_window();
+    allow_explorer_foreground_activation();
+    open_target_in_file_explorer(target)?;
+    raise_new_explorer_window(&existing_explorer_windows);
     Ok(())
 }
 
 #[cfg(windows)]
-fn build_reveal_command(target: &Path) -> Result<Command, WorkspaceError> {
-    let windows_directory = std::env::var_os("SystemRoot")
-        .filter(|value| !value.is_empty())
-        .ok_or(WorkspaceError::Internal)?;
-    let explorer = std::path::PathBuf::from(windows_directory).join("explorer.exe");
-    if !explorer.is_absolute() {
+fn open_target_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
+    if target.is_dir() {
+        open_directory_in_file_explorer(target)
+    } else {
+        select_item_in_file_explorer(target)
+    }
+}
+
+#[cfg(windows)]
+fn open_directory_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
+    let target = path_to_wide(target);
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_RESTORE,
+        )
+    };
+    if (result as isize) > 32 {
+        Ok(())
+    } else {
+        Err(WorkspaceError::Internal)
+    }
+}
+
+#[cfg(windows)]
+fn select_item_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
+    let _com = ComInitialization::initialize()?;
+    let target = path_to_wide(target);
+    let mut item = std::ptr::null_mut();
+    let parse_result = unsafe {
+        SHParseDisplayName(
+            target.as_ptr(),
+            std::ptr::null_mut(),
+            &mut item,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if hresult_failed(parse_result) || item.is_null() {
         return Err(WorkspaceError::Internal);
     }
-    let mut command = Command::new(explorer);
-    command.arg("/select,").arg(target);
-    Ok(command)
+
+    let reveal_result = unsafe { SHOpenFolderAndSelectItems(item, 0, std::ptr::null(), 0) };
+    unsafe {
+        ILFree(item);
+    }
+    if hresult_failed(reveal_result) {
+        Err(WorkspaceError::Internal)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn path_to_wide(path: &Path) -> Vec<u16> {
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn hresult_failed(result: i32) -> bool {
+    result < 0
+}
+
+#[cfg(windows)]
+struct ComInitialization {
+    initialized: bool,
+}
+
+#[cfg(windows)]
+impl ComInitialization {
+    fn initialize() -> Result<Self, WorkspaceError> {
+        let result = unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+        if hresult_failed(result) && result != RPC_E_CHANGED_MODE {
+            return Err(WorkspaceError::Internal);
+        }
+        Ok(Self {
+            initialized: matches!(result, S_OK | S_FALSE),
+        })
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ComInitialization {
+    fn drop(&mut self) {
+        if self.initialized {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn raise_new_explorer_window(existing_windows: &[HWND]) {
+    let deadline = Instant::now() + Duration::from_millis(900);
+    while Instant::now() < deadline {
+        if let Some(window) = visible_explorer_windows()
+            .into_iter()
+            .find(|window| !existing_windows.contains(window))
+        {
+            raise_explorer_window(window);
+            return;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    if let Some(window) = visible_explorer_windows().into_iter().next() {
+        raise_explorer_window(window);
+    }
+}
+
+#[cfg(windows)]
+fn raise_explorer_window(window: HWND) {
+    if window.is_null() {
+        return;
+    }
+
+    const RAISE_FLAGS: u32 = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
+    const RELEASE_FLAGS: u32 = RAISE_FLAGS | SWP_NOACTIVATE;
+
+    unsafe {
+        let _ = ShowWindowAsync(window, SW_RESTORE);
+        let _ = SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, RAISE_FLAGS);
+        let _ = BringWindowToTop(window);
+        let _ = SetForegroundWindow(window);
+    }
+    thread::sleep(Duration::from_millis(250));
+    unsafe {
+        let _ = SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, RELEASE_FLAGS);
+    }
+}
+
+#[cfg(windows)]
+fn visible_explorer_windows() -> Vec<HWND> {
+    let mut windows = Vec::new();
+    unsafe {
+        let _ = EnumWindows(
+            Some(collect_visible_explorer_window),
+            &mut windows as *mut Vec<HWND> as LPARAM,
+        );
+    }
+    windows
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn collect_visible_explorer_window(window: HWND, parameter: LPARAM) -> BOOL {
+    if is_explorer_window(window) {
+        let windows = unsafe { &mut *(parameter as *mut Vec<HWND>) };
+        windows.push(window);
+    }
+    1
+}
+
+#[cfg(windows)]
+fn is_explorer_window(window: HWND) -> bool {
+    if window.is_null() {
+        return false;
+    }
+    let visible = unsafe { IsWindowVisible(window) };
+    if visible == 0 {
+        return false;
+    }
+    matches!(
+        window_class(window).as_str(),
+        "CabinetWClass" | "ExploreWClass"
+    )
+}
+
+#[cfg(windows)]
+fn window_class(window: HWND) -> String {
+    let mut buffer = [0u16; 256];
+    let length = unsafe { GetClassNameW(window, buffer.as_mut_ptr(), buffer.len() as i32) };
+    wide_buffer_to_string(&buffer, length)
+}
+
+#[cfg(windows)]
+fn window_text(window: HWND) -> String {
+    let mut buffer = [0u16; 512];
+    let length = unsafe { GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len() as i32) };
+    wide_buffer_to_string(&buffer, length)
+}
+
+#[cfg(windows)]
+fn wide_buffer_to_string(buffer: &[u16], length: i32) -> String {
+    if length <= 0 {
+        return String::new();
+    }
+    OsString::from_wide(&buffer[..length as usize])
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[cfg(windows)]
+fn demote_foreground_codex_window() {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.is_null() {
+        return;
+    }
+
+    let class_name = window_class(foreground);
+    let title = window_text(foreground).to_ascii_lowercase();
+    if class_name != "Chrome_WidgetWin_1" || !title.contains("codex") {
+        return;
+    }
+
+    const DEMOTE_FLAGS: u32 = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    unsafe {
+        let _ = SetWindowPos(foreground, HWND_NOTOPMOST, 0, 0, 0, 0, DEMOTE_FLAGS);
+        let _ = SetWindowPos(foreground, HWND_BOTTOM, 0, 0, 0, 0, DEMOTE_FLAGS);
+    }
+}
+
+#[cfg(windows)]
+fn allow_explorer_foreground_activation() {
+    unsafe {
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+    }
 }
 
 #[cfg(not(windows))]
@@ -1079,7 +1318,8 @@ mod tests {
         assert_eq!(response["rootPath"], json!(root));
         // The display name must remain a leaf label, never the absolute path.
         assert_ne!(response["rootName"], json!(root));
-        assert!(!response["rootName"].as_str().unwrap().contains(['/', '\\']));
+        let root_name = response["rootName"].as_str().expect("rootName string");
+        assert!(!root_name.contains(['/', '\\']));
         assert_eq!(response["compatible"], true);
     }
 
@@ -1515,21 +1755,12 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn reveal_command_keeps_the_selector_separate_from_a_unicode_path() {
+    fn reveal_path_to_windows_wide_preserves_unicode_spaces_and_commas() {
         let target = Path::new("C:\\workspace with spaces\\\u{6587}\u{4ef6}, source.rs");
-        let command = build_reveal_command(target).expect("reveal command");
-        assert_eq!(
-            Path::new(command.get_program()).file_name(),
-            Some(std::ffi::OsStr::new("explorer.exe"))
-        );
-        let arguments: Vec<_> = command.get_args().map(ToOwned::to_owned).collect();
-        assert_eq!(
-            arguments,
-            [
-                std::ffi::OsString::from("/select,"),
-                target.as_os_str().to_owned(),
-            ]
-        );
+        let wide = path_to_wide(target);
+        assert_eq!(wide.last().copied(), Some(0));
+        let roundtrip = std::ffi::OsString::from_wide(&wide[..wide.len() - 1]);
+        assert_eq!(roundtrip, target.as_os_str());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

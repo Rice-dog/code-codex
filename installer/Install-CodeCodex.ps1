@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.20"
+    [string]$Version = "0.1.29"
 )
 
 $ErrorActionPreference = "Stop"
@@ -223,9 +223,8 @@ if ($null -ne $existingInstall -and
 $documentCopies = @()
 foreach ($document in @(
     "README.md",
+    "README.zh-CN.md",
     "LICENSE",
-    "SECURITY.md",
-    "THIRD_PARTY.md",
     "THIRD_PARTY_LICENSES.txt",
     "sbom.spdx.json"
 )) {
@@ -285,7 +284,7 @@ if ($null -ne $existingMsiRegistration) {
 
 & $SourceShortcutTool preflight --install-root $InstallRoot --version $Version
 if ($LASTEXITCODE -ne 0) {
-    throw "Stable Codex and its desktop shortcut could not be validated. No installation files were changed."
+    throw "Stable Codex could not be validated for Code-Codex integration. No installation files were changed."
 }
 
 New-Item -ItemType Directory -Path $VersionsRoot -Force | Out-Null
@@ -342,8 +341,9 @@ if ($installDocumentation) {
 Write-AtomicText (Join-Path $InstallRoot "current-version") ($Version + "`n")
 Write-AtomicText (Join-Path $InstallRoot "install-type") "portable`n"
 
-# Remove the obsolete sign-in launch entry. The existing Codex shortcut is now
-# the single user-controlled entry point for both Codex and Code-Codex.
+# Remove the obsolete sign-in launch entry. The existing Codex or ChatGPT
+# shortcut is now the single user-controlled entry point for both the official
+# app and Code-Codex.
 Remove-ItemProperty `
     -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
     -Name "CodeCodex" `
@@ -355,7 +355,7 @@ New-ItemProperty -Path $uninstallKey -Name "DisplayName" -PropertyType String -V
 New-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -PropertyType String -Value $Version -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "Publisher" -PropertyType String -Value "Code-Codex contributors" -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "InstallLocation" -PropertyType String -Value $InstallRoot -Force | Out-Null
-New-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -PropertyType String -Value (Join-Path $InstallRoot "Codex.ico") -Force | Out-Null
+New-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -PropertyType String -Value (Join-Path $InstallRoot "Uninstall-CodeCodex.exe") -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "UninstallString" -PropertyType String `
     -Value ('"{0}"' -f (Join-Path $InstallRoot "Uninstall-CodeCodex.exe")) -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "NoModify" -PropertyType DWord -Value 1 -Force | Out-Null
@@ -364,7 +364,7 @@ New-ItemProperty -Path $uninstallKey -Name "NoRepair" -PropertyType DWord -Value
 $installedShortcutTool = Join-Path $InstallRoot "CodeCodex.Shortcut.exe"
 & $installedShortcutTool install --install-root $InstallRoot --version $Version
 if ($LASTEXITCODE -ne 0) {
-    throw "The Codex desktop shortcut could not be redirected (exit code $LASTEXITCODE)."
+    throw "The Codex or ChatGPT desktop shortcut could not be redirected, or the Code-Codex shortcut could not be created (exit code $LASTEXITCODE)."
 }
 
-Write-Host "Installed Code-Codex $Version. The existing Codex desktop shortcut now starts Code-Codex."
+Write-Host "Installed Code-Codex $Version. The Codex, ChatGPT, or Code-Codex desktop shortcut now starts Code-Codex."

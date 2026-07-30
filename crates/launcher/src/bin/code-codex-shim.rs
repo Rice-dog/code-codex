@@ -147,10 +147,7 @@ mod tests {
         let root = Path::new("install-root");
         assert_eq!(
             resolve_versioned_launcher(root, "0.1.4\r\n"),
-            Ok(root
-                .join("versions")
-                .join("0.1.4")
-                .join("CodeCodex.exe"))
+            Ok(root.join("versions").join("0.1.4").join("CodeCodex.exe"))
         );
         assert_eq!(validate_version_pointer("2026.7.23\n"), Ok("2026.7.23"));
     }

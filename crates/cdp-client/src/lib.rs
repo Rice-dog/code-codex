@@ -2927,8 +2927,7 @@ mod tests {
                         ))
                         .await
                         .expect("binding event");
-                } else if method == "Runtime.evaluate"
-                    && expression.contains("__codeCodexReceive")
+                } else if method == "Runtime.evaluate" && expression.contains("__codeCodexReceive")
                 {
                     return expression.to_owned();
                 }

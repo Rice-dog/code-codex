@@ -10,7 +10,7 @@
     "useDefineForClassFields": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["node", "vitest/globals"]
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "demo/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "demo/**/*.ts"]
 }

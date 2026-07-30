@@ -201,7 +201,8 @@ impl Workspace {
             let source_parent = source.parent().unwrap_or_else(|| Path::new(""));
             let source_directory = DirectoryCapability::open(self.root_handle(), source_parent)?;
             let source_parent_handle = source_directory.handle()?;
-            let source_metadata = validated_entry_metadata(source_parent_handle, Path::new(base_name))?;
+            let source_metadata =
+                validated_entry_metadata(source_parent_handle, Path::new(base_name))?;
             let kind = kind_from_metadata(&source_metadata);
 
             if source_metadata.is_dir() {
@@ -666,24 +667,20 @@ fn copy_directory(
     dest_name: &Path,
 ) -> Result<(), WorkspaceError> {
     // Create destination directory
-    create_dir(dest_parent, dest_name, &DirOptions::new())
-        .map_err(|e| map_mutation_io(&e))?;
+    create_dir(dest_parent, dest_name, &DirOptions::new()).map_err(|e| map_mutation_io(&e))?;
 
     let source_dir = open_directory_nofollow(source_parent, source_name)?;
     let dest_dir = open_directory_nofollow(dest_parent, dest_name)?;
 
     let entries: Vec<OsString> = read_base_dir(&source_dir)
         .map_err(|e| map_io(&e))?
-        .map(|item| {
-            item.map(|entry| entry.file_name())
-                .map_err(|e| map_io(&e))
-        })
+        .map(|item| item.map(|entry| entry.file_name()).map_err(|e| map_io(&e)))
         .collect::<Result<_, _>>()?;
 
     for name in entries {
         let path = Path::new(&name);
-        let metadata = stat(&source_dir, path, FollowSymlinks::No)
-            .map_err(|e| map_mutation_io(&e))?;
+        let metadata =
+            stat(&source_dir, path, FollowSymlinks::No).map_err(|e| map_mutation_io(&e))?;
 
         if metadata.is_dir() {
             copy_directory(&source_dir, path, &dest_dir, path)?;

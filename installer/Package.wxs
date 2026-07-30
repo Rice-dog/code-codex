@@ -139,8 +139,6 @@
       <ComponentRef Id="ProductFiles" />
       <ComponentRef Id="CommandLinePayload" />
       <ComponentRef Id="RuntimeLauncherPayload" />
-      <ComponentRef Id="DocumentationFiles" />
-      <ComponentRef Id="DemoDocumentationFiles" />
       <ComponentRef Id="SettingsCleanup" />
     </Feature>
 
@@ -175,8 +173,6 @@
             <File Id="InstallTypeFile" Source="$(var.InstallTypePath)" Name="install-type" />
             <File Id="ReadmeFile" Source="$(var.ReadmePath)" Name="README.md" />
             <File Id="LicenseFile" Source="$(var.LicensePath)" Name="LICENSE" />
-            <File Id="SecurityFile" Source="$(var.SecurityPath)" Name="SECURITY.md" />
-            <File Id="ThirdPartyFile" Source="$(var.ThirdPartyPath)" Name="THIRD_PARTY.md" />
             <File
               Id="ThirdPartyLicensesFile"
               Source="$(var.ThirdPartyLicensesPath)"
@@ -241,38 +237,6 @@
             </Directory>
           </Directory>
 
-          <Directory Id="DocumentationFolder" Name="docs">
-            <Component Id="DocumentationFiles" Guid="{7F3A2FA4-4D49-4A57-A32E-58345B6667A8}">
-              <File Source="$(var.DocsPath)\architecture.md" Name="architecture.md" />
-              <File Source="$(var.DocsPath)\compatibility.md" Name="compatibility.md" />
-              <File Source="$(var.DocsPath)\prior-art.md" Name="prior-art.md" />
-              <File Source="$(var.DocsPath)\protocol.md" Name="protocol.md" />
-              <File Source="$(var.DocsPath)\testing.md" Name="testing.md" />
-              <File Source="$(var.DocsPath)\threat-model.md" Name="threat-model.md" />
-              <RemoveFolder Id="RemoveDocumentationFolder" Directory="DocumentationFolder" On="uninstall" />
-              <RegistryValue
-                Root="HKCU"
-                Key="Software\CodeCodex"
-                Name="Documentation"
-                Type="integer"
-                Value="1"
-                KeyPath="yes" />
-            </Component>
-            <Directory Id="DemoDocumentationFolder" Name="demo">
-              <Component Id="DemoDocumentationFiles" Guid="{9BB04C24-541F-4F01-91FA-E75E8E338D35}">
-                <File Source="$(var.DocsPath)\demo\README.md" Name="README.md" />
-                <File Source="$(var.DemoVideoPath)" Name="$(var.DemoVideoName)" />
-                <RemoveFolder Id="RemoveDemoDocumentationFolder" Directory="DemoDocumentationFolder" On="uninstall" />
-                <RegistryValue
-                  Root="HKCU"
-                  Key="Software\CodeCodex"
-                  Name="DemoDocumentation"
-                  Type="integer"
-                  Value="1"
-                  KeyPath="yes" />
-              </Component>
-            </Directory>
-          </Directory>
         </Directory>
       </Directory>
       <Directory Id="SettingsFolder" Name="CodeCodex">

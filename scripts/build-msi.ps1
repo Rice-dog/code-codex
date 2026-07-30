@@ -1,13 +1,12 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.20",
+    [string]$Version = "0.1.29",
     [string]$BinaryPath,
     [string]$GuiBinaryPath,
     [string]$ShimBinaryPath,
     [string]$ShortcutBinaryPath,
     [string]$UninstallBinaryPath,
     [string]$OutputPath,
-    [string]$ThirdPartyPath,
     [string]$ThirdPartyLicensesPath,
     [string]$SbomPath,
     [string]$WixPath
@@ -70,20 +69,12 @@ $UninstallBinaryPath = [IO.Path]::GetFullPath($UninstallBinaryPath)
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
 $readmePath = Join-Path $RepoRoot "README.md"
 $licensePath = Join-Path $RepoRoot "LICENSE"
-$securityPath = Join-Path $RepoRoot "SECURITY.md"
-$docsPath = Join-Path $RepoRoot "docs"
-$demoVideoName = "CodeCodex-0.1.0-demo.mp4"
-$demoVideoPath = Join-Path $docsPath "demo\$demoVideoName"
-if ([string]::IsNullOrWhiteSpace($ThirdPartyPath)) {
-    $ThirdPartyPath = Join-Path $RepoRoot "THIRD_PARTY.md"
-}
 if ([string]::IsNullOrWhiteSpace($ThirdPartyLicensesPath)) {
     $ThirdPartyLicensesPath = Join-Path $RepoRoot "THIRD_PARTY_LICENSES.txt"
 }
 if ([string]::IsNullOrWhiteSpace($SbomPath)) {
     $SbomPath = Join-Path $RepoRoot "artifacts\sbom.spdx.json"
 }
-$ThirdPartyPath = [IO.Path]::GetFullPath($ThirdPartyPath)
 $ThirdPartyLicensesPath = [IO.Path]::GetFullPath($ThirdPartyLicensesPath)
 $SbomPath = [IO.Path]::GetFullPath($SbomPath)
 $sourcePath = Join-Path $RepoRoot "installer\Package.wxs"
@@ -100,16 +91,6 @@ foreach ($requiredPath in @(
     $UninstallBinaryPath,
     $readmePath,
     $licensePath,
-    $securityPath,
-    (Join-Path $docsPath "architecture.md"),
-    (Join-Path $docsPath "compatibility.md"),
-    (Join-Path $docsPath "prior-art.md"),
-    (Join-Path $docsPath "protocol.md"),
-    (Join-Path $docsPath "testing.md"),
-    (Join-Path $docsPath "threat-model.md"),
-    (Join-Path $docsPath "demo\README.md"),
-    $demoVideoPath,
-    $ThirdPartyPath,
     $ThirdPartyLicensesPath,
     $SbomPath,
     $sourcePath,
@@ -217,11 +198,6 @@ try {
         "-d", "RuntimeLauncherComponentGuid=$runtimeLauncherComponentGuid",
         "-d", "ReadmePath=$readmePath",
         "-d", "LicensePath=$licensePath",
-        "-d", "SecurityPath=$securityPath",
-        "-d", "DocsPath=$docsPath",
-        "-d", "DemoVideoPath=$demoVideoPath",
-        "-d", "DemoVideoName=$demoVideoName",
-        "-d", "ThirdPartyPath=$ThirdPartyPath",
         "-d", "ThirdPartyLicensesPath=$ThirdPartyLicensesPath",
         "-d", "SbomPath=$SbomPath",
         "-d", "SettingsCleanupCAPath=$settingsCleanupCAPath",

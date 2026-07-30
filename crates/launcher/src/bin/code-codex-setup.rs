@@ -62,11 +62,7 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         Err(error) => {
-            gui_support::show_dialog(
-                TITLE,
-                &format!("Code-Codex setup failed: {error}"),
-                true,
-            );
+            gui_support::show_dialog(TITLE, &format!("Code-Codex setup failed: {error}"), true);
             ExitCode::FAILURE
         }
     }
@@ -90,8 +86,7 @@ fn run_setup(arguments: &[OsString]) -> Result<ExitStatus, String> {
         SetupSource::Sibling => {
             script_wrapper::run_sibling_script(INSTALL_SCRIPT, arguments.iter().cloned())?
                 .ok_or_else(|| {
-                    "the plain setup program requires Install-CodeCodex.ps1 next to it"
-                        .to_owned()
+                    "the plain setup program requires Install-CodeCodex.ps1 next to it".to_owned()
                 })
         }
     }

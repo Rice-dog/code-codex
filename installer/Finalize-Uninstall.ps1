@@ -13,6 +13,8 @@ $ProgramsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
 $AllowedRoot = $ProgramsRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 $InstallFullPath = [IO.Path]::GetFullPath($InstallRoot)
 $InstallPrefix = $InstallFullPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+$ShortcutOwnerMarker = "Managed by Code-Codex (code-codex/v1)"
+$LegacyShortcutDescription = "Launch Codex Desktop with Code-Codex file preview and editing"
 
 function Test-ReparsePoint([IO.FileSystemInfo]$Item) {
     return ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
@@ -28,6 +30,62 @@ function Remove-ReparsePoint([IO.FileSystemInfo]$Item) {
     }
     else {
         [IO.File]::Delete($Item.FullName)
+    }
+}
+
+function Test-SamePath([string]$Left, [string]$Right) {
+    if ([string]::IsNullOrWhiteSpace($Left) -or [string]::IsNullOrWhiteSpace($Right)) {
+        return $false
+    }
+    try {
+        $leftFull = [IO.Path]::GetFullPath($Left).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        $rightFull = [IO.Path]::GetFullPath($Right).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        return $leftFull.Equals($rightFull, [StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Remove-VerifiedCodeCodexDesktopShortcut {
+    $desktop = [Environment]::GetEnvironmentVariable("CODE_CODEX_DESKTOP")
+    if ([string]::IsNullOrWhiteSpace($desktop)) {
+        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+    }
+    if ([string]::IsNullOrWhiteSpace($desktop)) { return }
+
+    $shortcutPath = Join-Path $desktop "Code-Codex.lnk"
+    $shortcutItem = Get-ExistingItem $shortcutPath
+    if ($null -eq $shortcutItem) { return }
+    if ($shortcutItem.PSIsContainer -or (Test-ReparsePoint $shortcutItem)) { return }
+
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $targetPath = [string]$shortcut.TargetPath
+        $description = [string]$shortcut.Description
+        if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
+
+        $targetFullPath = [IO.Path]::GetFullPath($targetPath)
+        $expectedLauncher = Join-Path $InstallFullPath "CodeCodex.exe"
+        $ownedTarget = (Test-SamePath $targetFullPath $expectedLauncher) -or
+            $targetFullPath.StartsWith($InstallPrefix, [StringComparison]::OrdinalIgnoreCase)
+        $ownedDescription = $description -eq $ShortcutOwnerMarker -or
+            $description -eq $LegacyShortcutDescription
+
+        if ($ownedTarget -and $ownedDescription) {
+            $shortcutItem.Attributes = [IO.FileAttributes]::Normal
+            [IO.File]::Delete($shortcutPath)
+        }
+    }
+    catch {
+        return
     }
 }
 
@@ -93,7 +151,7 @@ function Wait-ForProcessExit([int]$ProcessId, [string]$Description) {
 }
 
 function Show-UninstallFailure([string]$Detail) {
-    $message = "Code-Codex could not be fully removed. Close Codex and Code-Codex, then run the uninstaller again.`r`n`r`n$Detail"
+    $message = "Code-Codex could not be fully removed. Close Codex or ChatGPT and Code-Codex, then run the uninstaller again.`r`n`r`n$Detail"
     try {
         Add-Type -AssemblyName System.Windows.Forms
         [void][System.Windows.Forms.MessageBox]::Show(
@@ -158,8 +216,10 @@ try {
         if ([int]$msiProcess.ExitCode -notin @(0, 1641, 3010)) {
             throw "Windows Installer could not remove Code-Codex (exit code $($msiProcess.ExitCode))."
         }
+        Remove-VerifiedCodeCodexDesktopShortcut
     }
     else {
+        Remove-VerifiedCodeCodexDesktopShortcut
         $removed = $null -eq (Get-ExistingItem $InstallFullPath)
         $lastFailure = "Installed files may still be in use."
         for ($attempt = 1; -not $removed -and $attempt -le 30; $attempt++) {

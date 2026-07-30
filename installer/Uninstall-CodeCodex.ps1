@@ -10,6 +10,8 @@ $ProgramsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
 $AllowedRoot = $ProgramsRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 $InstallFullPath = [IO.Path]::GetFullPath($InstallRoot)
 $InstallPrefix = $InstallFullPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+$ShortcutOwnerMarker = "Managed by Code-Codex (code-codex/v1)"
+$LegacyShortcutDescription = "Launch Codex Desktop with Code-Codex file preview and editing"
 
 function Test-ReparsePoint([IO.FileSystemInfo]$Item) {
     return ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
@@ -66,6 +68,42 @@ function Remove-SettingsEntry([string]$Path, [switch]$RegularFileOnly) {
     }
 }
 
+function Remove-VerifiedCodeCodexDesktopShortcut {
+    $desktop = [Environment]::GetEnvironmentVariable("CODE_CODEX_DESKTOP")
+    if ([string]::IsNullOrWhiteSpace($desktop)) {
+        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+    }
+    if ([string]::IsNullOrWhiteSpace($desktop)) { return }
+
+    $shortcutPath = Join-Path $desktop "Code-Codex.lnk"
+    $shortcutItem = Get-ExistingItem $shortcutPath
+    if ($null -eq $shortcutItem) { return }
+    if ($shortcutItem.PSIsContainer -or (Test-ReparsePoint $shortcutItem)) { return }
+
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $targetPath = [string]$shortcut.TargetPath
+        $description = [string]$shortcut.Description
+        if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
+
+        $targetFullPath = [IO.Path]::GetFullPath($targetPath)
+        $expectedLauncher = Join-Path $InstallFullPath "CodeCodex.exe"
+        $ownedTarget = (Test-SamePath $targetFullPath $expectedLauncher) -or
+            $targetFullPath.StartsWith($InstallPrefix, [StringComparison]::OrdinalIgnoreCase)
+        $ownedDescription = $description -eq $ShortcutOwnerMarker -or
+            $description -eq $LegacyShortcutDescription
+
+        if ($ownedTarget -and $ownedDescription) {
+            $shortcutItem.Attributes = [IO.FileAttributes]::Normal
+            [IO.File]::Delete($shortcutPath)
+        }
+    }
+    catch {
+        return
+    }
+}
+
 if (-not $InstallFullPath.StartsWith($AllowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Refusing to remove unexpected path: $InstallFullPath"
 }
@@ -113,7 +151,7 @@ if ($null -ne $installItem) {
     }
     $running = @($running | Sort-Object -Unique)
     if ($running.Count -gt 0) {
-        throw "Code-Codex is still running. Close Codex Desktop, then run the uninstaller again."
+        throw "Code-Codex is still running. Close Codex or ChatGPT Desktop, then run the uninstaller again."
     }
 
     $currentProcessRecord = $processSnapshot |
@@ -232,10 +270,12 @@ $shortcutToolItem = Get-ExistingItem $shortcutTool
 if ($null -eq $shortcutToolItem -or $shortcutToolItem.PSIsContainer -or (Test-ReparsePoint $shortcutToolItem)) {
     throw "The verified shortcut restoration tool is missing. No files were removed."
 }
+Remove-VerifiedCodeCodexDesktopShortcut
 & $shortcutTool restore --install-root $InstallFullPath
 if ($LASTEXITCODE -ne 0) {
-    throw "The original Codex shortcut could not be restored. No Code-Codex files were removed."
+    throw "The Codex, ChatGPT, or Code-Codex desktop shortcut could not be restored or removed. No Code-Codex files were removed."
 }
+Remove-VerifiedCodeCodexDesktopShortcut
 
 Remove-ItemProperty `
     -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
@@ -301,7 +341,7 @@ if ($uninstallerLauncherPid -gt 0) {
 Start-Process -FilePath $powerShellPath -WindowStyle Hidden -ArgumentList $finalizerArguments
 $finalizerLaunched = $true
 
-Write-Host "The original Codex shortcut was restored. Code-Codex will be removed after this window closes."
+Write-Host "The Codex or ChatGPT desktop shortcut was restored, or the Code-Codex shortcut was removed. Code-Codex will be removed after this window closes."
 }
 catch {
     if (-not $finalizerLaunched -and

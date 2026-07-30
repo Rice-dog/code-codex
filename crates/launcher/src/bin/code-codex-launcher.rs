@@ -62,7 +62,7 @@ fn message_for_exit_code(code: Option<i32>) -> &'static str {
             "This Codex Desktop version is not supported by Code-Codex. Run code-codex.exe diagnose from a terminal for compatibility details."
         }
         Some(exit_codes::ALREADY_RUNNING) => {
-            "Codex Desktop is already running without Code-Codex. Close Codex Desktop, then start it again from the official Codex desktop shortcut."
+            "Codex Desktop is already running without Code-Codex. Close Codex Desktop, then start it again from the Codex or Code-Codex desktop shortcut."
         }
         Some(exit_codes::STARTUP_FAILURE) => {
             "Code-Codex could not start its App Server or another required startup component. Run code-codex.exe diagnose from a terminal for details."

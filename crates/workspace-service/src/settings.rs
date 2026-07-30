@@ -112,9 +112,7 @@ impl SettingsStore {
         {
             let local = std::env::var_os("LOCALAPPDATA").ok_or(WorkspaceError::Internal)?;
             Ok(Self::new(
-                PathBuf::from(local)
-                    .join("CodeCodex")
-                    .join("settings.json"),
+                PathBuf::from(local).join("CodeCodex").join("settings.json"),
             ))
         }
         #[cfg(not(windows))]

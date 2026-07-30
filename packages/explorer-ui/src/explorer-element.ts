@@ -1,4 +1,4 @@
-import { ActiveThreadTracker } from "./active-thread";
+﻿import { ActiveThreadTracker } from "./active-thread";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
 import { getFileIcon, icons } from "./icons";
@@ -1684,7 +1684,6 @@ export class CodeCodexElement extends HTMLElement {
     }
 
     this.#contextActionPending = true;
-    let refreshFailed = false;
     try {
       const current = await this.#requestEntryAction("explorer.entry.move", {
         relativePath: source.path,
@@ -1702,20 +1701,12 @@ export class CodeCodexElement extends HTMLElement {
         if (!shouldLoad) continue;
         try {
           await this.#loadDirectory(path, false, true);
-        } catch {
-          refreshFailed = true;
-        }
+        } catch {}
       }
 
       const movedPath = destinationParentPath ? `${destinationParentPath}/${source.name}` : source.name;
       const movedIndex = this.#rows.findIndex((row) => row.kind === "node" && row.path === movedPath);
       if (movedIndex >= 0) this.#focusIndex(movedIndex, false);
-      const destinationName = destinationParentPath || this.#context?.rootName || "project root";
-      const message = `${source.name} moved to ${destinationName}`;
-      this.#showActionNotice(
-        refreshFailed ? `${message}; refresh the explorer to update the list` : message,
-        refreshFailed ? "error" : "success",
-      );
     } catch (error) {
       this.#showActionNotice(contextActionError("move", error), "error");
     } finally {
@@ -2146,8 +2137,8 @@ export class CodeCodexElement extends HTMLElement {
       const paths = this.#selectedPaths.size > 1 && this.#selectedPaths.has(target.path)
         ? Array.from(this.#selectedPaths).sort()
         : [target.path];
-      await this.#copyRelativePath(paths.length === 1 ? paths[0] : paths.join("\n"));
-      this.#showActionNotice(paths.length === 1 ? "Relative path copied" : `${paths.length} paths copied`);
+      const copyText = paths.length === 1 ? (paths[0] ?? "") : paths.join("\n");
+      await this.#copyRelativePath(copyText);
       return true;
     }
     if (action === "copy-absolute") {
@@ -2158,7 +2149,6 @@ export class CodeCodexElement extends HTMLElement {
       // window. Paths are already contained (validated when the tree loaded).
       const absolutePaths = this.#contextActionPaths(target).map((path) => joinAbsolutePath(root, path));
       await this.#copyRelativePath(absolutePaths.join("\r\n"));
-      this.#showActionNotice(absolutePaths.length === 1 ? "Absolute path copied" : `${absolutePaths.length} absolute paths copied`);
       return true;
     }
     if (action === "reveal") {
@@ -2167,12 +2157,10 @@ export class CodeCodexElement extends HTMLElement {
         const current = await this.#requestEntryAction("explorer.entry.reveal", { relativePath: path });
         if (!current) break;
       }
-      this.#showActionNotice(paths.length === 1 ? "Opened in File Explorer" : `${paths.length} items revealed`);
       return true;
     }
     if (action === "refresh") {
       await this.#refreshContextTarget(target);
-      this.#showActionNotice(target.kind === "root" ? "Explorer refreshed" : `${target.name} refreshed`);
       return true;
     }
     throw new Error("Unsupported context-menu action.");
@@ -2253,8 +2241,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#contextActionPending = true;
     this.#contextMenuError = undefined;
     this.#setContextMenuBusy(true);
-    let successMessage: string | undefined;
-    let refreshFailed = false;
+    let succeeded = false;
     let failureMessage: string | undefined;
     try {
       if (action === "new-file" || action === "new-folder") {
@@ -2265,10 +2252,8 @@ export class CodeCodexElement extends HTMLElement {
         if (!current) return;
         try {
           await this.#refreshDirectoryIfLoaded(parentRelativePath);
-        } catch {
-          refreshFailed = true;
-        }
-        successMessage = `${kind === "file" ? "File" : "Folder"} ${name} created`;
+        } catch {}
+        succeeded = true;
       } else if (action === "rename") {
         if (name === undefined) throw new Error("A name is required.");
         const current = await this.#requestEntryAction("explorer.entry.rename", { relativePath: target.path, newName: name });
@@ -2277,10 +2262,8 @@ export class CodeCodexElement extends HTMLElement {
         this.#closePreviewTabsWithin(target.path);
         try {
           await this.#refreshDirectoryIfLoaded(target.parentPath);
-        } catch {
-          refreshFailed = true;
-        }
-        successMessage = `${target.name} renamed to ${name}`;
+        } catch {}
+        succeeded = true;
       } else {
         // Delete: operate on all selected paths if the target is part of a multi-selection.
         const pathsToDelete = this.#selectedPaths.size > 1 && this.#selectedPaths.has(target.path)
@@ -2299,10 +2282,8 @@ export class CodeCodexElement extends HTMLElement {
         }
         try {
           for (const parentPath of parentPaths) await this.#refreshDirectoryIfLoaded(parentPath);
-        } catch {
-          refreshFailed = true;
-        }
-        successMessage = topLevel.length === 1 ? `${target.name} deleted` : `${topLevel.length} items deleted`;
+        } catch {}
+        succeeded = true;
       }
     } catch (error) {
       failureMessage = contextActionError(action, error);
@@ -2313,12 +2294,8 @@ export class CodeCodexElement extends HTMLElement {
       if (failureMessage) {
         if (dialogStillOpen) this.#showContextMenuError(failureMessage);
         else this.#showActionNotice(failureMessage, "error");
-      } else if (successMessage) {
+      } else if (succeeded) {
         if (this.#contextMenuTarget === target) this.#closeContextMenu(true);
-        this.#showActionNotice(
-          refreshFailed ? `${successMessage}; refresh the explorer to update the list` : successMessage,
-          refreshFailed ? "error" : "success",
-        );
       }
     }
   }
@@ -2415,9 +2392,6 @@ export class CodeCodexElement extends HTMLElement {
       // Refresh the target directory to show the new files.
       if (targetDir) await this.#loadDirectory(targetDir, false, true);
       else await this.#refreshLoadedDirectories();
-
-      const verb = operation === "copy" ? "copied" : "moved";
-      this.#showActionNotice(paths.length === 1 ? `1 item ${verb}` : `${paths.length} items ${verb}`);
     } catch (error) {
       this.#showActionNotice(contextActionError("paste", error), "error");
     }
@@ -2444,8 +2418,6 @@ export class CodeCodexElement extends HTMLElement {
       for (const parentPath of parentPaths) {
         if (parentPath) await this.#refreshDirectoryIfLoaded(parentPath);
       }
-
-      this.#showActionNotice(paths.length === 1 ? "1 item deleted" : `${paths.length} items deleted`);
     } catch (error) {
       this.#showActionNotice(contextActionError("delete", error), "error");
     }
@@ -2481,7 +2453,6 @@ export class CodeCodexElement extends HTMLElement {
       // Copy selected files to internal clipboard (for paste operation), not OS clipboard.
       if (this.#selectedPaths.size > 0) {
         this.#fileClipboard = { paths: Array.from(this.#selectedPaths).sort(), operation: "copy" };
-        this.#showActionNotice(this.#selectedPaths.size === 1 ? "1 item copied" : `${this.#selectedPaths.size} items copied`);
       }
       return;
     }
@@ -2490,7 +2461,6 @@ export class CodeCodexElement extends HTMLElement {
       // Cut selected files to internal clipboard (will be moved on paste).
       if (this.#selectedPaths.size > 0) {
         this.#fileClipboard = { paths: Array.from(this.#selectedPaths).sort(), operation: "cut" };
-        this.#showActionNotice(this.#selectedPaths.size === 1 ? "1 item cut" : `${this.#selectedPaths.size} items cut`);
         this.#syncSelectionDom(); // Visual update for cut state
       }
       return;
@@ -3437,6 +3407,10 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #showActionNotice(message: string, tone: "success" | "error" = "success"): void {
+    if (tone !== "error") {
+      this.#hideActionNotice();
+      return;
+    }
     this.#hideActionNotice();
     this.#actionNotice.textContent = message;
     this.#actionNotice.dataset.tone = tone;
@@ -3720,7 +3694,7 @@ function entryNameValidationError(value: string): string | undefined {
   return undefined;
 }
 
-function contextActionError(action: ContextMenuAction | "move", error: unknown): string {
+function contextActionError(action: ContextMenuAction | "move" | "paste", error: unknown): string {
   const subject = action === "new-file"
     ? "The file"
     : action === "new-folder"

@@ -621,8 +621,7 @@ mod tests {
         let implicit = default_run_args();
         assert!(matches!(implicit.channel, ChannelPreference::Stable));
 
-        let parsed =
-            Cli::try_parse_from(["code-codex", "run"]).expect("parse default run command");
+        let parsed = Cli::try_parse_from(["code-codex", "run"]).expect("parse default run command");
         let Some(Commands::Run(explicit)) = parsed.command else {
             panic!("run command was not parsed");
         };

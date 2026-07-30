@@ -2,7 +2,7 @@ import type { BridgeMessage, BridgeRequest, ObjectBridge, TreeNodeInput } from "
 
 const rootEntries: TreeNodeInput[] = [
   { name: "src", relativePath: "src", kind: "directory" },
-  { name: "tests", relativePath: "tests", kind: "directory" },
+  { name: "demo", relativePath: "demo", kind: "directory" },
   { name: "vendor-index", relativePath: "vendor-index", kind: "directory" },
   { name: ".git", relativePath: ".git", kind: "directory" },
   { name: ".env", relativePath: ".env", kind: "file" },
@@ -26,10 +26,10 @@ const directories = new Map<string, TreeNodeInput[]>([
   ],
   ["src/adapters", [{ name: "codex-26.715.ts", relativePath: "src/adapters/codex-26.715.ts", kind: "file" }]],
   [
-    "tests",
+    "demo",
     [
-      { name: "bridge.test.ts", relativePath: "tests/bridge.test.ts", kind: "file" },
-      { name: "tree-model.test.ts", relativePath: "tests/tree-model.test.ts", kind: "file" },
+      { name: "demo.ts", relativePath: "demo/demo.ts", kind: "file" },
+      { name: "index.html", relativePath: "demo/index.html", kind: "file" },
     ],
   ],
   [

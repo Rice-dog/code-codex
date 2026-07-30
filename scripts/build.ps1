@@ -36,6 +36,26 @@ try {
     if ($Configuration -eq "Release") { $arguments += "--release" }
     & $cargo @arguments
     if ($LASTEXITCODE -ne 0) { throw "Cargo build failed with exit code $LASTEXITCODE" }
+
+    $profile = if ($Configuration -eq "Release") { "release" } else { "debug" }
+    $outputRoot = Join-Path $RepoRoot "target\$profile"
+    $setupStub = Join-Path $outputRoot "code-codex-setup.exe"
+    $uninstallerStub = Join-Path $outputRoot "code-codex-uninstall.exe"
+    $installScript = Join-Path $RepoRoot "installer\Install-CodeCodex.ps1"
+    $uninstallScript = Join-Path $RepoRoot "installer\Uninstall-CodeCodex.ps1"
+    $finalizerScript = Join-Path $RepoRoot "installer\Finalize-Uninstall.ps1"
+
+    foreach ($required in @($setupStub, $uninstallerStub, $installScript, $uninstallScript, $finalizerScript)) {
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Required source-built installer payload is missing: $required"
+        }
+    }
+
+    Copy-Item -LiteralPath $setupStub -Destination (Join-Path $outputRoot "Install-CodeCodex.exe") -Force
+    Copy-Item -LiteralPath $uninstallerStub -Destination (Join-Path $outputRoot "Uninstall-CodeCodex.exe") -Force
+    Copy-Item -LiteralPath $installScript -Destination $outputRoot -Force
+    Copy-Item -LiteralPath $uninstallScript -Destination $outputRoot -Force
+    Copy-Item -LiteralPath $finalizerScript -Destination $outputRoot -Force
 }
 finally {
     Pop-Location

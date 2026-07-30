@@ -56,7 +56,7 @@ workspace-service = { path = "../workspace-service" }
 known-folders = "1.4.2"
 win32job = "2.0.3"
 windows-permissions = "0.2.4"
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 junction = "2.0.0"
@@ -64,5 +64,11 @@ junction = "2.0.0"
 [build-dependencies]
 embed-resource = "3.0.11"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "allow"
+unused_must_use = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"
