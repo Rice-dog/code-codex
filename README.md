@@ -18,15 +18,15 @@ editing, navigation, and file operations.
 
 Download the ready-made installer from [`releases`](releases/):
 
-- Recommended: `CodeCodex-0.1.29-x64-setup.exe`
-- Alternative: `CodeCodex-0.1.29-x64.msi`
-- Portable package: `CodeCodex-0.1.29-x64.zip`
+- Recommended: `CodeCodex-0.1.30-x64-setup.exe`
+- Alternative: `CodeCodex-0.1.30-x64.msi`
+- Portable package: `CodeCodex-0.1.30-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.1.29-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.1.30-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -66,7 +66,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.29
+./scripts/package.ps1 -Version 0.1.30
 ```
 
 The generated packages are written to `releases/`.
