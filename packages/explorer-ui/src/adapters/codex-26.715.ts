@@ -5,6 +5,7 @@ export const ACTIVE_THREAD_MARKER_SELECTOR = '[data-app-action-sidebar-thread-ac
 export const ACTIVE_LOCAL_THREAD_SELECTOR = '[data-app-action-sidebar-thread-id][data-app-action-sidebar-thread-active="true"]';
 export const COMPOSER_THREAD_SELECTOR = "[data-above-composer-conversation-id]";
 export const RESPONSE_THREAD_SELECTOR = "[data-response-annotation-conversation]";
+export const MAIN_SURFACE_SELECTOR = 'main:is(.main-surface, [data-app-shell-main-surface="default"])';
 
 export function plausibleThreadId(value: unknown): value is string {
   return typeof value === "string" && THREAD_PATTERN.test(value);
@@ -42,10 +43,13 @@ export function annotationConsensusThreadId(root: ParentNode = document): string
 }
 
 export const codex26715Adapter: RendererAdapter = Object.freeze({
-  id: "codex-26.715",
-  supportsVersion: (version: string) => /^26\.(715|721)\./.test(version),
-  qualifiesRenderer: (root: ParentNode = document) =>
-    Boolean(root.querySelector("aside.app-shell-left-panel") && root.querySelector("main.main-surface") && root.querySelector("[data-app-shell-sidebar-trigger]")),
+  id: "codex-26.715-26.727",
+  supportsVersion: (version: string) => /^26\.(715|721|727)\./.test(version),
+  qualifiesRenderer: (root: ParentNode = document) => {
+    const mains = root.querySelectorAll(MAIN_SURFACE_SELECTOR);
+    const parent = mains.length === 1 ? mains[0]?.parentElement : null;
+    return Boolean(parent?.querySelector(":scope > aside.app-shell-left-panel") && root.querySelector("[data-app-shell-sidebar-trigger]"));
+  },
   activeThreadId: (root: ParentNode = document) => {
     if (root.querySelector(ACTIVE_THREAD_MARKER_SELECTOR)) return activeLocalThreadId(root);
     return annotationConsensusThreadId(root);

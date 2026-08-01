@@ -64,7 +64,7 @@ export function assessBootstrapCompatibility(config: Readonly<BootstrapConfig> =
     };
   }
   if (version && !codex26715Adapter.supportsVersion(version)) {
-    return { supported: false, version, reason: `Codex ${version} is outside the verified 26.715.x adapter range.` };
+    return { supported: false, version, reason: `Codex ${version} is outside the verified 26.715.x, 26.721.x, and 26.727.x adapter range.` };
   }
   return { supported: true, ...(version ? { version } : {}) };
 }

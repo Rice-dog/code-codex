@@ -128,31 +128,191 @@ if ($null -ne $installItem) {
         throw "Refusing to uninstall from a non-directory or reparse-point install path: $InstallFullPath"
     }
     $running = @()
+    $unverifiedRunning = @()
     $processSnapshot = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     foreach ($process in $processSnapshot) {
         $knownProductName = [string]$process.Name -in @(
             "code-codex.exe",
             "CodeCodex.exe"
         )
+        if (-not $knownProductName) { continue }
         if ([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) {
-            if ($knownProductName) { $running += $process.ProcessId }
+            $unverifiedRunning += [uint32]$process.ProcessId
             continue
         }
         try {
             $processPath = [IO.Path]::GetFullPath([string]$process.ExecutablePath)
-            if ($knownProductName -and
-                $processPath.StartsWith($InstallPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-                $running += $process.ProcessId
+            if ($processPath.StartsWith($InstallPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                $running += [pscustomobject]@{
+                    ProcessId = [uint32]$process.ProcessId
+                    Name = [string]$process.Name
+                    ExecutablePath = $processPath
+                }
             }
         }
         catch {
-            if ($knownProductName) { $running += $process.ProcessId }
+            $unverifiedRunning += [uint32]$process.ProcessId
         }
     }
-    $running = @($running | Sort-Object -Unique)
-    if ($running.Count -gt 0) {
-        throw "Code-Codex is still running. Close Codex or ChatGPT Desktop, then run the uninstaller again."
+    $unverifiedRunning = @($unverifiedRunning | Sort-Object -Unique)
+    if ($unverifiedRunning.Count -gt 0) {
+        $unverifiedProcessIds = $unverifiedRunning -join ", "
+        throw "A running Code-Codex process could not be verified safely (process IDs: $unverifiedProcessIds). Close Code-Codex, then run the uninstaller again."
     }
+
+    # Retain the process identities for the session launched by Code-Codex.
+    # This includes the app server, package guard, and Codex window, but not an
+    # unrelated Codex process whose parent chain is outside this launch.
+    $ownedDescendants = @()
+    $ownedProcessIds = @($running | ForEach-Object { [uint32]$_.ProcessId })
+    $frontierProcessIds = @($ownedProcessIds)
+    $descendantDepth = 1
+    while ($frontierProcessIds.Count -gt 0 -and $descendantDepth -le 32) {
+        $children = @(
+            $processSnapshot |
+                Where-Object {
+                    [uint32]$_.ParentProcessId -in $frontierProcessIds -and
+                    [uint32]$_.ProcessId -notin $ownedProcessIds
+                }
+        )
+        if ($children.Count -eq 0) { break }
+
+        foreach ($child in $children) {
+            $childPath = $null
+            if (-not [string]::IsNullOrWhiteSpace([string]$child.ExecutablePath)) {
+                try {
+                    $childPath = [IO.Path]::GetFullPath([string]$child.ExecutablePath)
+                }
+                catch {}
+            }
+            $ownedDescendants += [pscustomobject]@{
+                ProcessId = [uint32]$child.ProcessId
+                Name = [string]$child.Name
+                ExecutablePath = $childPath
+                CreationDate = $child.CreationDate
+                Depth = $descendantDepth
+            }
+        }
+        $frontierProcessIds = @($children | ForEach-Object { [uint32]$_.ProcessId })
+        $ownedProcessIds += $frontierProcessIds
+        $descendantDepth++
+    }
+
+    # A desktop user should not have to discover and close hidden launcher and
+    # service processes before uninstalling. Stop only product executables that
+    # are still verified inside this installation, checking the identity again
+    # immediately before termination to narrow the PID-reuse race.
+    $running = @(
+        $running |
+            Sort-Object `
+                @{ Expression = { if ($_.Name -ieq "CodeCodex.exe") { 0 } else { 1 } } }, `
+                ProcessId
+    )
+    $stoppedProcessIds = @()
+    foreach ($runningProcess in $running) {
+        $currentProcess = Get-CimInstance `
+            Win32_Process `
+            -Filter ("ProcessId = {0}" -f [uint32]$runningProcess.ProcessId) `
+            -ErrorAction Stop
+        if ($null -eq $currentProcess) { continue }
+
+        $currentName = [string]$currentProcess.Name
+        $currentPathText = [string]$currentProcess.ExecutablePath
+        if ($currentName -notin @("code-codex.exe", "CodeCodex.exe") -or
+            [string]::IsNullOrWhiteSpace($currentPathText)) {
+            throw "A Code-Codex process changed identity while the uninstaller was preparing to stop it."
+        }
+        try {
+            $currentPath = [IO.Path]::GetFullPath($currentPathText)
+        }
+        catch {
+            throw "A Code-Codex process path could not be verified before termination."
+        }
+        if (-not (Test-SamePath $currentPath ([string]$runningProcess.ExecutablePath)) -or
+            -not $currentPath.StartsWith($InstallPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "A Code-Codex process changed identity while the uninstaller was preparing to stop it."
+        }
+
+        try {
+            Stop-Process -Id ([int]$runningProcess.ProcessId) -Force -ErrorAction Stop
+        }
+        catch {
+            $stopError = $_.Exception.Message
+            $afterStopFailure = Get-CimInstance `
+                Win32_Process `
+                -Filter ("ProcessId = {0}" -f [uint32]$runningProcess.ProcessId) `
+                -ErrorAction Stop
+            if ($null -ne $afterStopFailure) {
+                throw "Code-Codex could not be stopped automatically: $stopError"
+            }
+            continue
+        }
+        $stoppedProcessIds += [int]$runningProcess.ProcessId
+    }
+    $stoppedProcessIds = @($stoppedProcessIds | Sort-Object -Unique)
+    if ($stoppedProcessIds.Count -gt 0) {
+        Wait-Process -Id $stoppedProcessIds -Timeout 15 -ErrorAction SilentlyContinue
+        $remaining = @(
+            $stoppedProcessIds |
+                Where-Object { $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue) }
+        )
+        if ($remaining.Count -gt 0) {
+            throw "Code-Codex could not be stopped automatically. Restart Windows, then run the uninstaller again."
+        }
+    }
+
+    # Stop the verified descendant session from the leaves inward. Closing the
+    # Codex package processes lets the package guard exit, while leaving the
+    # installed stable Codex application itself untouched on disk.
+    $stoppedDescendantIds = @()
+    foreach ($ownedDescendant in @(
+        $ownedDescendants |
+            Sort-Object `
+                @{ Expression = { $_.Depth }; Descending = $true }, `
+                ProcessId
+    )) {
+        $currentDescendant = Get-CimInstance `
+            Win32_Process `
+            -Filter ("ProcessId = {0}" -f [uint32]$ownedDescendant.ProcessId) `
+            -ErrorAction Stop
+        if ($null -eq $currentDescendant) { continue }
+        if ([string]$currentDescendant.Name -ine [string]$ownedDescendant.Name -or
+            $currentDescendant.CreationDate -ne $ownedDescendant.CreationDate -or
+            [string]::IsNullOrWhiteSpace([string]$ownedDescendant.ExecutablePath) -or
+            [string]::IsNullOrWhiteSpace([string]$currentDescendant.ExecutablePath)) {
+            continue
+        }
+        try {
+            $currentDescendantPath = [IO.Path]::GetFullPath([string]$currentDescendant.ExecutablePath)
+        }
+        catch {
+            continue
+        }
+        if (-not (Test-SamePath $currentDescendantPath ([string]$ownedDescendant.ExecutablePath))) {
+            continue
+        }
+
+        try {
+            Stop-Process -Id ([int]$ownedDescendant.ProcessId) -Force -ErrorAction Stop
+            $stoppedDescendantIds += [int]$ownedDescendant.ProcessId
+        }
+        catch {
+            $stopError = $_.Exception.Message
+            $afterStopFailure = Get-CimInstance `
+                Win32_Process `
+                -Filter ("ProcessId = {0}" -f [uint32]$ownedDescendant.ProcessId) `
+                -ErrorAction Stop
+            if ($null -ne $afterStopFailure) {
+                throw "The Code-Codex session could not be closed automatically: $stopError"
+            }
+        }
+    }
+    $stoppedDescendantIds = @($stoppedDescendantIds | Sort-Object -Unique)
+    if ($stoppedDescendantIds.Count -gt 0) {
+        Wait-Process -Id $stoppedDescendantIds -Timeout 15 -ErrorAction SilentlyContinue
+    }
+
+    $processSnapshot = @(Get-CimInstance Win32_Process -ErrorAction Stop)
 
     $currentProcessRecord = $processSnapshot |
         Where-Object { [uint32]$_.ProcessId -eq [uint32]$PID } |

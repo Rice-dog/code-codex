@@ -1,4 +1,5 @@
 import { getFileIcon, icons } from "./icons";
+import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { MAX_SYNTAX_SOURCE_UNITS, highlightSyntaxForPath, type SyntaxHighlight } from "./syntax-highlight";
 
 export const MAIN_PREVIEW_TAG = "code-codex-main-preview";
@@ -1414,7 +1415,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   }
 
   #syncSuppression(): void {
-    const parent = this.#connected && this.#state.activePath !== null && this.parentElement?.matches("main.main-surface")
+    const parent = this.#connected && this.#state.activePath !== null && this.parentElement?.matches(MAIN_SURFACE_SELECTOR)
       ? this.parentElement
       : null;
     if (!parent) {

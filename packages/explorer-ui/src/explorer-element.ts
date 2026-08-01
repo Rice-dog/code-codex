@@ -1,4 +1,5 @@
 ﻿import { ActiveThreadTracker } from "./active-thread";
+import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
 import { getFileIcon, icons } from "./icons";
@@ -3178,7 +3179,7 @@ export class CodeCodexElement extends HTMLElement {
   #ensureMainPreview(): CodeCodexMainPreviewElement | undefined {
     const surface = this.#mainPreviewSurface;
     if (!surface?.isConnected || this.#dismissed) return undefined;
-    const qualifiedSurfaces = document.querySelectorAll("main.main-surface");
+    const qualifiedSurfaces = document.querySelectorAll(MAIN_SURFACE_SELECTOR);
     if (qualifiedSurfaces.length !== 1 || qualifiedSurfaces[0] !== surface) return undefined;
     if (this.#mainPreview?.parentElement === surface) return this.#mainPreview;
     this.#detachMainPreview(false);

@@ -11,9 +11,9 @@ English | [简体中文](README.zh-CN.md)
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.1.30"><img alt="Version" src="https://img.shields.io/badge/version-0.1.30-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.1.33"><img alt="Version" src="https://img.shields.io/badge/version-0.1.33-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2011-lightgrey">
+  <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
   <img alt="Status" src="https://img.shields.io/badge/status-preview-yellow">
@@ -34,21 +34,24 @@ editing, navigation, and file operations.
 ## Install Option 1: Download EXE
 
 Download the ready-made installer from
-[GitHub Releases](https://github.com/Rice-dog/code-codex/releases/tag/v0.1.30):
+[GitHub Releases](https://github.com/Rice-dog/code-codex/releases/tag/v0.1.33):
 
-- Recommended: [`CodeCodex-0.1.30-x64-setup.exe`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.30/CodeCodex-0.1.30-x64-setup.exe)
-- Alternative: [`CodeCodex-0.1.30-x64.msi`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.30/CodeCodex-0.1.30-x64.msi)
-- Portable package: [`CodeCodex-0.1.30-x64.zip`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.30/CodeCodex-0.1.30-x64.zip)
-- Standalone uninstaller: [`Uninstall-CodeCodex.exe`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.30/Uninstall-CodeCodex.exe)
+Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
+with the official stable Codex/ChatGPT Desktop app installed.
+
+- Recommended: [`CodeCodex-0.1.33-x64-setup.exe`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.33/CodeCodex-0.1.33-x64-setup.exe)
+- Alternative: [`CodeCodex-0.1.33-x64.msi`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.33/CodeCodex-0.1.33-x64.msi)
+- Portable package: [`CodeCodex-0.1.33-x64.zip`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.33/CodeCodex-0.1.33-x64.zip)
+- Standalone uninstaller: [`Uninstall-CodeCodex.exe`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.33/Uninstall-CodeCodex.exe)
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.1.30-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.1.33-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with
-[`SHA256SUMS.txt`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.30/SHA256SUMS.txt).
+[`SHA256SUMS.txt`](https://github.com/Rice-dog/code-codex/releases/download/v0.1.33/SHA256SUMS.txt).
 
 If the official Codex/ChatGPT Desktop app is installed, the installer checks
 for a desktop `Codex` shortcut first and a desktop `ChatGPT` shortcut second.
@@ -85,7 +88,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.30
+./scripts/package.ps1 -Version 0.1.33
 ```
 
 The generated packages are written to `releases/`.

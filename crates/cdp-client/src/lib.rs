@@ -40,7 +40,7 @@ const MAX_COMPATIBLE_TARGETS: usize = 8;
 const MAX_RECENTLY_QUALIFIED_TARGETS: usize = 8;
 const MAX_REJECTED_EXECUTION_CONTEXTS: usize = 128;
 const REPLAY_WINDOW: usize = 4_096;
-const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&Boolean(document.querySelector('aside.app-shell-left-panel')&&document.querySelector('main.main-surface')&&document.querySelector('[data-app-shell-sidebar-trigger]'))";
+const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const m=document.querySelectorAll('main.main-surface,main[data-app-shell-main-surface=\"default\"]');const p=m.length===1?m[0].parentElement:null;return Boolean(p&&p.querySelector(':scope > aside.app-shell-left-panel')&&document.querySelector('[data-app-shell-sidebar-trigger]'))})()";
 const DOCUMENT_READY_STATE_PROBE: &str = "document.readyState";
 const INITIAL_RENDERER_QUALIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_RENDERER_QUALIFICATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -2567,6 +2567,12 @@ mod tests {
         assert!(RENDERER_LAYOUT_PROBE.starts_with("window===window.top"));
         assert!(RENDERER_LAYOUT_PROBE.contains("location.protocol==='app:'"));
         assert!(RENDERER_LAYOUT_PROBE.contains("location.host==='-'"));
+        assert!(RENDERER_LAYOUT_PROBE.contains("main.main-surface"));
+        assert!(
+            RENDERER_LAYOUT_PROBE.contains("main[data-app-shell-main-surface=\"default\"]")
+        );
+        assert!(RENDERER_LAYOUT_PROBE.contains("m.length===1"));
+        assert!(RENDERER_LAYOUT_PROBE.contains(":scope > aside.app-shell-left-panel"));
     }
 
     #[test]

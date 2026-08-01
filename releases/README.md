@@ -2,11 +2,14 @@
 
 This folder contains ready-made downloadable packages.
 
-## v0.1.30
+Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
+with the official stable Codex/ChatGPT Desktop app installed.
 
-- `CodeCodex-0.1.30-x64-setup.exe`: recommended installer.
-- `CodeCodex-0.1.30-x64.msi`: MSI installer.
-- `CodeCodex-0.1.30-x64.zip`: portable package, including
+## v0.1.33
+
+- `CodeCodex-0.1.33-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.33-x64.msi`: MSI installer.
+- `CodeCodex-0.1.33-x64.zip`: portable package, including
   `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
 - `Uninstall-CodeCodex.exe`: standalone uninstaller for an existing install.
 - `SHA256SUMS.txt`: SHA-256 checksums for the downloadable files.
@@ -19,5 +22,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.30
+./scripts/package.ps1 -Version 0.1.33
 ```
