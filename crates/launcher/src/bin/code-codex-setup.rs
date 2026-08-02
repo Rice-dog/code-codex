@@ -7,7 +7,9 @@ use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, ExitStatus, Stdio};
+use std::process::{Command, ExitCode, Output, Stdio};
+use std::thread;
+use std::time::Duration;
 
 #[path = "../gui_support.rs"]
 mod gui_support;
@@ -18,6 +20,8 @@ const TITLE: &str = "Code-Codex setup";
 const INSTALL_SCRIPT: &str = "Install-CodeCodex.ps1";
 const FOOTER_MAGIC: &[u8; 8] = b"CLEXZIP1";
 const FOOTER_LENGTH: u64 = 24;
+const MAX_SCRIPT_DIAGNOSTIC_CHARS: usize = 4_096;
+const TRUNCATION_MARKER: &str = "\n[diagnostic output truncated]";
 const EXPAND_ARCHIVE_SCRIPT: &str = "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:CLE_ARCHIVE_PATH -DestinationPath $env:CLE_DESTINATION_PATH -Force";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,8 +42,12 @@ struct PortableExecutableLayout {
 
 fn main() -> ExitCode {
     let arguments: Vec<_> = env::args_os().skip(1).collect();
-    match run_setup(&arguments) {
-        Ok(status) if status.success() => {
+    let mut progress = gui_support::ProgressDialog::open(TITLE, "Preparing setup...", 5);
+    match run_setup(&arguments, &mut progress) {
+        Ok(output) if output.status.success() => {
+            progress.set_progress(100, "Installation complete");
+            thread::sleep(Duration::from_millis(650));
+            progress.close();
             gui_support::show_dialog(
                 TITLE,
                 "Code-Codex was installed successfully. Restart Codex to use Code-Codex.",
@@ -47,28 +55,29 @@ fn main() -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        Ok(status) => {
-            let detail = status.code().map_or_else(
-                || "without an exit code".to_owned(),
-                |code| format!("with exit code {code}"),
-            );
+        Ok(output) => {
+            progress.close();
+            let detail = format_setup_failure(output.status.code(), &output.stdout, &output.stderr);
             gui_support::show_dialog(
                 TITLE,
-                &format!(
-                    "Code-Codex setup failed {detail}. No successful installation was reported."
-                ),
+                &format!("Code-Codex setup failed:\n\n{detail}"),
                 true,
             );
             ExitCode::FAILURE
         }
         Err(error) => {
+            progress.close();
             gui_support::show_dialog(TITLE, &format!("Code-Codex setup failed: {error}"), true);
             ExitCode::FAILURE
         }
     }
 }
 
-fn run_setup(arguments: &[OsString]) -> Result<ExitStatus, String> {
+fn run_setup(
+    arguments: &[OsString],
+    progress: &mut gui_support::ProgressDialog,
+) -> Result<Output, String> {
+    progress.set_progress(15, "Reading installation package...");
     let executable = env::current_exe()
         .map_err(|error| format!("the setup executable could not be located: {error}"))?;
     match inspect_setup_source(&executable)? {
@@ -82,9 +91,12 @@ fn run_setup(arguments: &[OsString]) -> Result<ExitStatus, String> {
             payload_length,
             executable_length,
             arguments,
+            progress,
         ),
         SetupSource::Sibling => {
-            script_wrapper::run_sibling_script(INSTALL_SCRIPT, arguments.iter().cloned())?
+            progress.set_progress(60, "Preparing Code-Codex installer...");
+            progress.set_marquee("Installing Code-Codex...");
+            script_wrapper::run_sibling_script_captured(INSTALL_SCRIPT, arguments.iter().cloned())?
                 .ok_or_else(|| {
                     "the plain setup program requires Install-CodeCodex.ps1 next to it".to_owned()
                 })
@@ -98,12 +110,14 @@ fn run_embedded_setup(
     payload_length: u64,
     executable_length: u64,
     arguments: &[OsString],
-) -> Result<ExitStatus, String> {
+    progress: &mut gui_support::ProgressDialog,
+) -> Result<Output, String> {
     let temporary_directory = tempfile::Builder::new()
         .prefix("CodeCodex-Setup-")
         .tempdir()
         .map_err(|error| format!("a temporary setup directory could not be created: {error}"))?;
     let archive = temporary_directory.path().join("payload.zip");
+    progress.set_progress(25, "Extracting installation package...");
     extract_embedded_archive(
         executable,
         &archive,
@@ -112,9 +126,88 @@ fn run_embedded_setup(
         executable_length,
     )?;
 
+    progress.set_progress(40, "Expanding installation files...");
     expand_archive(&archive, temporary_directory.path())?;
+    progress.set_progress(60, "Preparing Code-Codex installer...");
     let installer = find_extracted_installer(temporary_directory.path())?;
-    script_wrapper::run_script(&installer, arguments.iter().cloned())
+    progress.set_marquee("Installing Code-Codex...");
+    script_wrapper::run_script_captured(&installer, arguments.iter().cloned())
+}
+
+fn format_setup_failure(exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> String {
+    let stdout = sanitize_script_output(stdout);
+    let stderr = sanitize_script_output(stderr);
+    let mut sections = Vec::new();
+    if !stderr.is_empty() {
+        sections.push(format!("PowerShell error:\n{stderr}"));
+    }
+    if !stdout.is_empty() {
+        sections.push(format!("Installer output:\n{stdout}"));
+    }
+    let exit_detail = exit_code.map_or_else(
+        || "without an exit code".to_owned(),
+        |code| format!("with exit code {code}"),
+    );
+    if sections.is_empty() {
+        return format!(
+            "Windows PowerShell exited {exit_detail} and did not provide diagnostic output."
+        );
+    }
+    let diagnostic = truncate_diagnostic(sections.join("\n\n"));
+    format!("{diagnostic}\n\nWindows PowerShell exited {exit_detail}.")
+}
+
+fn sanitize_script_output(bytes: &[u8]) -> String {
+    let decoded = if bytes.starts_with(&[0xff, 0xfe]) {
+        decode_utf16_le(&bytes[2..])
+    } else if looks_like_utf16_le(bytes) {
+        decode_utf16_le(bytes)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+    decoded
+        .trim_start_matches('\u{feff}')
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .filter(|character| *character == '\n' || *character == '\t' || !character.is_control())
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
+fn looks_like_utf16_le(bytes: &[u8]) -> bool {
+    if bytes.len() < 4 || bytes.len() % 2 != 0 {
+        return false;
+    }
+    let pairs = bytes.chunks_exact(2).take(64);
+    let mut count = 0usize;
+    let mut zero_high_bytes = 0usize;
+    for pair in pairs {
+        count += 1;
+        if pair[1] == 0 {
+            zero_high_bytes += 1;
+        }
+    }
+    count > 0 && zero_high_bytes * 4 >= count * 3
+}
+
+fn decode_utf16_le(bytes: &[u8]) -> String {
+    let units = bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16_lossy(&units)
+}
+
+fn truncate_diagnostic(text: String) -> String {
+    if text.chars().count() <= MAX_SCRIPT_DIAGNOSTIC_CHARS {
+        return text;
+    }
+    let keep = MAX_SCRIPT_DIAGNOSTIC_CHARS.saturating_sub(TRUNCATION_MARKER.chars().count());
+    let mut truncated = text.chars().take(keep).collect::<String>();
+    truncated.push_str(TRUNCATION_MARKER);
+    truncated
 }
 
 fn inspect_setup_source(executable: &Path) -> Result<SetupSource, String> {
@@ -407,18 +500,16 @@ fn expand_archive(archive: &Path, destination: &Path) -> Result<(), String> {
         .env("CLE_ARCHIVE_PATH", archive)
         .env("CLE_DESTINATION_PATH", destination)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     gui_support::configure_hidden(&mut command);
-    let status = command.status().map_err(|error| {
+    let output = command.output().map_err(|error| {
         format!("the embedded installer archive could not be expanded: {error}")
     })?;
-    if !status.success() {
-        return Err(status.code().map_or_else(
-            || "the embedded installer archive could not be expanded".to_owned(),
-            |code| {
-                format!("the embedded installer archive could not be expanded (exit code {code})")
-            },
+    if !output.status.success() {
+        return Err(format!(
+            "the embedded installer archive could not be expanded:\n\n{}",
+            format_setup_failure(output.status.code(), &output.stdout, &output.stderr)
         ));
     }
     Ok(())
@@ -646,5 +737,62 @@ mod tests {
         let error = classify_setup_source(&executable).expect_err("prefix must be rejected");
         assert!(error.contains("does not begin"));
         assert_ne!(payload_offset, stub_length);
+    }
+
+    #[test]
+    fn setup_failure_prioritizes_stderr_and_keeps_stdout_and_exit_code() {
+        let message = format_setup_failure(
+            Some(23),
+            b"preflight output",
+            b"specific installation error",
+        );
+
+        let error_position = message.find("specific installation error").expect("stderr");
+        let output_position = message.find("preflight output").expect("stdout");
+        let exit_position = message.find("exit code 23").expect("exit code");
+        assert!(error_position < output_position);
+        assert!(output_position < exit_position);
+        assert!(message.contains("PowerShell error:"));
+        assert!(message.contains("Installer output:"));
+    }
+
+    #[test]
+    fn setup_failure_uses_stdout_when_stderr_is_empty() {
+        let message = format_setup_failure(Some(1), b"installer-only detail", b"");
+
+        assert!(message.contains("Installer output:\ninstaller-only detail"));
+        assert!(!message.contains("PowerShell error:"));
+    }
+
+    #[test]
+    fn setup_failure_falls_back_when_powershell_is_silent() {
+        assert_eq!(
+            format_setup_failure(Some(1), b"", b""),
+            "Windows PowerShell exited with exit code 1 and did not provide diagnostic output."
+        );
+        assert!(format_setup_failure(None, b"", b"").contains("without an exit code"));
+    }
+
+    #[test]
+    fn setup_failure_sanitizes_utf16_newlines_nuls_and_invalid_utf8() {
+        let utf16 = "\u{feff}line one\r\nline two"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let message = format_setup_failure(Some(1), &[b'o', 0, b'k', 0], &utf16);
+
+        assert!(message.contains("line one\nline two"));
+        assert!(message.contains("Installer output:\nok"));
+        assert!(!message.contains('\0'));
+        assert!(!sanitize_script_output(&[0xff, b'e', 0, b'r', 0]).contains('\0'));
+    }
+
+    #[test]
+    fn setup_failure_bounds_long_diagnostics() {
+        let message = format_setup_failure(Some(1), b"", &vec![b'x'; 20_000]);
+
+        assert!(message.contains(TRUNCATION_MARKER.trim()));
+        assert!(message.ends_with("Windows PowerShell exited with exit code 1."));
+        assert!(message.chars().count() <= MAX_SCRIPT_DIAGNOSTIC_CHARS + 80);
     }
 }

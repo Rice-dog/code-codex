@@ -62,6 +62,10 @@ pub struct CodexInstallation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_full_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_user_model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub app_server: Option<PathBuf>,
 }
 
@@ -181,6 +185,7 @@ struct PackageRecord {
     install_location: String,
     publisher: String,
     package_family_name: String,
+    package_full_name: String,
 }
 
 pub fn discover_codex(
@@ -196,6 +201,8 @@ pub fn discover_codex(
             channel: "custom".to_owned(),
             source: DiscoverySource::Explicit,
             package_name: None,
+            package_full_name: None,
+            app_user_model_id: None,
             app_server: None,
         });
     }
@@ -221,7 +228,7 @@ fn discover_windows_packages() -> Vec<CodexInstallation> {
     }
     #[cfg(windows)]
     {
-        const SCRIPT: &str = r#"[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); @(Get-AppxPackage | Where-Object { $_.Name -like 'OpenAI.Codex*' } | Select-Object Name,Version,InstallLocation,Publisher,PackageFamilyName) | ConvertTo-Json -Compress"#;
+        const SCRIPT: &str = r#"[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); @(Get-AppxPackage | Where-Object { $_.Name -like 'OpenAI.Codex*' } | Select-Object Name,Version,InstallLocation,Publisher,PackageFamilyName,PackageFullName) | ConvertTo-Json -Compress"#;
         let Some(powershell) = trusted_powershell() else {
             return Vec::new();
         };
@@ -264,14 +271,7 @@ fn discover_windows_packages() -> Vec<CodexInstallation> {
 
 #[cfg(windows)]
 fn package_installation(record: PackageRecord) -> Option<CodexInstallation> {
-    const OFFICIAL_PUBLISHER: &str = "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B";
-    const OFFICIAL_FAMILY_SUFFIX: &str = "_2p2nqsd0c76g0";
-    if !matches!(record.name.as_str(), "OpenAI.Codex" | "OpenAI.CodexBeta")
-        || record.publisher != OFFICIAL_PUBLISHER
-        || !record.package_family_name.ends_with(OFFICIAL_FAMILY_SUFFIX)
-    {
-        return None;
-    }
+    let (package_full_name, app_user_model_id) = validated_package_activation(&record)?;
     let root = dunce::canonicalize(&record.install_location).ok()?;
     if !root.is_dir() {
         return None;
@@ -290,8 +290,45 @@ fn package_installation(record: PackageRecord) -> Option<CodexInstallation> {
         channel: channel.to_owned(),
         source: DiscoverySource::WindowsPackageManager,
         package_name: Some(record.name),
+        package_full_name: Some(package_full_name),
+        app_user_model_id: Some(app_user_model_id),
         app_server,
     })
+}
+
+#[cfg(windows)]
+fn validated_package_activation(record: &PackageRecord) -> Option<(String, String)> {
+    const OFFICIAL_PUBLISHER: &str = "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B";
+    const OFFICIAL_PUBLISHER_ID: &str = "2p2nqsd0c76g0";
+    const MAX_PACKAGE_FULL_NAME_LENGTH: usize = 127;
+
+    if !matches!(record.name.as_str(), "OpenAI.Codex" | "OpenAI.CodexBeta")
+        || record.publisher != OFFICIAL_PUBLISHER
+    {
+        return None;
+    }
+
+    let expected_family = format!("{}_{}", record.name, OFFICIAL_PUBLISHER_ID);
+    let expected_full_name_prefix = format!("{}_", record.name);
+    let expected_full_name_suffix = format!("_{OFFICIAL_PUBLISHER_ID}");
+    if record.package_family_name != expected_family
+        || record.package_full_name.is_empty()
+        || record.package_full_name.len() > MAX_PACKAGE_FULL_NAME_LENGTH
+        || record.package_full_name.chars().any(char::is_control)
+        || !record
+            .package_full_name
+            .starts_with(&expected_full_name_prefix)
+        || !record
+            .package_full_name
+            .ends_with(&expected_full_name_suffix)
+    {
+        return None;
+    }
+
+    Some((
+        record.package_full_name.clone(),
+        format!("{}!App", record.package_family_name),
+    ))
 }
 
 #[cfg(windows)]
@@ -362,6 +399,8 @@ fn discover_user_install(preference: ChannelPreference) -> Option<CodexInstallat
                     channel: channel.to_owned(),
                     source: DiscoverySource::UserInstall,
                     package_name: None,
+                    package_full_name: None,
+                    app_user_model_id: None,
                     app_server: None,
                 });
             }
@@ -380,6 +419,8 @@ fn discover_user_install(preference: ChannelPreference) -> Option<CodexInstallat
         channel: "custom".to_owned(),
         source: DiscoverySource::Path,
         package_name: None,
+        package_full_name: None,
+        app_user_model_id: None,
         app_server: None,
     })
 }
@@ -1008,6 +1049,54 @@ mod tests {
         assert!(channel_matches("custom", ChannelPreference::Any));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn official_package_activation_metadata_is_derived_from_validated_identity() {
+        let record = PackageRecord {
+            name: "OpenAI.Codex".to_owned(),
+            version: "26.721.11231.0".to_owned(),
+            install_location: r"C:\Program Files\WindowsApps\OpenAI.Codex".to_owned(),
+            publisher: "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B".to_owned(),
+            package_family_name: "OpenAI.Codex_2p2nqsd0c76g0".to_owned(),
+            package_full_name: "OpenAI.Codex_26.721.11231.0_x64__2p2nqsd0c76g0".to_owned(),
+        };
+
+        assert_eq!(
+            validated_package_activation(&record),
+            Some((
+                "OpenAI.Codex_26.721.11231.0_x64__2p2nqsd0c76g0".to_owned(),
+                "OpenAI.Codex_2p2nqsd0c76g0!App".to_owned(),
+            ))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn package_activation_metadata_rejects_untrusted_or_malformed_identity_fields() {
+        let mut record = PackageRecord {
+            name: "OpenAI.CodexBeta".to_owned(),
+            version: "26.721.11231.0".to_owned(),
+            install_location: r"C:\Program Files\WindowsApps\OpenAI.CodexBeta".to_owned(),
+            publisher: "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B".to_owned(),
+            package_family_name: "OpenAI.CodexBeta_2p2nqsd0c76g0".to_owned(),
+            package_full_name: "OpenAI.CodexBeta_26.721.11231.0_x64__2p2nqsd0c76g0".to_owned(),
+        };
+
+        record.package_family_name = "Attacker_2p2nqsd0c76g0".to_owned();
+        assert!(validated_package_activation(&record).is_none());
+
+        record.package_family_name = "OpenAI.CodexBeta_2p2nqsd0c76g0".to_owned();
+        record.package_full_name =
+            "OpenAI.CodexBeta_26.721.11231.0_x64__2p2nqsd0c76g0\n".to_owned();
+        assert!(validated_package_activation(&record).is_none());
+
+        record.package_full_name = format!("OpenAI.CodexBeta_{}_2p2nqsd0c76g0", "x".repeat(128));
+        assert!(validated_package_activation(&record).is_none());
+
+        record.package_full_name = "Other.Package_26.721.11231.0_x64__2p2nqsd0c76g0".to_owned();
+        assert!(validated_package_activation(&record).is_none());
+    }
+
     #[test]
     fn explicit_app_server_override_remains_available_for_development() {
         let directory = tempfile::TempDir::new().expect("temp dir");
@@ -1045,6 +1134,8 @@ mod tests {
             channel: "custom".to_owned(),
             source: DiscoverySource::UserInstall,
             package_name: None,
+            package_full_name: None,
+            app_user_model_id: None,
             app_server: Some(executable),
         };
 
@@ -1065,6 +1156,8 @@ mod tests {
             channel: "beta".to_owned(),
             source: DiscoverySource::WindowsPackageManager,
             package_name: Some("OpenAI.CodexBeta".to_owned()),
+            package_full_name: Some("OpenAI.CodexBeta_26.715.3651.0_x64__2p2nqsd0c76g0".to_owned()),
+            app_user_model_id: Some("OpenAI.CodexBeta_2p2nqsd0c76g0!App".to_owned()),
             app_server: Some(official.clone()),
         };
 

@@ -24,8 +24,8 @@ use discovery::{
     discover_app_server_source, discover_codex, is_supported_version, prepare_app_server_launch,
 };
 use process_guard::{
-    CodexChildGuard, PortReservation, ProcessGuardError, is_executable_running,
-    verify_listener_executable, verify_listener_owner,
+    CodexProcessGuard, PortReservation, ProcessGuardError, is_executable_running,
+    verify_listener_executable, verify_listener_owner, verify_process_identity,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -262,17 +262,54 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     )
     .await?;
 
-    let mut command = Command::new(&installation.executable);
-    command
-        .arg("--remote-debugging-address=127.0.0.1")
-        .arg(format!("--remote-debugging-port={port}"))
-        .args(&args.codex_args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    let mut launch_arguments = vec![
+        "--remote-debugging-address=127.0.0.1".to_owned(),
+        format!("--remote-debugging-port={port}"),
+    ];
+    launch_arguments.extend(args.codex_args);
     reservation.release();
     let launched_after = SystemTime::now();
-    let mut child = CodexChildGuard::spawn(command).map_err(|_| AppError::Launch)?;
+    let mut child = if installation.source == DiscoverySource::WindowsPackageManager {
+        let package_full_name = installation
+            .package_full_name
+            .clone()
+            .ok_or(AppError::Launch)?;
+        let app_user_model_id = installation
+            .app_user_model_id
+            .clone()
+            .ok_or(AppError::Launch)?;
+        let mut child = CodexProcessGuard::activate_package(
+            package_full_name,
+            app_user_model_id,
+            launch_arguments,
+        )
+        .await
+        .map_err(|_| AppError::Launch)?;
+        let launched_pid = child.pid();
+        let official_executable = installation.executable.clone();
+        let identity_result = tokio::task::spawn_blocking(move || {
+            verify_process_identity(launched_pid, launched_after, &official_executable)
+        })
+        .await
+        .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        if let Err(error) = identity_result {
+            child.terminate().await;
+            return Err(error.into());
+        }
+        if child.arm_package_termination().await.is_err() {
+            child.terminate().await;
+            return Err(AppError::Launch);
+        }
+        child
+    } else {
+        let mut command = Command::new(&installation.executable);
+        command
+            .args(launch_arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        CodexProcessGuard::spawn(command).map_err(|_| AppError::Launch)?
+    };
     let launched_pid = child.pid();
     tracing::info!(event = "codex_launched", channel = %installation.channel);
 
@@ -674,6 +711,8 @@ mod tests {
             channel: "beta".to_owned(),
             source: DiscoverySource::WindowsPackageManager,
             package_name: Some("OpenAI.CodexBeta".to_owned()),
+            package_full_name: Some("OpenAI.CodexBeta_26.715.3651.0_x64__2p2nqsd0c76g0".to_owned()),
+            app_user_model_id: Some("OpenAI.CodexBeta_2p2nqsd0c76g0!App".to_owned()),
             app_server: Some(PathBuf::from(r"C:\Users\secret\codex.exe")),
         };
         let report = redacted_codex_diagnostic(&installation).to_string();

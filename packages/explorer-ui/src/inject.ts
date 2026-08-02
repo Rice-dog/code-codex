@@ -1,6 +1,6 @@
 import { getBootstrapConfig } from "./bridge";
 import { CodeCodexElement } from "./explorer-element";
-import { codex26715Adapter, plausibleThreadId } from "./adapters/codex-26.715";
+import { codex26715Adapter, MAIN_SURFACE_SELECTOR, plausibleThreadId } from "./adapters/codex-26.715";
 import {
   clearExplorerDismissalForSession,
   dismissExplorerForSession,
@@ -12,7 +12,7 @@ const DISMISS_EVENT = "code-codex:dismiss";
 const RESELECTION_LISTENER_STATE = Symbol.for("code-codex:reselection-listener:v1");
 const SHELL_LAYOUT_STYLE_SELECTOR = 'style[data-code-codex-shell-layout="codex-26.715"]';
 const SHELL_LAYOUT_CSS = `
-code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + main.main-surface > header[data-app-shell-header-edge-scroll] {
+code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + ${MAIN_SURFACE_SELECTOR} > header[data-app-shell-header-edge-scroll] {
   position: absolute !important;
   top: 0 !important;
   right: 0 !important;
@@ -21,8 +21,8 @@ code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface
 }
 
 @container thread-content (min-width: 600px) {
-  code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + main.main-surface .thread-scroll-container[data-app-action-timeline-scroll] > div > [data-mcp-app-portal-target="true"],
-  code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + main.main-surface .thread-scroll-container[data-app-action-timeline-scroll] [data-pip-obstacle="thread-footer"] {
+  code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + ${MAIN_SURFACE_SELECTOR} .thread-scroll-container[data-app-action-timeline-scroll] > div > [data-mcp-app-portal-target="true"],
+  code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + ${MAIN_SURFACE_SELECTOR} .thread-scroll-container[data-app-action-timeline-scroll] [data-pip-obstacle="thread-footer"] {
     max-width: min(var(--thread-content-max-width), calc(100% - 100px)) !important;
   }
 }
@@ -57,7 +57,7 @@ function isVisibleMount(element: Element): boolean {
 }
 
 function qualifiedMainSurface(): HTMLElement | null {
-  const mains = [...document.querySelectorAll<HTMLElement>("main.main-surface")];
+  const mains = [...document.querySelectorAll<HTMLElement>(MAIN_SURFACE_SELECTOR)];
   if (mains.length !== 1 || !codex26715Adapter.qualifiesRenderer(document)) return null;
   const main = mains[0];
   const parent = main?.parentElement;

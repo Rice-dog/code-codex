@@ -8,6 +8,14 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $UiRoot = Join-Path $RepoRoot "packages\explorer-ui"
+$PreviousMsvcRustFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
+$StaticCrtFlag = "-C target-feature=+crt-static"
+if ([string]::IsNullOrWhiteSpace($PreviousMsvcRustFlags)) {
+    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = $StaticCrtFlag
+}
+elseif ($PreviousMsvcRustFlags -notmatch '(?i)(^|\s)target-feature=(?:[^\s]*,)?\+crt-static(?:,|\s|$)') {
+    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = "$PreviousMsvcRustFlags $StaticCrtFlag"
+}
 
 function Resolve-Cargo {
     $command = Get-Command cargo -ErrorAction SilentlyContinue
@@ -59,4 +67,5 @@ try {
 }
 finally {
     Pop-Location
+    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = $PreviousMsvcRustFlags
 }
