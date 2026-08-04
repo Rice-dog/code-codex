@@ -5,11 +5,14 @@ import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } fro
 import { getFileIcon, icons } from "./icons";
 import {
   AUDIO_PREVIEWER_ID,
+  CSV_PREVIEWER_ID,
   CodeCodexMainPreviewElement,
+  DIAGRAM_PREVIEWER_ID,
   IMAGE_PREVIEWER_ID,
   MAIN_PREVIEW_TAG,
   MARKDOWN_PREVIEWER_ID,
   NATIVE_POWERPOINT_PREVIEW_MIME,
+  NOTEBOOK_PREVIEWER_ID,
   OFFICE_PREVIEWER_ID,
   PDF_PREVIEWER_ID,
   registerMainPreviewElement,
@@ -58,12 +61,13 @@ const MAX_VIDEO_PREVIEW_BYTES = 128 * 1024 * 1024;
 const MAX_PDF_PREVIEW_BYTES = 64 * 1024 * 1024;
 const MAX_AUDIO_PREVIEW_BYTES = 128 * 1024 * 1024;
 const MAX_OFFICE_PREVIEW_BYTES = 64 * 1024 * 1024;
+const MAX_NOTEBOOK_PREVIEW_BYTES = 16 * 1024 * 1024;
 
-type MediaPreviewKind = "image" | "video" | "pdf" | "audio" | "office";
+type MediaPreviewKind = "image" | "video" | "pdf" | "audio" | "office" | "notebook";
 
 interface PreviewerDefinition {
   readonly id: string;
-  readonly kind: "markdown" | MediaPreviewKind;
+  readonly kind: "markdown" | "csv" | "diagram" | MediaPreviewKind;
   readonly title: string;
   readonly iconFileName: string;
   readonly extensions: readonly string[];
@@ -83,6 +87,20 @@ const PREVIEWER_DEFINITIONS: readonly PreviewerDefinition[] = Object.freeze([
     title: "Markdown Preview",
     iconFileName: "README.md",
     extensions: [".md", ".markdown"],
+  },
+  {
+    id: CSV_PREVIEWER_ID,
+    kind: "csv",
+    title: "CSV Preview",
+    iconFileName: "preview.csv",
+    extensions: [".csv"],
+  },
+  {
+    id: DIAGRAM_PREVIEWER_ID,
+    kind: "diagram",
+    title: "Diagram Preview",
+    iconFileName: "preview.drawio",
+    extensions: [".drawio", ".plantuml"],
   },
   {
     id: IMAGE_PREVIEWER_ID,
@@ -118,6 +136,13 @@ const PREVIEWER_DEFINITIONS: readonly PreviewerDefinition[] = Object.freeze([
     title: "Office Preview",
     iconFileName: "preview.docx",
     extensions: [".docx", ".xlsx", ".ppt", ".pptx"],
+  },
+  {
+    id: NOTEBOOK_PREVIEWER_ID,
+    kind: "notebook",
+    title: "Jupyter Notebook Preview",
+    iconFileName: "preview.ipynb",
+    extensions: [".ipynb"],
   },
 ]);
 
@@ -171,6 +196,12 @@ const MEDIA_PREVIEW_ROUTES: Readonly<Record<string, MediaPreviewRoute>> = Object
     kind: "office",
     mimeTypes: ["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
     maxBytes: MAX_OFFICE_PREVIEW_BYTES,
+  },
+  ipynb: {
+    previewerId: NOTEBOOK_PREVIEWER_ID,
+    kind: "notebook",
+    mimeTypes: ["application/x-ipynb+json"],
+    maxBytes: MAX_NOTEBOOK_PREVIEW_BYTES,
   },
 });
 
@@ -3697,7 +3728,7 @@ export class CodeCodexElement extends HTMLElement {
     else this.#enabledPreviewers.add(previewer.id);
     this.#writeEnabledPreviewers();
     this.#renderPreviewMarket();
-    if (previewer.kind === "markdown") {
+    if (previewer.kind === "markdown" || previewer.kind === "csv" || previewer.kind === "diagram") {
       this.#syncMainPreview();
     } else {
       this.#applyMediaPreviewerToggle(previewer.id, !wasEnabled);

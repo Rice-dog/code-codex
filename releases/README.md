@@ -5,6 +5,36 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.48
+
+- `CodeCodex-0.1.48-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.48-x64.msi`: MSI installer.
+- `CodeCodex-0.1.48-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds one independently enabled Diagram Preview extension for `.drawio` and `.plantuml` files.
+- Renders Draw.io shapes and common PlantUML activity syntax locally as bounded SVG without uploading source code.
+- Keeps versioned raw edit mode available and rejects external resources, unsafe XML, and truncated diagrams.
+
+## v0.1.47
+
+- `CodeCodex-0.1.47-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.47-x64.msi`: MSI installer.
+- `CodeCodex-0.1.47-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds an independently enabled CSV Preview extension for `.csv` files.
+- Renders bounded comma-delimited data in an accessible table with sticky row and column headers.
+- Preserves quoted commas, embedded line breaks, leading zeros, and formula-like values as literal text; raw edit mode remains available.
+
+## v0.1.46
+
+- `CodeCodex-0.1.46-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.46-x64.msi`: MSI installer.
+- `CodeCodex-0.1.46-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds an independently enabled, local Jupyter Notebook Preview extension for `.ipynb` files.
+- Renders Markdown and syntax-highlighted code cells with saved outputs without executing notebook code.
+- Loads notebooks through bounded, versioned native chunks and applies read-only rendering limits.
+
 ## v0.1.45
 
 - `CodeCodex-0.1.45-x64-setup.exe`: recommended installer.
@@ -125,5 +155,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.45
+./scripts/package.ps1 -Version 0.1.48
 ```

@@ -560,6 +560,7 @@ export const styles = String.raw`
   .node-icon[data-icon-kind="kotlin"],
   .node-icon[data-icon-kind="csharp"],
   .node-icon[data-icon-kind="sass"],
+  .node-icon[data-icon-kind="diagram"],
   .node-icon[data-icon-kind="image"],
   .node-icon[data-icon-kind="video"] { color: var(--cle-icon-violet); }
   .node-icon[data-icon-kind="java"],

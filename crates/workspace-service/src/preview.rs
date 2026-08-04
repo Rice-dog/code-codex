@@ -24,12 +24,13 @@ pub const MAX_IMAGE_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_VIDEO_PREVIEW_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_PDF_PREVIEW_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_AUDIO_PREVIEW_BYTES: u64 = 128 * 1024 * 1024;
+pub const MAX_NOTEBOOK_PREVIEW_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_OFFICE_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_NATIVE_POWERPOINT_PREVIEW_BYTES: u64 = 64 * 1024 * 1024;
 
 pub const NATIVE_POWERPOINT_PREVIEW_MIME: &str = "application/vnd.code-codex.powerpoint-slides+zip";
 
-const MEDIA_SIGNATURE_BYTES: usize = 64;
+const MEDIA_SIGNATURE_BYTES: usize = 4 * 1024;
 const MAX_OFFICE_ENTRIES: usize = 4_096;
 const MAX_OFFICE_ENTRY_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_OFFICE_XML_BYTES: u64 = 8 * 1024 * 1024;
@@ -52,6 +53,7 @@ pub enum MediaKind {
     Video,
     Pdf,
     Audio,
+    Notebook,
     Office,
 }
 
@@ -183,6 +185,7 @@ enum MediaSignature {
     Flac,
     M4a,
     Aac,
+    NotebookJson,
     Docx,
     Xlsx,
     Ppt,
@@ -282,8 +285,8 @@ impl Workspace {
         self.preview_with_after_read(relative_path, || {})
     }
 
-    /// Returns metadata for a renderer-supported image, video, PDF, audio, or Office file without
-    /// transferring its contents. Media is still opened through the retained
+    /// Returns metadata for a renderer-supported image, video, PDF, audio, notebook, or Office
+    /// file without transferring its contents. Media is still opened through the retained
     /// workspace capability and is limited by native policy.
     pub fn media_info(&self, relative_path: &str) -> Result<MediaInfo, WorkspaceError> {
         let (mut file, policy, size_bytes, version) = self.open_media(relative_path)?;
@@ -1265,6 +1268,12 @@ fn media_policy(extension: Option<&str>) -> Option<MediaPolicy> {
         maximum_size: MAX_AUDIO_PREVIEW_BYTES,
         signature,
     };
+    let notebook = |mime_type, signature| MediaPolicy {
+        kind: MediaKind::Notebook,
+        mime_type,
+        maximum_size: MAX_NOTEBOOK_PREVIEW_BYTES,
+        signature,
+    };
     let office = |mime_type, signature| MediaPolicy {
         kind: MediaKind::Office,
         mime_type,
@@ -1291,6 +1300,10 @@ fn media_policy(extension: Option<&str>) -> Option<MediaPolicy> {
         "m4a" => Some(audio("audio/mp4", MediaSignature::M4a)),
         "ogg" => Some(audio("audio/ogg", MediaSignature::Ogg)),
         "aac" => Some(audio("audio/aac", MediaSignature::Aac)),
+        "ipynb" => Some(notebook(
+            "application/x-ipynb+json",
+            MediaSignature::NotebookJson,
+        )),
         "docx" => Some(office(
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             MediaSignature::Docx,
@@ -1336,11 +1349,21 @@ fn matches_media_signature(signature: MediaSignature, bytes: &[u8]) -> bool {
             &[b"M4A ", b"M4B ", b"mp41", b"mp42", b"isom", b"iso2"],
         ),
         MediaSignature::Aac => matches_aac_signature(bytes),
+        MediaSignature::NotebookJson => matches_notebook_json_signature(bytes),
         MediaSignature::Ppt => bytes.starts_with(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
         MediaSignature::Docx | MediaSignature::Xlsx | MediaSignature::Pptx => {
             bytes.starts_with(b"PK\x03\x04")
         }
     }
+}
+
+fn matches_notebook_json_signature(bytes: &[u8]) -> bool {
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
+    bytes
+        .iter()
+        .copied()
+        .find(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+        == Some(b'{')
 }
 
 fn matches_pdf_signature(bytes: &[u8]) -> bool {
@@ -2429,6 +2452,8 @@ fn is_text_extension(extension: Option<&str>) -> bool {
                 | "properties"
                 | "csv"
                 | "tsv"
+                | "drawio"
+                | "plantuml"
                 | "sql"
                 | "graphql"
                 | "gql"
@@ -3187,6 +3212,9 @@ mod tests {
             "README",
             "Dockerfile",
             "CONFIG.YAML",
+            "DATA.CSV",
+            "ARCHITECTURE.DRAWIO",
+            "FLOW.PLANTUML",
             "query.SQL",
             ".editorconfig",
         ] {
@@ -3279,6 +3307,86 @@ mod tests {
                 .expect_err("changed version")
                 .code(),
             crate::ErrorCode::Conflict
+        );
+    }
+
+    #[test]
+    fn notebook_media_transport_validates_a_bounded_json_prefix_and_serializes_contract() {
+        let (directory, workspace) = fixture();
+        let plain = br#"{"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5}"#;
+        let with_bom =
+            b"\xef\xbb\xbf \t\r\n{\"cells\":[],\"metadata\":{},\"nbformat\":4,\"nbformat_minor\":5}";
+
+        for (name, contents) in [
+            ("plain.ipynb", plain.as_slice()),
+            ("WITH-BOM.IPYNB", with_bom.as_slice()),
+        ] {
+            fs::write(directory.path().join(name), contents).expect("notebook fixture");
+            let info = workspace.media_info(name).expect("notebook media info");
+            assert_eq!(info.kind, MediaKind::Notebook, "{name}");
+            assert_eq!(info.mime_type, "application/x-ipynb+json", "{name}");
+            assert_eq!(info.size_bytes, contents.len() as u64, "{name}");
+            assert_eq!(info.chunk_size, MEDIA_CHUNK_BYTES, "{name}");
+            assert_eq!(info.chunk_count, 1, "{name}");
+
+            let serialized = serde_json::to_value(&info).expect("serialize notebook info");
+            assert_eq!(serialized["kind"], "notebook", "{name}");
+            assert_eq!(serialized["mimeType"], "application/x-ipynb+json", "{name}");
+
+            let chunk = workspace
+                .media_chunk(name, 0, info.chunk_size, info.size_bytes, &info.version)
+                .expect("notebook chunk");
+            assert_eq!(chunk.offset, 0, "{name}");
+            assert_eq!(chunk.data, contents, "{name}");
+            assert!(chunk.eof, "{name}");
+        }
+
+        fs::write(directory.path().join("invalid.ipynb"), b"[1, 2, 3]")
+            .expect("invalid notebook prefix");
+        assert_eq!(
+            workspace
+                .media_info("invalid.ipynb")
+                .expect_err("invalid notebook prefix")
+                .code(),
+            crate::ErrorCode::NotEditable
+        );
+
+        let mut outside_prefix = vec![b' '; MEDIA_SIGNATURE_BYTES];
+        outside_prefix.extend_from_slice(b"{}");
+        fs::write(
+            directory.path().join("outside-prefix.ipynb"),
+            outside_prefix,
+        )
+        .expect("notebook outside signature prefix");
+        assert_eq!(
+            workspace
+                .media_info("outside-prefix.ipynb")
+                .expect_err("object outside bounded signature prefix")
+                .code(),
+            crate::ErrorCode::NotEditable
+        );
+
+        fs::write(directory.path().join(".env.ipynb"), b"{}").expect("sensitive notebook");
+        assert_eq!(
+            workspace
+                .media_info(".env.ipynb")
+                .expect_err("sensitive notebook")
+                .code(),
+            crate::ErrorCode::AccessDenied
+        );
+
+        let oversized = directory.path().join("oversized.ipynb");
+        let mut file = fs::File::create(&oversized).expect("large notebook");
+        file.write_all(b"{}").expect("notebook signature");
+        file.set_len(MAX_NOTEBOOK_PREVIEW_BYTES + 1)
+            .expect("sparse large notebook");
+        drop(file);
+        assert_eq!(
+            workspace
+                .media_info("oversized.ipynb")
+                .expect_err("large notebook")
+                .code(),
+            crate::ErrorCode::ContentTooLarge
         );
     }
 
@@ -3791,6 +3899,7 @@ mod tests {
                 MediaKind::Video => "video",
                 MediaKind::Pdf => "pdf",
                 MediaKind::Audio => "audio",
+                MediaKind::Notebook => "notebook",
                 MediaKind::Office => "office",
             };
             assert_eq!(serialized["kind"], expected_kind, "{name}");

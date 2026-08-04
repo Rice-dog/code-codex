@@ -23,15 +23,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.1.45-x64-setup.exe`
-- Alternative: `CodeCodex-0.1.45-x64.msi`
-- Portable package: `CodeCodex-0.1.45-x64.zip`
+- Recommended: `CodeCodex-0.1.48-x64-setup.exe`
+- Alternative: `CodeCodex-0.1.48-x64.msi`
+- Portable package: `CodeCodex-0.1.48-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.1.45-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.1.48-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -71,7 +71,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.45
+./scripts/package.ps1 -Version 0.1.48
 ```
 
 The generated packages are written to `releases/`.
@@ -95,7 +95,10 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 - File tree in the Codex sidebar for local workspaces.
 - Main-window file tabs beside the conversation.
 - Text preview and editing, including multilingual Markdown content.
-- Independently enabled image, video, PDF, audio, and Office previews from Preview Market.
+- Independently enabled Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, and Office previews from Preview Market.
+- Local CSV table previews with quoted fields, embedded line breaks, sticky headers, and bounded rendering.
+- Local, bounded Diagram Preview rendering for `.drawio` files and common `.plantuml` activity syntax without uploading source code.
+- Local, read-only Jupyter Notebook previews for Markdown and code cells with saved outputs.
 - Local, read-only previews for DOCX documents, XLSX workbooks, and PPT/PPTX presentations.
 - Context menu actions for create, rename, delete, copy path, reveal, and refresh.
 - Drag and drop file movement.

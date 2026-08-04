@@ -14,6 +14,10 @@ const rootEntries: TreeNodeInput[] = [
   { name: "preview-document.docx", relativePath: "preview-document.docx", kind: "file" },
   { name: "preview-spreadsheet.xlsx", relativePath: "preview-spreadsheet.xlsx", kind: "file" },
   { name: "preview-presentation.pptx", relativePath: "preview-presentation.pptx", kind: "file" },
+  { name: "preview-notebook.ipynb", relativePath: "preview-notebook.ipynb", kind: "file" },
+  { name: "preview-data.csv", relativePath: "preview-data.csv", kind: "file" },
+  { name: "preview-workflow.drawio", relativePath: "preview-workflow.drawio", kind: "file" },
+  { name: "preview-workflow.plantuml", relativePath: "preview-workflow.plantuml", kind: "file" },
   { name: "package.json", relativePath: "package.json", kind: "file" },
   { name: "README.md", relativePath: "README.md", kind: "file" },
 ];
@@ -52,11 +56,74 @@ const listeners = new Set<(message: BridgeMessage) => void>();
 const previewText = new Map<string, string>([
   ["README.md", "# Code-Codex\n\nA project tree with bounded file preview and editing in Codex Desktop.\n"],
   ["package.json", '{\n  "name": "@code-codex/explorer-ui",\n  "private": true\n}\n'],
+  [
+    "preview-data.csv",
+    [
+      "record_id,file_name,file_type,size_kb,status,last_modified,owner,notes",
+      "1,README.md,Markdown,18,Ready,2026-08-04,Alex,Rendered documentation preview",
+      '2,main.ts,TypeScript,42,Editing,2026-08-04,Sam,"Syntax highlighting, line numbers"',
+      "3,notebook.ipynb,Jupyter Notebook,156,Ready,2026-08-03,Lin,Markdown and code cells",
+      "4,architecture.png,Image,824,Ready,2026-08-02,Maya,Zoomable image preview",
+      "5,demo.mp4,Video,26690,Review,2026-08-01,Chris,Playback controls enabled",
+      '6,meeting-notes.docx,Word,238,Ready,2026-07-31,Jamie,"Multi-page document\r\nwith saved layout"',
+      "7,quarterly-report.pdf,PDF,1048,Review,2026-07-30,Taylor,Tables and charts",
+      "8,数据样例.csv,CSV,12,Editing,2026-07-28,小林,包含中文字符",
+      '9,literal-formula.csv,CSV,4,Ready,2026-07-27,Riley,"=SUM(A1:A2) is displayed as text"',
+    ].join("\r\n"),
+  ],
+  [
+    "preview-workflow.drawio",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram id="preview-workflow" name="Preview workflow">
+    <mxGraphModel page="1" pageWidth="1169" pageHeight="827">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="select" value="Select a file" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="80" y="130" width="150" height="60" as="geometry" /></mxCell>
+        <mxCell id="detect" value="Detect format" style="rhombus;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="300" y="115" width="130" height="90" as="geometry" /></mxCell>
+        <mxCell id="render" value="Render preview" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="510" y="130" width="160" height="60" as="geometry" /></mxCell>
+        <mxCell id="edge-1" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;" edge="1" parent="1" source="select" target="detect"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="edge-2" value="Supported" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;" edge="1" parent="1" source="detect" target="render"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="compressed-page" name="Compressed page">jVHLjoMwDPwa30Oslt0r6ePUj4gUL6BNauSkXfj7FWCWXirtLeMZjyc2oEvjVfzQ3ThQBGsG3xLgCaytwFrAM6AT5rK+0ugozrI+rCIzi+zlDbtYzJ5C9/KfBr82PH18aArHaRDKmcIWblHkMkVVCD/ugWaDCrD56mN0HFkWEqkKB6oBm1yEv+mF+TzW6I+AjY4kKTS+jb0vI41X4kRFJrBma9BvmUmxUfzTh9Jp7UNrHfVtp7a11nxecftnvS8J7EX3tMH9Hgv3cj88/wI=</diagram>
+</mxfile>
+`,
+  ],
+  [
+    "preview-workflow.plantuml",
+    `@startuml
+title Code-Codex Preview Workflow
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 14
+skinparam activity {
+  BackgroundColor #EAF2FF
+  BorderColor #5B78A6
+  DiamondBackgroundColor #FFF2CC
+  DiamondBorderColor #D6B656
+  FontColor #20242B
+}
+start
+:Select a file in Explorer;
+if (Is a preview plugin available?) then (yes)
+  :Load the matching plugin;
+  :Render the file preview;
+else (no)
+  :Show the raw file content;
+endif
+:Return to the Codex conversation;
+stop
+@enduml
+`,
+  ],
   ["src/explorer-element.ts", "export class CodeCodexElement extends HTMLElement {\n  // Local demo preview\n}\n"],
   ["src/bridge.ts", "export class ExplorerBridge extends EventTarget {}\n"],
   ["src/tree-model.ts", "export class TreeModel {\n  // Lazy, virtualized file tree model\n}\n"],
 ]);
-const demoMedia = new Map<string, { readonly kind: "image" | "video" | "pdf" | "audio" | "office"; readonly mimeType: string; readonly bytes: Uint8Array }>([
+const demoMedia = new Map<string, { readonly kind: "image" | "video" | "pdf" | "audio" | "office" | "notebook"; readonly mimeType: string; readonly bytes: Uint8Array }>([
   [
     "preview-image.png",
     {
@@ -105,6 +172,14 @@ const demoMedia = new Map<string, { readonly kind: "image" | "video" | "pdf" | "
       bytes: createDemoPptx(),
     },
   ],
+  [
+    "preview-notebook.ipynb",
+    {
+      kind: "notebook",
+      mimeType: "application/x-ipynb+json",
+      bytes: createDemoNotebook(),
+    },
+  ],
 ]);
 const DEMO_MEDIA_VERSION = "d".repeat(64);
 const DEMO_MEDIA_CHUNK_BYTES = 2 * 1024 * 1024;
@@ -114,6 +189,79 @@ let watching = false;
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function createDemoNotebook(): Uint8Array {
+  const notebook = {
+    cells: [
+      {
+        cell_type: "markdown",
+        id: "intro",
+        metadata: {},
+        source: [
+          "# Notebook Preview\n",
+          "\n",
+          "Saved Markdown, highlighted Python, tables, and rich outputs render without executing code.\n",
+          "\n",
+          "| Feature | Status |\n",
+          "| --- | --- |\n",
+          "| Safe rendering | Ready |\n",
+        ],
+      },
+      {
+        cell_type: "code",
+        execution_count: 1,
+        id: "calculation",
+        metadata: {},
+        source: ["values = [2, 4, 8, 16]\n", "sum(values)\n"],
+        outputs: [
+          { name: "stdout", output_type: "stream", text: ["Calculating saved output...\n"] },
+          {
+            data: { "text/plain": ["30"] },
+            execution_count: 1,
+            metadata: {},
+            output_type: "execute_result",
+          },
+          {
+            data: { "application/json": { total: 30, values: [2, 4, 8, 16] } },
+            metadata: {},
+            output_type: "display_data",
+          },
+        ],
+      },
+      {
+        cell_type: "code",
+        execution_count: 2,
+        id: "chart",
+        metadata: {},
+        source: ["# A saved SVG output; this code is never run by Code-Codex.\n", "display(chart)\n"],
+        outputs: [
+          {
+            data: {
+              "image/svg+xml": [
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 360 110\" width=\"360\" height=\"110\">",
+                "<rect x=\"0\" y=\"0\" width=\"360\" height=\"110\" rx=\"8\" fill=\"#f6f6f4\"/>",
+                "<path d=\"M35 82 L110 56 L185 68 L260 28 L330 42\" fill=\"none\" stroke=\"#3b82f6\" stroke-width=\"4\"/>",
+                "<circle cx=\"260\" cy=\"28\" r=\"5\" fill=\"#3b82f6\"/>",
+                "<text x=\"35\" y=\"25\" font-family=\"Segoe UI, sans-serif\" font-size=\"14\" fill=\"#333\">Saved notebook chart</text>",
+                "</svg>",
+              ],
+              "text/plain": ["<Figure size 360x110>"],
+            },
+            metadata: {},
+            output_type: "display_data",
+          },
+        ],
+      },
+    ],
+    metadata: {
+      kernelspec: { display_name: "Python 3", language: "python", name: "python3" },
+      language_info: { file_extension: ".py", name: "python", version: "3.12" },
+    },
+    nbformat: 4,
+    nbformat_minor: 5,
+  };
+  return new TextEncoder().encode(JSON.stringify(notebook, null, 2));
 }
 
 function createDemoPdf(): Uint8Array {

@@ -47,6 +47,10 @@ export const VIDEO_PREVIEWER_ID = "code-codex.video-preview";
 export const PDF_PREVIEWER_ID = "code-codex.pdf-preview";
 export const AUDIO_PREVIEWER_ID = "code-codex.audio-preview";
 export const OFFICE_PREVIEWER_ID = "code-codex.office-preview";
+export const NOTEBOOK_PREVIEWER_ID = "code-codex.notebook-preview";
+export const CSV_PREVIEWER_ID = "code-codex.csv-preview";
+export const DIAGRAM_PREVIEWER_ID = "code-codex.diagram-preview";
+export const NOTEBOOK_PREVIEW_MIME = "application/x-ipynb+json";
 export const NATIVE_POWERPOINT_PREVIEW_MIME = "application/vnd.code-codex.powerpoint-slides+zip";
 
 const MAX_PDF_CANVAS_PIXELS = 16_777_216;
@@ -98,8 +102,222 @@ const MAX_DOCX_SETTLE_IMAGES = 512;
 const MAX_DOCX_VISUAL_OVERFLOW_ELEMENTS = 1_024;
 const DOCX_TABLE_HEADER_MARKER_PREFIX = "__cle_docx_table_header_";
 const DOCX_KEEP_NEXT_MARKER_PREFIX = "__cle_docx_keep_next_";
+const MAX_NOTEBOOK_PREVIEW_BYTES = 16 * 1024 * 1024;
+const MAX_NOTEBOOK_CELLS = 500;
+const MAX_NOTEBOOK_CELL_SOURCE_UNITS = 256_000;
+const MAX_NOTEBOOK_TOTAL_SOURCE_UNITS = 4_000_000;
+const MAX_NOTEBOOK_OUTPUTS_PER_CELL = 100;
+const MAX_NOTEBOOK_TOTAL_OUTPUTS = 2_000;
+const MAX_NOTEBOOK_OUTPUT_TEXT_UNITS = 256_000;
+const MAX_NOTEBOOK_TOTAL_OUTPUT_TEXT_UNITS = 2_000_000;
+const MAX_NOTEBOOK_HTML_UNITS = 1_000_000;
+const MAX_NOTEBOOK_TOTAL_HTML_UNITS = 4_000_000;
+const MAX_NOTEBOOK_SVG_UNITS = 1_000_000;
+const MAX_NOTEBOOK_SVG_NODES = 10_000;
+const MAX_NOTEBOOK_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_NOTEBOOK_TOTAL_IMAGE_BYTES = 32 * 1024 * 1024;
+const MAX_NOTEBOOK_DOM_NODES = 30_000;
+const MAX_NOTEBOOK_TRACEBACK_LINES = 200;
+const MAX_NOTEBOOK_ATTACHMENTS = 1_000;
+const MAX_NOTEBOOK_TEXT_SEGMENTS = 16_384;
+const MAX_NOTEBOOK_MARKDOWN_TOKENS = 10_000;
+const MAX_NOTEBOOK_HTML_TAGS = 10_000;
+const MAX_NOTEBOOK_RASTER_DIMENSION = 16_384;
+const MAX_NOTEBOOK_RASTER_PIXELS = 16_777_216;
+const MAX_NOTEBOOK_RASTER_FRAMES = 256;
+const MAX_NOTEBOOK_RASTER_FRAME_PIXELS = 67_108_864;
+const MAX_CSV_ROWS = 1_000;
+const MAX_CSV_COLUMNS = 128;
+const MAX_CSV_CELLS = 10_000;
+const MAX_CSV_CELL_TEXT_UNITS = 16_384;
+const MAX_DRAWIO_INFLATED_BYTES = 2 * 1024 * 1024;
+const MAX_DRAWIO_PAGES = 32;
+const MAX_DRAWIO_CELLS = 5_000;
+const MAX_DRAWIO_VERTICES = 1_500;
+const MAX_DRAWIO_EDGES = 2_500;
+const MAX_DRAWIO_XML_ELEMENTS = 20_000;
+const MAX_DRAWIO_XML_NODES = 60_000;
+const MAX_DRAWIO_XML_DEPTH = 64;
+const MAX_DRAWIO_XML_ATTRIBUTES = 120_000;
+const MAX_DRAWIO_XML_ATTRIBUTES_PER_ELEMENT = 128;
+const MAX_DRAWIO_XML_ATTRIBUTE_UNITS = 1_500_000;
+const MAX_DRAWIO_XML_TAG_UNITS = 65_536;
+const MAX_DIAGRAM_LABEL_UNITS = 1_000;
+const MAX_DIAGRAM_LINE_CHARACTERS = 160;
+const MAX_DIAGRAM_SVG_NODES = 24_000;
+const MAX_DIAGRAM_SVG_TEXT_UNITS = 256_000;
+const MAX_DIAGRAM_COORDINATE = 1_000_000;
+const MAX_DIAGRAM_VIEWBOX_SPAN = 100_000;
+const MAX_DIAGRAM_VIEWBOX_ASPECT = 100;
+const MIN_DIAGRAM_DISPLAY_WIDTH = 240;
+const MIN_DIAGRAM_DISPLAY_HEIGHT = 180;
+const MAX_DIAGRAM_DISPLAY_WIDTH = 1_800;
+const MAX_DIAGRAM_DISPLAY_HEIGHT = 1_200;
+const MAX_PLANTUML_STATEMENTS = 256;
+const MAX_PLANTUML_NESTING = 16;
+const NOTEBOOK_RENDER_BATCH_CELLS = 4;
 
 type OfficeDocumentKind = "docx" | "xlsx" | "ppt" | "pptx";
+
+type NotebookMimeBundle = Readonly<Record<string, unknown>>;
+
+interface NotebookModel {
+  readonly minor: number;
+  readonly languagePath: string;
+  readonly languageLabel: string;
+  readonly kernelLabel: string;
+  readonly cells: readonly NotebookCellModel[];
+  readonly reservedOutputTextUnits: number;
+  readonly limited: boolean;
+  readonly newerMinor: boolean;
+}
+
+interface CsvModel {
+  readonly rows: readonly (readonly string[])[];
+  readonly totalRows: number;
+  readonly maximumColumns: number;
+  readonly limited: boolean;
+  readonly malformed: boolean;
+}
+
+type DiagramSourceKind = "drawio" | "plantuml";
+
+interface DrawioPageSource {
+  readonly name: string;
+  readonly model: Element | null;
+  readonly encoded: string | null;
+}
+
+interface DrawioCellGeometry {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface DrawioVertex {
+  readonly id: string;
+  readonly parentId: string;
+  readonly label: string;
+  readonly style: ReadonlyMap<string, string>;
+  readonly geometry: DrawioCellGeometry;
+  readonly group: boolean;
+}
+
+interface DrawioEdge {
+  readonly label: string;
+  readonly sourceId: string;
+  readonly targetId: string;
+  readonly style: ReadonlyMap<string, string>;
+  readonly points: readonly DiagramPoint[];
+  readonly sourcePoint: DiagramPoint | null;
+  readonly targetPoint: DiagramPoint | null;
+}
+
+interface DiagramPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+interface DiagramSvgBudget {
+  nodes: number;
+  textUnits: number;
+}
+
+type PlantActivityStatement =
+  | { readonly kind: "start" | "stop" }
+  | { readonly kind: "action"; readonly label: string }
+  | {
+      readonly kind: "if";
+      readonly label: string;
+      readonly yesLabel: string;
+      readonly noLabel: string;
+      readonly thenBranch: readonly PlantActivityStatement[];
+      readonly elseBranch: readonly PlantActivityStatement[];
+    };
+
+interface PlantActivityTheme {
+  readonly background: string;
+  readonly fill: string;
+  readonly stroke: string;
+  readonly diamondFill: string;
+  readonly diamondStroke: string;
+  readonly font: string;
+  readonly roundCorner: number;
+}
+
+interface PlantActivityModel {
+  readonly title: string;
+  readonly statements: readonly PlantActivityStatement[];
+  readonly theme: PlantActivityTheme;
+  readonly unsupported: number;
+}
+
+type PlantLayoutNodeKind = "start" | "stop" | "action" | "decision" | "join";
+
+interface PlantLayoutNode {
+  readonly kind: PlantLayoutNodeKind;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly label: string;
+}
+
+interface PlantLayoutEdge {
+  readonly points: readonly DiagramPoint[];
+  readonly label: string;
+}
+
+interface PlantBlockLayout {
+  readonly width: number;
+  readonly height: number;
+  readonly entry: DiagramPoint | null;
+  readonly exit: DiagramPoint | null;
+  readonly nodes: readonly PlantLayoutNode[];
+  readonly edges: readonly PlantLayoutEdge[];
+}
+
+type NotebookCellModel =
+  | {
+      readonly kind: "markdown";
+      readonly source: string;
+      readonly attachments: ReadonlyMap<string, NotebookMimeBundle>;
+    }
+  | {
+      readonly kind: "code";
+      readonly source: string;
+      readonly executionCount: number | null;
+      readonly outputs: readonly NotebookOutputModel[];
+    }
+  | { readonly kind: "raw"; readonly source: string }
+  | { readonly kind: "unsupported"; readonly reason: string };
+
+type NotebookOutputModel =
+  | { readonly kind: "stream"; readonly name: "stdout" | "stderr"; readonly text: string }
+  | { readonly kind: "error"; readonly ename: string; readonly evalue: string; readonly traceback: string }
+  | {
+      readonly kind: "display";
+      readonly executionCount: number | null;
+      readonly data: NotebookMimeBundle;
+    }
+  | { readonly kind: "unsupported" };
+
+interface NotebookParseBudget {
+  sourceUnits: number;
+  outputCount: number;
+  outputTextUnits: number;
+  attachmentCount: number;
+  limited: boolean;
+}
+
+interface NotebookRenderBudget {
+  htmlUnits: number;
+  outputTextUnits: number;
+  imageBytes: number;
+  domNodes: number;
+  limited: boolean;
+}
 
 interface OfficeDomBudget {
   remainingNodes: number;
@@ -235,7 +453,7 @@ export interface MainPreviewEmptyView extends MainPreviewFileBase {
 }
 
 export interface MainPreviewMediaView extends MainPreviewFileBase {
-  readonly kind: "image" | "video" | "pdf" | "audio" | "office";
+  readonly kind: "image" | "video" | "pdf" | "audio" | "office" | "notebook";
   readonly mimeType: string;
   readonly sizeBytes: number;
   readonly bytes: Uint8Array;
@@ -390,6 +608,1275 @@ function isMarkdownPreviewPath(path: string): boolean {
   return normalized.endsWith(".md") || normalized.endsWith(".markdown");
 }
 
+function isCsvPreviewPath(path: string): boolean {
+  return path.replaceAll("\\", "/").toLowerCase().endsWith(".csv");
+}
+
+function diagramSourceKind(path: string): DiagramSourceKind | null {
+  const normalized = path.replaceAll("\\", "/").toLowerCase();
+  if (normalized.endsWith(".drawio")) return "drawio";
+  if (normalized.endsWith(".plantuml")) return "plantuml";
+  return null;
+}
+
+function isDiagramPreviewPath(path: string): boolean {
+  return diagramSourceKind(path) !== null;
+}
+
+function parseCsv(source: string, allowIncompleteFinalRecord = false): CsvModel {
+  const input = source.charCodeAt(0) === 0xfeff ? source.slice(1) : source;
+  if (input.length === 0) {
+    return { rows: [], totalRows: 0, maximumColumns: 0, limited: false, malformed: false };
+  }
+
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let rowColumns = 0;
+  let totalRows = 0;
+  let maximumColumns = 0;
+  let retainedCells = 0;
+  let inQuotes = false;
+  let atFieldStart = true;
+  let afterClosingQuote = false;
+  let endedAtRecordBoundary = false;
+  let limited = false;
+  let malformed = false;
+
+  const canRetainField = (): boolean =>
+    totalRows < MAX_CSV_ROWS && rowColumns < MAX_CSV_COLUMNS && retainedCells < MAX_CSV_CELLS;
+  const append = (value: string): void => {
+    if (!canRetainField()) {
+      limited = true;
+      return;
+    }
+    const remaining = MAX_CSV_CELL_TEXT_UNITS - field.length;
+    if (remaining <= 0) {
+      limited = true;
+      return;
+    }
+    const candidate = value.slice(0, remaining);
+    const finalCodeUnit = candidate.charCodeAt(candidate.length - 1);
+    const safeCandidate = finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff ? candidate.slice(0, -1) : candidate;
+    field += safeCandidate;
+    if (safeCandidate.length < value.length) limited = true;
+  };
+  const finishField = (): void => {
+    if (canRetainField()) {
+      row.push(field);
+      retainedCells += 1;
+    } else {
+      limited = true;
+    }
+    rowColumns += 1;
+    field = "";
+    atFieldStart = true;
+    afterClosingQuote = false;
+  };
+  const finishRow = (): void => {
+    finishField();
+    maximumColumns = Math.max(maximumColumns, rowColumns);
+    if (totalRows < MAX_CSV_ROWS && row.length > 0) rows.push(row);
+    else limited = true;
+    totalRows += 1;
+    row = [];
+    rowColumns = 0;
+  };
+
+  for (let index = 0; index < input.length; index += 1) {
+    let character = input[index] ?? "";
+    const firstCodeUnit = character.charCodeAt(0);
+    const secondCodeUnit = input.charCodeAt(index + 1);
+    if (
+      firstCodeUnit >= 0xd800 && firstCodeUnit <= 0xdbff &&
+      secondCodeUnit >= 0xdc00 && secondCodeUnit <= 0xdfff
+    ) {
+      character += input[index + 1];
+      index += 1;
+    }
+    if (inQuotes) {
+      if (character === '"') {
+        if (input[index + 1] === '"') {
+          append('"');
+          index += 1;
+        } else {
+          inQuotes = false;
+          afterClosingQuote = true;
+        }
+      } else if (character === "\r") {
+        append("\n");
+        if (input[index + 1] === "\n") index += 1;
+      } else {
+        append(character);
+      }
+      endedAtRecordBoundary = false;
+      continue;
+    }
+
+    if (character === ",") {
+      finishField();
+      endedAtRecordBoundary = false;
+      continue;
+    }
+    if (character === "\r" || character === "\n") {
+      if (character === "\r" && input[index + 1] === "\n") index += 1;
+      finishRow();
+      endedAtRecordBoundary = true;
+      continue;
+    }
+    if (character === '"' && atFieldStart) {
+      inQuotes = true;
+      atFieldStart = false;
+      endedAtRecordBoundary = false;
+      continue;
+    }
+    if (character === '"') malformed = true;
+    if (afterClosingQuote) malformed = true;
+    append(character);
+    atFieldStart = false;
+    afterClosingQuote = false;
+    endedAtRecordBoundary = false;
+  }
+
+  if (inQuotes && !allowIncompleteFinalRecord) malformed = true;
+  if (!endedAtRecordBoundary || rowColumns > 0 || field.length > 0 || atFieldStart === false) finishRow();
+  return { rows, totalRows, maximumColumns, limited, malformed };
+}
+
+function visibleCsvCellText(value: string): string {
+  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, (character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return `\\u${code.toString(16).padStart(4, "0")}`;
+  });
+}
+
+function boundedDiagramNumber(value: string | null, fallback: number, minimum: number, maximum: number): number {
+  if (value === null || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+
+function safeDiagramColor(value: string | undefined, fallback: string): string {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return /^#[0-9a-f]{6}$/.test(normalized) || /^#[0-9a-f]{3}$/.test(normalized) ? normalized : fallback;
+}
+
+function parseDrawioStyle(value: string | null): ReadonlyMap<string, string> {
+  const result = new Map<string, string>();
+  const source = (value ?? "").slice(0, 8_192);
+  for (const token of source.split(";", 128)) {
+    const separator = token.indexOf("=");
+    const key = (separator < 0 ? token : token.slice(0, separator)).trim().toLowerCase();
+    if (!key || !/^[a-z][a-z0-9_.-]{0,63}$/.test(key)) continue;
+    result.set(key, separator < 0 ? "1" : token.slice(separator + 1).trim().slice(0, 256));
+  }
+  return result;
+}
+
+function decodedDrawioEntity(entity: string): string {
+  const normalized = entity.toLowerCase();
+  const named: Readonly<Record<string, string>> = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    lt: "<",
+    nbsp: " ",
+    quot: '"',
+  };
+  if (named[normalized] !== undefined) return named[normalized];
+  const numeric = normalized.startsWith("#x")
+    ? Number.parseInt(normalized.slice(2), 16)
+    : normalized.startsWith("#")
+      ? Number.parseInt(normalized.slice(1), 10)
+      : Number.NaN;
+  return Number.isInteger(numeric) && numeric >= 0 && numeric <= 0x10ffff && !(numeric >= 0xd800 && numeric <= 0xdfff)
+    ? String.fromCodePoint(numeric)
+    : `&${entity};`;
+}
+
+function plainDrawioLabel(value: string | null): string {
+  return (value ?? "")
+    .slice(0, MAX_DIAGRAM_LABEL_UNITS * 4)
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/(?:div|p|li|tr|h[1-6])\s*>/gi, "\n")
+    .replace(/<[^>]{0,1024}>/g, "")
+    .replace(/&(#x[0-9a-f]+|#\d+|amp|apos|gt|lt|nbsp|quot);/gi, (_match, entity: string) => decodedDrawioEntity(entity))
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ")
+    .slice(0, MAX_DIAGRAM_LABEL_UNITS)
+    .trim();
+}
+
+function assertDiagramNotAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException("The diagram preview was cancelled.", "AbortError");
+}
+
+function enforceDiagramXmlBudget(source: string, signal?: AbortSignal): void {
+  let index = 0;
+  let depth = 0;
+  let elements = 0;
+  let nodes = 0;
+  let attributes = 0;
+  let attributeUnits = 0;
+  const countNode = (): void => {
+    nodes += 1;
+    if (nodes > MAX_DRAWIO_XML_NODES) throw new Error("The diagram XML has too many nodes to preview safely.");
+  };
+  while (index < source.length) {
+    assertDiagramNotAborted(signal);
+    const opening = source.indexOf("<", index);
+    if (opening < 0) {
+      if (index < source.length) countNode();
+      break;
+    }
+    if (opening > index) countNode();
+    if (source.startsWith("<!--", opening)) {
+      const ending = source.indexOf("-->", opening + 4);
+      if (ending < 0) throw new Error("The diagram XML contains an incomplete comment.");
+      countNode();
+      index = ending + 3;
+      continue;
+    }
+    if (source.startsWith("<![CDATA[", opening)) {
+      const ending = source.indexOf("]]>", opening + 9);
+      if (ending < 0) throw new Error("The diagram XML contains an incomplete CDATA section.");
+      countNode();
+      index = ending + 3;
+      continue;
+    }
+    if (source.startsWith("<?", opening)) {
+      const ending = source.indexOf("?>", opening + 2);
+      if (ending < 0 || ending - opening > MAX_DRAWIO_XML_TAG_UNITS) {
+        throw new Error("The diagram XML declaration exceeds the safe preview limit.");
+      }
+      countNode();
+      index = ending + 2;
+      continue;
+    }
+    if (source.startsWith("</", opening)) {
+      const ending = source.indexOf(">", opening + 2);
+      if (ending < 0 || ending - opening > MAX_DRAWIO_XML_TAG_UNITS) {
+        throw new Error("A diagram XML closing tag exceeds the safe preview limit.");
+      }
+      depth -= 1;
+      if (depth < 0) throw new Error("The diagram XML nesting is malformed.");
+      index = ending + 1;
+      continue;
+    }
+    if (source.startsWith("<!", opening)) {
+      throw new Error("Unsupported XML declarations are not allowed in diagram previews.");
+    }
+    let cursor = opening + 1;
+    while (cursor < source.length && /\s/.test(source[cursor] ?? "")) cursor += 1;
+    const nameStart = cursor;
+    while (cursor < source.length && !/[\s/>]/.test(source[cursor] ?? "")) cursor += 1;
+    if (cursor === nameStart) throw new Error("The diagram XML contains a malformed element.");
+    elements += 1;
+    if (elements > MAX_DRAWIO_XML_ELEMENTS) throw new Error("The diagram XML has too many elements to preview safely.");
+    countNode();
+    depth += 1;
+    if (depth > MAX_DRAWIO_XML_DEPTH) throw new Error("The diagram XML nesting is too deep to preview safely.");
+    let elementAttributes = 0;
+    let closed = false;
+    while (cursor < source.length) {
+      assertDiagramNotAborted(signal);
+      if (cursor - opening > MAX_DRAWIO_XML_TAG_UNITS) throw new Error("A diagram XML tag exceeds the safe preview limit.");
+      while (cursor < source.length && /\s/.test(source[cursor] ?? "")) cursor += 1;
+      if (source[cursor] === ">") {
+        cursor += 1;
+        closed = true;
+        break;
+      }
+      if (source[cursor] === "/" && source[cursor + 1] === ">") {
+        cursor += 2;
+        depth -= 1;
+        closed = true;
+        break;
+      }
+      const attributeStart = cursor;
+      while (cursor < source.length && !/[\s=/>]/.test(source[cursor] ?? "")) cursor += 1;
+      if (cursor === attributeStart) throw new Error("The diagram XML contains a malformed attribute.");
+      const attributeNameUnits = cursor - attributeStart;
+      while (cursor < source.length && /\s/.test(source[cursor] ?? "")) cursor += 1;
+      if (source[cursor] !== "=") throw new Error("The diagram XML contains an unquoted attribute.");
+      cursor += 1;
+      while (cursor < source.length && /\s/.test(source[cursor] ?? "")) cursor += 1;
+      const quote = source[cursor];
+      if (quote !== '"' && quote !== "'") throw new Error("The diagram XML contains an unquoted attribute value.");
+      const valueStart = cursor + 1;
+      const valueEnd = source.indexOf(quote, valueStart);
+      if (valueEnd < 0) throw new Error("The diagram XML contains an incomplete attribute value.");
+      const valueUnits = valueEnd - valueStart;
+      cursor = valueEnd + 1;
+      elementAttributes += 1;
+      attributes += 1;
+      attributeUnits += attributeNameUnits + valueUnits;
+      if (elementAttributes > MAX_DRAWIO_XML_ATTRIBUTES_PER_ELEMENT) {
+        throw new Error("A diagram XML element has too many attributes to preview safely.");
+      }
+      if (attributes > MAX_DRAWIO_XML_ATTRIBUTES || attributeUnits > MAX_DRAWIO_XML_ATTRIBUTE_UNITS) {
+        throw new Error("The diagram XML attribute budget was exceeded.");
+      }
+    }
+    if (!closed) throw new Error("The diagram XML contains an incomplete element.");
+    index = cursor;
+  }
+  if (depth !== 0) throw new Error("The diagram XML nesting is malformed.");
+  assertDiagramNotAborted(signal);
+}
+
+function parseSafeDiagramXml(Parser: typeof DOMParser, source: string, signal?: AbortSignal): XMLDocument {
+  if (source.length === 0 || source.length > MAX_DRAWIO_INFLATED_BYTES) {
+    throw new Error("The diagram XML exceeds the safe preview limit.");
+  }
+  assertDiagramNotAborted(signal);
+  const withoutBom = source.charCodeAt(0) === 0xfeff ? source.slice(1) : source;
+  const declaration = withoutBom.match(/^\s*<\?xml\s+[^?]{0,512}\?>/i)?.[0] ?? "";
+  const remaining = declaration ? withoutBom.slice(declaration.length) : withoutBom;
+  if (
+    /<\?/.test(remaining) ||
+    /<\s*!(?:doctype|entity)\b/i.test(remaining) ||
+    /<(?:[a-z][\w.-]*:)?include\b/i.test(remaining)
+  ) {
+    throw new Error("External resources and XML directives are not allowed in diagram previews.");
+  }
+  enforceDiagramXmlBudget(withoutBom, signal);
+  assertDiagramNotAborted(signal);
+  const document = new Parser().parseFromString(withoutBom, "application/xml");
+  for (const element of document.getElementsByTagName("*")) {
+    if (element.localName.toLowerCase() === "parsererror") throw new Error("The diagram XML is malformed.");
+  }
+  assertDiagramNotAborted(signal);
+  return document;
+}
+
+function drawioPages(Parser: typeof DOMParser, source: string, signal?: AbortSignal): {
+  readonly pages: readonly DrawioPageSource[];
+  readonly limited: boolean;
+} {
+  const document = parseSafeDiagramXml(Parser, source, signal);
+  const root = document.documentElement;
+  const rootName = root.localName.toLowerCase();
+  if (rootName === "mxgraphmodel") {
+    return { pages: [{ name: "Page 1", model: root, encoded: null }], limited: false };
+  }
+  if (rootName !== "mxfile") throw new Error("This is not a Draw.io diagram.");
+  const pageElements = Array.from(root.children).filter((element) => element.localName.toLowerCase() === "diagram");
+  if (pageElements.length === 0) throw new Error("The Draw.io file has no pages.");
+  const pages = pageElements.slice(0, MAX_DRAWIO_PAGES).map((page, index): DrawioPageSource => ({
+    name: plainDrawioLabel(xmlAttribute(page, "name")) || `Page ${index + 1}`,
+    model: directXmlChild(page, "mxGraphModel"),
+    encoded: directXmlChild(page, "mxGraphModel") ? null : (page.textContent ?? "").trim(),
+  }));
+  return { pages, limited: pageElements.length > pages.length };
+}
+
+async function inflateDrawioPage(encoded: string, signal?: AbortSignal): Promise<string> {
+  assertDiagramNotAborted(signal);
+  const compact = encoded.replace(/\s+/g, "");
+  if (!compact || compact.length > 128 * 1024 || !/^[a-z0-9+/]*={0,2}$/i.test(compact)) {
+    throw new Error("The compressed Draw.io page is invalid.");
+  }
+  let binary: string;
+  try {
+    binary = atob(compact);
+  } catch {
+    throw new Error("The compressed Draw.io page is invalid.");
+  }
+  const compressed = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  const cancelReader = (): void => {
+    void reader?.cancel(signal?.reason).catch(() => undefined);
+  };
+  signal?.addEventListener("abort", cancelReader, { once: true });
+  try {
+    assertDiagramNotAborted(signal);
+    const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    reader = stream.getReader();
+    assertDiagramNotAborted(signal);
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    while (true) {
+      assertDiagramNotAborted(signal);
+      const result = await reader.read();
+      assertDiagramNotAborted(signal);
+      if (result.done) break;
+      const chunk = result.value;
+      length += chunk.byteLength;
+      if (length > MAX_DRAWIO_INFLATED_BYTES) {
+        await reader.cancel();
+        throw new Error("The compressed Draw.io page expands beyond the safe preview limit.");
+      }
+      chunks.push(chunk);
+    }
+    const inflated = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      inflated.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    assertDiagramNotAborted(signal);
+    const escaped = new TextDecoder("utf-8", { fatal: true }).decode(inflated);
+    const xml = decodeURIComponent(escaped);
+    if (xml.length > MAX_DRAWIO_INFLATED_BYTES) throw new Error("The diagram XML exceeds the safe preview limit.");
+    return xml;
+  } catch (error) {
+    if (signal?.aborted) assertDiagramNotAborted(signal);
+    if (error instanceof Error && error.message.includes("safe preview limit")) throw error;
+    throw new Error("This compressed Draw.io page could not be decoded locally.");
+  } finally {
+    signal?.removeEventListener("abort", cancelReader);
+    if (signal?.aborted) {
+      try {
+        await reader?.cancel(signal.reason);
+      } catch {
+        // Cancellation can race with a completed or errored stream.
+      }
+    }
+    try {
+      reader?.releaseLock();
+    } catch {
+      // The bounded reader may already have been cancelled.
+    }
+  }
+}
+
+async function drawioPageModel(
+  Parser: typeof DOMParser,
+  page: DrawioPageSource,
+  signal?: AbortSignal,
+): Promise<Element> {
+  assertDiagramNotAborted(signal);
+  if (page.model) return page.model;
+  const encoded = page.encoded ?? "";
+  const xml = encoded.trimStart().startsWith("<") ? encoded : await inflateDrawioPage(encoded, signal);
+  assertDiagramNotAborted(signal);
+  const document = parseSafeDiagramXml(Parser, xml, signal);
+  if (document.documentElement.localName.toLowerCase() !== "mxgraphmodel") {
+    throw new Error("The Draw.io page does not contain a graph model.");
+  }
+  return document.documentElement;
+}
+
+function drawioGeometry(cell: Element): DrawioCellGeometry | null {
+  const geometry = directXmlChild(cell, "mxGeometry");
+  if (!geometry) return null;
+  return {
+    x: boundedDiagramNumber(xmlAttribute(geometry, "x"), 0, -1_000_000, 1_000_000),
+    y: boundedDiagramNumber(xmlAttribute(geometry, "y"), 0, -1_000_000, 1_000_000),
+    width: boundedDiagramNumber(xmlAttribute(geometry, "width"), 120, 1, 100_000),
+    height: boundedDiagramNumber(xmlAttribute(geometry, "height"), 50, 1, 100_000),
+  };
+}
+
+function drawioPoint(element: Element): DiagramPoint {
+  return {
+    x: boundedDiagramNumber(xmlAttribute(element, "x"), 0, -1_000_000, 1_000_000),
+    y: boundedDiagramNumber(xmlAttribute(element, "y"), 0, -1_000_000, 1_000_000),
+  };
+}
+
+function drawioGraph(model: Element): {
+  readonly vertices: readonly DrawioVertex[];
+  readonly edges: readonly DrawioEdge[];
+} {
+  const cells: Element[] = [];
+  for (const element of model.getElementsByTagName("*")) {
+    if (element.localName.toLowerCase() !== "mxcell") continue;
+    if (cells.length >= MAX_DRAWIO_CELLS) throw new Error("This Draw.io page has too many cells to preview safely.");
+    cells.push(element);
+  }
+  const vertices: DrawioVertex[] = [];
+  const edges: DrawioEdge[] = [];
+  const ids = new Set<string>();
+  for (const cell of cells) {
+    const id = (xmlAttribute(cell, "id") ?? "").slice(0, 512);
+    if (id && ids.has(id)) continue;
+    if (id) ids.add(id);
+    const style = parseDrawioStyle(xmlAttribute(cell, "style"));
+    if (xmlAttribute(cell, "vertex") === "1") {
+      if (vertices.length >= MAX_DRAWIO_VERTICES) throw new Error("This Draw.io page has too many shapes to preview safely.");
+      const geometry = drawioGeometry(cell);
+      if (!id || !geometry) continue;
+      vertices.push({
+        id,
+        parentId: (xmlAttribute(cell, "parent") ?? "").slice(0, 512),
+        label: plainDrawioLabel(xmlAttribute(cell, "value")),
+        style,
+        geometry,
+        group: style.has("group") || style.get("shape")?.toLowerCase() === "group",
+      });
+      continue;
+    }
+    if (xmlAttribute(cell, "edge") !== "1") continue;
+    if (edges.length >= MAX_DRAWIO_EDGES) throw new Error("This Draw.io page has too many connectors to preview safely.");
+    const geometry = directXmlChild(cell, "mxGeometry");
+    const points: DiagramPoint[] = [];
+    let sourcePoint: DiagramPoint | null = null;
+    let targetPoint: DiagramPoint | null = null;
+    if (geometry) {
+      for (const child of geometry.children) {
+        const childName = child.localName.toLowerCase();
+        if (childName === "mxpoint") {
+          const purpose = (xmlAttribute(child, "as") ?? "").toLowerCase();
+          if (purpose === "sourcepoint") sourcePoint = drawioPoint(child);
+          else if (purpose === "targetpoint") targetPoint = drawioPoint(child);
+        } else if (childName === "array" && (xmlAttribute(child, "as") ?? "").toLowerCase() === "points") {
+          for (const point of Array.from(child.children).slice(0, 128)) {
+            if (point.localName.toLowerCase() === "mxpoint") points.push(drawioPoint(point));
+          }
+        }
+      }
+    }
+    edges.push({
+      label: plainDrawioLabel(xmlAttribute(cell, "value")),
+      sourceId: (xmlAttribute(cell, "source") ?? "").slice(0, 512),
+      targetId: (xmlAttribute(cell, "target") ?? "").slice(0, 512),
+      style,
+      points,
+      sourcePoint,
+      targetPoint,
+    });
+  }
+  return { vertices, edges };
+}
+
+function absoluteDrawioVertices(vertices: readonly DrawioVertex[]): ReadonlyMap<string, DrawioVertex> {
+  const original = new Map(vertices.map((vertex) => [vertex.id, vertex]));
+  const resolved = new Map<string, DrawioVertex>();
+  const visiting = new Set<string>();
+  const resolve = (vertex: DrawioVertex, depth: number): DrawioVertex => {
+    const existing = resolved.get(vertex.id);
+    if (existing) return existing;
+    if (depth > 64 || visiting.has(vertex.id)) throw new Error("The Draw.io page contains cyclic group geometry.");
+    visiting.add(vertex.id);
+    const parent = original.get(vertex.parentId);
+    const parentGeometry = parent ? resolve(parent, depth + 1).geometry : null;
+    const absoluteX = vertex.geometry.x + (parentGeometry?.x ?? 0);
+    const absoluteY = vertex.geometry.y + (parentGeometry?.y ?? 0);
+    if (
+      !Number.isFinite(absoluteX) ||
+      !Number.isFinite(absoluteY) ||
+      Math.abs(absoluteX) > MAX_DIAGRAM_COORDINATE ||
+      Math.abs(absoluteY) > MAX_DIAGRAM_COORDINATE
+    ) {
+      throw new Error("The Draw.io group coordinates exceed the safe preview limit.");
+    }
+    const absolute: DrawioVertex = {
+      ...vertex,
+      geometry: {
+        ...vertex.geometry,
+        x: absoluteX,
+        y: absoluteY,
+      },
+    };
+    visiting.delete(vertex.id);
+    resolved.set(vertex.id, absolute);
+    return absolute;
+  };
+  for (const vertex of vertices) resolve(vertex, 0);
+  return resolved;
+}
+
+function diagramSvgElement(document: Document, name: string, budget: DiagramSvgBudget): SVGElement {
+  budget.nodes += 1;
+  if (budget.nodes > MAX_DIAGRAM_SVG_NODES) throw new Error("The diagram SVG node budget was exceeded.");
+  return document.createElementNS("http://www.w3.org/2000/svg", name);
+}
+
+function setDiagramSvgText(element: SVGElement, value: string, budget: DiagramSvgBudget): string {
+  let text = value.slice(0, MAX_DIAGRAM_LABEL_UNITS);
+  const finalCodeUnit = text.charCodeAt(text.length - 1);
+  if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) text = text.slice(0, -1);
+  budget.textUnits += text.length;
+  if (text) budget.nodes += 1;
+  if (budget.textUnits > MAX_DIAGRAM_SVG_TEXT_UNITS || budget.nodes > MAX_DIAGRAM_SVG_NODES) {
+    throw new Error("The diagram SVG text budget was exceeded.");
+  }
+  element.textContent = text;
+  return text;
+}
+
+function setBoundedDiagramSvgViewport(
+  svg: SVGSVGElement,
+  minimumX: number,
+  minimumY: number,
+  viewWidth: number,
+  viewHeight: number,
+): void {
+  if (
+    !Number.isFinite(minimumX) ||
+    !Number.isFinite(minimumY) ||
+    !Number.isFinite(viewWidth) ||
+    !Number.isFinite(viewHeight) ||
+    viewWidth <= 0 ||
+    viewHeight <= 0 ||
+    viewWidth > MAX_DIAGRAM_VIEWBOX_SPAN ||
+    viewHeight > MAX_DIAGRAM_VIEWBOX_SPAN
+  ) {
+    throw new Error("The diagram dimensions exceed the safe preview limit.");
+  }
+  const aspect = Math.max(viewWidth / viewHeight, viewHeight / viewWidth);
+  if (!Number.isFinite(aspect) || aspect > MAX_DIAGRAM_VIEWBOX_ASPECT) {
+    throw new Error("The diagram aspect ratio exceeds the safe preview limit.");
+  }
+  let displayWidth = Math.min(MAX_DIAGRAM_DISPLAY_WIDTH, Math.max(MIN_DIAGRAM_DISPLAY_WIDTH, viewWidth));
+  let displayHeight = displayWidth * viewHeight / viewWidth;
+  if (displayHeight > MAX_DIAGRAM_DISPLAY_HEIGHT) {
+    displayHeight = MAX_DIAGRAM_DISPLAY_HEIGHT;
+    displayWidth = Math.max(MIN_DIAGRAM_DISPLAY_WIDTH, displayHeight * viewWidth / viewHeight);
+  }
+  displayWidth = Math.min(MAX_DIAGRAM_DISPLAY_WIDTH, Math.max(MIN_DIAGRAM_DISPLAY_WIDTH, displayWidth));
+  displayHeight = Math.min(MAX_DIAGRAM_DISPLAY_HEIGHT, Math.max(MIN_DIAGRAM_DISPLAY_HEIGHT, displayHeight));
+  const boundedWidth = Math.ceil(displayWidth);
+  const boundedHeight = Math.ceil(displayHeight);
+  svg.setAttribute("viewBox", `${minimumX} ${minimumY} ${viewWidth} ${viewHeight}`);
+  svg.setAttribute("width", String(boundedWidth));
+  svg.setAttribute("height", String(boundedHeight));
+  svg.style.width = `${boundedWidth}px`;
+  svg.style.height = `${boundedHeight}px`;
+}
+
+function diagramPolylineMidpoint(points: readonly DiagramPoint[]): DiagramPoint {
+  if (points.length === 0) return { x: 0, y: 0 };
+  if (points.length === 1) return points[0] ?? { x: 0, y: 0 };
+  const lengths: number[] = [];
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1] ?? points[0] ?? { x: 0, y: 0 };
+    const point = points[index] ?? previous;
+    const length = Math.hypot(point.x - previous.x, point.y - previous.y);
+    lengths.push(length);
+    total += length;
+  }
+  let remaining = total / 2;
+  for (let index = 1; index < points.length; index += 1) {
+    const length = lengths[index - 1] ?? 0;
+    const previous = points[index - 1] ?? points[0] ?? { x: 0, y: 0 };
+    const point = points[index] ?? previous;
+    if (remaining <= length || index === points.length - 1) {
+      const ratio = length > 0 ? remaining / length : 0;
+      return { x: previous.x + (point.x - previous.x) * ratio, y: previous.y + (point.y - previous.y) * ratio };
+    }
+    remaining -= length;
+  }
+  return points[points.length - 1] ?? { x: 0, y: 0 };
+}
+
+function drawioBoundaryPoint(vertex: DrawioVertex, toward: DiagramPoint): DiagramPoint {
+  const { x, y, width, height } = vertex.geometry;
+  const center = { x: x + width / 2, y: y + height / 2 };
+  const dx = toward.x - center.x;
+  const dy = toward.y - center.y;
+  if (dx === 0 && dy === 0) return center;
+  const scale = 1 / Math.max(Math.abs(dx) / Math.max(1, width / 2), Math.abs(dy) / Math.max(1, height / 2));
+  return { x: center.x + dx * scale, y: center.y + dy * scale };
+}
+
+function wrappedDiagramLines(value: string, maximumCharacters: number, maximumLines: number): readonly string[] {
+  const result: string[] = [];
+  const width = Math.min(MAX_DIAGRAM_LINE_CHARACTERS, Math.max(4, Math.trunc(maximumCharacters)));
+  for (const requestedLine of value.split(/\r?\n/)) {
+    const words = requestedLine.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      result.push("");
+      continue;
+    }
+    let line = "";
+    let lineLength = 0;
+    for (const word of words) {
+      const characters = Array.from(word);
+      if (characters.length > width) {
+        if (line) {
+          result.push(line);
+          line = "";
+          lineLength = 0;
+        }
+        for (let index = 0; index < characters.length; index += width) {
+          result.push(characters.slice(index, index + width).join(""));
+        }
+      } else if (!line || lineLength + 1 + characters.length <= width) {
+        line = line ? `${line} ${word}` : word;
+        lineLength = lineLength === 0 ? characters.length : lineLength + 1 + characters.length;
+      } else {
+        result.push(line);
+        line = word;
+        lineLength = characters.length;
+      }
+    }
+    if (line) result.push(line);
+  }
+  const normalized = result.slice(0, maximumLines);
+  if (result.length > maximumLines && normalized.length > 0) {
+    const final = normalized[normalized.length - 1] ?? "";
+    normalized[normalized.length - 1] = `${Array.from(final).slice(0, Math.max(1, width - 1)).join("")}\u2026`;
+  }
+  return normalized;
+}
+
+function appendDiagramSvgText(
+  document: Document,
+  parent: SVGElement,
+  label: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string,
+  fontSize: number,
+  budget: DiagramSvgBudget,
+): void {
+  if (!label) return;
+  const boundedLabel = label.slice(0, MAX_DIAGRAM_LABEL_UNITS);
+  const text = diagramSvgElement(document, "text", budget);
+  text.setAttribute("x", String(x + width / 2));
+  text.setAttribute("y", String(y + height / 2));
+  text.setAttribute("fill", color);
+  text.setAttribute("font-family", "Segoe UI, sans-serif");
+  text.setAttribute("font-size", String(fontSize));
+  text.setAttribute("text-anchor", "middle");
+  text.setAttribute("dominant-baseline", "middle");
+  const lines = wrappedDiagramLines(boundedLabel, Math.max(5, Math.floor(width / Math.max(6, fontSize * 0.56))), Math.max(1, Math.floor(height / (fontSize * 1.25))));
+  const lineHeight = fontSize * 1.22;
+  for (let index = 0; index < lines.length; index += 1) {
+    const span = diagramSvgElement(document, "tspan", budget);
+    span.setAttribute("x", String(x + width / 2));
+    span.setAttribute("dy", index === 0 ? String(-((lines.length - 1) * lineHeight) / 2) : String(lineHeight));
+    setDiagramSvgText(span, lines[index] ?? "", budget);
+    text.append(span);
+  }
+  const title = diagramSvgElement(document, "title", budget);
+  setDiagramSvgText(title, boundedLabel, budget);
+  text.append(title);
+  parent.append(text);
+}
+
+function drawioShapeKind(style: ReadonlyMap<string, string>): "rect" | "ellipse" | "rhombus" | "hexagon" | "parallelogram" | "cylinder" | "unsupported" {
+  const shape = style.get("shape")?.trim().toLowerCase() ?? "";
+  if (style.has("rhombus") || shape === "rhombus") return "rhombus";
+  if (style.has("ellipse") || shape === "ellipse" || shape === "doubleellipse") return "ellipse";
+  if (shape === "hexagon") return "hexagon";
+  if (shape === "parallelogram") return "parallelogram";
+  if (shape === "cylinder" || shape === "cylinder3") return "cylinder";
+  if (!shape || shape === "rectangle" || shape === "label" || shape === "process") return "rect";
+  return "unsupported";
+}
+
+function appendDrawioShape(document: Document, parent: SVGElement, vertex: DrawioVertex, budget: DiagramSvgBudget): boolean {
+  const { x, y, width, height } = vertex.geometry;
+  const fill = safeDiagramColor(vertex.style.get("fillcolor"), "var(--cle-main-raised)");
+  const stroke = safeDiagramColor(vertex.style.get("strokecolor"), "var(--cle-main-muted)");
+  const font = safeDiagramColor(vertex.style.get("fontcolor"), "var(--cle-main-text)");
+  const strokeWidth = boundedDiagramNumber(vertex.style.get("strokewidth") ?? null, 1.2, 0.5, 8);
+  const kind = drawioShapeKind(vertex.style);
+  let shape: SVGElement;
+  if (kind === "ellipse") {
+    shape = diagramSvgElement(document, "ellipse", budget);
+    shape.setAttribute("cx", String(x + width / 2));
+    shape.setAttribute("cy", String(y + height / 2));
+    shape.setAttribute("rx", String(width / 2));
+    shape.setAttribute("ry", String(height / 2));
+  } else if (kind === "rhombus" || kind === "hexagon" || kind === "parallelogram") {
+    shape = diagramSvgElement(document, "polygon", budget);
+    const points = kind === "rhombus"
+      ? [[x + width / 2, y], [x + width, y + height / 2], [x + width / 2, y + height], [x, y + height / 2]]
+      : kind === "hexagon"
+        ? [[x + width * 0.22, y], [x + width * 0.78, y], [x + width, y + height / 2], [x + width * 0.78, y + height], [x + width * 0.22, y + height], [x, y + height / 2]]
+        : [[x + width * 0.18, y], [x + width, y], [x + width * 0.82, y + height], [x, y + height]];
+    shape.setAttribute("points", points.map((point) => point.join(",")).join(" "));
+  } else {
+    shape = diagramSvgElement(document, "rect", budget);
+    shape.setAttribute("x", String(x));
+    shape.setAttribute("y", String(y));
+    shape.setAttribute("width", String(width));
+    shape.setAttribute("height", String(height));
+    if (vertex.style.get("rounded") === "1" || kind === "cylinder") {
+      const radius = Math.min(14, width / 5, height / 3);
+      shape.setAttribute("rx", String(radius));
+      shape.setAttribute("ry", String(radius));
+    }
+  }
+  shape.setAttribute("fill", fill);
+  shape.setAttribute("stroke", stroke);
+  shape.setAttribute("stroke-width", String(strokeWidth));
+  if (vertex.style.get("dashed") === "1") shape.setAttribute("stroke-dasharray", "6 4");
+  parent.append(shape);
+  const fontSize = boundedDiagramNumber(vertex.style.get("fontsize") ?? null, 14, 8, 32);
+  appendDiagramSvgText(document, parent, vertex.label, x + 5, y + 4, Math.max(1, width - 10), Math.max(1, height - 8), font, fontSize, budget);
+  return kind !== "unsupported";
+}
+
+function renderDrawioSvg(document: Document, model: Element, accessibleName: string): {
+  readonly svg: SVGSVGElement;
+  readonly unsupportedShapes: number;
+} {
+  const budget: DiagramSvgBudget = { nodes: 0, textUnits: 0 };
+  const graph = drawioGraph(model);
+  const vertices = absoluteDrawioVertices(graph.vertices);
+  const drawableVertices = [...vertices.values()].filter((vertex) => !vertex.group);
+  if (drawableVertices.length === 0 && graph.edges.length === 0) throw new Error("This Draw.io page has no drawable cells.");
+  const svg = diagramSvgElement(document, "svg", budget) as SVGSVGElement;
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", accessibleName);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  const title = diagramSvgElement(document, "title", budget);
+  setDiagramSvgText(title, accessibleName, budget);
+  svg.append(title);
+  const definitions = diagramSvgElement(document, "defs", budget);
+  const marker = diagramSvgElement(document, "marker", budget);
+  const markerId = `cle-diagram-arrow-${++nextDiagramMarkerId}`;
+  marker.setAttribute("id", markerId);
+  marker.setAttribute("viewBox", "0 0 10 10");
+  marker.setAttribute("refX", "9");
+  marker.setAttribute("refY", "5");
+  marker.setAttribute("markerWidth", "7");
+  marker.setAttribute("markerHeight", "7");
+  marker.setAttribute("orient", "auto-start-reverse");
+  const markerPath = diagramSvgElement(document, "path", budget);
+  markerPath.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+  markerPath.setAttribute("fill", "context-stroke");
+  marker.append(markerPath);
+  definitions.append(marker);
+  svg.append(definitions);
+  const edgeLayer = diagramSvgElement(document, "g", budget);
+  const shapeLayer = diagramSvgElement(document, "g", budget);
+  let minimumX = Number.POSITIVE_INFINITY;
+  let minimumY = Number.POSITIVE_INFINITY;
+  let maximumX = Number.NEGATIVE_INFINITY;
+  let maximumY = Number.NEGATIVE_INFINITY;
+  const includePoint = (point: DiagramPoint): void => {
+    if (
+      !Number.isFinite(point.x) ||
+      !Number.isFinite(point.y) ||
+      Math.abs(point.x) > MAX_DIAGRAM_COORDINATE ||
+      Math.abs(point.y) > MAX_DIAGRAM_COORDINATE
+    ) {
+      throw new Error("The Draw.io geometry exceeds the safe preview limit.");
+    }
+    minimumX = Math.min(minimumX, point.x);
+    minimumY = Math.min(minimumY, point.y);
+    maximumX = Math.max(maximumX, point.x);
+    maximumY = Math.max(maximumY, point.y);
+  };
+  for (const vertex of drawableVertices) {
+    includePoint({ x: vertex.geometry.x, y: vertex.geometry.y });
+    includePoint({ x: vertex.geometry.x + vertex.geometry.width, y: vertex.geometry.y + vertex.geometry.height });
+  }
+  for (const edge of graph.edges) {
+    const source = vertices.get(edge.sourceId);
+    const target = vertices.get(edge.targetId);
+    const sourceCenter = source
+      ? { x: source.geometry.x + source.geometry.width / 2, y: source.geometry.y + source.geometry.height / 2 }
+      : edge.sourcePoint;
+    const targetCenter = target
+      ? { x: target.geometry.x + target.geometry.width / 2, y: target.geometry.y + target.geometry.height / 2 }
+      : edge.targetPoint;
+    if (!sourceCenter || !targetCenter) continue;
+    let points: DiagramPoint[] = [sourceCenter, ...edge.points, targetCenter];
+    if (edge.points.length === 0 && (edge.style.get("edgestyle") ?? "").toLowerCase().includes("orthogonal")) {
+      const middleX = (sourceCenter.x + targetCenter.x) / 2;
+      points = [sourceCenter, { x: middleX, y: sourceCenter.y }, { x: middleX, y: targetCenter.y }, targetCenter];
+    }
+    if (source) points[0] = drawioBoundaryPoint(source, points[1] ?? targetCenter);
+    if (target) points[points.length - 1] = drawioBoundaryPoint(target, points[points.length - 2] ?? sourceCenter);
+    for (const point of points) includePoint(point);
+    const path = diagramSvgElement(document, "path", budget);
+    path.setAttribute("d", points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" "));
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", safeDiagramColor(edge.style.get("strokecolor"), "var(--cle-main-muted)"));
+    path.setAttribute("stroke-width", String(boundedDiagramNumber(edge.style.get("strokewidth") ?? null, 1.35, 0.5, 8)));
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("stroke-linecap", "round");
+    if (edge.style.get("dashed") === "1") path.setAttribute("stroke-dasharray", "6 4");
+    if ((edge.style.get("endarrow") ?? "block").toLowerCase() !== "none") path.setAttribute("marker-end", `url(#${markerId})`);
+    if ((edge.style.get("startarrow") ?? "none").toLowerCase() !== "none") path.setAttribute("marker-start", `url(#${markerId})`);
+    edgeLayer.append(path);
+    if (edge.label) {
+      const midpoint = diagramPolylineMidpoint(points);
+      appendDiagramSvgText(document, edgeLayer, edge.label, midpoint.x - 65, midpoint.y - 15, 130, 30, "var(--cle-main-text)", 12, budget);
+    }
+  }
+  let unsupportedShapes = 0;
+  for (const vertex of drawableVertices) {
+    if (!appendDrawioShape(document, shapeLayer, vertex, budget)) unsupportedShapes += 1;
+  }
+  svg.append(edgeLayer, shapeLayer);
+  if (!Number.isFinite(minimumX) || !Number.isFinite(minimumY) || !Number.isFinite(maximumX) || !Number.isFinite(maximumY)) {
+    throw new Error("The Draw.io page has no visible geometry.");
+  }
+  const margin = 32;
+  const viewWidth = Math.max(120, maximumX - minimumX + margin * 2);
+  const viewHeight = Math.max(100, maximumY - minimumY + margin * 2);
+  setBoundedDiagramSvgViewport(svg, minimumX - margin, minimumY - margin, viewWidth, viewHeight);
+  return { svg, unsupportedShapes };
+}
+
+function plainPlantUmlLabel(value: string): string {
+  return value
+    .replace(/\\n/g, "\n")
+    .replace(/<[^>]{0,1024}>/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ")
+    .slice(0, MAX_DIAGRAM_LABEL_UNITS)
+    .trim();
+}
+
+function parsePlantUmlActivity(source: string): PlantActivityModel {
+  const withoutComments = source.replace(/\/\'[\s\S]*?(?:\'\/|$)/g, "");
+  const body: string[] = [];
+  let title = "PlantUML activity diagram";
+  let background = "var(--cle-main-bg)";
+  let fill = "var(--cle-main-raised)";
+  let stroke = "var(--cle-main-muted)";
+  let diamondFill = "var(--cle-main-raised)";
+  let diamondStroke = "var(--cle-main-muted)";
+  let font = "var(--cle-main-text)";
+  let roundCorner = 12;
+  let inActivitySkin = false;
+  let unsupported = 0;
+  const applySkinParameter = (key: string, value: string, activity: boolean): void => {
+    const normalizedKey = key.trim().toLowerCase();
+    const normalizedValue = value.trim().split(/\s+/, 1)[0] ?? "";
+    if (!activity && normalizedKey === "backgroundcolor") background = safeDiagramColor(normalizedValue, background);
+    else if (!activity && normalizedKey === "roundcorner") roundCorner = boundedDiagramNumber(normalizedValue, roundCorner, 0, 36);
+    else if (activity && normalizedKey === "backgroundcolor") fill = safeDiagramColor(normalizedValue, fill);
+    else if (activity && normalizedKey === "bordercolor") stroke = safeDiagramColor(normalizedValue, stroke);
+    else if (activity && normalizedKey === "diamondbackgroundcolor") diamondFill = safeDiagramColor(normalizedValue, diamondFill);
+    else if (activity && normalizedKey === "diamondbordercolor") diamondStroke = safeDiagramColor(normalizedValue, diamondStroke);
+    else if (activity && normalizedKey === "fontcolor") font = safeDiagramColor(normalizedValue, font);
+  };
+  for (const requestedLine of withoutComments.replace(/\r\n?/g, "\n").split("\n")) {
+    const line = requestedLine.trim();
+    if (!line || line.startsWith("'")) continue;
+    if (/^!(?:include|include_once|import|theme|pragma|function|procedure|unquoted)/i.test(line) || /^include\b/i.test(line)) {
+      throw new Error("PlantUML includes, themes, imports, and preprocessors are disabled in local preview.");
+    }
+    if (/^@(?:startuml|enduml)\b/i.test(line)) continue;
+    if (/^title\s+/i.test(line)) {
+      title = plainPlantUmlLabel(line.replace(/^title\s+/i, "")) || title;
+      continue;
+    }
+    if (inActivitySkin) {
+      if (line === "}") {
+        inActivitySkin = false;
+        continue;
+      }
+      const match = line.match(/^([a-z][a-z0-9]*)\s+(.+)$/i);
+      if (match?.[1] && match[2]) applySkinParameter(match[1], match[2], true);
+      else unsupported += 1;
+      continue;
+    }
+    if (/^skinparam\s+activity\s*\{$/i.test(line)) {
+      inActivitySkin = true;
+      continue;
+    }
+    const skinParameter = line.match(/^skinparam\s+([a-z][a-z0-9]*)\s+(.+)$/i);
+    if (skinParameter?.[1] && skinParameter[2]) {
+      applySkinParameter(skinParameter[1], skinParameter[2], false);
+      continue;
+    }
+    body.push(line);
+  }
+  if (inActivitySkin) throw new Error("The PlantUML skinparam block is incomplete.");
+
+  let index = 0;
+  let statements = 0;
+  const parseBlock = (depth: number): readonly PlantActivityStatement[] => {
+    if (depth > MAX_PLANTUML_NESTING) throw new Error("The PlantUML activity nesting is too deep to preview safely.");
+    const result: PlantActivityStatement[] = [];
+    while (index < body.length) {
+      const line = body[index] ?? "";
+      if (/^(?:else\b|endif\b)/i.test(line)) break;
+      index += 1;
+      let statement: PlantActivityStatement | null = null;
+      if (/^start$/i.test(line)) statement = { kind: "start" };
+      else if (/^(?:stop|end)$/i.test(line)) statement = { kind: "stop" };
+      else if (line.startsWith(":") && line.endsWith(";")) {
+        const label = plainPlantUmlLabel(line.slice(1, -1));
+        if (label) statement = { kind: "action", label };
+      } else if (/^if\s*\(/i.test(line)) {
+        const thenMarker = line.toLowerCase().lastIndexOf(") then");
+        const opening = line.indexOf("(");
+        if (opening < 0 || thenMarker <= opening) throw new Error("A PlantUML if statement is malformed.");
+        const condition = plainPlantUmlLabel(line.slice(opening + 1, thenMarker));
+        const tail = line.slice(thenMarker + 6).trim();
+        const yesLabel = plainPlantUmlLabel(tail.replace(/^\((.*)\)$/, "$1")) || "yes";
+        const thenBranch = parseBlock(depth + 1);
+        let noLabel = "no";
+        let elseBranch: readonly PlantActivityStatement[] = [];
+        const delimiter = body[index] ?? "";
+        if (/^else\b/i.test(delimiter)) {
+          noLabel = plainPlantUmlLabel(delimiter.replace(/^else\s*(?:\((.*)\))?$/i, "$1")) || "no";
+          index += 1;
+          elseBranch = parseBlock(depth + 1);
+        }
+        if (!/^endif$/i.test(body[index] ?? "")) throw new Error("A PlantUML if statement is missing endif.");
+        index += 1;
+        statement = {
+          kind: "if",
+          label: condition || "Decision",
+          yesLabel,
+          noLabel,
+          thenBranch,
+          elseBranch,
+        };
+      } else {
+        unsupported += 1;
+      }
+      if (!statement) continue;
+      statements += 1;
+      if (statements > MAX_PLANTUML_STATEMENTS) throw new Error("This PlantUML activity has too many statements to preview safely.");
+      result.push(statement);
+    }
+    return result;
+  };
+  const parsed = parseBlock(0);
+  if (index < body.length) unsupported += body.length - index;
+  if (parsed.length === 0) throw new Error("No supported PlantUML activity statements were found.");
+  return {
+    title,
+    statements: parsed,
+    theme: { background, fill, stroke, diamondFill, diamondStroke, font, roundCorner },
+    unsupported,
+  };
+}
+
+function translatePlantLayout(layout: PlantBlockLayout, x: number, y: number): PlantBlockLayout {
+  const translatePoint = (point: DiagramPoint): DiagramPoint => ({ x: point.x + x, y: point.y + y });
+  return {
+    width: layout.width,
+    height: layout.height,
+    entry: layout.entry ? translatePoint(layout.entry) : null,
+    exit: layout.exit ? translatePoint(layout.exit) : null,
+    nodes: layout.nodes.map((node) => ({ ...node, x: node.x + x, y: node.y + y })),
+    edges: layout.edges.map((edge) => ({ ...edge, points: edge.points.map(translatePoint) })),
+  };
+}
+
+function emptyPlantLayout(): PlantBlockLayout {
+  return {
+    width: 110,
+    height: 1,
+    entry: { x: 55, y: 0 },
+    exit: { x: 55, y: 1 },
+    nodes: [],
+    edges: [],
+  };
+}
+
+function layoutSimplePlantStatement(statement: Exclude<PlantActivityStatement, { readonly kind: "if" }>): PlantBlockLayout {
+  if (statement.kind === "action") {
+    const requestedLines = wrappedDiagramLines(statement.label, 34, 8);
+    const longest = Math.max(10, ...requestedLines.map((line) => Array.from(line).length));
+    const width = Math.min(330, Math.max(180, longest * 7.2 + 34));
+    const height = Math.max(52, requestedLines.length * 18 + 24);
+    return {
+      width,
+      height,
+      entry: { x: width / 2, y: 0 },
+      exit: { x: width / 2, y: height },
+      nodes: [{ kind: "action", x: 0, y: 0, width, height, label: statement.label }],
+      edges: [],
+    };
+  }
+  const size = statement.kind === "start" ? 18 : 22;
+  return {
+    width: size,
+    height: size,
+    entry: { x: size / 2, y: 0 },
+    exit: { x: size / 2, y: size },
+    nodes: [{ kind: statement.kind, x: 0, y: 0, width: size, height: size, label: "" }],
+    edges: [],
+  };
+}
+
+function layoutPlantIf(statement: Extract<PlantActivityStatement, { readonly kind: "if" }>): PlantBlockLayout {
+  const thenLayout = statement.thenBranch.length > 0 ? layoutPlantBlock(statement.thenBranch) : emptyPlantLayout();
+  const elseLayout = statement.elseBranch.length > 0 ? layoutPlantBlock(statement.elseBranch) : emptyPlantLayout();
+  const gap = 100;
+  const branchWidth = thenLayout.width + gap + elseLayout.width;
+  const width = Math.max(250, branchWidth);
+  const diamondWidth = 180;
+  const diamondHeight = 86;
+  const centerX = width / 2;
+  const branchTop = diamondHeight + 54;
+  const branchStartX = (width - branchWidth) / 2;
+  const translatedThen = translatePlantLayout(thenLayout, branchStartX, branchTop);
+  const translatedElse = translatePlantLayout(elseLayout, branchStartX + thenLayout.width + gap, branchTop);
+  const branchBottom = branchTop + Math.max(thenLayout.height, elseLayout.height);
+  const joinY = branchBottom + 40;
+  const joinSize = 12;
+  const thenEntry = translatedThen.entry ?? { x: branchStartX + thenLayout.width / 2, y: branchTop };
+  const elseEntry = translatedElse.entry ?? { x: branchStartX + thenLayout.width + gap + elseLayout.width / 2, y: branchTop };
+  const thenExit = translatedThen.exit ?? thenEntry;
+  const elseExit = translatedElse.exit ?? elseEntry;
+  const leftStart = { x: centerX - diamondWidth / 2, y: diamondHeight / 2 };
+  const rightStart = { x: centerX + diamondWidth / 2, y: diamondHeight / 2 };
+  const join = { x: centerX, y: joinY + joinSize / 2 };
+  const edges: PlantLayoutEdge[] = [
+    ...translatedThen.edges,
+    ...translatedElse.edges,
+    { points: [leftStart, { x: thenEntry.x, y: leftStart.y }, thenEntry], label: statement.yesLabel },
+    { points: [rightStart, { x: elseEntry.x, y: rightStart.y }, elseEntry], label: statement.noLabel },
+    { points: [thenExit, { x: thenExit.x, y: join.y }, join], label: "" },
+    { points: [elseExit, { x: elseExit.x, y: join.y }, join], label: "" },
+  ];
+  return {
+    width,
+    height: joinY + joinSize,
+    entry: { x: centerX, y: 0 },
+    exit: { x: centerX, y: joinY + joinSize },
+    nodes: [
+      { kind: "decision", x: centerX - diamondWidth / 2, y: 0, width: diamondWidth, height: diamondHeight, label: statement.label },
+      ...translatedThen.nodes,
+      ...translatedElse.nodes,
+      { kind: "join", x: centerX - joinSize / 2, y: joinY, width: joinSize, height: joinSize, label: "" },
+    ],
+    edges,
+  };
+}
+
+function layoutPlantBlock(statements: readonly PlantActivityStatement[]): PlantBlockLayout {
+  if (statements.length === 0) return emptyPlantLayout();
+  const layouts = statements.map((statement) => statement.kind === "if" ? layoutPlantIf(statement) : layoutSimplePlantStatement(statement));
+  const width = Math.max(...layouts.map((layout) => layout.width));
+  const nodes: PlantLayoutNode[] = [];
+  const edges: PlantLayoutEdge[] = [];
+  let y = 0;
+  let entry: DiagramPoint | null = null;
+  let previousExit: DiagramPoint | null = null;
+  for (const layout of layouts) {
+    const translated = translatePlantLayout(layout, (width - layout.width) / 2, y);
+    if (!entry) entry = translated.entry;
+    if (previousExit && translated.entry) edges.push({ points: [previousExit, translated.entry], label: "" });
+    nodes.push(...translated.nodes);
+    edges.push(...translated.edges);
+    previousExit = translated.exit;
+    y += layout.height + 38;
+  }
+  return {
+    width,
+    height: Math.max(1, y - 38),
+    entry,
+    exit: previousExit,
+    nodes,
+    edges,
+  };
+}
+
+function renderPlantUmlActivitySvg(document: Document, model: PlantActivityModel, accessibleName: string): SVGSVGElement {
+  const budget: DiagramSvgBudget = { nodes: 0, textUnits: 0 };
+  const layout = layoutPlantBlock(model.statements);
+  const titleHeight = model.title ? 48 : 0;
+  const margin = 36;
+  const viewWidth = Math.max(280, layout.width + margin * 2);
+  const viewHeight = Math.max(180, layout.height + titleHeight + margin * 2);
+  const offsetX = (viewWidth - layout.width) / 2;
+  const offsetY = margin + titleHeight;
+  const translated = translatePlantLayout(layout, offsetX, offsetY);
+  const svg = diagramSvgElement(document, "svg", budget) as SVGSVGElement;
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", accessibleName);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  setBoundedDiagramSvgViewport(svg, 0, 0, viewWidth, viewHeight);
+  const titleNode = diagramSvgElement(document, "title", budget);
+  setDiagramSvgText(titleNode, accessibleName, budget);
+  svg.append(titleNode);
+  const background = diagramSvgElement(document, "rect", budget);
+  background.setAttribute("x", "0");
+  background.setAttribute("y", "0");
+  background.setAttribute("width", String(viewWidth));
+  background.setAttribute("height", String(viewHeight));
+  background.setAttribute("fill", model.theme.background);
+  svg.append(background);
+  const definitions = diagramSvgElement(document, "defs", budget);
+  const marker = diagramSvgElement(document, "marker", budget);
+  const markerId = `cle-diagram-arrow-${++nextDiagramMarkerId}`;
+  marker.setAttribute("id", markerId);
+  marker.setAttribute("viewBox", "0 0 10 10");
+  marker.setAttribute("refX", "9");
+  marker.setAttribute("refY", "5");
+  marker.setAttribute("markerWidth", "7");
+  marker.setAttribute("markerHeight", "7");
+  marker.setAttribute("orient", "auto");
+  const markerPath = diagramSvgElement(document, "path", budget);
+  markerPath.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+  markerPath.setAttribute("fill", model.theme.stroke);
+  marker.append(markerPath);
+  definitions.append(marker);
+  svg.append(definitions);
+  if (model.title) appendDiagramSvgText(document, svg, model.title, margin, margin - 10, viewWidth - margin * 2, 38, model.theme.font, 17, budget);
+  const edges = diagramSvgElement(document, "g", budget);
+  for (const edge of translated.edges) {
+    if (edge.points.length < 2) continue;
+    const path = diagramSvgElement(document, "path", budget);
+    path.setAttribute("d", edge.points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" "));
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", model.theme.stroke);
+    path.setAttribute("stroke-width", "1.5");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("marker-end", `url(#${markerId})`);
+    edges.append(path);
+    if (edge.label) {
+      const midpoint = diagramPolylineMidpoint(edge.points);
+      appendDiagramSvgText(document, edges, edge.label, midpoint.x - 42, midpoint.y - 21, 84, 24, model.theme.font, 11, budget);
+    }
+  }
+  svg.append(edges);
+  const nodes = diagramSvgElement(document, "g", budget);
+  for (const node of translated.nodes) {
+    let shape: SVGElement;
+    if (node.kind === "start" || node.kind === "join") {
+      shape = diagramSvgElement(document, "circle", budget);
+      shape.setAttribute("cx", String(node.x + node.width / 2));
+      shape.setAttribute("cy", String(node.y + node.height / 2));
+      shape.setAttribute("r", String(node.width / 2));
+      shape.setAttribute("fill", model.theme.stroke);
+    } else if (node.kind === "stop") {
+      shape = diagramSvgElement(document, "circle", budget);
+      shape.setAttribute("cx", String(node.x + node.width / 2));
+      shape.setAttribute("cy", String(node.y + node.height / 2));
+      shape.setAttribute("r", String(node.width / 2 - 1));
+      shape.setAttribute("fill", model.theme.background);
+      shape.setAttribute("stroke", model.theme.stroke);
+      shape.setAttribute("stroke-width", "2");
+      const center = diagramSvgElement(document, "circle", budget);
+      center.setAttribute("cx", String(node.x + node.width / 2));
+      center.setAttribute("cy", String(node.y + node.height / 2));
+      center.setAttribute("r", String(Math.max(3, node.width / 2 - 5)));
+      center.setAttribute("fill", model.theme.stroke);
+      nodes.append(shape, center);
+      continue;
+    } else if (node.kind === "decision") {
+      shape = diagramSvgElement(document, "polygon", budget);
+      shape.setAttribute("points", [
+        `${node.x + node.width / 2},${node.y}`,
+        `${node.x + node.width},${node.y + node.height / 2}`,
+        `${node.x + node.width / 2},${node.y + node.height}`,
+        `${node.x},${node.y + node.height / 2}`,
+      ].join(" "));
+      shape.setAttribute("fill", model.theme.diamondFill);
+      shape.setAttribute("stroke", model.theme.diamondStroke);
+      shape.setAttribute("stroke-width", "1.4");
+    } else {
+      shape = diagramSvgElement(document, "rect", budget);
+      shape.setAttribute("x", String(node.x));
+      shape.setAttribute("y", String(node.y));
+      shape.setAttribute("width", String(node.width));
+      shape.setAttribute("height", String(node.height));
+      shape.setAttribute("rx", String(Math.min(model.theme.roundCorner, node.height / 3)));
+      shape.setAttribute("fill", model.theme.fill);
+      shape.setAttribute("stroke", model.theme.stroke);
+      shape.setAttribute("stroke-width", "1.4");
+    }
+    nodes.append(shape);
+    if (node.label) {
+      appendDiagramSvgText(document, nodes, node.label, node.x + 7, node.y + 5, node.width - 14, node.height - 10, model.theme.font, 13, budget);
+    }
+  }
+  svg.append(nodes);
+  return svg;
+}
+
 function isSafeMarkdownLink(value: string): boolean {
   const trimmed = value.trim();
   if (trimmed.startsWith("#")) return true;
@@ -501,6 +1988,651 @@ function configureMarkdownRenderer(renderer: typeof markdownRenderer, editable: 
 
 configureMarkdownRenderer(markdownRenderer, false);
 configureMarkdownRenderer(markdownEditorRenderer, true);
+
+const notebookMarkdownRenderer = new MarkdownIt({
+  html: false,
+  linkify: true,
+  typographer: false,
+  breaks: false,
+  highlight: renderMarkdownFence,
+});
+
+notebookMarkdownRenderer.renderer.rules.image = (tokens, index) => {
+  const token = tokens[index];
+  const alt = String(token?.content ?? "").trim() || String(token?.attrGet("alt") ?? "").trim() || "Notebook image";
+  const source = String(token?.attrGet("src") ?? "");
+  return `<span class="notebook-image-placeholder" data-notebook-image-alt="${escapeMarkdownHtml(alt)}" data-notebook-image-src="${escapeMarkdownHtml(source)}">Image \u00b7 ${escapeMarkdownHtml(alt)}</span>`;
+};
+
+function notebookRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function notebookJoinedText(
+  value: unknown,
+  maximum: number,
+): { readonly text: string; readonly valid: boolean; readonly truncated: boolean } {
+  const limit = Math.max(0, maximum);
+  if (typeof value === "string") {
+    return { text: value.slice(0, limit), valid: true, truncated: value.length > limit };
+  }
+  if (!Array.isArray(value)) return { text: "", valid: false, truncated: false };
+  let text = "";
+  const segmentCount = Math.min(value.length, MAX_NOTEBOOK_TEXT_SEGMENTS);
+  let truncated = value.length > segmentCount;
+  for (let index = 0; index < segmentCount; index += 1) {
+    const segment = value[index];
+    if (typeof segment !== "string") return { text: "", valid: false, truncated: false };
+    const remaining = limit - text.length;
+    if (remaining <= 0) {
+      if (segment.length > 0 || index + 1 < value.length) truncated = true;
+      break;
+    }
+    text += segment.slice(0, remaining);
+    if (segment.length > remaining) {
+      truncated = true;
+      break;
+    }
+  }
+  return { text, valid: true, truncated };
+}
+
+function notebookBoundedSource(value: unknown, budget: NotebookParseBudget): string | null {
+  const remaining = Math.max(0, MAX_NOTEBOOK_TOTAL_SOURCE_UNITS - budget.sourceUnits);
+  const joined = notebookJoinedText(value, Math.min(MAX_NOTEBOOK_CELL_SOURCE_UNITS, remaining));
+  if (!joined.valid) return null;
+  budget.sourceUnits += joined.text.length;
+  if (joined.truncated) budget.limited = true;
+  return joined.text;
+}
+
+function notebookBoundedOutputText(value: unknown, budget: NotebookParseBudget, maximum = MAX_NOTEBOOK_OUTPUT_TEXT_UNITS): string | null {
+  const remaining = Math.max(0, MAX_NOTEBOOK_TOTAL_OUTPUT_TEXT_UNITS - budget.outputTextUnits);
+  const joined = notebookJoinedText(value, Math.min(maximum, remaining));
+  if (!joined.valid) return null;
+  budget.outputTextUnits += joined.text.length;
+  if (joined.truncated) budget.limited = true;
+  return joined.text;
+}
+
+function notebookExecutionCount(value: unknown): number | null {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
+}
+
+function notebookSafeLabel(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized ? normalized.slice(0, 80) : fallback;
+}
+
+function notebookLanguageDetails(metadata: Record<string, unknown> | null): {
+  readonly path: string;
+  readonly languageLabel: string;
+  readonly kernelLabel: string;
+} {
+  const languageInfo = notebookRecord(metadata?.language_info);
+  const kernelspec = notebookRecord(metadata?.kernelspec);
+  const languageName = notebookSafeLabel(languageInfo?.name ?? kernelspec?.language, "Plain text");
+  const kernelLabel = notebookSafeLabel(kernelspec?.display_name ?? kernelspec?.name, "No kernel metadata");
+  const requestedExtension = typeof languageInfo?.file_extension === "string" ? languageInfo.file_extension.trim().toLowerCase() : "";
+  if (/^\.[a-z0-9][a-z0-9._+-]{0,11}$/.test(requestedExtension)) {
+    return { path: `notebook-cell${requestedExtension}`, languageLabel: languageName, kernelLabel };
+  }
+  const normalized = languageName.toLowerCase();
+  const extension = MARKDOWN_FENCE_EXTENSIONS[normalized] ?? ({
+    ipython: "py",
+    ipython3: "py",
+    julia: "jl",
+    r: "r",
+    ruby: "rb",
+    scala: "scala",
+  } as Readonly<Record<string, string>>)[normalized] ?? "txt";
+  return { path: `notebook-cell.${extension}`, languageLabel: languageName, kernelLabel };
+}
+
+function notebookAttachments(value: unknown, budget: NotebookParseBudget): ReadonlyMap<string, NotebookMimeBundle> {
+  const result = new Map<string, NotebookMimeBundle>();
+  const attachments = notebookRecord(value);
+  if (!attachments) return result;
+  for (const name in attachments) {
+    if (!Object.prototype.hasOwnProperty.call(attachments, name)) continue;
+    if (budget.attachmentCount >= MAX_NOTEBOOK_ATTACHMENTS) {
+      budget.limited = true;
+      break;
+    }
+    budget.attachmentCount += 1;
+    const rawBundle = attachments[name];
+    const bundle = notebookRecord(rawBundle);
+    if (!bundle || name.length === 0 || name.length > 256) continue;
+    result.set(name, bundle);
+  }
+  return result;
+}
+
+function notebookOutputs(value: unknown, budget: NotebookParseBudget): readonly NotebookOutputModel[] {
+  if (!Array.isArray(value)) return [];
+  const outputs: NotebookOutputModel[] = [];
+  const maximum = Math.min(value.length, MAX_NOTEBOOK_OUTPUTS_PER_CELL);
+  if (value.length > maximum) budget.limited = true;
+  for (let index = 0; index < maximum; index += 1) {
+    if (budget.outputCount >= MAX_NOTEBOOK_TOTAL_OUTPUTS) {
+      budget.limited = true;
+      break;
+    }
+    budget.outputCount += 1;
+    const output = notebookRecord(value[index]);
+    const outputType = typeof output?.output_type === "string" ? output.output_type : "";
+    if (outputType === "stream") {
+      const text = notebookBoundedOutputText(output?.text, budget);
+      outputs.push(text === null
+        ? { kind: "unsupported" }
+        : { kind: "stream", name: output?.name === "stderr" ? "stderr" : "stdout", text });
+      continue;
+    }
+    if (outputType === "error") {
+      const traceback = notebookBoundedOutputText(output?.traceback, budget);
+      outputs.push(traceback === null
+        ? { kind: "unsupported" }
+        : {
+            kind: "error",
+            ename: notebookSafeLabel(output?.ename, "Error"),
+            evalue: notebookSafeLabel(output?.evalue, ""),
+            traceback,
+          });
+      continue;
+    }
+    if (outputType === "display_data" || outputType === "execute_result") {
+      const data = notebookRecord(output?.data);
+      outputs.push(data
+        ? {
+            kind: "display",
+            executionCount: outputType === "execute_result" ? notebookExecutionCount(output?.execution_count) : null,
+            data,
+          }
+        : { kind: "unsupported" });
+      continue;
+    }
+    outputs.push({ kind: "unsupported" });
+  }
+  return outputs;
+}
+
+function parseNotebook(bytes: Uint8Array): NotebookModel {
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_NOTEBOOK_PREVIEW_BYTES) {
+    throw new Error("This notebook is outside the supported preview size.");
+  }
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("This notebook is not valid UTF-8 JSON.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source) as unknown;
+  } catch {
+    throw new Error("This notebook does not contain valid JSON.");
+  }
+  const root = notebookRecord(parsed);
+  if (!root || root.nbformat !== 4 || !Number.isSafeInteger(root.nbformat_minor) || (root.nbformat_minor as number) < 0) {
+    throw new Error("Only Jupyter notebooks using nbformat 4 are supported.");
+  }
+  if (!Array.isArray(root.cells)) throw new Error("This notebook does not contain a valid cell list.");
+
+  const budget: NotebookParseBudget = {
+    sourceUnits: 0,
+    outputCount: 0,
+    outputTextUnits: 0,
+    attachmentCount: 0,
+    limited: root.cells.length > MAX_NOTEBOOK_CELLS,
+  };
+  const cells: NotebookCellModel[] = [];
+  for (const rawCell of root.cells.slice(0, MAX_NOTEBOOK_CELLS)) {
+    const cell = notebookRecord(rawCell);
+    const cellType = typeof cell?.cell_type === "string" ? cell.cell_type : "";
+    const cellSource = notebookBoundedSource(cell?.source, budget);
+    if (cellSource === null) {
+      cells.push({ kind: "unsupported", reason: "Malformed cell source" });
+    } else if (cellType === "markdown") {
+      cells.push({ kind: "markdown", source: cellSource, attachments: notebookAttachments(cell?.attachments, budget) });
+    } else if (cellType === "code") {
+      cells.push({
+        kind: "code",
+        source: cellSource,
+        executionCount: notebookExecutionCount(cell?.execution_count),
+        outputs: notebookOutputs(cell?.outputs, budget),
+      });
+    } else if (cellType === "raw") {
+      cells.push({ kind: "raw", source: cellSource });
+    } else {
+      cells.push({ kind: "unsupported", reason: "Unsupported cell type" });
+    }
+  }
+  const minor = root.nbformat_minor as number;
+  const language = notebookLanguageDetails(notebookRecord(root.metadata));
+  return {
+    minor,
+    languagePath: language.path,
+    languageLabel: language.languageLabel,
+    kernelLabel: language.kernelLabel,
+    cells,
+    reservedOutputTextUnits: budget.outputTextUnits,
+    limited: budget.limited,
+    newerMinor: minor > 5,
+  };
+}
+
+function notebookTerminalText(value: string): string {
+  return value
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+}
+
+function notebookMimeText(value: unknown, maximum: number): { readonly text: string; readonly truncated: boolean } | null {
+  const joined = notebookJoinedText(value, maximum);
+  return joined.valid ? { text: joined.text, truncated: joined.truncated } : null;
+}
+
+function notebookMarkupTagMarkersWithinLimit(source: string, maximum: number): boolean {
+  if (maximum < 1) return source.indexOf("<") < 0;
+  let count = 0;
+  let offset = 0;
+  while (offset < source.length) {
+    const marker = source.indexOf("<", offset);
+    if (marker < 0) return true;
+    count += 1;
+    if (count > maximum) return false;
+    offset = marker + 1;
+  }
+  return true;
+}
+
+function notebookJsonText(value: unknown, maximum: number): { readonly text: string; readonly truncated: boolean } | null {
+  if (value === undefined || typeof value === "bigint" || typeof value === "function" || typeof value === "symbol") return null;
+  const limit = Math.max(0, Math.min(MAX_NOTEBOOK_OUTPUT_TEXT_UNITS, Math.trunc(maximum)));
+  const chunks: string[] = [];
+  let pending = "";
+  let length = 0;
+  let overflow = false;
+  let limited = false;
+  const flush = (): void => {
+    if (!pending) return;
+    chunks.push(pending);
+    pending = "";
+  };
+  const append = (segment: string): boolean => {
+    if (overflow || !segment) return !overflow;
+    const remaining = limit - length;
+    if (remaining <= 0) {
+      overflow = true;
+      return false;
+    }
+    const accepted = segment.length <= remaining ? segment : segment.slice(0, remaining);
+    if (pending.length + accepted.length > 8_192) flush();
+    pending += accepted;
+    length += accepted.length;
+    if (accepted.length < segment.length) overflow = true;
+    return !overflow;
+  };
+  const appendString = (source: string): boolean => {
+    if (!append('"')) return false;
+    for (let index = 0; index < source.length && !overflow; index += 1) {
+      const code = source.charCodeAt(index);
+      switch (code) {
+        case 0x08:
+          append("\\b");
+          break;
+        case 0x09:
+          append("\\t");
+          break;
+        case 0x0a:
+          append("\\n");
+          break;
+        case 0x0c:
+          append("\\f");
+          break;
+        case 0x0d:
+          append("\\r");
+          break;
+        case 0x22:
+          append('\\"');
+          break;
+        case 0x5c:
+          append("\\\\");
+          break;
+        default:
+          if (code < 0x20 || (code >= 0xd800 && code <= 0xdfff)) {
+            if (code >= 0xd800 && code <= 0xdbff) {
+              const low = source.charCodeAt(index + 1);
+              if (low >= 0xdc00 && low <= 0xdfff) {
+                append(source[index] ?? "");
+                if (!overflow) append(source[index + 1] ?? "");
+                index += 1;
+                break;
+              }
+            }
+            append(`\\u${code.toString(16).padStart(4, "0")}`);
+          } else {
+            append(source[index] ?? "");
+          }
+      }
+    }
+    return !overflow && append('"');
+  };
+  const entries = function* (record: Record<string, unknown>): Generator<readonly [string, unknown], void, void> {
+    for (const key in record) {
+      if (Object.prototype.hasOwnProperty.call(record, key)) yield [key, record[key]] as const;
+    }
+  };
+  type Frame =
+    | { readonly kind: "value"; readonly value: unknown; readonly depth: number }
+    | { readonly kind: "array"; readonly value: readonly unknown[]; readonly index: number; readonly depth: number }
+    | {
+        readonly kind: "object";
+        readonly iterator: Iterator<readonly [string, unknown]>;
+        readonly first: boolean;
+        readonly depth: number;
+      };
+  const stack: Frame[] = [{ kind: "value", value, depth: 0 }];
+  const maximumVisits = Math.max(256, Math.min(1_100_000, limit * 4 + 512));
+  let visits = 0;
+  while (stack.length > 0 && !overflow) {
+    visits += 1;
+    if (visits > maximumVisits) {
+      limited = true;
+      break;
+    }
+    const frame = stack.pop()!;
+    if (frame.kind === "array") {
+      if (frame.index >= frame.value.length) {
+        if (frame.value.length > 0) append(`\n${"  ".repeat(frame.depth)}`);
+        append("]");
+        continue;
+      }
+      if (frame.index > 0) append(",");
+      append(`\n${"  ".repeat(frame.depth + 1)}`);
+      stack.push({ kind: "array", value: frame.value, index: frame.index + 1, depth: frame.depth });
+      stack.push({ kind: "value", value: frame.value[frame.index], depth: frame.depth + 1 });
+      continue;
+    }
+    if (frame.kind === "object") {
+      const next = frame.iterator.next();
+      if (next.done) {
+        if (!frame.first) append(`\n${"  ".repeat(frame.depth)}`);
+        append("}");
+        continue;
+      }
+      if (!frame.first) append(",");
+      append(`\n${"  ".repeat(frame.depth + 1)}`);
+      appendString(next.value[0]);
+      append(": ");
+      stack.push({ kind: "object", iterator: frame.iterator, first: false, depth: frame.depth });
+      stack.push({ kind: "value", value: next.value[1], depth: frame.depth + 1 });
+      continue;
+    }
+
+    const current = frame.value;
+    if (current === null) {
+      append("null");
+    } else if (typeof current === "string") {
+      appendString(current);
+    } else if (typeof current === "number") {
+      append(Number.isFinite(current) ? String(current) : "null");
+    } else if (typeof current === "boolean") {
+      append(current ? "true" : "false");
+    } else if (frame.depth >= 64) {
+      limited = true;
+      append("null");
+    } else if (Array.isArray(current)) {
+      append("[");
+      stack.push({ kind: "array", value: current, index: 0, depth: frame.depth });
+    } else {
+      const record = notebookRecord(current);
+      if (!record) {
+        append("null");
+      } else {
+        append("{");
+        stack.push({ kind: "object", iterator: entries(record), first: true, depth: frame.depth });
+      }
+    }
+  }
+  flush();
+  return { text: chunks.join(""), truncated: overflow || limited || stack.length > 0 };
+}
+
+function notebookByte(binary: string, index: number): number {
+  return index >= 0 && index < binary.length ? binary.charCodeAt(index) : -1;
+}
+
+function notebookUint16Be(binary: string, offset: number): number {
+  return notebookByte(binary, offset) * 256 + notebookByte(binary, offset + 1);
+}
+
+function notebookUint16Le(binary: string, offset: number): number {
+  return notebookByte(binary, offset) + notebookByte(binary, offset + 1) * 256;
+}
+
+function notebookUint24Le(binary: string, offset: number): number {
+  return notebookByte(binary, offset) + notebookByte(binary, offset + 1) * 256 + notebookByte(binary, offset + 2) * 65_536;
+}
+
+function notebookUint32Be(binary: string, offset: number): number {
+  return notebookByte(binary, offset) * 16_777_216 +
+    notebookByte(binary, offset + 1) * 65_536 +
+    notebookByte(binary, offset + 2) * 256 +
+    notebookByte(binary, offset + 3);
+}
+
+function notebookUint32Le(binary: string, offset: number): number {
+  return notebookByte(binary, offset) +
+    notebookByte(binary, offset + 1) * 256 +
+    notebookByte(binary, offset + 2) * 65_536 +
+    notebookByte(binary, offset + 3) * 16_777_216;
+}
+
+function notebookRasterDimensionsValid(width: number, height: number): boolean {
+  return Number.isSafeInteger(width) &&
+    Number.isSafeInteger(height) &&
+    width > 0 &&
+    height > 0 &&
+    width <= MAX_NOTEBOOK_RASTER_DIMENSION &&
+    height <= MAX_NOTEBOOK_RASTER_DIMENSION &&
+    width * height <= MAX_NOTEBOOK_RASTER_PIXELS;
+}
+
+function notebookPngStructureValid(binary: string): boolean {
+  if (
+    binary.length < 45 ||
+    ![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((value, index) => notebookByte(binary, index) === value)
+  ) return false;
+  let offset = 8;
+  let sawHeader = false;
+  let sawImageData = false;
+  while (offset + 12 <= binary.length) {
+    const length = notebookUint32Be(binary, offset);
+    if (!Number.isSafeInteger(length) || length < 0 || length > binary.length - offset - 12) return false;
+    const type = binary.slice(offset + 4, offset + 8);
+    const end = offset + 12 + length;
+    if (!sawHeader) {
+      if (type !== "IHDR" || length !== 13) return false;
+      const width = notebookUint32Be(binary, offset + 8);
+      const height = notebookUint32Be(binary, offset + 12);
+      const bitDepth = notebookByte(binary, offset + 16);
+      const colorType = notebookByte(binary, offset + 17);
+      const validDepths: Readonly<Record<number, readonly number[]>> = {
+        0: [1, 2, 4, 8, 16],
+        2: [8, 16],
+        3: [1, 2, 4, 8],
+        4: [8, 16],
+        6: [8, 16],
+      };
+      if (
+        !notebookRasterDimensionsValid(width, height) ||
+        !validDepths[colorType]?.includes(bitDepth) ||
+        notebookByte(binary, offset + 18) !== 0 ||
+        notebookByte(binary, offset + 19) !== 0 ||
+        ![0, 1].includes(notebookByte(binary, offset + 20))
+      ) return false;
+      sawHeader = true;
+    } else if (type === "IHDR") {
+      return false;
+    }
+    if (type === "IDAT") sawImageData = true;
+    if (type === "IEND") return length === 0 && sawImageData && end === binary.length;
+    offset = end;
+  }
+  return false;
+}
+
+function notebookJpegStructureValid(binary: string): boolean {
+  if (
+    binary.length < 14 ||
+    notebookByte(binary, 0) !== 0xff ||
+    notebookByte(binary, 1) !== 0xd8 ||
+    notebookByte(binary, binary.length - 2) !== 0xff ||
+    notebookByte(binary, binary.length - 1) !== 0xd9
+  ) return false;
+  const startOfFrameMarkers = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+  let offset = 2;
+  let sawFrame = false;
+  while (offset < binary.length - 2) {
+    if (notebookByte(binary, offset) !== 0xff) return false;
+    while (notebookByte(binary, offset) === 0xff) offset += 1;
+    const marker = notebookByte(binary, offset);
+    offset += 1;
+    if (marker < 0 || marker === 0x00) return false;
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (marker === 0xd9) return sawFrame && offset === binary.length;
+    if (offset + 2 > binary.length) return false;
+    const segmentLength = notebookUint16Be(binary, offset);
+    if (segmentLength < 2 || segmentLength > binary.length - offset) return false;
+    if (startOfFrameMarkers.has(marker)) {
+      if (segmentLength < 8) return false;
+      const height = notebookUint16Be(binary, offset + 3);
+      const width = notebookUint16Be(binary, offset + 5);
+      if (!notebookRasterDimensionsValid(width, height)) return false;
+      sawFrame = true;
+    }
+    if (marker === 0xda) return sawFrame;
+    offset += segmentLength;
+  }
+  return false;
+}
+
+function notebookGifSubBlocksEnd(binary: string, requestedOffset: number): number {
+  let offset = requestedOffset;
+  while (offset < binary.length) {
+    const length = notebookByte(binary, offset);
+    offset += 1;
+    if (length === 0) return offset;
+    if (length < 0 || length > binary.length - offset) return -1;
+    offset += length;
+  }
+  return -1;
+}
+
+function notebookGifStructureValid(binary: string): boolean {
+  if (binary.length < 14 || (!binary.startsWith("GIF87a") && !binary.startsWith("GIF89a"))) return false;
+  const screenWidth = notebookUint16Le(binary, 6);
+  const screenHeight = notebookUint16Le(binary, 8);
+  if (!notebookRasterDimensionsValid(screenWidth, screenHeight)) return false;
+  const packed = notebookByte(binary, 10);
+  let offset = 13;
+  if ((packed & 0x80) !== 0) offset += 3 * (1 << ((packed & 0x07) + 1));
+  if (offset > binary.length) return false;
+  let frames = 0;
+  let totalFramePixels = 0;
+  while (offset < binary.length) {
+    const introducer = notebookByte(binary, offset);
+    if (introducer === 0x3b) return frames > 0 && offset + 1 === binary.length;
+    if (introducer === 0x21) {
+      if (offset + 2 > binary.length) return false;
+      offset = notebookGifSubBlocksEnd(binary, offset + 2);
+      if (offset < 0) return false;
+      continue;
+    }
+    if (introducer !== 0x2c || offset + 10 > binary.length) return false;
+    const width = notebookUint16Le(binary, offset + 5);
+    const height = notebookUint16Le(binary, offset + 7);
+    if (!notebookRasterDimensionsValid(width, height)) return false;
+    frames += 1;
+    totalFramePixels += width * height;
+    if (frames > MAX_NOTEBOOK_RASTER_FRAMES || totalFramePixels > MAX_NOTEBOOK_RASTER_FRAME_PIXELS) return false;
+    const imagePacked = notebookByte(binary, offset + 9);
+    offset += 10;
+    if ((imagePacked & 0x80) !== 0) offset += 3 * (1 << ((imagePacked & 0x07) + 1));
+    if (offset >= binary.length || notebookByte(binary, offset) < 2 || notebookByte(binary, offset) > 12) return false;
+    offset = notebookGifSubBlocksEnd(binary, offset + 1);
+    if (offset < 0) return false;
+  }
+  return false;
+}
+
+function notebookWebpStructureValid(binary: string): boolean {
+  if (
+    binary.length < 20 ||
+    !binary.startsWith("RIFF") ||
+    binary.slice(8, 12) !== "WEBP" ||
+    notebookUint32Le(binary, 4) + 8 !== binary.length
+  ) return false;
+  let offset = 12;
+  let sawDimensions = false;
+  let frames = 0;
+  let totalFramePixels = 0;
+  while (offset + 8 <= binary.length) {
+    const type = binary.slice(offset, offset + 4);
+    const length = notebookUint32Le(binary, offset + 4);
+    const data = offset + 8;
+    const end = data + length;
+    const paddedEnd = end + (length & 1);
+    if (!Number.isSafeInteger(length) || length < 0 || end > binary.length || paddedEnd > binary.length) return false;
+    let width = 0;
+    let height = 0;
+    if (type === "VP8X") {
+      if (length !== 10) return false;
+      width = notebookUint24Le(binary, data + 4) + 1;
+      height = notebookUint24Le(binary, data + 7) + 1;
+    } else if (type === "VP8 ") {
+      if (length < 10 || binary.slice(data + 3, data + 6) !== "\u009d\u0001\u002a") return false;
+      width = notebookUint16Le(binary, data + 6) & 0x3fff;
+      height = notebookUint16Le(binary, data + 8) & 0x3fff;
+    } else if (type === "VP8L") {
+      if (length < 5 || notebookByte(binary, data) !== 0x2f) return false;
+      const bits = notebookUint32Le(binary, data + 1);
+      width = (bits & 0x3fff) + 1;
+      height = ((bits >>> 14) & 0x3fff) + 1;
+    } else if (type === "ANMF") {
+      if (length < 16) return false;
+      frames += 1;
+      width = notebookUint24Le(binary, data + 6) + 1;
+      height = notebookUint24Le(binary, data + 9) + 1;
+      totalFramePixels += width * height;
+      if (frames > MAX_NOTEBOOK_RASTER_FRAMES || totalFramePixels > MAX_NOTEBOOK_RASTER_FRAME_PIXELS) return false;
+    }
+    if ((width > 0 || height > 0) && !notebookRasterDimensionsValid(width, height)) return false;
+    if (width > 0 && height > 0) sawDimensions = true;
+    offset = paddedEnd;
+  }
+  return sawDimensions && offset === binary.length;
+}
+
+function notebookRasterStructureValid(mimeType: string, binary: string): boolean {
+  switch (mimeType) {
+    case "image/png":
+      return notebookPngStructureValid(binary);
+    case "image/jpeg":
+      return notebookJpegStructureValid(binary);
+    case "image/gif":
+      return notebookGifStructureValid(binary);
+    case "image/webp":
+      return notebookWebpStructureValid(binary);
+    default:
+      return false;
+  }
+}
 
 const markdownSerializer = new TurndownService({
   headingStyle: "atx",
@@ -1668,6 +3800,331 @@ const mainPreviewStyles = String.raw`
     font-size: 11px;
   }
 
+  .csv-preview {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 18px clamp(12px, 2.5vw, 28px) 24px;
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+  }
+  .csv-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 0 2px 13px;
+  }
+  .csv-title { margin: 0 0 4px; font-size: 15px; font-weight: 650; line-height: 1.35; }
+  .csv-summary { color: var(--cle-main-muted); font-size: 11px; line-height: 1.5; }
+  .csv-mode {
+    flex: 0 0 auto;
+    padding: 4px 8px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 999px;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+  .csv-notices { display: grid; flex: 0 0 auto; gap: 6px; margin: 0 0 10px; }
+  .csv-notice {
+    padding: 7px 9px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .csv-warning { color: var(--cle-main-text); }
+  .csv-table-scroll {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    background: var(--cle-main-bg);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 8px;
+  }
+  .csv-table-scroll:focus-visible {
+    outline: 2px solid var(--cle-main-focus);
+    outline-offset: 2px;
+  }
+  .csv-table {
+    width: max-content;
+    min-width: 100%;
+    border-spacing: 0;
+    border-collapse: separate;
+    color: var(--cle-main-text);
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .csv-table th,
+  .csv-table td {
+    min-width: 112px;
+    max-width: 360px;
+    padding: 6px 10px;
+    border-right: 1px solid var(--cle-main-line);
+    border-bottom: 1px solid var(--cle-main-line);
+    vertical-align: top;
+    text-align: left;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    unicode-bidi: plaintext;
+    tab-size: 4;
+  }
+  .csv-table tr > :last-child { border-right: 0; }
+  .csv-table tbody tr:last-child > * { border-bottom: 0; }
+  .csv-column-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    font-weight: 600;
+    text-align: center !important;
+    user-select: none;
+  }
+  .csv-row-number {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    width: 48px;
+    min-width: 48px !important;
+    max-width: 48px !important;
+    color: var(--cle-main-faint);
+    background: var(--cle-main-raised);
+    font-weight: 500;
+    text-align: right !important;
+    user-select: none;
+  }
+  .csv-corner { top: 0; z-index: 3; text-align: center !important; }
+  .csv-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--cle-main-hover) 58%, transparent); }
+  .csv-table tbody tr:hover td { background: var(--cle-main-hover); }
+  .csv-caption {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .diagram-preview {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+    min-height: 100%;
+    padding: 18px clamp(12px, 2.5vw, 28px) 28px;
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+  }
+  .diagram-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 0 2px 13px;
+  }
+  .diagram-title { margin: 0 0 4px; font-size: 15px; font-weight: 650; line-height: 1.35; }
+  .diagram-summary { color: var(--cle-main-muted); font-size: 11px; line-height: 1.5; }
+  .diagram-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+  .diagram-page-label { color: var(--cle-main-muted); font-size: 10.5px; }
+  .diagram-page-select {
+    max-width: 220px;
+    height: 28px;
+    padding: 0 25px 0 8px;
+    color: var(--cle-main-text);
+    background: var(--cle-main-raised);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 6px;
+    font: 11px/1.2 "Segoe UI", sans-serif;
+  }
+  .diagram-page-select:focus-visible { outline: 2px solid var(--cle-main-focus); outline-offset: 2px; }
+  .diagram-notices { display: grid; flex: 0 0 auto; gap: 6px; margin: 0 0 10px; }
+  .diagram-notice {
+    padding: 7px 9px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .diagram-canvas {
+    display: grid;
+    flex: 1 1 auto;
+    place-items: start center;
+    min-width: 0;
+    min-height: 240px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    background: var(--cle-main-bg);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 8px;
+  }
+  .diagram-canvas:focus-visible { outline: 2px solid var(--cle-main-focus); outline-offset: 2px; }
+  .diagram-canvas svg { display: block; flex: 0 0 auto; max-width: none; height: auto; min-height: 220px; }
+  .diagram-status {
+    align-self: stretch;
+    width: min(100%, 520px);
+    margin: auto;
+    padding: 40px 24px;
+    color: var(--cle-main-muted);
+    font-size: 12px;
+    line-height: 1.55;
+    text-align: center;
+  }
+  .diagram-status.error { color: var(--cle-main-text); }
+
+  .notebook-preview {
+    min-width: 0;
+    min-height: 100%;
+    padding: 24px clamp(14px, 3vw, 34px) 64px;
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+  }
+  .notebook-shell { width: min(100%, 1040px); margin: 0 auto; }
+  .notebook-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin: 0 0 18px;
+    padding: 0 2px 14px;
+    border-bottom: 1px solid var(--cle-main-line);
+  }
+  .notebook-title { margin: 0 0 4px; font-size: 15px; font-weight: 650; line-height: 1.35; }
+  .notebook-summary { color: var(--cle-main-muted); font-size: 11px; line-height: 1.5; }
+  .notebook-mode {
+    flex: 0 0 auto;
+    padding: 4px 8px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 999px;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+  .notebook-notice {
+    margin: 0 0 14px;
+    padding: 8px 10px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 7px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .notebook-cells { display: grid; gap: 14px; }
+  .notebook-cell {
+    --cle-notebook-prompt-width: 62px;
+    display: grid;
+    grid-template-columns: var(--cle-notebook-prompt-width) minmax(0, 1fr);
+    min-width: 0;
+    overflow: hidden;
+    background: var(--cle-main-bg);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 9px;
+  }
+  .notebook-cell.markdown { border-color: transparent; background: transparent; }
+  .notebook-prompt {
+    grid-column: 1;
+    padding: 14px 9px 12px 6px;
+    color: var(--cle-main-faint);
+    background: var(--cle-main-raised);
+    border-right: 1px solid var(--cle-main-line);
+    font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    user-select: none;
+  }
+  .notebook-cell.markdown .notebook-prompt { color: transparent; background: transparent; border-right-color: transparent; }
+  .notebook-cell-body { grid-column: 2; min-width: 0; overflow: hidden; }
+  .notebook-source,
+  .notebook-raw,
+  .notebook-output pre {
+    margin: 0;
+    font: 12.5px/1.58 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    tab-size: 4;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .notebook-source { padding: 14px 16px; overflow: auto; white-space: pre; }
+  .notebook-source code { display: block; min-width: max-content; font: inherit; }
+  .notebook-raw { padding: 14px 16px; color: var(--cle-main-muted); }
+  .notebook-markdown.markdown-body {
+    width: auto;
+    margin: 0;
+    padding: 4px 12px 2px 16px;
+    font-size: 14px;
+  }
+  .notebook-markdown .notebook-image-placeholder { margin-block: 3px; }
+  .notebook-image-placeholder {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 2px 8px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border: 1px dashed var(--cle-main-line);
+    border-radius: 5px;
+    font-size: 11px;
+  }
+  .notebook-outputs { border-top: 1px solid var(--cle-main-line); }
+  .notebook-output { min-width: 0; padding: 11px 16px; overflow: auto; }
+  .notebook-output + .notebook-output { border-top: 1px solid var(--cle-main-line); }
+  .notebook-output.stderr,
+  .notebook-output.error { color: var(--cle-syntax-deleted); background: color-mix(in srgb, var(--cle-syntax-deleted) 5%, transparent); }
+  .notebook-output.unsupported { color: var(--cle-main-muted); font-size: 11px; }
+  .notebook-output-image {
+    display: block;
+    max-width: 100%;
+    max-height: min(70vh, 920px);
+    margin: 0 auto;
+    object-fit: contain;
+  }
+  .notebook-rich-html { color: var(--cle-main-text); font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; }
+  .notebook-rich-html > :first-child { margin-top: 0; }
+  .notebook-rich-html > :last-child { margin-bottom: 0; }
+  .notebook-rich-html table { max-width: 100%; border-collapse: collapse; }
+  .notebook-rich-html th,
+  .notebook-rich-html td { padding: 5px 9px; border: 1px solid var(--cle-main-line); text-align: left; }
+  .notebook-rich-html th { background: var(--cle-main-raised); font-weight: 600; }
+  .notebook-rich-html pre { overflow: auto; white-space: pre; }
+  .notebook-limited { color: var(--cle-main-muted); }
+
+  @media (max-width: 680px) {
+    .csv-preview { padding-inline: 9px; }
+    .csv-header { display: block; }
+    .csv-mode { display: inline-block; margin-top: 8px; }
+    .csv-table th,
+    .csv-table td { min-width: 96px; padding-inline: 8px; }
+    .diagram-preview { padding-inline: 9px; }
+    .diagram-header { display: block; }
+    .diagram-controls { margin-top: 8px; }
+    .notebook-preview { padding-inline: 10px; }
+    .notebook-header { display: block; }
+    .notebook-mode { display: inline-block; margin-top: 8px; }
+    .notebook-cell { --cle-notebook-prompt-width: 44px; }
+    .notebook-prompt { padding-inline: 3px 6px; font-size: 10px; }
+    .notebook-source,
+    .notebook-output,
+    .notebook-raw { padding-inline: 11px; }
+    .notebook-markdown.markdown-body { padding-inline: 10px 4px; }
+  }
+
   .view-state {
     display: grid;
     place-items: center;
@@ -1776,6 +4233,11 @@ interface PdfPreviewJob {
   pageGeneration: number;
 }
 
+interface NotebookPreviewJob {
+  readonly generation: number;
+  readonly abortController: AbortController;
+}
+
 interface OfficePreviewJob {
   readonly generation: number;
   readonly abortController: AbortController;
@@ -1785,6 +4247,11 @@ interface OfficePreviewJob {
   nativePptObjectUrl: { readonly url: string; readonly revoke: () => void } | null;
   resourceObserver: MutationObserver | null;
   docxRepairTimer: number | null;
+}
+
+interface DiagramPreviewJob {
+  readonly generation: number;
+  readonly abortController: AbortController;
 }
 
 type FocusSnapshot =
@@ -1809,6 +4276,7 @@ type FocusSnapshot =
   | null;
 
 let nextInstanceId = 0;
+let nextDiagramMarkerId = 0;
 
 function fileNameFromPath(path: string): string {
   const normalized = path.replaceAll("\\", "/");
@@ -1816,7 +4284,12 @@ function fileNameFromPath(path: string): string {
 }
 
 function isMediaPreviewView(view: MainPreviewFileView | undefined): view is MainPreviewMediaView {
-  return view?.kind === "image" || view?.kind === "video" || view?.kind === "pdf" || view?.kind === "audio" || view?.kind === "office";
+  return view?.kind === "image" ||
+    view?.kind === "video" ||
+    view?.kind === "pdf" ||
+    view?.kind === "audio" ||
+    view?.kind === "office" ||
+    view?.kind === "notebook";
 }
 
 function previewerIdForMediaKind(kind: MainPreviewMediaView["kind"]): string {
@@ -1831,6 +4304,8 @@ function previewerIdForMediaKind(kind: MainPreviewMediaView["kind"]): string {
       return AUDIO_PREVIEWER_ID;
     case "office":
       return OFFICE_PREVIEWER_ID;
+    case "notebook":
+      return NOTEBOOK_PREVIEWER_ID;
   }
 }
 
@@ -2063,6 +4538,7 @@ function cloneView(view: MainPreviewFileView): MainPreviewFileView {
     case "pdf":
     case "audio":
     case "office":
+    case "notebook":
       return {
         kind: view.kind,
         path: view.path,
@@ -2102,6 +4578,9 @@ function normalizeState(state: MainPreviewState): MainPreviewState {
     PDF_PREVIEWER_ID,
     AUDIO_PREVIEWER_ID,
     OFFICE_PREVIEWER_ID,
+    NOTEBOOK_PREVIEWER_ID,
+    CSV_PREVIEWER_ID,
+    DIAGRAM_PREVIEWER_ID,
   ].filter(
     (previewer) => state.enabledPreviewers?.includes(previewer) === true,
   );
@@ -2220,8 +4699,12 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   }>();
   #pdfGeneration = 0;
   #pdfJob: PdfPreviewJob | null = null;
+  #notebookGeneration = 0;
+  #notebookJob: NotebookPreviewJob | null = null;
   #officeGeneration = 0;
   #officeJob: OfficePreviewJob | null = null;
+  #diagramGeneration = 0;
+  #diagramJob: DiagramPreviewJob | null = null;
   #state: MainPreviewState = { activePath: null, tabs: [] };
   #rovingPath: string | null = null;
   #nextTabId = 0;
@@ -2259,7 +4742,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   disconnectedCallback(): void {
     this.#connected = false;
     this.#cancelPdfPreview();
+    this.#cancelNotebookPreview();
     this.#cancelOfficePreview();
+    this.#cancelDiagramPreview();
     this.#syntaxCache.clear();
     this.#revokeAllMediaObjectUrls();
     this.#panelMount.replaceChildren();
@@ -2424,7 +4909,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   #renderPanel(): void {
     this.#cancelPdfPreview();
+    this.#cancelNotebookPreview();
     this.#cancelOfficePreview();
+    this.#cancelDiagramPreview();
     if (this.#state.activePath === null) {
       this.#panelMount.replaceChildren();
       return;
@@ -2460,7 +4947,15 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       this.#state.enabledPreviewers?.includes(MARKDOWN_PREVIEWER_ID) === true &&
       isMarkdownPreviewPath(view.path) &&
       !editor;
-    const metadata = `${markdownEditing ? "Rendered Markdown edit · " : markdownPreview ? "Markdown preview · " : ""}${this.#metadataFor(view)}`;
+    const csvPreview = (view.kind === "text" || view.kind === "empty") &&
+      this.#state.enabledPreviewers?.includes(CSV_PREVIEWER_ID) === true &&
+      isCsvPreviewPath(view.path) &&
+      !editor;
+    const diagramPreview = (view.kind === "text" || view.kind === "empty") &&
+      this.#state.enabledPreviewers?.includes(DIAGRAM_PREVIEWER_ID) === true &&
+      isDiagramPreviewPath(view.path) &&
+      !editor;
+    const metadata = `${markdownEditing ? "Rendered Markdown edit · " : markdownPreview ? "Markdown preview · " : csvPreview ? "CSV preview · " : diagramPreview ? "Diagram preview · " : ""}${this.#metadataFor(view)}`;
     metaBar.append(location, this.#textSpan(metadata, "preview-metadata"));
 
     const content = this.ownerDocument.createElement("div");
@@ -2539,6 +5034,14 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
           content.append(this.#markdownReader(view));
           return;
         }
+        if (this.#state.enabledPreviewers?.includes(CSV_PREVIEWER_ID) && isCsvPreviewPath(view.path)) {
+          content.append(this.#csvReader(view));
+          return;
+        }
+        if (this.#state.enabledPreviewers?.includes(DIAGRAM_PREVIEWER_ID) && isDiagramPreviewPath(view.path)) {
+          content.append(this.#diagramReader(view));
+          return;
+        }
         {
           const reader = this.ownerDocument.createElement("div");
           reader.className = "code-reader";
@@ -2557,9 +5060,18 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       case "pdf":
       case "audio":
       case "office":
+      case "notebook":
         content.append(this.#mediaPreview(view));
         return;
       case "empty":
+        if (this.#state.enabledPreviewers?.includes(CSV_PREVIEWER_ID) && isCsvPreviewPath(view.path)) {
+          content.append(this.#statePanel("Empty CSV file", "This CSV file has no rows.", "empty", view));
+          return;
+        }
+        if (this.#state.enabledPreviewers?.includes(DIAGRAM_PREVIEWER_ID) && isDiagramPreviewPath(view.path)) {
+          content.append(this.#statePanel("Empty diagram file", "This diagram file has no content.", "empty", view));
+          return;
+        }
         content.append(this.#statePanel("Empty file", "This file is empty.", "empty", view));
         return;
       case "unsupported":
@@ -2579,6 +5091,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     }
 
     if (view.kind === "pdf") return this.#pdfPreview(view);
+    if (view.kind === "notebook") return this.#notebookPreview(view);
     if (view.kind === "office") return this.#officePreview(view);
 
     let audioPreview: HTMLAudioElement | undefined;
@@ -2644,6 +5157,572 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     video.setAttribute("aria-label", `Preview ${view.name}`);
     container.append(video);
     return container;
+  }
+
+  #notebookPreview(view: MainPreviewMediaView): HTMLElement {
+    if (view.mimeType !== NOTEBOOK_PREVIEW_MIME) {
+      return this.#statePanel("Notebook preview unavailable", "This file does not contain a supported notebook payload.", "unsupported", view);
+    }
+    const container = this.ownerDocument.createElement("article");
+    container.className = "notebook-preview";
+    container.setAttribute("aria-label", `Jupyter notebook preview: ${view.name}`);
+    container.setAttribute("aria-busy", "true");
+    const loading = this.#textSpan("Loading notebook\u2026", "office-preview-loading");
+    loading.setAttribute("role", "status");
+    container.append(loading);
+
+    const job: NotebookPreviewJob = {
+      generation: ++this.#notebookGeneration,
+      abortController: new AbortController(),
+    };
+    this.#notebookJob = job;
+    const isCurrent = (): boolean =>
+      this.#connected &&
+      this.#notebookJob === job &&
+      this.#notebookGeneration === job.generation &&
+      !job.abortController.signal.aborted &&
+      container.isConnected;
+
+    queueMicrotask(() => {
+      void (async () => {
+        try {
+          const model = parseNotebook(view.bytes);
+          if (!isCurrent()) return;
+          await this.#renderNotebookModel(view, model, container, job, isCurrent);
+        } catch (error) {
+          if (!isCurrent()) return;
+          const message = error instanceof Error ? error.message : "This notebook could not be opened.";
+          container.setAttribute("aria-busy", "false");
+          container.replaceChildren(this.#statePanel("Notebook preview failed", message, "error", view));
+        }
+      })();
+    });
+    return container;
+  }
+
+  async #renderNotebookModel(
+    view: MainPreviewMediaView,
+    model: NotebookModel,
+    container: HTMLElement,
+    job: NotebookPreviewJob,
+    isCurrent: () => boolean,
+  ): Promise<void> {
+    const shell = this.ownerDocument.createElement("div");
+    shell.className = "notebook-shell";
+    const header = this.ownerDocument.createElement("header");
+    header.className = "notebook-header";
+    const headingCopy = this.ownerDocument.createElement("div");
+    const title = this.ownerDocument.createElement("h2");
+    title.className = "notebook-title";
+    title.textContent = view.name;
+    const summary = this.ownerDocument.createElement("div");
+    summary.className = "notebook-summary";
+    summary.textContent = `${model.kernelLabel} \u00b7 ${model.languageLabel} \u00b7 nbformat 4.${model.minor} \u00b7 ${model.cells.length} ${model.cells.length === 1 ? "cell" : "cells"}`;
+    headingCopy.append(title, summary);
+    const mode = this.#textSpan("Read-only \u00b7 saved outputs only", "notebook-mode");
+    header.append(headingCopy, mode);
+
+    const notices = this.ownerDocument.createElement("div");
+    const versionNotice = model.newerMinor
+      ? this.#textSpan("This notebook uses a newer nbformat minor version. Known fields are shown using best-effort rendering.", "notebook-notice")
+      : null;
+    if (versionNotice) notices.append(versionNotice);
+    const limitNotice = this.#textSpan("Preview limited for performance.", "notebook-notice notebook-limited");
+    limitNotice.hidden = !model.limited;
+    notices.append(limitNotice);
+
+    const cells = this.ownerDocument.createElement("div");
+    cells.className = "notebook-cells";
+    const budget: NotebookRenderBudget = {
+      htmlUnits: 0,
+      outputTextUnits: model.reservedOutputTextUnits,
+      imageBytes: 0,
+      domNodes: 16,
+      limited: model.limited,
+    };
+    shell.append(header, notices, cells);
+    container.replaceChildren(shell);
+
+    for (let start = 0; start < model.cells.length; start += NOTEBOOK_RENDER_BATCH_CELLS) {
+      if (!isCurrent()) return;
+      const fragment = this.ownerDocument.createDocumentFragment();
+      const end = Math.min(model.cells.length, start + NOTEBOOK_RENDER_BATCH_CELLS);
+      for (let index = start; index < end; index += 1) {
+        const cell = this.#notebookCell(model.cells[index]!, index, model.languagePath, budget, job);
+        if (cell) fragment.append(cell);
+      }
+      cells.append(fragment);
+      limitNotice.hidden = !budget.limited;
+      if (end < model.cells.length) await this.#yieldNotebookRender(job.abortController.signal);
+    }
+    if (model.cells.length === 0 && isCurrent()) {
+      const empty = this.#textSpan("This notebook does not contain any cells.", "notebook-notice");
+      cells.append(empty);
+    }
+    if (isCurrent()) container.setAttribute("aria-busy", "false");
+  }
+
+  #notebookCell(
+    cell: NotebookCellModel,
+    index: number,
+    languagePath: string,
+    budget: NotebookRenderBudget,
+    job: NotebookPreviewJob,
+  ): HTMLElement | null {
+    if (!this.#consumeNotebookDomNodes(budget, 5)) return null;
+    const section = this.ownerDocument.createElement("section");
+    section.className = `notebook-cell ${cell.kind}`;
+    const prompt = this.ownerDocument.createElement("div");
+    prompt.className = "notebook-prompt";
+    prompt.setAttribute("aria-hidden", "true");
+    const body = this.ownerDocument.createElement("div");
+    body.className = "notebook-cell-body";
+
+    if (cell.kind === "markdown") {
+      prompt.textContent = "Markdown";
+      section.setAttribute("aria-label", `Markdown cell ${index + 1}`);
+      body.append(this.#notebookMarkdown(cell.source, cell.attachments, budget, job));
+    } else if (cell.kind === "code") {
+      const execution = cell.executionCount === null ? " " : String(cell.executionCount);
+      prompt.textContent = `In [${execution}]`;
+      section.setAttribute("aria-label", `Code cell ${index + 1}${cell.executionCount === null ? "" : `, execution ${cell.executionCount}`}`);
+      const pre = this.ownerDocument.createElement("pre");
+      pre.className = "notebook-source";
+      const highlighted = this.#highlightedCode(languagePath, cell.source);
+      const highlightedNodes = highlighted.querySelectorAll("*").length + highlighted.childNodes.length + 1;
+      if (this.#consumeNotebookDomNodes(budget, highlightedNodes)) {
+        pre.append(highlighted);
+      } else {
+        const plain = this.ownerDocument.createElement("code");
+        plain.textContent = cell.source;
+        pre.append(plain);
+      }
+      body.append(pre);
+      if (cell.outputs.length > 0) {
+        const outputs = this.ownerDocument.createElement("div");
+        outputs.className = "notebook-outputs";
+        for (let outputIndex = 0; outputIndex < cell.outputs.length; outputIndex += 1) {
+          if (!this.#consumeNotebookDomNodes(budget, 2)) break;
+          outputs.append(this.#notebookOutput(cell.outputs[outputIndex]!, index, outputIndex, budget, job));
+        }
+        body.append(outputs);
+      }
+    } else if (cell.kind === "raw") {
+      prompt.textContent = "Raw";
+      section.setAttribute("aria-label", `Raw cell ${index + 1}`);
+      const pre = this.ownerDocument.createElement("pre");
+      pre.className = "notebook-raw";
+      pre.textContent = cell.source;
+      body.append(pre);
+    } else {
+      prompt.textContent = "Cell";
+      section.setAttribute("aria-label", `Unsupported cell ${index + 1}`);
+      body.append(this.#textSpan(cell.reason, "notebook-output unsupported"));
+    }
+    section.append(prompt, body);
+    return section;
+  }
+
+  #notebookOutput(
+    output: NotebookOutputModel,
+    cellIndex: number,
+    outputIndex: number,
+    budget: NotebookRenderBudget,
+    job: NotebookPreviewJob,
+  ): HTMLElement {
+    const element = this.ownerDocument.createElement("div");
+    element.className = `notebook-output ${output.kind}`;
+    element.setAttribute("aria-label", `Saved output ${outputIndex + 1} from code cell ${cellIndex + 1}`);
+    if (output.kind === "stream") {
+      element.classList.add(output.name);
+      const pre = this.ownerDocument.createElement("pre");
+      pre.textContent = notebookTerminalText(output.text);
+      element.append(pre);
+      return element;
+    }
+    if (output.kind === "error") {
+      const pre = this.ownerDocument.createElement("pre");
+      const heading = `${output.ename}${output.evalue ? `: ${output.evalue}` : ""}`;
+      const traceback = notebookTerminalText(output.traceback)
+        .split("\n")
+        .slice(0, MAX_NOTEBOOK_TRACEBACK_LINES)
+        .join("\n");
+      pre.textContent = traceback ? `${heading}\n${traceback}` : heading;
+      element.append(pre);
+      return element;
+    }
+    if (output.kind === "display") {
+      const rendered = this.#notebookMimeOutput(output.data, budget, job, `Output from code cell ${cellIndex + 1}`);
+      if (rendered) {
+        element.classList.add("rich");
+        element.append(rendered);
+      } else {
+        element.classList.add("unsupported");
+        element.textContent = "This saved output type is not supported safely.";
+      }
+      return element;
+    }
+    element.classList.add("unsupported");
+    element.textContent = "Unsupported saved output.";
+    return element;
+  }
+
+  #notebookMimeOutput(
+    bundle: NotebookMimeBundle,
+    budget: NotebookRenderBudget,
+    job: NotebookPreviewJob,
+    alt: string,
+    startIndex = 0,
+  ): HTMLElement | null {
+    const priorities = [
+      "image/png",
+      "image/jpeg",
+      "image/webp",
+      "image/gif",
+      "image/svg+xml",
+      "text/html",
+      "text/markdown",
+      "application/json",
+      "text/latex",
+      "text/plain",
+    ] as const;
+    for (let priorityIndex = startIndex; priorityIndex < priorities.length; priorityIndex += 1) {
+      const mimeType = priorities[priorityIndex]!;
+      if (!Object.prototype.hasOwnProperty.call(bundle, mimeType)) continue;
+      const value = bundle[mimeType];
+      if (mimeType === "image/svg+xml") {
+        const image = this.#notebookSvgImage(value, budget, alt);
+        if (image) {
+          this.#bindNotebookImageFallback(image, job, () => this.#notebookMimeOutput(bundle, budget, job, alt, priorityIndex + 1));
+          return image;
+        }
+        continue;
+      }
+      if (mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp" || mimeType === "image/gif") {
+        const image = this.#notebookRasterImage(mimeType, value, budget, alt);
+        if (image) {
+          this.#bindNotebookImageFallback(image, job, () => this.#notebookMimeOutput(bundle, budget, job, alt, priorityIndex + 1));
+          return image;
+        }
+        continue;
+      }
+      if (mimeType === "text/html") {
+        const html = this.#notebookHtml(value, budget);
+        if (html) return html;
+        continue;
+      }
+      if (mimeType === "text/markdown") {
+        const text = this.#takeNotebookRenderText(value, budget);
+        if (!text) continue;
+        return this.#notebookMarkdown(text, new Map(), budget, job);
+      }
+      if (mimeType === "application/json") {
+        const remaining = Math.max(0, MAX_NOTEBOOK_TOTAL_OUTPUT_TEXT_UNITS - budget.outputTextUnits);
+        const json = notebookJsonText(value, Math.min(MAX_NOTEBOOK_OUTPUT_TEXT_UNITS, remaining));
+        if (!json) continue;
+        budget.outputTextUnits += json.text.length;
+        if (json.truncated) budget.limited = true;
+        const pre = this.ownerDocument.createElement("pre");
+        pre.textContent = json.text;
+        return pre;
+      }
+      const text = this.#takeNotebookRenderText(value, budget);
+      if (!text) continue;
+      const pre = this.ownerDocument.createElement("pre");
+      pre.textContent = text;
+      return pre;
+    }
+    return null;
+  }
+
+  #takeNotebookRenderText(value: unknown, budget: NotebookRenderBudget): string | null {
+    const remaining = Math.max(0, MAX_NOTEBOOK_TOTAL_OUTPUT_TEXT_UNITS - budget.outputTextUnits);
+    const text = notebookMimeText(value, Math.min(MAX_NOTEBOOK_OUTPUT_TEXT_UNITS, remaining));
+    if (!text) return null;
+    budget.outputTextUnits += text.text.length;
+    if (text.truncated) budget.limited = true;
+    return text.text;
+  }
+
+  #notebookMarkdown(
+    source: string,
+    attachments: ReadonlyMap<string, NotebookMimeBundle>,
+    budget: NotebookRenderBudget,
+    job: NotebookPreviewJob,
+  ): HTMLElement {
+    const fallback = (): HTMLElement => {
+      budget.limited = true;
+      const plain = this.ownerDocument.createElement("pre");
+      plain.className = "notebook-raw notebook-limited";
+      plain.textContent = source;
+      return plain;
+    };
+    const remainingNodes = Math.max(0, MAX_NOTEBOOK_DOM_NODES - budget.domNodes);
+    const maximumTokens = Math.min(MAX_NOTEBOOK_MARKDOWN_TOKENS, remainingNodes);
+    if (maximumTokens < 1) return fallback();
+    const tokens = notebookMarkdownRenderer.parse(source, {});
+    let tokenCount = 0;
+    for (const token of tokens) {
+      tokenCount += 1;
+      if (token.children) tokenCount += token.children.length;
+      if (tokenCount > maximumTokens) return fallback();
+    }
+    const article = this.ownerDocument.createElement("article");
+    article.className = "notebook-markdown markdown-body";
+    const rendered = notebookMarkdownRenderer.renderer.render(tokens, notebookMarkdownRenderer.options, {});
+    const fragment = DOMPurify.sanitize(rendered, {
+      ALLOWED_TAGS: [...MARKDOWN_ALLOWED_TAGS],
+      ALLOWED_ATTR: ["align", "class", "start", "title", "data-notebook-image-alt", "data-notebook-image-src"],
+      ALLOW_ARIA_ATTR: false,
+      ALLOW_DATA_ATTR: false,
+      FORBID_TAGS: ["audio", "button", "embed", "form", "iframe", "img", "input", "math", "object", "select", "source", "style", "svg", "textarea", "video"],
+      FORBID_ATTR: ["formaction", "href", "ping", "src", "srcset", "style"],
+      KEEP_CONTENT: true,
+      RETURN_DOM_FRAGMENT: true,
+      SANITIZE_NAMED_PROPS: true,
+    }) as DocumentFragment;
+    article.append(fragment);
+    for (const anchor of article.querySelectorAll("a")) {
+      anchor.removeAttribute("href");
+      anchor.removeAttribute("target");
+      anchor.setAttribute("title", "Links are disabled in notebook preview");
+    }
+    for (const placeholder of article.querySelectorAll<HTMLElement>(".notebook-image-placeholder")) {
+      const sourceValue = placeholder.getAttribute("data-notebook-image-src") ?? "";
+      const alt = placeholder.getAttribute("data-notebook-image-alt") ?? "Notebook attachment";
+      let attachmentName = sourceValue.startsWith("attachment:") ? sourceValue.slice("attachment:".length) : "";
+      if (attachmentName && !attachments.has(attachmentName)) {
+        try {
+          attachmentName = decodeURIComponent(attachmentName);
+        } catch {
+          attachmentName = "";
+        }
+      }
+      const attachment = attachmentName ? attachments.get(attachmentName) : undefined;
+      const image = attachment ? this.#notebookAttachmentImage(attachment, budget, job, alt) : null;
+      if (image) placeholder.replaceWith(image);
+      else {
+        placeholder.textContent = attachmentName ? `Attachment unavailable \u00b7 ${alt}` : `External image blocked \u00b7 ${alt}`;
+        placeholder.removeAttribute("data-notebook-image-src");
+        placeholder.removeAttribute("data-notebook-image-alt");
+      }
+    }
+    const cost = article.querySelectorAll("*").length + article.childNodes.length + 1;
+    if (this.#consumeNotebookDomNodes(budget, cost)) return article;
+    return fallback();
+  }
+
+  #notebookAttachmentImage(
+    bundle: NotebookMimeBundle,
+    budget: NotebookRenderBudget,
+    job: NotebookPreviewJob,
+    alt: string,
+    startIndex = 0,
+  ): HTMLImageElement | null {
+    const priorities = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"] as const;
+    for (let priorityIndex = startIndex; priorityIndex < priorities.length; priorityIndex += 1) {
+      const mimeType = priorities[priorityIndex]!;
+      if (!Object.prototype.hasOwnProperty.call(bundle, mimeType)) continue;
+      const value = bundle[mimeType];
+      const image = mimeType === "image/svg+xml"
+        ? this.#notebookSvgImage(value, budget, alt)
+        : this.#notebookRasterImage(mimeType, value, budget, alt);
+      if (image) {
+        this.#bindNotebookImageFallback(
+          image,
+          job,
+          () => this.#notebookAttachmentImage(bundle, budget, job, alt, priorityIndex + 1),
+        );
+        return image;
+      }
+    }
+    return null;
+  }
+
+  #notebookHtml(value: unknown, budget: NotebookRenderBudget): HTMLElement | null {
+    const remaining = Math.max(0, MAX_NOTEBOOK_TOTAL_HTML_UNITS - budget.htmlUnits);
+    const html = notebookMimeText(value, Math.min(MAX_NOTEBOOK_HTML_UNITS, remaining));
+    if (!html) return null;
+    budget.htmlUnits += html.text.length;
+    if (html.truncated) budget.limited = true;
+    const maximumTagMarkers = Math.min(MAX_NOTEBOOK_HTML_TAGS, Math.max(0, MAX_NOTEBOOK_DOM_NODES - budget.domNodes));
+    if (!notebookMarkupTagMarkersWithinLimit(html.text, maximumTagMarkers)) {
+      budget.limited = true;
+      return null;
+    }
+    const fragment = DOMPurify.sanitize(html.text, {
+      ALLOWED_TAGS: [
+        "a", "blockquote", "br", "code", "del", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "li", "ol", "p", "pre", "s", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
+      ],
+      ALLOWED_ATTR: ["align", "colspan", "rowspan", "scope", "start", "title"],
+      ALLOW_ARIA_ATTR: false,
+      ALLOW_DATA_ATTR: false,
+      FORBID_TAGS: ["audio", "button", "embed", "form", "iframe", "img", "input", "math", "object", "select", "source", "style", "svg", "textarea", "video"],
+      FORBID_ATTR: ["class", "formaction", "href", "id", "ping", "src", "srcset", "style", "target"],
+      KEEP_CONTENT: true,
+      RETURN_DOM_FRAGMENT: true,
+      SANITIZE_NAMED_PROPS: true,
+    }) as DocumentFragment;
+    const cost = this.#notebookNodeCost(fragment);
+    if (!this.#consumeNotebookDomNodes(budget, cost)) return null;
+    const container = this.ownerDocument.createElement("div");
+    container.className = "notebook-rich-html";
+    container.append(fragment);
+    for (const anchor of container.querySelectorAll("a")) {
+      anchor.removeAttribute("href");
+      anchor.setAttribute("title", "Links are disabled in notebook preview");
+    }
+    return container;
+  }
+
+  #notebookRasterImage(
+    mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+    value: unknown,
+    budget: NotebookRenderBudget,
+    alt: string,
+  ): HTMLImageElement | null {
+    const maximumEncodedUnits = Math.ceil(MAX_NOTEBOOK_IMAGE_BYTES / 3) * 4 + 4;
+    const encoded = notebookMimeText(value, maximumEncodedUnits + 1);
+    if (!encoded || encoded.truncated) return null;
+    const normalized = encoded.text.replace(/[\t\n\f\r ]+/g, "");
+    if (
+      normalized.length === 0 ||
+      normalized.length > maximumEncodedUnits ||
+      normalized.length % 4 !== 0 ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized)
+    ) return null;
+    let binary: string;
+    try {
+      binary = (this.ownerDocument.defaultView?.atob ?? globalThis.atob)(normalized);
+    } catch {
+      return null;
+    }
+    if (
+      binary.length === 0 ||
+      binary.length > MAX_NOTEBOOK_IMAGE_BYTES ||
+      budget.imageBytes + binary.length > MAX_NOTEBOOK_TOTAL_IMAGE_BYTES ||
+      !notebookRasterStructureValid(mimeType, binary)
+    ) {
+      budget.limited = budget.imageBytes + binary.length > MAX_NOTEBOOK_TOTAL_IMAGE_BYTES;
+      return null;
+    }
+    budget.imageBytes += binary.length;
+    const image = this.ownerDocument.createElement("img");
+    image.className = "notebook-output-image";
+    image.alt = alt;
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.draggable = false;
+    image.src = `data:${mimeType};base64,${normalized}`;
+    return image;
+  }
+
+  #notebookSvgImage(value: unknown, budget: NotebookRenderBudget, alt: string): HTMLImageElement | null {
+    const svg = notebookMimeText(value, MAX_NOTEBOOK_SVG_UNITS + 1);
+    if (!svg || svg.truncated || svg.text.length > MAX_NOTEBOOK_SVG_UNITS) return null;
+    const maximumTagMarkers = Math.min(MAX_NOTEBOOK_SVG_NODES, Math.max(0, MAX_NOTEBOOK_DOM_NODES - budget.domNodes));
+    if (!notebookMarkupTagMarkersWithinLimit(svg.text, maximumTagMarkers)) {
+      budget.limited = true;
+      return null;
+    }
+    const sanitized = String(DOMPurify.sanitize(svg.text, {
+      ALLOWED_TAGS: [
+        "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "defs", "clippath", "lineargradient", "radialgradient", "stop",
+      ],
+      ALLOWED_ATTR: [
+        "xmlns", "viewBox", "preserveAspectRatio", "width", "height", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "d", "points", "transform", "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-linecap", "stroke-linejoin", "opacity", "font-family", "font-size", "font-style", "font-weight", "text-anchor", "dominant-baseline", "offset", "stop-color", "stop-opacity", "clip-path",
+      ],
+      ALLOW_ARIA_ATTR: false,
+      ALLOW_DATA_ATTR: false,
+      FORBID_TAGS: ["a", "animate", "animateMotion", "animateTransform", "audio", "embed", "filter", "foreignObject", "iframe", "image", "object", "script", "set", "style", "use", "video"],
+      FORBID_ATTR: ["href", "id", "style", "xlink:href"],
+      KEEP_CONTENT: false,
+      SANITIZE_NAMED_PROPS: true,
+    }));
+    if (!sanitized || /url\s*\(/i.test(sanitized)) return null;
+    const template = this.ownerDocument.createElement("template");
+    template.innerHTML = sanitized;
+    const root = template.content.firstElementChild;
+    if (!root || root.localName.toLowerCase() !== "svg" || template.content.children.length !== 1) return null;
+    const nodeCount = this.#notebookNodeCost(root);
+    if (nodeCount > MAX_NOTEBOOK_SVG_NODES || !this.#consumeNotebookDomNodes(budget, nodeCount)) return null;
+    const serialized = root.outerHTML;
+    const byteLength = new TextEncoder().encode(serialized).byteLength;
+    if (byteLength > MAX_NOTEBOOK_IMAGE_BYTES || budget.imageBytes + byteLength > MAX_NOTEBOOK_TOTAL_IMAGE_BYTES) {
+      budget.limited = true;
+      return null;
+    }
+    budget.imageBytes += byteLength;
+    const image = this.ownerDocument.createElement("img");
+    image.className = "notebook-output-image";
+    image.alt = alt;
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.draggable = false;
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
+    return image;
+  }
+
+  #bindNotebookImageFallback(
+    image: HTMLImageElement,
+    job: NotebookPreviewJob,
+    renderFallback: () => HTMLElement | null,
+  ): void {
+    image.addEventListener("error", () => {
+      if (!this.#isNotebookJobCurrent(job) || !image.isConnected) return;
+      let fallback: HTMLElement | null = null;
+      try {
+        fallback = renderFallback();
+      } catch {
+        fallback = null;
+      }
+      if (!this.#isNotebookJobCurrent(job) || !image.isConnected) return;
+      if (!fallback) fallback = this.#textSpan("Saved image unavailable.", "notebook-image-placeholder notebook-limited");
+      image.replaceWith(fallback);
+    }, { once: true });
+  }
+
+  #isNotebookJobCurrent(job: NotebookPreviewJob): boolean {
+    return this.#connected &&
+      this.#notebookJob === job &&
+      this.#notebookGeneration === job.generation &&
+      !job.abortController.signal.aborted;
+  }
+
+  #notebookNodeCost(root: Node): number {
+    let count = 0;
+    const walker = this.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ALL);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) count += 1;
+    return count;
+  }
+
+  #consumeNotebookDomNodes(budget: NotebookRenderBudget, count: number): boolean {
+    if (count < 0 || budget.domNodes + count > MAX_NOTEBOOK_DOM_NODES) {
+      budget.limited = true;
+      return false;
+    }
+    budget.domNodes += count;
+    return true;
+  }
+
+  async #yieldNotebookRender(signal: AbortSignal): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const window = this.ownerDocument.defaultView;
+      if (window) window.setTimeout(resolve, 0);
+      else setTimeout(resolve, 0);
+    });
+    if (signal.aborted) {
+      const error = new Error("Notebook preview cancelled");
+      error.name = "AbortError";
+      throw error;
+    }
+  }
+
+  #cancelNotebookPreview(): void {
+    this.#notebookGeneration += 1;
+    const job = this.#notebookJob;
+    this.#notebookJob = null;
+    job?.abortController.abort();
   }
 
   #pdfPreview(view: MainPreviewMediaView): HTMLElement {
@@ -6292,6 +9371,252 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     return panel;
   }
 
+  #csvReader(view: MainPreviewTextView): HTMLElement {
+    const model = parseCsv(view.text, view.truncated);
+    if (model.rows.length === 0) {
+      return this.#statePanel("Empty CSV file", "This CSV file has no rows.", "empty", view);
+    }
+
+    const container = this.ownerDocument.createElement("article");
+    container.className = "csv-preview";
+    container.setAttribute("aria-label", `CSV preview: ${view.name}`);
+
+    const header = this.ownerDocument.createElement("header");
+    header.className = "csv-header";
+    const headingCopy = this.ownerDocument.createElement("div");
+    const title = this.ownerDocument.createElement("h2");
+    title.className = "csv-title";
+    title.textContent = view.name;
+    const summary = this.ownerDocument.createElement("div");
+    summary.className = "csv-summary";
+    summary.textContent = `${model.totalRows.toLocaleString()} ${model.totalRows === 1 ? "row" : "rows"} · ${model.maximumColumns.toLocaleString()} ${model.maximumColumns === 1 ? "column" : "columns"} · comma-delimited`;
+    headingCopy.append(title, summary);
+    const mode = this.#textSpan("Preview grid", "csv-mode");
+    header.append(headingCopy, mode);
+
+    const notices = this.ownerDocument.createElement("div");
+    notices.className = "csv-notices";
+    if (view.truncated) {
+      notices.append(this.#textSpan("Showing the beginning of this file. The final record may be incomplete.", "csv-notice"));
+    }
+    if (model.limited) notices.append(this.#textSpan("Preview limited for performance.", "csv-notice"));
+    if (model.malformed) {
+      notices.append(this.#textSpan("CSV quoting is malformed. Displayed using best effort.", "csv-notice csv-warning"));
+    }
+
+    const scroller = this.ownerDocument.createElement("div");
+    scroller.className = "csv-table-scroll";
+    scroller.tabIndex = 0;
+    scroller.setAttribute("aria-label", `Scrollable CSV table for ${view.name}`);
+    const table = this.ownerDocument.createElement("table");
+    table.className = "csv-table";
+    const caption = this.ownerDocument.createElement("caption");
+    caption.className = "csv-caption";
+    caption.textContent = `${view.name} CSV preview${view.truncated || model.limited ? ", partial data" : ""}`;
+
+    const head = this.ownerDocument.createElement("thead");
+    const headingRow = this.ownerDocument.createElement("tr");
+    const corner = this.ownerDocument.createElement("th");
+    corner.className = "csv-row-number csv-corner";
+    corner.scope = "col";
+    corner.textContent = "#";
+    headingRow.append(corner);
+    const displayedColumns = Math.min(model.maximumColumns, MAX_CSV_COLUMNS);
+    for (let column = 1; column <= displayedColumns; column += 1) {
+      const cell = this.ownerDocument.createElement("th");
+      cell.className = "csv-column-header";
+      cell.scope = "col";
+      cell.textContent = excelColumnLabel(column);
+      headingRow.append(cell);
+    }
+    head.append(headingRow);
+
+    const body = this.ownerDocument.createElement("tbody");
+    const fragment = this.ownerDocument.createDocumentFragment();
+    for (let rowIndex = 0; rowIndex < model.rows.length; rowIndex += 1) {
+      const row = model.rows[rowIndex] ?? [];
+      const tableRow = this.ownerDocument.createElement("tr");
+      const rowNumber = this.ownerDocument.createElement("th");
+      rowNumber.className = "csv-row-number";
+      rowNumber.scope = "row";
+      rowNumber.textContent = String(rowIndex + 1);
+      tableRow.append(rowNumber);
+      for (const value of row) {
+        const cell = this.ownerDocument.createElement("td");
+        cell.dir = "auto";
+        cell.textContent = visibleCsvCellText(value);
+        tableRow.append(cell);
+      }
+      fragment.append(tableRow);
+    }
+    body.append(fragment);
+    table.append(caption, head, body);
+    scroller.append(table);
+    container.append(header);
+    if (notices.childElementCount > 0) container.append(notices);
+    container.append(scroller);
+    return container;
+  }
+
+  #startDiagramPreview(): DiagramPreviewJob {
+    this.#cancelDiagramPreview();
+    const job = {
+      generation: this.#diagramGeneration,
+      abortController: new AbortController(),
+    };
+    this.#diagramJob = job;
+    return job;
+  }
+
+  #isDiagramPreviewCurrent(job: DiagramPreviewJob): boolean {
+    return this.#connected &&
+      this.#diagramJob === job &&
+      this.#diagramGeneration === job.generation &&
+      !job.abortController.signal.aborted;
+  }
+
+  #cancelDiagramPreview(): void {
+    this.#diagramGeneration += 1;
+    const job = this.#diagramJob;
+    this.#diagramJob = null;
+    job?.abortController.abort(new DOMException("The diagram preview was cancelled.", "AbortError"));
+  }
+
+  #diagramReader(view: MainPreviewTextView): HTMLElement {
+    const kind = diagramSourceKind(view.path);
+    const container = this.ownerDocument.createElement("article");
+    container.className = "diagram-preview";
+    container.setAttribute("aria-label", `Diagram preview: ${view.name}`);
+    const header = this.ownerDocument.createElement("header");
+    header.className = "diagram-header";
+    const headingCopy = this.ownerDocument.createElement("div");
+    const title = this.ownerDocument.createElement("h2");
+    title.className = "diagram-title";
+    title.textContent = view.name;
+    const summary = this.ownerDocument.createElement("div");
+    summary.className = "diagram-summary";
+    summary.textContent = kind === "drawio" ? "Draw.io diagram · Local preview" : "PlantUML activity · Local preview";
+    headingCopy.append(title, summary);
+    const controls = this.ownerDocument.createElement("div");
+    controls.className = "diagram-controls";
+    header.append(headingCopy, controls);
+    const notices = this.ownerDocument.createElement("div");
+    notices.className = "diagram-notices";
+    const canvas = this.ownerDocument.createElement("div");
+    canvas.className = "diagram-canvas";
+    canvas.tabIndex = 0;
+    canvas.setAttribute("aria-label", `${view.name} rendered diagram`);
+    const status = (message: string, error = false): HTMLElement => {
+      const element = this.ownerDocument.createElement("div");
+      element.className = `diagram-status${error ? " error" : ""}`;
+      element.setAttribute(error ? "role" : "aria-live", error ? "alert" : "polite");
+      element.textContent = message;
+      return element;
+    };
+    const notice = (message: string): HTMLElement => this.#textSpan(message, "diagram-notice");
+    container.append(header);
+    if (view.truncated) {
+      notices.append(notice("Diagram rendering is disabled because this file exceeds the safe text-preview limit."));
+      canvas.append(status("A truncated diagram cannot be parsed safely. Use the source file in a dedicated diagram editor.", true));
+      container.append(notices, canvas);
+      return container;
+    }
+    if (!kind) {
+      canvas.append(status("This diagram format is not supported.", true));
+      container.append(canvas);
+      return container;
+    }
+    const initialJob = this.#startDiagramPreview();
+    if (kind === "plantuml") {
+      try {
+        assertDiagramNotAborted(initialJob.abortController.signal);
+        const model = parsePlantUmlActivity(view.text);
+        assertDiagramNotAborted(initialJob.abortController.signal);
+        summary.textContent = "PlantUML activity · Bounded local renderer";
+        if (model.unsupported > 0) {
+          notices.append(notice(`Partial preview: ${model.unsupported.toLocaleString()} unsupported PlantUML ${model.unsupported === 1 ? "statement was" : "statements were"} omitted.`));
+        }
+        const svg = renderPlantUmlActivitySvg(this.ownerDocument, model, `${view.name} PlantUML activity diagram`);
+        assertDiagramNotAborted(initialJob.abortController.signal);
+        canvas.append(svg);
+      } catch (error) {
+        if (!this.#isDiagramPreviewCurrent(initialJob)) return container;
+        const message = error instanceof Error ? error.message : "The PlantUML activity could not be parsed.";
+        canvas.append(status(`${message} Switch to editing mode to inspect the raw source.`, true));
+      }
+      if (notices.childElementCount > 0) container.append(notices);
+      container.append(canvas);
+      return container;
+    }
+
+    const Parser = this.ownerDocument.defaultView?.DOMParser;
+    if (!Parser) {
+      canvas.append(status("This Codex build cannot parse Draw.io XML locally.", true));
+      container.append(canvas);
+      return container;
+    }
+    let parsed: ReturnType<typeof drawioPages>;
+    try {
+      parsed = drawioPages(Parser, view.text, initialJob.abortController.signal);
+    } catch (error) {
+      if (!this.#isDiagramPreviewCurrent(initialJob)) return container;
+      const message = error instanceof Error ? error.message : "The Draw.io file could not be parsed.";
+      canvas.append(status(`${message} Switch to editing mode to inspect the raw source.`, true));
+      container.append(canvas);
+      return container;
+    }
+    summary.textContent = `Draw.io · ${parsed.pages.length.toLocaleString()} ${parsed.pages.length === 1 ? "page" : "pages"} · Local renderer`;
+    if (parsed.limited) notices.append(notice(`Only the first ${MAX_DRAWIO_PAGES.toLocaleString()} Draw.io pages are available in preview.`));
+    let pageNotice: HTMLElement | null = null;
+    const renderPage = async (index: number): Promise<void> => {
+      const page = parsed.pages[index];
+      if (!page) return;
+      const pageJob = this.#startDiagramPreview();
+      pageNotice?.remove();
+      pageNotice = null;
+      canvas.replaceChildren(status(`Rendering ${page.name}…`));
+      try {
+        assertDiagramNotAborted(pageJob.abortController.signal);
+        const model = await drawioPageModel(Parser, page, pageJob.abortController.signal);
+        if (!this.#isDiagramPreviewCurrent(pageJob) || !container.isConnected) return;
+        const rendered = renderDrawioSvg(this.ownerDocument, model, `${view.name} · ${page.name}`);
+        if (!this.#isDiagramPreviewCurrent(pageJob) || !container.isConnected) return;
+        canvas.replaceChildren(rendered.svg);
+        canvas.setAttribute("aria-label", `${view.name} rendered Draw.io page: ${page.name}`);
+        if (rendered.unsupportedShapes > 0) {
+          pageNotice = notice(`${rendered.unsupportedShapes.toLocaleString()} unsupported Draw.io ${rendered.unsupportedShapes === 1 ? "shape uses" : "shapes use"} a safe rectangular fallback.`);
+          notices.append(pageNotice);
+          if (!notices.isConnected) container.insertBefore(notices, canvas);
+        }
+      } catch (error) {
+        if (!this.#isDiagramPreviewCurrent(pageJob) || !container.isConnected) return;
+        const message = error instanceof Error ? error.message : "The Draw.io page could not be rendered.";
+        canvas.replaceChildren(status(`${message} Switch to editing mode to inspect the raw source.`, true));
+      }
+    };
+    if (parsed.pages.length > 1) {
+      const label = this.ownerDocument.createElement("label");
+      label.className = "diagram-page-label";
+      label.textContent = "Page";
+      const select = this.ownerDocument.createElement("select");
+      select.className = "diagram-page-select";
+      select.setAttribute("aria-label", `Select a Draw.io page for ${view.name}`);
+      parsed.pages.forEach((page, index) => {
+        const option = this.ownerDocument.createElement("option");
+        option.value = String(index);
+        option.textContent = page.name;
+        select.append(option);
+      });
+      select.addEventListener("change", () => void renderPage(Number.parseInt(select.value, 10)));
+      label.append(select);
+      controls.append(label);
+    }
+    if (notices.childElementCount > 0) container.append(notices);
+    container.append(canvas);
+    void renderPage(0);
+    return container;
+  }
+
   #metadataFor(view: MainPreviewFileView): string {
     switch (view.kind) {
       case "loading":
@@ -6312,6 +9637,8 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
         const kind = officeDocumentKind(view.mimeType);
         return `${kind?.toUpperCase() ?? "Office"} \u00b7 ${formatBytes(view.sizeBytes)}`;
       }
+      case "notebook":
+        return `Notebook \u00b7 ${formatBytes(view.sizeBytes)}`;
       case "unsupported":
         return formatBytes(view.sizeBytes);
       case "error":

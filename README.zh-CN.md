@@ -20,15 +20,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.1.45-x64-setup.exe`
-- 备选：`CodeCodex-0.1.45-x64.msi`
-- 便携包：`CodeCodex-0.1.45-x64.zip`
+- 推荐：`CodeCodex-0.1.48-x64-setup.exe`
+- 备选：`CodeCodex-0.1.48-x64.msi`
+- 便携包：`CodeCodex-0.1.48-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.1.45-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.1.48-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -67,7 +67,7 @@ Get-FileHash .\CodeCodex-0.1.45-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.45
+./scripts/package.ps1 -Version 0.1.48
 ```
 
 生成结果会写入 `releases/`。
@@ -91,7 +91,10 @@ Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创
 - Codex 侧边栏中的本地工作区文件树。
 - 位于对话旁边的主窗口文件标签页。
 - 文本预览与编辑，包括多语言 Markdown 内容。
-- 可在预览市场中独立启用图片、视频、PDF、音频和 Office 预览。
+- 可在预览市场中独立启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook 和 Office 预览。
+- 在本地以表格形式预览 CSV，支持引号字段、字段内换行、固定表头和受限渲染。
+- 在本地以受限方式预览 `.drawio` 文件和常用 `.plantuml` 活动图语法，不会上传源代码。
+- 在本地以只读方式预览 Jupyter Notebook 的 Markdown、代码单元格和已保存输出。
 - 在本地以只读方式预览 DOCX 文档、XLSX 工作簿和 PPT/PPTX 演示文稿。
 - 右键菜单：新建、重命名、删除、复制路径、在资源管理器中显示、刷新。
 - 文件和文件夹拖拽移动。
