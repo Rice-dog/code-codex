@@ -5,6 +5,24 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.45
+
+- `CodeCodex-0.1.45-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.45-x64.msi`: MSI installer.
+- `CodeCodex-0.1.45-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Splits automatically overflowing DOCX paragraphs and tables into page-sized preview cards when the source file has no cached Word page-break markers.
+- Preserves same-size next-page section transitions while retaining dotted leaders and right-aligned cached page numbers.
+
+## v0.1.44
+
+- `CodeCodex-0.1.44-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.44-x64.msi`: MSI installer.
+- `CodeCodex-0.1.44-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Restores dotted leaders and right-aligned cached page numbers in DOCX contents and illustration lists.
+- Honors direct page-before properties in the preview copy so sections such as illustration lists begin on a new page without modifying the source document.
+
 ## v0.1.43
 
 - `CodeCodex-0.1.43-x64-setup.exe`: recommended installer.
@@ -107,5 +125,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.43
+./scripts/package.ps1 -Version 0.1.45
 ```

@@ -201,6 +201,18 @@ function createDemoDocx(): Uint8Array {
         "<w:body>",
         '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>Code-Codex Office Preview</w:t></w:r></w:p>',
         "<w:p><w:r><w:t>This DOCX file is generated entirely in memory for the local preview demo.</w:t></w:r></w:p>",
+        '<w:p><w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9000"/></w:tabs></w:pPr><w:r><w:t>1 Introduction</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>1</w:t></w:r></w:p>',
+        '<w:p><w:pPr><w:pageBreakBefore/><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t>Illustration List</w:t></w:r></w:p>',
+        ...Array.from({ length: 40 }, (_, index) =>
+          `<w:p><w:pPr><w:spacing w:line="480" w:lineRule="exact"/><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9000"/></w:tabs></w:pPr><w:r><w:t>Figure ${index + 1} Preview architecture</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>${index + 2}</w:t></w:r></w:p>`,
+        ),
+        '<w:p><w:r><w:br w:type="page"/></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>Automatic table pagination</w:t></w:r></w:p>',
+        '<w:tbl><w:tblPr><w:tblW w:w="9000" w:type="dxa"/><w:tblBorders><w:top w:val="single" w:sz="4"/><w:left w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:right w:val="single" w:sz="4"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="1800"/><w:gridCol w:w="7200"/></w:tblGrid>',
+        '<w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Row</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Description</w:t></w:r></w:p></w:tc></w:tr>',
+        ...Array.from({ length: 40 }, (_, index) =>
+          `<w:tr><w:tc><w:tcPr><w:tcW w:w="1800" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:spacing w:line="480" w:lineRule="exact"/></w:pPr><w:r><w:t>${index + 1}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="7200" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:spacing w:line="480" w:lineRule="exact"/></w:pPr><w:r><w:t>Paginated table row ${index + 1}</w:t></w:r></w:p></w:tc></w:tr>`,
+        ),
+        '</w:tbl>',
         '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>',
         "</w:body>",
         "</w:document>",

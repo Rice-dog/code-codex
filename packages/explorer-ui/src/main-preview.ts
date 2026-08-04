@@ -83,8 +83,37 @@ const MAX_PPT_TOTAL_ASSET_BYTES = 96 * 1024 * 1024;
 const MAX_PPT_TABLE_CELLS = 25_000;
 const MAX_PPT_PARSE_MILLISECONDS = 20_000;
 const MAX_PPT_RENDER_MILLISECONDS = 15_000;
+const MAX_DOCX_DOCUMENT_XML_BYTES = 8 * 1024 * 1024;
+const MAX_DOCX_STYLES_XML_BYTES = 2 * 1024 * 1024;
+const MAX_DOCX_DIRECT_PAGE_BREAKS = 512;
+const MAX_DOCX_PREPARED_BYTES = 32 * 1024 * 1024;
+const MAX_DOCX_AUTO_PAGES = 256;
+const MAX_DOCX_AUTO_TABLE_ROWS = 5_000;
+const MAX_DOCX_KEEP_NEXT_PARAGRAPHS = 5_000;
+const DOCX_AUTO_PAGINATION_SLICE_MILLISECONDS = 16;
+const DOCX_PAGE_OVERFLOW_EPSILON = 1;
+const DOCX_LAYOUT_SETTLE_MILLISECONDS = 550;
+const DOCX_IMAGE_SETTLE_MILLISECONDS = 1_000;
+const MAX_DOCX_SETTLE_IMAGES = 512;
+const MAX_DOCX_VISUAL_OVERFLOW_ELEMENTS = 1_024;
+const DOCX_TABLE_HEADER_MARKER_PREFIX = "__cle_docx_table_header_";
+const DOCX_KEEP_NEXT_MARKER_PREFIX = "__cle_docx_keep_next_";
 
 type OfficeDocumentKind = "docx" | "xlsx" | "ppt" | "pptx";
+
+interface OfficeDomBudget {
+  remainingNodes: number;
+  remainingTextUnits: number;
+}
+
+interface DocxPaginationClock {
+  sliceEndsAt: number;
+}
+
+type DocxBlockSplitResult =
+  | { readonly kind: "split"; readonly remainder: HTMLElement | null; readonly oversized: boolean }
+  | { readonly kind: "budget" }
+  | null;
 
 interface XlsxWorksheetMeta {
   readonly name: string;
@@ -144,6 +173,8 @@ const OFFICE_MIME_TYPES: Readonly<Record<string, OfficeDocumentKind>> = Object.f
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
 });
 const DOCX_SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+const DOCX_WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
 const DOCX_ALLOWED_SVG_TAGS = new Set(["ellipse", "foreignobject", "g", "image", "line", "rect", "svg"]);
 const DOCX_ALLOWED_SVG_ATTRIBUTES = new Set([
   "class",
@@ -1019,6 +1050,34 @@ const mainPreviewStyles = String.raw`
     box-shadow: 0 8px 28px rgba(0, 0, 0, .22), 0 1px 3px rgba(0, 0, 0, .2) !important;
   }
 
+  .office-word-document section.office-word-unpaginated {
+    height: auto !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .office-word-document section.office-word-unpaginated > header,
+  .office-word-document section.office-word-unpaginated > footer {
+    position: static !important;
+  }
+
+  .office-word-document section.office-word-oversized {
+    height: auto !important;
+  }
+
+  .office-word-document p[data-cle-docx-paragraph-continuation="true"] {
+    list-style-type: none !important;
+    counter-increment: none !important;
+    counter-reset: none !important;
+    counter-set: none !important;
+  }
+
+  .office-word-document p[data-cle-docx-paragraph-continuation="true"]::before {
+    display: none !important;
+    content: none !important;
+    counter-increment: none !important;
+  }
+
   .office-word-document section img {
     max-width: 100%;
   }
@@ -1725,6 +1784,7 @@ interface OfficePreviewJob {
   legacyPptWorker: Worker | null;
   nativePptObjectUrl: { readonly url: string; readonly revoke: () => void } | null;
   resourceObserver: MutationObserver | null;
+  docxRepairTimer: number | null;
 }
 
 type FocusSnapshot =
@@ -2885,6 +2945,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       legacyPptWorker: null,
       nativePptObjectUrl: null,
       resourceObserver: null,
+      docxRepairTimer: null,
     };
     this.#officeJob = job;
 
@@ -2955,8 +3016,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     const documentRoot = this.ownerDocument.createElement("article");
     documentRoot.className = "office-word-document";
     const generatedStyleHost = this.ownerDocument.createElement("div");
+    const previewBytes = await this.#prepareDocxPreviewBytes(view.bytes, job.abortController.signal);
 
-    await renderDocxAsync(view.bytes.slice(), documentRoot, generatedStyleHost, {
+    await renderDocxAsync(previewBytes.slice(), documentRoot, generatedStyleHost, {
       inWrapper: true,
       hideWrapperOnPrint: false,
       ignoreWidth: false,
@@ -2964,7 +3026,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       ignoreFonts: true,
       breakPages: true,
       debug: false,
-      experimental: false,
+      experimental: true,
       className: docxClassName,
       trimXmlDeclaration: true,
       renderHeaders: true,
@@ -2981,10 +3043,27 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     const generatedStyles = this.#takeSanitizedDocxStyles(generatedStyleHost, docxClassName);
     for (const style of documentRoot.querySelectorAll("style")) style.remove();
     this.#sanitizeDetachedDocx(documentRoot);
+    this.#captureDocxPreviewMarkers(documentRoot);
     const truncated = this.#boundOfficeDom(documentRoot);
+    const documentCost = this.#officeDomCost(documentRoot, false);
+    const domBudget: OfficeDomBudget = {
+      remainingNodes: Math.max(0, MAX_OFFICE_DOM_NODES - documentCost.nodes),
+      remainingTextUnits: Math.max(0, MAX_OFFICE_TEXT_UNITS - documentCost.textUnits),
+    };
     if (!isCurrent()) return;
     stage.replaceChildren(...generatedStyles, documentRoot);
+    await this.#settleDocxLayout(documentRoot, job.abortController.signal);
+    if (!isCurrent()) return;
+    await this.#paginateDocxOverflowPages(
+      documentRoot,
+      docxClassName,
+      job.abortController.signal,
+      domBudget,
+    );
+    if (!isCurrent()) return;
+    this.#renumberDocxCachedPageFooters(documentRoot, docxClassName, domBudget);
     this.#observeOfficeResources(documentRoot, job);
+    this.#observeLateDocxLayout(documentRoot, docxClassName, job, domBudget);
     if (truncated) {
       const notice = this.#textSpan("Preview limited for performance.", "office-preview-notice");
       notice.setAttribute("role", "status");
@@ -2992,11 +3071,1376 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     }
   }
 
-  #throwIfOfficeAborted(signal: AbortSignal): void {
-    if (!signal.aborted) return;
+  async #prepareDocxPreviewBytes(bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array> {
+    try {
+      this.#throwIfOfficeAborted(signal);
+      const archive = await JSZip.loadAsync(bytes.slice(), { checkCRC32: false, createFolders: false });
+      this.#throwIfOfficeAborted(signal);
+      const documentEntry = archive.file("word/document.xml");
+      if (!documentEntry) return bytes;
+      const document = await this.#readXlsxXmlEntry(
+        documentEntry,
+        MAX_DOCX_DOCUMENT_XML_BYTES,
+        signal,
+        "Word document",
+      );
+      let styles: Document | null = null;
+      const stylesEntry = archive.file("word/styles.xml");
+      if (stylesEntry) {
+        try {
+          styles = await this.#readXlsxXmlEntry(
+            stylesEntry,
+            MAX_DOCX_STYLES_XML_BYTES,
+            signal,
+            "Word styles",
+          );
+        } catch {
+          this.#throwIfOfficeAborted(signal);
+          styles = null;
+        }
+      }
+      const Serializer = this.ownerDocument.defaultView?.XMLSerializer;
+      if (!Serializer) return bytes;
+
+      const body = Array.from(document.documentElement.children).find(
+        (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "body",
+      );
+      if (!body) return bytes;
+      const isMainFlowParagraph = (paragraph: Element): boolean => {
+        let ancestor = paragraph.parentElement;
+        while (ancestor && ancestor !== body) {
+          if (
+            ancestor.namespaceURI === DOCX_WORD_NAMESPACE &&
+            ["tbl", "txbxContent"].includes(ancestor.localName)
+          ) {
+            return false;
+          }
+          ancestor = ancestor.parentElement;
+        }
+        return ancestor === body;
+      };
+      const paragraphs = Array.from(document.getElementsByTagNameNS(DOCX_WORD_NAMESPACE, "p"))
+        .filter(isMainFlowParagraph);
+      const pageBreakParagraphs: Element[] = [];
+      const sectionBreakParagraphs: Element[] = [];
+      const tableHeaderRows: Element[] = [];
+      const keepNextParagraphs: Element[] = [];
+      type DocxFlowToken = "boundary" | "content";
+      const isWordElement = (element: Element | null, localName: string): boolean =>
+        element?.namespaceURI === DOCX_WORD_NAMESPACE && element.localName === localName;
+      const wordChild = (parent: Element | null | undefined, localName: string): Element | null => (
+        parent
+          ? Array.from(parent.children).find(
+            (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === localName,
+          ) ?? null
+          : null
+      );
+      const wordAttribute = (element: Element | null | undefined, localName: string): string | null => (
+        element?.getAttributeNS(DOCX_WORD_NAMESPACE, localName) ??
+        element?.getAttribute(`w:${localName}`) ??
+        element?.getAttribute(localName) ??
+        null
+      );
+      const isEnabledWordValue = (value: string | null, defaultValue = true): boolean => {
+        if (value === null) return defaultValue;
+        return !["0", "false", "off", "no"].includes(value.trim().toLowerCase());
+      };
+      const keepNextValue = (properties: Element | null | undefined): boolean | null => {
+        const keepNext = wordChild(properties, "keepNext");
+        return keepNext ? isEnabledWordValue(wordAttribute(keepNext, "val")) : null;
+      };
+      const paragraphFlowTokens = (paragraph: Element): DocxFlowToken[] => {
+        const tokens: DocxFlowToken[] = [];
+        const visibleElements = new Set([
+          "cr",
+          "drawing",
+          "endnoteReference",
+          "footnoteReference",
+          "noBreakHyphen",
+          "object",
+          "pict",
+          "softHyphen",
+          "sym",
+          "tab",
+        ]);
+        const visit = (parent: Element): void => {
+          for (const child of Array.from(parent.children)) {
+            if (child.namespaceURI !== DOCX_WORD_NAMESPACE) continue;
+            if (["pPr", "rPr"].includes(child.localName)) continue;
+            if (isWordElement(child, "lastRenderedPageBreak")) {
+              tokens.push("boundary");
+              continue;
+            }
+            if (isWordElement(child, "br")) {
+              const type = (
+                child.getAttributeNS(DOCX_WORD_NAMESPACE, "type") ??
+                child.getAttribute("w:type") ??
+                child.getAttribute("type") ??
+                ""
+              ).trim();
+              tokens.push(type === "page" ? "boundary" : "content");
+              continue;
+            }
+            if (isWordElement(child, "t")) {
+              if ((child.textContent ?? "").trim().length > 0) tokens.push("content");
+              continue;
+            }
+            if (visibleElements.has(child.localName)) {
+              tokens.push("content");
+              continue;
+            }
+            visit(child);
+          }
+        };
+        visit(paragraph);
+        return tokens;
+      };
+      const beginsWithPageBreak = (paragraph: Element): boolean =>
+        paragraphFlowTokens(paragraph)[0] === "boundary";
+      const endsWithPageBreak = (paragraph: Element): boolean => {
+        const tokens = paragraphFlowTokens(paragraph);
+        return tokens[tokens.length - 1] === "boundary";
+      };
+      const hasEnabledTableHeader = (row: Element): boolean => {
+        const properties = Array.from(row.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "trPr",
+        );
+        const header = properties && Array.from(properties.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "tblHeader",
+        );
+        if (!header) return false;
+        const value = (
+          header.getAttributeNS(DOCX_WORD_NAMESPACE, "val") ??
+          header.getAttribute("w:val") ??
+          header.getAttribute("val") ??
+          "true"
+        ).trim().toLowerCase();
+        return !["0", "false", "off", "no"].includes(value);
+      };
+      for (const table of Array.from(document.getElementsByTagNameNS(DOCX_WORD_NAMESPACE, "tbl"))) {
+        const rows = Array.from(table.children).filter(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "tr",
+        );
+        for (const row of rows) {
+          if (!hasEnabledTableHeader(row)) break;
+          tableHeaderRows.push(row);
+          if (tableHeaderRows.length > MAX_DOCX_AUTO_TABLE_ROWS) return bytes;
+        }
+      }
+
+      type DocxParagraphStyle = {
+        readonly basedOn: string | null;
+        readonly ownKeepNext: boolean | null;
+      };
+      const paragraphStyles = new Map<string, DocxParagraphStyle>();
+      let documentDefaultKeepNext = false;
+      let defaultParagraphStyleId: string | null = null;
+      if (styles) {
+        const docDefaults = wordChild(styles.documentElement, "docDefaults");
+        const paragraphDefaults = wordChild(wordChild(docDefaults, "pPrDefault"), "pPr");
+        documentDefaultKeepNext = keepNextValue(paragraphDefaults) ?? false;
+        for (const style of Array.from(styles.getElementsByTagNameNS(DOCX_WORD_NAMESPACE, "style"))) {
+          if ((wordAttribute(style, "type") ?? "").trim() !== "paragraph") continue;
+          const styleId = (wordAttribute(style, "styleId") ?? "").trim();
+          if (!styleId) continue;
+          const basedOn = (wordAttribute(wordChild(style, "basedOn"), "val") ?? "").trim() || null;
+          paragraphStyles.set(styleId, {
+            basedOn,
+            ownKeepNext: keepNextValue(wordChild(style, "pPr")),
+          });
+          if (
+            defaultParagraphStyleId === null &&
+            isEnabledWordValue(wordAttribute(style, "default"), false)
+          ) {
+            defaultParagraphStyleId = styleId;
+          }
+        }
+      }
+      if (defaultParagraphStyleId === null && paragraphStyles.has("Normal")) {
+        defaultParagraphStyleId = "Normal";
+      }
+      const resolvedStyleKeepNext = new Map<string, boolean>();
+      const resolveStyleKeepNext = (styleId: string | null): boolean => {
+        if (!styleId) return documentDefaultKeepNext;
+        const cached = resolvedStyleKeepNext.get(styleId);
+        if (cached !== undefined) return cached;
+        const path: string[] = [];
+        const seen = new Set<string>();
+        let cursor: string | null = styleId;
+        let inherited = documentDefaultKeepNext;
+        while (cursor) {
+          const inheritedFromCache = resolvedStyleKeepNext.get(cursor);
+          if (inheritedFromCache !== undefined) {
+            inherited = inheritedFromCache;
+            break;
+          }
+          if (seen.has(cursor)) break;
+          seen.add(cursor);
+          path.push(cursor);
+          cursor = paragraphStyles.get(cursor)?.basedOn ?? null;
+        }
+        for (let pathIndex = path.length - 1; pathIndex >= 0; pathIndex -= 1) {
+          const pathStyleId = path[pathIndex];
+          if (!pathStyleId) continue;
+          const ownKeepNext = paragraphStyles.get(pathStyleId)?.ownKeepNext ?? null;
+          if (ownKeepNext !== null) inherited = ownKeepNext;
+          resolvedStyleKeepNext.set(pathStyleId, inherited);
+        }
+        return resolvedStyleKeepNext.get(styleId) ?? inherited;
+      };
+      const defaultParagraphKeepNext = resolveStyleKeepNext(defaultParagraphStyleId);
+      for (const paragraph of paragraphs) {
+        const properties = wordChild(paragraph, "pPr");
+        const directKeepNext = keepNextValue(properties);
+        const styleId = (wordAttribute(wordChild(properties, "pStyle"), "val") ?? "").trim();
+        const inheritedKeepNext = styleId
+          ? resolveStyleKeepNext(styleId)
+          : defaultParagraphKeepNext;
+        if (
+          (directKeepNext ?? inheritedKeepNext) &&
+          keepNextParagraphs.length < MAX_DOCX_KEEP_NEXT_PARAGRAPHS
+        ) {
+          keepNextParagraphs.push(paragraph);
+        }
+      }
+      // docx-preview 0.4 parses direct pageBreakBefore properties but only
+      // paginates the style-level equivalent. Convert them in this preview copy.
+      for (let paragraphIndex = 0; paragraphIndex < paragraphs.length; paragraphIndex += 1) {
+        const paragraph = paragraphs[paragraphIndex];
+        if (!paragraph) continue;
+        const properties = Array.from(paragraph.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "pPr",
+        );
+        const pageBreakBefore = properties && Array.from(properties.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "pageBreakBefore",
+        );
+        if (!pageBreakBefore) continue;
+        const value = (
+          pageBreakBefore.getAttributeNS(DOCX_WORD_NAMESPACE, "val") ??
+          pageBreakBefore.getAttribute("w:val") ??
+          pageBreakBefore.getAttribute("val") ??
+          "true"
+        ).trim().toLowerCase();
+        if (["0", "false", "off", "no"].includes(value)) continue;
+        pageBreakBefore.remove();
+        const previousBlock = paragraph.previousElementSibling;
+        const alreadyAtPageStart = previousBlock === null || beginsWithPageBreak(paragraph) || (
+          previousBlock !== null &&
+          isWordElement(previousBlock, "p") &&
+          endsWithPageBreak(previousBlock)
+        );
+        if (alreadyAtPageStart) continue;
+        pageBreakParagraphs.push(paragraph);
+        if (pageBreakParagraphs.length > MAX_DOCX_DIRECT_PAGE_BREAKS) return bytes;
+      }
+      const pageBreakParagraphSet = new Set(pageBreakParagraphs);
+
+      // The library also ignores same-size paragraph section transitions.
+      // Preserve next-page section semantics with a preview-only hard break.
+      const finalSectionProperties = Array.from(body.children).find(
+        (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "sectPr",
+      );
+      const pageSizeSignature = (sectionProperties: Element | undefined): string | null => {
+        const pageSize = sectionProperties && Array.from(sectionProperties.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "pgSz",
+        );
+        if (!pageSize) return null;
+        return ["w", "h", "orient"].map((attribute) => (
+          pageSize.getAttributeNS(DOCX_WORD_NAMESPACE, attribute) ??
+          pageSize.getAttribute(`w:${attribute}`) ??
+          pageSize.getAttribute(attribute) ??
+          ""
+        )).join("|");
+      };
+      for (let paragraphIndex = 0; paragraphIndex < paragraphs.length; paragraphIndex += 1) {
+        const paragraph = paragraphs[paragraphIndex];
+        if (!paragraph) continue;
+        const properties = Array.from(paragraph.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "pPr",
+        );
+        const sectionProperties = properties && Array.from(properties.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "sectPr",
+        );
+        if (!sectionProperties) continue;
+        const sectionType = Array.from(sectionProperties.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "type",
+        );
+        const value = (
+          sectionType?.getAttributeNS(DOCX_WORD_NAMESPACE, "val") ??
+          sectionType?.getAttribute("w:val") ??
+          sectionType?.getAttribute("val") ??
+          "nextPage"
+        ).trim();
+        if (value !== "nextPage") continue;
+        let nextSectionProperties = finalSectionProperties;
+        for (let nextIndex = paragraphIndex + 1; nextIndex < paragraphs.length; nextIndex += 1) {
+          const nextParagraph = paragraphs[nextIndex];
+          if (!nextParagraph) continue;
+          const nextProperties = Array.from(nextParagraph.children).find(
+            (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "pPr",
+          );
+          const candidate = nextProperties && Array.from(nextProperties.children).find(
+            (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "sectPr",
+          );
+          if (candidate) {
+            nextSectionProperties = candidate;
+            break;
+          }
+        }
+        const currentPageSize = pageSizeSignature(sectionProperties);
+        const nextPageSize = pageSizeSignature(nextSectionProperties);
+        if (currentPageSize && nextPageSize && currentPageSize !== nextPageSize) continue;
+        const nextBlock = paragraph.nextElementSibling;
+        if (
+          endsWithPageBreak(paragraph) ||
+          (
+            nextBlock !== null &&
+            isWordElement(nextBlock, "p") &&
+            (beginsWithPageBreak(nextBlock) || pageBreakParagraphSet.has(nextBlock))
+          )
+        ) {
+          continue;
+        }
+        sectionBreakParagraphs.push(paragraph);
+        if (pageBreakParagraphs.length + sectionBreakParagraphs.length > MAX_DOCX_DIRECT_PAGE_BREAKS) {
+          return bytes;
+        }
+      }
+      if (
+        pageBreakParagraphs.length === 0 &&
+        sectionBreakParagraphs.length === 0 &&
+        tableHeaderRows.length === 0 &&
+        keepNextParagraphs.length === 0
+      ) {
+        return bytes;
+      }
+
+      const prefix = document.documentElement.lookupPrefix(DOCX_WORD_NAMESPACE) ?? "w";
+      if (document.documentElement.lookupNamespaceURI(prefix) !== DOCX_WORD_NAMESPACE) {
+        document.documentElement.setAttributeNS(XMLNS_NAMESPACE, `xmlns:${prefix}`, DOCX_WORD_NAMESPACE);
+      }
+      const name = (localName: string): string => `${prefix}:${localName}`;
+      const createPageBreakRun = (): Element => {
+        const run = document.createElementNS(DOCX_WORD_NAMESPACE, name("r"));
+        const pageBreak = document.createElementNS(DOCX_WORD_NAMESPACE, name("br"));
+        pageBreak.setAttributeNS(DOCX_WORD_NAMESPACE, name("type"), "page");
+        run.append(pageBreak);
+        return run;
+      };
+      const createPageBreakParagraph = (): Element => {
+        const breakParagraph = document.createElementNS(DOCX_WORD_NAMESPACE, name("p"));
+        breakParagraph.append(createPageBreakRun());
+        return breakParagraph;
+      };
+      for (const paragraph of pageBreakParagraphs) {
+        const parent = paragraph.parentNode;
+        if (parent) parent.insertBefore(createPageBreakParagraph(), paragraph);
+      }
+      for (const paragraph of sectionBreakParagraphs) {
+        paragraph.append(createPageBreakRun());
+      }
+
+      const usedBookmarkIds = new Set(
+        Array.from(document.getElementsByTagNameNS(DOCX_WORD_NAMESPACE, "bookmarkStart"))
+          .map((bookmark) => (
+            bookmark.getAttributeNS(DOCX_WORD_NAMESPACE, "id") ??
+            bookmark.getAttribute("w:id") ??
+            bookmark.getAttribute("id") ??
+            ""
+          )),
+      );
+      let nextBookmarkId = 2_000_000_000;
+      const addBookmarkMarker = (paragraph: Element, markerName: string): void => {
+        while (usedBookmarkIds.has(String(nextBookmarkId))) nextBookmarkId += 1;
+        const bookmarkId = String(nextBookmarkId);
+        nextBookmarkId += 1;
+        usedBookmarkIds.add(bookmarkId);
+        const bookmarkStart = document.createElementNS(DOCX_WORD_NAMESPACE, name("bookmarkStart"));
+        bookmarkStart.setAttributeNS(DOCX_WORD_NAMESPACE, name("id"), bookmarkId);
+        bookmarkStart.setAttributeNS(DOCX_WORD_NAMESPACE, name("name"), markerName);
+        const bookmarkEnd = document.createElementNS(DOCX_WORD_NAMESPACE, name("bookmarkEnd"));
+        bookmarkEnd.setAttributeNS(DOCX_WORD_NAMESPACE, name("id"), bookmarkId);
+        const firstContent = Array.from(paragraph.children).find(
+          (child) => !(child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "pPr"),
+        ) ?? null;
+        paragraph.insertBefore(bookmarkStart, firstContent);
+        paragraph.insertBefore(bookmarkEnd, firstContent);
+      };
+      for (let rowIndex = 0; rowIndex < tableHeaderRows.length; rowIndex += 1) {
+        const row = tableHeaderRows[rowIndex];
+        const firstCell = row && Array.from(row.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "tc",
+        );
+        const firstParagraph = firstCell && Array.from(firstCell.children).find(
+          (child) => child.namespaceURI === DOCX_WORD_NAMESPACE && child.localName === "p",
+        );
+        if (!firstParagraph) continue;
+        addBookmarkMarker(firstParagraph, `${DOCX_TABLE_HEADER_MARKER_PREFIX}${rowIndex}`);
+      }
+      for (let paragraphIndex = 0; paragraphIndex < keepNextParagraphs.length; paragraphIndex += 1) {
+        const paragraph = keepNextParagraphs[paragraphIndex];
+        if (paragraph) {
+          addBookmarkMarker(paragraph, `${DOCX_KEEP_NEXT_MARKER_PREFIX}${paragraphIndex}`);
+        }
+      }
+
+      const serialized = new Serializer().serializeToString(document);
+      archive.file("word/document.xml", serialized);
+      const prepared = await archive.generateAsync(
+        { type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } },
+        () => this.#throwIfOfficeAborted(signal),
+      );
+      this.#throwIfOfficeAborted(signal);
+      return prepared.byteLength <= MAX_DOCX_PREPARED_BYTES ? prepared : bytes;
+    } catch (error) {
+      if (signal.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+      return bytes;
+    }
+  }
+
+  #captureDocxPreviewMarkers(root: HTMLElement): void {
+    const markers = Array.from(root.querySelectorAll<HTMLElement>("[id]")).filter(
+      (element) => (
+        element.id.startsWith(DOCX_TABLE_HEADER_MARKER_PREFIX) ||
+        element.id.startsWith(DOCX_KEEP_NEXT_MARKER_PREFIX)
+      ),
+    );
+    for (const marker of markers) {
+      if (marker.id.startsWith(DOCX_TABLE_HEADER_MARKER_PREFIX)) {
+        const row = marker.closest<HTMLTableRowElement>("tr");
+        if (row) row.dataset.cleDocxTableHeader = "true";
+      } else {
+        const paragraph = marker.closest<HTMLParagraphElement>("p");
+        if (paragraph) paragraph.dataset.cleDocxKeepNext = "true";
+      }
+      marker.remove();
+    }
+  }
+
+  async #settleDocxLayout(root: HTMLElement, signal: AbortSignal): Promise<void> {
+    await Promise.all([
+      this.#waitOfficeDelay(DOCX_LAYOUT_SETTLE_MILLISECONDS, signal),
+      this.#waitForDocxImages(root, signal),
+    ]);
+    await this.#yieldOfficeAnimationFrame(signal);
+    await this.#yieldOfficeAnimationFrame(signal);
+    this.#throwIfOfficeAborted(signal);
+    void root.getBoundingClientRect();
+  }
+
+  async #waitForDocxImages(root: HTMLElement, signal: AbortSignal): Promise<void> {
+    this.#throwIfOfficeAborted(signal);
+    const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"))
+      .slice(0, MAX_DOCX_SETTLE_IMAGES);
+    if (images.length === 0) return;
+
+    const decoding = Promise.allSettled(images.map(async (image) => {
+      try {
+        if (typeof image.decode === "function") await image.decode();
+      } catch {
+        // A corrupt image must not prevent the rest of the document from rendering.
+      }
+    }));
+    await new Promise<void>((resolve, reject) => {
+      let finished = false;
+      const finish = (error?: Error): void => {
+        if (finished) return;
+        finished = true;
+        globalThis.clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onAbort = (): void => finish(this.#officeAbortError());
+      const timer = globalThis.setTimeout(() => finish(), DOCX_IMAGE_SETTLE_MILLISECONDS);
+      signal.addEventListener("abort", onAbort, { once: true });
+      void decoding.then(() => finish());
+    });
+  }
+
+  async #waitOfficeDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+    this.#throwIfOfficeAborted(signal);
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = (): void => {
+        globalThis.clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        reject(this.#officeAbortError());
+      };
+      const timer = globalThis.setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, milliseconds);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  async #yieldOfficeAnimationFrame(signal: AbortSignal): Promise<void> {
+    this.#throwIfOfficeAborted(signal);
+    const window = this.ownerDocument.defaultView;
+    if (!window) {
+      await this.#waitOfficeDelay(0, signal);
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      let finished = false;
+      const finish = (error?: Error): void => {
+        if (finished) return;
+        finished = true;
+        window.cancelAnimationFrame(frame);
+        window.clearTimeout(fallback);
+        signal.removeEventListener("abort", onAbort);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onAbort = (): void => finish(this.#officeAbortError());
+      const frame = window.requestAnimationFrame(() => finish());
+      const fallback = window.setTimeout(() => finish(), 100);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  #renumberDocxCachedPageFooters(
+    root: HTMLElement,
+    className: string,
+    domBudget: OfficeDomBudget,
+  ): void {
+    const wrapperClassName = `${className}-wrapper`;
+    const pages = Array.from(root.querySelectorAll<HTMLElement>(`section.${className}`)).filter(
+      (page) => page.parentElement?.classList.contains(wrapperClassName),
+    );
+    let nextPageNumber: number | null = null;
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+      const page = pages[pageIndex];
+      if (!page) continue;
+      if (
+        page.classList.contains("office-word-unpaginated") ||
+        page.classList.contains("office-word-oversized")
+      ) {
+        break;
+      }
+      let pageNumberNode: Node | null = null;
+      let cachedPageNumber: number | null = null;
+      for (const footer of Array.from(page.children).filter((child) => child.tagName === "FOOTER")) {
+        const text = (footer.textContent ?? "").replace(/\s+/g, " ").trim();
+        const match = text.match(/^[-\u2013\u2014]\s*(\d+)\s*[-\u2013\u2014]$/);
+        if (!match) continue;
+        cachedPageNumber = Number.parseInt(match[1] ?? "", 10);
+        if (!Number.isFinite(cachedPageNumber)) continue;
+        const pending: Node[] = Array.from(footer.childNodes);
+        while (pending.length > 0 && !pageNumberNode) {
+          const node = pending.shift();
+          if (!node) continue;
+          if (node.nodeType === Node.TEXT_NODE && /\d+/.test(node.nodeValue ?? "")) {
+            pageNumberNode = node;
+            break;
+          }
+          pending.unshift(...Array.from(node.childNodes));
+        }
+        if (pageNumberNode) break;
+      }
+      if (nextPageNumber === null && cachedPageNumber !== null) nextPageNumber = cachedPageNumber;
+      if (pageNumberNode && nextPageNumber !== null) {
+        const currentValue = pageNumberNode.nodeValue ?? "";
+        const replacement = String(nextPageNumber);
+        const currentDigits = currentValue.match(/\d+/)?.[0] ?? "";
+        const growth = Math.max(0, replacement.length - currentDigits.length);
+        if (growth > domBudget.remainingTextUnits) break;
+        domBudget.remainingTextUnits -= growth;
+        pageNumberNode.nodeValue = currentValue.replace(/\d+/, replacement);
+      }
+      if (nextPageNumber !== null) nextPageNumber += 1;
+    }
+  }
+
+  #observeLateDocxLayout(
+    root: HTMLElement,
+    className: string,
+    job: OfficePreviewJob,
+    domBudget: OfficeDomBudget,
+  ): void {
+    const signal = job.abortController.signal;
+    const window = this.ownerDocument.defaultView;
+    if (!window) return;
+    const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"))
+      .filter((image) => !image.complete);
+
+    let repairRunning = false;
+    let repairQueued = false;
+    let repairCount = 0;
+    const maximumRepairs = 4;
+
+    const runRepair = async (): Promise<void> => {
+      if (repairRunning) {
+        repairQueued = true;
+        return;
+      }
+      if (signal.aborted || this.#officeJob !== job || repairCount >= maximumRepairs) return;
+      repairRunning = true;
+      repairQueued = false;
+      repairCount += 1;
+      try {
+        await this.#yieldOfficeAnimationFrame(signal);
+        await this.#yieldOfficeAnimationFrame(signal);
+        if (this.#officeJob !== job) return;
+        const overflowing = Array.from(
+          root.querySelectorAll<HTMLElement>(`section.${className}`),
+        ).some((page) => (
+          !page.classList.contains("office-word-unpaginated") &&
+          this.#docxPageOverflows(page)
+        ));
+        if (!overflowing) return;
+        await this.#paginateDocxOverflowPages(root, className, signal, domBudget);
+        if (this.#officeJob === job) {
+          this.#renumberDocxCachedPageFooters(root, className, domBudget);
+        }
+      } finally {
+        repairRunning = false;
+        if (repairQueued && !signal.aborted && this.#officeJob === job) scheduleRepair();
+      }
+    };
+
+    const scheduleRepair = (): void => {
+      if (
+        signal.aborted ||
+        this.#officeJob !== job ||
+        repairCount >= maximumRepairs ||
+        job.docxRepairTimer !== null
+      ) {
+        return;
+      }
+      repairQueued = true;
+      job.docxRepairTimer = window.setTimeout(() => {
+        job.docxRepairTimer = null;
+        void runRepair().catch(() => undefined);
+      }, 80);
+    };
+
+    for (const image of images) {
+      image.addEventListener("load", scheduleRepair, { once: true, signal });
+    }
+    scheduleRepair();
+  }
+
+  async #checkpointDocxPagination(
+    clock: DocxPaginationClock,
+    signal: AbortSignal,
+    forceYield = false,
+  ): Promise<void> {
+    this.#throwIfOfficeAborted(signal);
+    if (!forceYield && Date.now() < clock.sliceEndsAt) return;
+    await this.#yieldOfficeRender();
+    this.#throwIfOfficeAborted(signal);
+    clock.sliceEndsAt = Date.now() + DOCX_AUTO_PAGINATION_SLICE_MILLISECONDS;
+  }
+
+  async #paginateDocxOverflowPages(
+    root: HTMLElement,
+    className: string,
+    signal: AbortSignal,
+    domBudget: OfficeDomBudget,
+  ): Promise<void> {
+    const window = this.ownerDocument.defaultView;
+    if (!window) return;
+
+    const wrapperClassName = `${className}-wrapper`;
+    const sourcePages = Array.from(root.querySelectorAll<HTMLElement>(`section.${className}`)).filter(
+      (page) => page.parentElement?.classList.contains(wrapperClassName),
+    );
+    if (sourcePages.length === 0) return;
+
+    const clock: DocxPaginationClock = {
+      sliceEndsAt: Date.now() + DOCX_AUTO_PAGINATION_SLICE_MILLISECONDS,
+    };
+    let continuationPageCount = 0;
+    let operationCount = 0;
+
+    for (const sourcePage of sourcePages) {
+      await this.#checkpointDocxPagination(clock, signal);
+
+      const shellChildren = Array.from(sourcePage.children) as HTMLElement[];
+      const sourceArticles = shellChildren.filter((child) => child.tagName === "ARTICLE");
+      const unsupportedChildren = shellChildren.some(
+        (child) => !["ARTICLE", "FOOTER", "HEADER"].includes(child.tagName),
+      );
+      if (sourceArticles.length !== 1 || unsupportedChildren) {
+        if (this.#docxPageOverflows(sourcePage)) {
+          sourcePage.classList.add("office-word-unpaginated");
+          sourcePage.dataset.cleDocxUnpaginated = "structure";
+          sourcePage.style.removeProperty("height");
+          sourcePage.setAttribute("aria-label", "Unpaginated document content");
+        }
+        continue;
+      }
+
+      const computedStyle = window.getComputedStyle(sourcePage);
+      const pageHeight = Number.parseFloat(computedStyle.minHeight);
+      if (!Number.isFinite(pageHeight) || pageHeight <= 0) {
+        sourcePage.classList.add("office-word-unpaginated");
+        sourcePage.dataset.cleDocxUnpaginated = "structure";
+        sourcePage.style.removeProperty("height");
+        sourcePage.setAttribute("aria-label", "Unpaginated document content");
+        continue;
+      }
+      const naturalHeight = Math.max(sourcePage.getBoundingClientRect().height, sourcePage.scrollHeight);
+      if (
+        naturalHeight <= pageHeight + DOCX_PAGE_OVERFLOW_EPSILON &&
+        !this.#docxPageOverflows(sourcePage)
+      ) {
+        continue;
+      }
+
+      const sourceArticle = sourceArticles[0];
+      if (!sourceArticle) continue;
+      const articleTemplate = sourceArticle.cloneNode(false) as HTMLElement;
+      const pending = Array.from(sourceArticle.children) as HTMLElement[];
+      if (pending.length === 0) continue;
+
+      sourceArticle.replaceChildren();
+      sourcePage.style.height = `${pageHeight}px`;
+      let currentPage = sourcePage;
+      let currentArticle = sourceArticle;
+      let currentHasContent = false;
+      let insertionAnchor = sourcePage;
+
+      type ContinuationPageResult =
+        | { readonly kind: "page"; readonly page: HTMLElement; readonly article: HTMLElement }
+        | { readonly kind: "limit"; readonly reason: "budget" | "page-limit" | "structure" };
+
+      const createContinuationPage = (): ContinuationPageResult => {
+        if (continuationPageCount >= MAX_DOCX_AUTO_PAGES) {
+          return { kind: "limit", reason: "page-limit" };
+        }
+        const page = sourcePage.cloneNode(false) as HTMLElement;
+        let article: HTMLElement | null = null;
+        for (const shellChild of shellChildren) {
+          if (shellChild === sourceArticle) {
+            article = articleTemplate.cloneNode(false) as HTMLElement;
+            page.append(article);
+          } else {
+            page.append(shellChild.cloneNode(true));
+          }
+        }
+        if (!article) return { kind: "limit", reason: "structure" };
+        this.#stripDocxCloneIds(page);
+        if (!this.#reserveOfficeDomClones(domBudget, [page])) {
+          return { kind: "limit", reason: "budget" };
+        }
+        page.style.height = `${pageHeight}px`;
+        insertionAnchor.after(page);
+        insertionAnchor = page;
+        continuationPageCount += 1;
+        return { kind: "page", page, article };
+      };
+
+      const finishAsUnpaginatedRemainder = (
+        reason: "budget" | "page-limit" | "structure",
+      ): void => {
+        let fallbackPage = currentPage;
+        let fallbackArticle = currentArticle;
+        if (currentHasContent) {
+          fallbackPage = sourcePage.cloneNode(false) as HTMLElement;
+          fallbackArticle = articleTemplate.cloneNode(false) as HTMLElement;
+          fallbackPage.replaceChildren(fallbackArticle);
+          this.#stripDocxCloneIds(fallbackPage);
+          insertionAnchor.after(fallbackPage);
+          insertionAnchor = fallbackPage;
+        }
+        fallbackPage.classList.add("office-word-unpaginated");
+        fallbackPage.dataset.cleDocxUnpaginated = reason;
+        fallbackPage.style.removeProperty("height");
+        fallbackPage.setAttribute("aria-label", "Unpaginated document continuation");
+        for (const block of pending.splice(0)) fallbackArticle.append(block);
+        currentPage = fallbackPage;
+        currentArticle = fallbackArticle;
+        currentHasContent = fallbackArticle.childElementCount > 0;
+      };
+
+      const markCurrentPageOversized = (): void => {
+        currentPage.classList.add("office-word-oversized");
+        currentPage.dataset.cleDocxOversized = "atomic";
+        currentPage.style.removeProperty("height");
+        currentPage.setAttribute("aria-label", "Oversized document content");
+      };
+
+      const advanceToContinuation = (): boolean => {
+        const continuation = createContinuationPage();
+        if (continuation.kind === "limit") {
+          finishAsUnpaginatedRemainder(continuation.reason);
+          return false;
+        }
+        currentPage = continuation.page;
+        currentArticle = continuation.article;
+        currentHasContent = false;
+        return true;
+      };
+
+      while (pending.length > 0) {
+        await this.#checkpointDocxPagination(clock, signal);
+        operationCount += 1;
+        if (operationCount % 64 === 0) {
+          await this.#checkpointDocxPagination(clock, signal, true);
+        }
+
+        if (pending[0]?.dataset.cleDocxKeepNext === "true") {
+          let keepNextCount = 0;
+          while (pending[keepNextCount]?.dataset.cleDocxKeepNext === "true") {
+            keepNextCount += 1;
+            if (keepNextCount % 64 === 0) {
+              await this.#checkpointDocxPagination(clock, signal, true);
+            }
+          }
+          const unitLength = Math.min(pending.length, keepNextCount + 1);
+          const keepNextUnit = pending.slice(0, unitLength);
+          currentArticle.append(...keepNextUnit);
+          if (!this.#docxPageOverflows(currentPage)) {
+            pending.splice(0, unitLength);
+            currentHasContent = true;
+            continue;
+          }
+          for (const unitBlock of keepNextUnit) unitBlock.remove();
+          if (currentHasContent) {
+            if (!advanceToContinuation()) break;
+            continue;
+          }
+          // The chain cannot fit even on an empty page. Relax keep-next so the
+          // existing table and paragraph splitters can preserve all content.
+          for (let chainIndex = 0; chainIndex < keepNextCount; chainIndex += 1) {
+            const chainBlock = pending[chainIndex];
+            if (chainBlock) delete chainBlock.dataset.cleDocxKeepNext;
+          }
+        }
+
+        const block = pending[0];
+        if (!block) break;
+        currentArticle.append(block);
+        if (!this.#docxPageOverflows(currentPage)) {
+          pending.shift();
+          currentHasContent = true;
+          continue;
+        }
+        block.remove();
+
+        if (currentHasContent) {
+          let blockSplit: DocxBlockSplitResult = await this.#splitDocxTableForPage(
+            block,
+            currentArticle,
+            currentPage,
+            signal,
+            clock,
+            domBudget,
+            true,
+          );
+          if (blockSplit === null) {
+            blockSplit = await this.#splitDocxParagraphForPage(
+              block,
+              currentArticle,
+              currentPage,
+              signal,
+              clock,
+              domBudget,
+            );
+          }
+          if (blockSplit?.kind === "budget") {
+            finishAsUnpaginatedRemainder("budget");
+            break;
+          }
+          if (blockSplit?.kind === "split") {
+            pending.shift();
+            if (blockSplit.remainder) pending.unshift(blockSplit.remainder);
+            if (blockSplit.oversized) markCurrentPageOversized();
+            if (!blockSplit.remainder && !blockSplit.oversized) continue;
+          }
+          if (pending.length > 0 && !advanceToContinuation()) break;
+          continue;
+        }
+
+        let blockSplit: DocxBlockSplitResult = await this.#splitDocxTableForPage(
+          block,
+          currentArticle,
+          currentPage,
+          signal,
+          clock,
+          domBudget,
+        );
+        if (blockSplit === null) {
+          blockSplit = await this.#splitDocxParagraphForPage(
+            block,
+            currentArticle,
+            currentPage,
+            signal,
+            clock,
+            domBudget,
+          );
+        }
+        if (blockSplit?.kind === "budget") {
+          finishAsUnpaginatedRemainder("budget");
+          break;
+        }
+        if (blockSplit?.kind === "split") {
+          pending.shift();
+          currentHasContent = true;
+          if (blockSplit.remainder) pending.unshift(blockSplit.remainder);
+          if (blockSplit.oversized) markCurrentPageOversized();
+          if (!blockSplit.remainder && !blockSplit.oversized) continue;
+        } else {
+          pending.shift();
+          currentArticle.append(block);
+          currentHasContent = true;
+          markCurrentPageOversized();
+        }
+
+        if (pending.length > 0 && !advanceToContinuation()) break;
+      }
+    }
+  }
+
+  #docxPageOverflows(page: HTMLElement): boolean {
+    if (page.clientHeight <= 0) return false;
+    if (page.scrollHeight > page.clientHeight + DOCX_PAGE_OVERFLOW_EPSILON) return true;
+    const pageBounds = page.getBoundingClientRect();
+    const computedStyle = this.ownerDocument.defaultView?.getComputedStyle(page);
+    const paddingBottom = Number.parseFloat(computedStyle?.paddingBottom ?? "0");
+    const contentBottom = pageBounds.bottom - (Number.isFinite(paddingBottom) ? paddingBottom : 0);
+    const visualElements = page.querySelectorAll<Element>([
+      "article",
+      "article img",
+      "article svg",
+      "article canvas",
+      "article object",
+      "article video",
+      "article table",
+      'article [style*="position"]',
+      'article [style*="transform"]',
+    ].join(","));
+    let inspected = 0;
+    for (const element of visualElements) {
+      inspected += 1;
+      if (inspected > MAX_DOCX_VISUAL_OVERFLOW_ELEMENTS) break;
+      const bounds = element.getBoundingClientRect();
+      if (
+        (bounds.width > 0 || bounds.height > 0) &&
+        bounds.bottom > contentBottom + DOCX_PAGE_OVERFLOW_EPSILON
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  #stripDocxCloneIds(root: HTMLElement): void {
+    root.removeAttribute("id");
+    for (const element of root.querySelectorAll("[id]")) element.removeAttribute("id");
+  }
+
+  async #splitDocxParagraphForPage(
+    block: HTMLElement,
+    article: HTMLElement,
+    page: HTMLElement,
+    signal: AbortSignal,
+    clock: DocxPaginationClock,
+    domBudget: OfficeDomBudget,
+  ): Promise<DocxBlockSplitResult> {
+    if (block.tagName !== "P") return null;
+    await this.#checkpointDocxPagination(clock, signal);
+    const sourceParagraph = block as HTMLParagraphElement;
+    const textNodes: Text[] = [];
+    const nodes = Array.from(sourceParagraph.childNodes).reverse();
+    while (nodes.length > 0) {
+      const node = nodes.pop();
+      if (!node) continue;
+      if (node.nodeType === Node.TEXT_NODE) {
+        if ((node.nodeValue ?? "").length > 0) textNodes.push(node as Text);
+        continue;
+      }
+      for (let child = node.lastChild; child; child = child.previousSibling) nodes.push(child);
+    }
+    const fullText = textNodes.map((node) => node.nodeValue ?? "").join("");
+    if (fullText.length < 2) return null;
+
+    const locateTextOffset = (offset: number): { node: Text; offset: number } | null => {
+      let consumed = 0;
+      for (const node of textNodes) {
+        const length = (node.nodeValue ?? "").length;
+        if (offset <= consumed + length) return { node, offset: offset - consumed };
+        consumed += length;
+      }
+      return null;
+    };
+    const dedupeSplitIds = (...roots: HTMLElement[]): void => {
+      const seen = new Set<string>();
+      for (const root of roots) {
+        const elements = [root, ...Array.from(root.querySelectorAll<HTMLElement>("[id]"))];
+        for (const element of elements) {
+          const id = element.id;
+          if (!id) continue;
+          if (seen.has(id)) element.removeAttribute("id");
+          else seen.add(id);
+        }
+      }
+    };
+    const cloneAtOffset = (
+      offset: number,
+    ): { prefix: HTMLParagraphElement; remainder: HTMLParagraphElement } | null => {
+      const location = locateTextOffset(offset);
+      if (!location) return null;
+      const prefixRange = this.ownerDocument.createRange();
+      prefixRange.selectNodeContents(sourceParagraph);
+      prefixRange.setEnd(location.node, location.offset);
+      const remainderRange = this.ownerDocument.createRange();
+      remainderRange.selectNodeContents(sourceParagraph);
+      remainderRange.setStart(location.node, location.offset);
+      const prefix = sourceParagraph.cloneNode(false) as HTMLParagraphElement;
+      const remainder = sourceParagraph.cloneNode(false) as HTMLParagraphElement;
+      prefix.append(prefixRange.cloneContents());
+      remainder.append(remainderRange.cloneContents());
+      remainder.dataset.cleDocxParagraphContinuation = "true";
+      dedupeSplitIds(prefix, remainder);
+      return { prefix, remainder };
+    };
+
+    let lowestCandidate = 1;
+    let highestCandidate = fullText.length - 1;
+    let bestFit = 0;
+    let trialCount = 0;
+    while (lowestCandidate <= highestCandidate) {
+      trialCount += 1;
+      if (trialCount % 8 === 0) {
+        await this.#checkpointDocxPagination(clock, signal, true);
+      }
+      const candidateOffset = Math.floor((lowestCandidate + highestCandidate) / 2);
+      const candidate = cloneAtOffset(candidateOffset);
+      if (!candidate) return null;
+      article.append(candidate.prefix);
+      const fits = !this.#docxPageOverflows(page);
+      candidate.prefix.remove();
+      if (fits) {
+        bestFit = candidateOffset;
+        lowestCandidate = candidateOffset + 1;
+      } else {
+        highestCandidate = candidateOffset - 1;
+      }
+    }
+    if (bestFit <= 0) return null;
+
+    let splitOffset = bestFit;
+    if (
+      splitOffset > 0 &&
+      splitOffset < fullText.length &&
+      /[\uD800-\uDBFF]/.test(fullText[splitOffset - 1] ?? "") &&
+      /[\uDC00-\uDFFF]/.test(fullText[splitOffset] ?? "")
+    ) {
+      splitOffset -= 1;
+    }
+    let preferredWordBoundary = 0;
+    for (let offset = splitOffset; offset > Math.max(0, splitOffset - 256); offset -= 1) {
+      if (/[\s,.;:!?，。；：！？、]/u.test(fullText[offset - 1] ?? "")) {
+        preferredWordBoundary = offset;
+        break;
+      }
+    }
+    if (preferredWordBoundary > 0) splitOffset = preferredWordBoundary;
+    if (splitOffset <= 0 || splitOffset >= fullText.length) return null;
+
+    const result = cloneAtOffset(splitOffset);
+    if (!result) return null;
+    if (`${result.prefix.textContent ?? ""}${result.remainder.textContent ?? ""}` !== fullText) {
+      return null;
+    }
+    article.append(result.prefix);
+    if (this.#docxPageOverflows(page)) {
+      result.prefix.remove();
+      return null;
+    }
+    result.prefix.remove();
+
+    const sourceCost = this.#officeDomCost(sourceParagraph);
+    const prefixCost = this.#officeDomCost(result.prefix);
+    const remainderCost = this.#officeDomCost(result.remainder);
+    const availableNodes = Math.min(
+      MAX_OFFICE_DOM_NODES,
+      domBudget.remainingNodes + sourceCost.nodes,
+    );
+    const availableTextUnits = Math.min(
+      MAX_OFFICE_TEXT_UNITS,
+      domBudget.remainingTextUnits + sourceCost.textUnits,
+    );
+    if (
+      prefixCost.nodes + remainderCost.nodes > availableNodes ||
+      prefixCost.textUnits + remainderCost.textUnits > availableTextUnits
+    ) {
+      return { kind: "budget" };
+    }
+    domBudget.remainingNodes = availableNodes - prefixCost.nodes - remainderCost.nodes;
+    domBudget.remainingTextUnits = availableTextUnits - prefixCost.textUnits - remainderCost.textUnits;
+    article.append(result.prefix);
+    return {
+      kind: "split",
+      remainder: result.remainder,
+      oversized: false,
+    };
+  }
+
+  async #splitDocxTableForPage(
+    block: HTMLElement,
+    article: HTMLElement,
+    page: HTMLElement,
+    signal: AbortSignal,
+    clock: DocxPaginationClock,
+    domBudget: OfficeDomBudget,
+    requireFittingFragment = false,
+  ): Promise<DocxBlockSplitResult> {
+    if (block.tagName !== "TABLE") return null;
+    await this.#checkpointDocxPagination(clock, signal);
+    const sourceTable = block as HTMLTableElement;
+    const sourceChildren = Array.from(sourceTable.children) as HTMLElement[];
+    const markedHeaderRows = Array.from(sourceTable.rows).filter(
+      (row) => row.parentElement?.tagName !== "THEAD" && row.dataset.cleDocxTableHeader === "true",
+    );
+    const markedHeaderRowSet = new Set(markedHeaderRows);
+    const rowDescriptors = Array.from(sourceTable.rows)
+      .map((row) => ({
+        row,
+        sourceGroup: row.parentElement,
+        sourceNextSibling: row.nextSibling,
+      }))
+      .filter(({ row, sourceGroup }) => (
+        sourceGroup?.tagName !== "THEAD" &&
+        sourceGroup?.tagName !== "TFOOT" &&
+        !markedHeaderRowSet.has(row)
+      ));
+    if (rowDescriptors.length < 2 || rowDescriptors.length > MAX_DOCX_AUTO_TABLE_ROWS) return null;
+
+    const sourceCost = this.#officeDomCost(sourceTable);
+    let movedRowNodes = 0;
+    let movedRowTextUnits = 0;
+    const lastRowIndexByGroup = new Map<HTMLElement | null, number>();
+    for (let rowIndex = 0; rowIndex < rowDescriptors.length; rowIndex += 1) {
+      if (rowIndex > 0 && rowIndex % 64 === 0) {
+        await this.#checkpointDocxPagination(clock, signal, true);
+      }
+      const descriptor = rowDescriptors[rowIndex];
+      if (!descriptor) continue;
+      lastRowIndexByGroup.set(descriptor.sourceGroup, rowIndex);
+      const rowCost = this.#officeDomCost(descriptor.row);
+      movedRowNodes += rowCost.nodes;
+      movedRowTextUnits += rowCost.textUnits;
+    }
+    const releasableSourceCost = {
+      nodes: Math.max(0, sourceCost.nodes - movedRowNodes),
+      textUnits: Math.max(0, sourceCost.textUnits - movedRowTextUnits),
+    };
+    let rowSpanEnd = -1;
+    let activeGroup: HTMLElement | null | undefined;
+    const safeBreakAfter = new Array<boolean>(rowDescriptors.length).fill(false);
+    for (let rowIndex = 0; rowIndex < rowDescriptors.length; rowIndex += 1) {
+      if (rowIndex > 0 && rowIndex % 16 === 0) {
+        await this.#checkpointDocxPagination(clock, signal, true);
+      }
+      const descriptor = rowDescriptors[rowIndex];
+      if (!descriptor) continue;
+      if (descriptor.sourceGroup !== activeGroup) {
+        activeGroup = descriptor.sourceGroup;
+        rowSpanEnd = rowIndex - 1;
+      }
+      const groupEnd = lastRowIndexByGroup.get(descriptor.sourceGroup) ?? rowIndex;
+      for (const cell of Array.from(descriptor.row.cells)) {
+        const requestedSpanEnd = cell.rowSpan === 0
+          ? groupEnd
+          : rowIndex + Math.max(1, cell.rowSpan) - 1;
+        rowSpanEnd = Math.max(rowSpanEnd, Math.min(groupEnd, requestedSpanEnd));
+      }
+      safeBreakAfter[rowIndex] = rowSpanEnd <= rowIndex;
+    }
+    const footerChildren = sourceChildren.filter((child) => child.tagName === "TFOOT");
+
+    const createFragment = (includeFooter: boolean): {
+      table: HTMLTableElement;
+      groups: Map<Element, HTMLElement>;
+    } => {
+      const table = sourceTable.cloneNode(false) as HTMLTableElement;
+      const groups = new Map<Element, HTMLElement>();
+      for (const sourceChild of sourceChildren) {
+        if (sourceChild.tagName === "TR") continue;
+        if (sourceChild.tagName === "TBODY") {
+          const group = sourceChild.cloneNode(false) as HTMLElement;
+          groups.set(sourceChild, group);
+          table.append(group);
+          continue;
+        }
+        if (sourceChild.tagName === "TFOOT" && !includeFooter) continue;
+        table.append(sourceChild.cloneNode(true));
+      }
+      if (markedHeaderRows.length > 0) {
+        const header = table.tHead ?? table.createTHead();
+        for (const markedRow of markedHeaderRows) {
+          const clone = markedRow.cloneNode(true) as HTMLTableRowElement;
+          delete clone.dataset.cleDocxTableHeader;
+          header.append(clone);
+        }
+      }
+      this.#stripDocxCloneIds(table);
+      return { table, groups };
+    };
+
+    const appendRow = (
+      fragment: { table: HTMLTableElement; groups: Map<Element, HTMLElement> },
+      descriptor: { row: HTMLTableRowElement; sourceGroup: HTMLElement | null },
+    ): void => {
+      const group = descriptor.sourceGroup ? fragment.groups.get(descriptor.sourceGroup) : null;
+      (group ?? fragment.table).append(descriptor.row);
+    };
+
+    const first = createFragment(false);
+    const createdTables: HTMLTableElement[] = [first.table];
+    const reservedCosts: Array<{ nodes: number; textUnits: number }> = [];
+    let availableNodes = Math.min(
+      MAX_OFFICE_DOM_NODES,
+      domBudget.remainingNodes + releasableSourceCost.nodes,
+    );
+    let availableTextUnits = Math.min(
+      MAX_OFFICE_TEXT_UNITS,
+      domBudget.remainingTextUnits + releasableSourceCost.textUnits,
+    );
+    const reserveTable = (table: HTMLTableElement): boolean => {
+      const cost = this.#officeDomCost(table);
+      if (
+        cost.nodes > availableNodes ||
+        cost.textUnits > availableTextUnits
+      ) {
+        return false;
+      }
+      availableNodes -= cost.nodes;
+      availableTextUnits -= cost.textUnits;
+      reservedCosts.push(cost);
+      return true;
+    };
+    const refundReservedCosts = (startIndex: number): void => {
+      for (const cost of reservedCosts.splice(startIndex)) {
+        availableNodes += cost.nodes;
+        availableTextUnits += cost.textUnits;
+      }
+    };
+    const commitBudget = (): void => {
+      domBudget.remainingNodes = Math.max(0, Math.min(MAX_OFFICE_DOM_NODES, availableNodes));
+      domBudget.remainingTextUnits = Math.max(
+        0,
+        Math.min(MAX_OFFICE_TEXT_UNITS, availableTextUnits),
+      );
+    };
+    const restore = (): void => {
+      for (let rowIndex = rowDescriptors.length - 1; rowIndex >= 0; rowIndex -= 1) {
+        const descriptor = rowDescriptors[rowIndex];
+        if (!descriptor?.sourceGroup) continue;
+        descriptor.sourceGroup.insertBefore(descriptor.row, descriptor.sourceNextSibling);
+      }
+      for (const table of createdTables) table.remove();
+      reservedCosts.splice(0);
+    };
+    if (!reserveTable(first.table)) return { kind: "budget" };
+    article.append(first.table);
+    let lastSafeFit = 0;
+    let splitCount = rowDescriptors.length;
+    let overflowed = false;
+
+    try {
+      for (let rowIndex = 0; rowIndex < rowDescriptors.length; rowIndex += 1) {
+        if (rowIndex > 0 && rowIndex % 16 === 0) {
+          await this.#checkpointDocxPagination(clock, signal, true);
+        }
+        const descriptor = rowDescriptors[rowIndex];
+        if (!descriptor) continue;
+        appendRow(first, descriptor);
+        const overflows = this.#docxPageOverflows(page);
+        if (!overflows && safeBreakAfter[rowIndex]) lastSafeFit = rowIndex + 1;
+        if (!overflows) continue;
+        overflowed = true;
+        if (lastSafeFit > 0) {
+          splitCount = lastSafeFit;
+          break;
+        }
+        if (safeBreakAfter[rowIndex]) {
+          if (requireFittingFragment) {
+            restore();
+            return null;
+          }
+          splitCount = rowIndex + 1;
+          break;
+        }
+      }
+
+      if (!overflowed) {
+        const footerCostStart = reservedCosts.length;
+        for (const footer of footerChildren) {
+          const clone = footer.cloneNode(true) as HTMLElement;
+          this.#stripDocxCloneIds(clone);
+          const cost = this.#officeDomCost(clone);
+          if (
+            cost.nodes > availableNodes ||
+            cost.textUnits > availableTextUnits
+          ) {
+            restore();
+            return { kind: "budget" };
+          }
+          availableNodes -= cost.nodes;
+          availableTextUnits -= cost.textUnits;
+          reservedCosts.push(cost);
+          first.table.append(clone);
+        }
+        if (!this.#docxPageOverflows(page)) {
+          commitBudget();
+          return { kind: "split", remainder: null, oversized: false };
+        }
+        overflowed = true;
+        splitCount = lastSafeFit > 0 ? lastSafeFit : rowDescriptors.length;
+        for (const footer of first.table.querySelectorAll(":scope > tfoot")) footer.remove();
+        refundReservedCosts(footerCostStart);
+      }
+
+      const needsRemainder = splitCount < rowDescriptors.length || footerChildren.length > 0;
+      let remainder: HTMLTableElement | null = null;
+      if (needsRemainder) {
+        const rest = createFragment(true);
+        createdTables.push(rest.table);
+        if (!reserveTable(rest.table)) {
+          restore();
+          return { kind: "budget" };
+        }
+        remainder = rest.table;
+        for (let rowIndex = splitCount; rowIndex < rowDescriptors.length; rowIndex += 1) {
+          if ((rowIndex - splitCount) > 0 && (rowIndex - splitCount) % 64 === 0) {
+            await this.#checkpointDocxPagination(clock, signal, true);
+          }
+          const descriptor = rowDescriptors[rowIndex];
+          if (descriptor) appendRow(rest, descriptor);
+        }
+      }
+
+      const oversized = this.#docxPageOverflows(page);
+      if (oversized && requireFittingFragment) {
+        restore();
+        return null;
+      }
+      commitBudget();
+      return {
+        kind: "split",
+        remainder,
+        oversized,
+      };
+    } catch (error) {
+      restore();
+      throw error;
+    }
+  }
+
+  #officeAbortError(): Error {
     const error = new Error("Office preview cancelled");
     error.name = "AbortError";
-    throw error;
+    return error;
+  }
+
+  #throwIfOfficeAborted(signal: AbortSignal): void {
+    if (!signal.aborted) return;
+    throw this.#officeAbortError();
   }
 
   #parseXlsxXml(bytes: Uint8Array, label: string): Document {
@@ -4441,6 +5885,10 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     job.abortController.abort();
     job.resourceObserver?.disconnect();
     job.resourceObserver = null;
+    if (job.docxRepairTimer !== null) {
+      globalThis.clearTimeout(job.docxRepairTimer);
+      job.docxRepairTimer = null;
+    }
     job.viewer?.destroy();
     job.viewer = null;
     job.legacyPptWorker?.terminate();
@@ -4658,6 +6106,34 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       normalized.startsWith("#") ||
       normalized.startsWith("blob:") ||
       /^data:image\/(?:bmp|gif|jpeg|png|webp);base64,/.test(normalized);
+  }
+
+  #officeDomCost(root: Node, includeRoot = true): { nodes: number; textUnits: number } {
+    const pending: Node[] = includeRoot ? [root] : Array.from(root.childNodes);
+    let nodes = 0;
+    let textUnits = 0;
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (!node) continue;
+      nodes += 1;
+      if (node.nodeType === Node.TEXT_NODE) textUnits += (node.nodeValue ?? "").length;
+      for (let child = node.lastChild; child; child = child.previousSibling) pending.push(child);
+    }
+    return { nodes, textUnits };
+  }
+
+  #reserveOfficeDomClones(domBudget: OfficeDomBudget, roots: readonly Node[]): boolean {
+    let nodes = 0;
+    let textUnits = 0;
+    for (const root of roots) {
+      const cost = this.#officeDomCost(root);
+      nodes += cost.nodes;
+      textUnits += cost.textUnits;
+    }
+    if (nodes > domBudget.remainingNodes || textUnits > domBudget.remainingTextUnits) return false;
+    domBudget.remainingNodes -= nodes;
+    domBudget.remainingTextUnits -= textUnits;
+    return true;
   }
 
   #boundOfficeDom(root: HTMLElement): boolean {
