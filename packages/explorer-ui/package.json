@@ -1,8 +1,75 @@
 {
   "name": "@code-codex/explorer-ui",
-  "version": "0.1.33",
+  "version": "0.1.43",
   "private": true,
   "description": "Dependency-light renderer UI injected into Codex Desktop.",
+  "codeCodex": {
+    "embeddedWasm": {
+      "file": "node_modules/@extend-ai/react-pptx/dist/pptx_wasm_bg.wasm",
+      "sha256": "6cd3fb9f1082477f155009bd583a1d18deb8b46bde829d25cf9ab00b120b4c90",
+      "workerFile": "node_modules/@extend-ai/react-pptx/dist/native-parser-worker.js",
+      "workerSha256": "70e6cf8b2937a8df90800f17e5e2df6315a8a61a79af1f932ea85d4381dc540d",
+      "sourceCommit": "9052a7674e9f7df188a524384be85f6c34a227ed",
+      "cargoLockSha256": "63832511cc3979a6154e11a11529b8f7b379a5e0c733570697615f9d503ecdaf",
+      "rustVersion": "1.93.1",
+      "wasmPackVersion": "0.13.1",
+      "target": "wasm32-unknown-unknown",
+      "component": {
+        "name": "pptx-wasm",
+        "version": "0.1.0",
+        "license": "MIT"
+      },
+      "cargoPackages": [
+        { "name": "adler2", "version": "2.0.1", "license": "0BSD OR MIT OR Apache-2.0", "checksum": "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa" },
+        { "name": "bumpalo", "version": "3.20.3", "license": "MIT OR Apache-2.0", "checksum": "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649" },
+        { "name": "byteorder", "version": "1.5.0", "license": "Unlicense OR MIT", "checksum": "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b" },
+        { "name": "cfb", "version": "0.10.0", "license": "MIT", "checksum": "d8a4f8e55be323b378facfcf1f06aa97f6ec17cf4ac84fb17325093aaf62da41" },
+        { "name": "cfg-if", "version": "1.0.4", "license": "MIT OR Apache-2.0", "checksum": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801" },
+        { "name": "crc32fast", "version": "1.5.0", "license": "MIT OR Apache-2.0", "checksum": "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511" },
+        { "name": "displaydoc", "version": "0.2.6", "license": "MIT OR Apache-2.0", "checksum": "1ac70aa55017e108007fbaf5aa0f54b021c98f92ff8af59d42eda9da96e3dd4f" },
+        { "name": "equivalent", "version": "1.0.2", "license": "Apache-2.0 OR MIT", "checksum": "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f" },
+        { "name": "flate2", "version": "1.1.9", "license": "MIT OR Apache-2.0", "checksum": "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c" },
+        { "name": "fnv", "version": "1.0.7", "license": "Apache-2.0 OR MIT", "checksum": "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1" },
+        { "name": "futures-core", "version": "0.3.32", "license": "MIT OR Apache-2.0", "checksum": "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d" },
+        { "name": "futures-task", "version": "0.3.32", "license": "MIT OR Apache-2.0", "checksum": "037711b3d59c33004d3856fbdc83b99d4ff37a24768fa1be9ce3538a1cde4393" },
+        { "name": "futures-util", "version": "0.3.32", "license": "MIT OR Apache-2.0", "checksum": "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6" },
+        { "name": "hashbrown", "version": "0.17.1", "license": "MIT OR Apache-2.0", "checksum": "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a" },
+        { "name": "indexmap", "version": "2.14.0", "license": "Apache-2.0 OR MIT", "checksum": "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9" },
+        { "name": "itoa", "version": "1.0.18", "license": "MIT OR Apache-2.0", "checksum": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682" },
+        { "name": "js-sys", "version": "0.3.103", "license": "MIT OR Apache-2.0", "checksum": "53b44bfcdb3f8d5837a46dae1ca9660a837176eee74a28b229bc626816589102" },
+        { "name": "log", "version": "0.4.33", "license": "MIT OR Apache-2.0", "checksum": "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad" },
+        { "name": "memchr", "version": "2.8.3", "license": "Unlicense OR MIT", "checksum": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98" },
+        { "name": "miniz_oxide", "version": "0.8.9", "license": "MIT OR Zlib OR Apache-2.0", "checksum": "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316" },
+        { "name": "once_cell", "version": "1.21.4", "license": "MIT OR Apache-2.0", "checksum": "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50" },
+        { "name": "pin-project-lite", "version": "0.2.17", "license": "Apache-2.0 OR MIT", "checksum": "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd" },
+        { "name": "pptx-core", "version": "0.1.0", "license": "MIT" },
+        { "name": "proc-macro2", "version": "1.0.106", "license": "MIT OR Apache-2.0", "checksum": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934" },
+        { "name": "quick-xml", "version": "0.37.5", "license": "MIT", "checksum": "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb" },
+        { "name": "quote", "version": "1.0.46", "license": "MIT OR Apache-2.0", "checksum": "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368" },
+        { "name": "rustversion", "version": "1.0.23", "license": "MIT OR Apache-2.0", "checksum": "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f" },
+        { "name": "serde", "version": "1.0.228", "license": "MIT OR Apache-2.0", "checksum": "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e" },
+        { "name": "serde_bytes", "version": "0.11.19", "license": "MIT OR Apache-2.0", "checksum": "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8" },
+        { "name": "serde_core", "version": "1.0.228", "license": "MIT OR Apache-2.0", "checksum": "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad" },
+        { "name": "serde_derive", "version": "1.0.228", "license": "MIT OR Apache-2.0", "checksum": "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79" },
+        { "name": "serde_json", "version": "1.0.150", "license": "MIT OR Apache-2.0", "checksum": "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9" },
+        { "name": "serde-wasm-bindgen", "version": "0.6.5", "license": "MIT", "checksum": "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b" },
+        { "name": "simd-adler32", "version": "0.3.9", "license": "MIT", "checksum": "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214" },
+        { "name": "slab", "version": "0.4.12", "license": "MIT", "checksum": "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5" },
+        { "name": "syn", "version": "2.0.118", "license": "MIT OR Apache-2.0", "checksum": "1b9ae57f904213ebb649ce6895b8a66c66f0203b9319718f69a5612a065b1422" },
+        { "name": "thiserror", "version": "2.0.18", "license": "MIT OR Apache-2.0", "checksum": "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4" },
+        { "name": "thiserror-impl", "version": "2.0.18", "license": "MIT OR Apache-2.0", "checksum": "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5" },
+        { "name": "unicode-ident", "version": "1.0.24", "license": "(MIT OR Apache-2.0) AND Unicode-3.0", "checksum": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75" },
+        { "name": "uuid", "version": "1.23.4", "license": "Apache-2.0 OR MIT", "checksum": "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53" },
+        { "name": "wasm-bindgen", "version": "0.2.126", "license": "MIT OR Apache-2.0", "checksum": "4b067c0c11094aef6b7a801c1e34a26affafdf3d051dba08456b868789aaf9a4" },
+        { "name": "wasm-bindgen-macro", "version": "0.2.126", "license": "MIT OR Apache-2.0", "checksum": "167ce5e579f6bcf889c4f7175a8a5a585de84e8ff93976ce393efa5f2837aab1" },
+        { "name": "wasm-bindgen-macro-support", "version": "0.2.126", "license": "MIT OR Apache-2.0", "checksum": "f3997c7839262f4ef12cf90b818d6340c18e80f263f1a94bf157d0ec4420380e" },
+        { "name": "wasm-bindgen-shared", "version": "0.2.126", "license": "MIT OR Apache-2.0", "checksum": "dc1b4cb0cc549fcf58d7dfc081778139b3d283a081644e833e84682ad71cea24" },
+        { "name": "zip", "version": "2.4.2", "license": "MIT", "checksum": "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50" },
+        { "name": "zmij", "version": "1.0.21", "license": "MIT", "checksum": "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa" },
+        { "name": "zopfli", "version": "0.8.3", "license": "Apache-2.0", "checksum": "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249" }
+      ]
+    }
+  },
   "type": "module",
   "files": [
     "dist"
@@ -15,10 +82,27 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.15",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@types/turndown": "^5.0.6",
     "esbuild": "^0.25.8",
     "typescript": "^5.8.3"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "@aiden0z/pptx-renderer": "1.2.4",
+    "@extend-ai/react-pptx": "0.1.2",
+    "docx-preview": "0.4.0",
+    "dompurify": "^3.4.12",
+    "echarts": "6.1.0",
+    "jszip": "3.10.1",
+    "markdown-it": "^15.0.0",
+    "pdfjs-dist": "5.4.624",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   }
 }

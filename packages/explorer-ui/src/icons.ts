@@ -281,6 +281,8 @@ const extensions: Readonly<Record<string, FileIconKind>> = Object.freeze({
   pdf: "pdf",
   doc: "document",
   docx: "document",
+  ppt: "document",
+  pptx: "document",
   odt: "document",
   rtf: "document",
   xls: "spreadsheet",

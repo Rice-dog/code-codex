@@ -1,6 +1,39 @@
+import DOMPurify from "dompurify";
+import { PptxViewer, RECOMMENDED_ZIP_LIMITS } from "@aiden0z/pptx-renderer";
+import {
+  ReactPptxViewer,
+  type ParsedPresentation,
+  type PresentationDocument,
+  type PresentationWarning,
+  type PptxViewerController,
+  type SlideNode,
+} from "@extend-ai/react-pptx";
+import { renderAsync as renderDocxAsync } from "docx-preview";
+import JSZip from "jszip";
+import MarkdownIt from "markdown-it";
+// pdfjs-dist publishes modern runtime modules without a matching subpath declaration.
+// @ts-expect-error The public declarations are imported separately below.
+import { AnnotationMode, VerbosityLevel, getDocument } from "pdfjs-dist/build/pdf.mjs";
+import type {
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  RenderTask,
+} from "pdfjs-dist/types/src/pdf.d.ts";
+// PDF.js uses this main-thread handler as a CSP-safe fake worker inside Codex's single injected bundle.
+import "pdfjs-dist/build/pdf.worker.mjs";
+import { createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import TurndownService from "turndown";
+// @ts-expect-error turndown-plugin-gfm does not publish TypeScript declarations.
+import { gfm as turndownGfm } from "turndown-plugin-gfm";
 import { getFileIcon, icons } from "./icons";
 import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { MAX_SYNTAX_SOURCE_UNITS, highlightSyntaxForPath, type SyntaxHighlight } from "./syntax-highlight";
+
+declare const __CODE_CODEX_PPT_WORKER_SOURCE__: string;
+declare const __CODE_CODEX_PPT_WASM_BASE64__: string;
+declare const __CODE_CODEX_PPT_VIEWER_STYLES__: string;
 
 export const MAIN_PREVIEW_TAG = "code-codex-main-preview";
 export const MAIN_PREVIEW_ACTIVATE_EVENT = "cle-main-preview-activate";
@@ -8,6 +41,130 @@ export const MAIN_PREVIEW_CLOSE_EVENT = "cle-main-preview-close";
 export const MAIN_PREVIEW_DRAFT_EVENT = "cle-main-preview-draft";
 export const MAIN_PREVIEW_SAVE_EVENT = "cle-main-preview-save";
 export const MAIN_PREVIEW_RELOAD_EVENT = "cle-main-preview-reload";
+export const MARKDOWN_PREVIEWER_ID = "code-codex.markdown-preview";
+export const IMAGE_PREVIEWER_ID = "code-codex.image-preview";
+export const VIDEO_PREVIEWER_ID = "code-codex.video-preview";
+export const PDF_PREVIEWER_ID = "code-codex.pdf-preview";
+export const AUDIO_PREVIEWER_ID = "code-codex.audio-preview";
+export const OFFICE_PREVIEWER_ID = "code-codex.office-preview";
+export const NATIVE_POWERPOINT_PREVIEW_MIME = "application/vnd.code-codex.powerpoint-slides+zip";
+
+const MAX_PDF_CANVAS_PIXELS = 16_777_216;
+const MAX_PDF_CANVAS_DIMENSION = 16_384;
+const MAX_PDF_CSS_SCALE = 2;
+const MAX_PDF_OUTPUT_SCALE = 2;
+const MAX_OFFICE_DOM_NODES = 50_000;
+const MAX_OFFICE_TEXT_UNITS = 4_000_000;
+const MAX_EXCEL_SHEETS = 32;
+const MAX_EXCEL_ROWS = 1_000;
+const MAX_EXCEL_COLUMNS = 128;
+const MAX_EXCEL_CELLS = 25_000;
+const MAX_EXCEL_CELL_TEXT_UNITS = 20_000;
+const MAX_EXCEL_TOTAL_TEXT_UNITS = 2_000_000;
+const MAX_XLSX_ZIP_ENTRIES = 4_096;
+const MAX_XLSX_WORKBOOK_XML_BYTES = 2 * 1024 * 1024;
+const MAX_XLSX_RELATIONSHIP_XML_BYTES = 2 * 1024 * 1024;
+const MAX_XLSX_SHARED_STRINGS_XML_BYTES = 8 * 1024 * 1024;
+const MAX_XLSX_WORKSHEET_XML_BYTES = 8 * 1024 * 1024;
+const MAX_XLSX_STYLES_XML_BYTES = 8 * 1024 * 1024;
+const MAX_XLSX_SHARED_STRINGS = 100_000;
+const MAX_XLSX_STYLE_RECORDS = 4_096;
+const MAX_XLSX_MERGED_RANGES = 512;
+const MAX_PPTX_RELATIONSHIP_FILES = 512;
+const MAX_PPTX_RELATIONSHIP_FILE_BYTES = 512 * 1024;
+const MAX_PPTX_RELATIONSHIP_TOTAL_BYTES = 4 * 1024 * 1024;
+const MAX_PPT_SLIDES = 256;
+const MAX_PPT_NODES = 25_000;
+const MAX_PPT_NODE_DEPTH = 16;
+const MAX_PPT_TEXT_UNITS = 2_000_000;
+const MAX_PPT_ASSETS = 512;
+const MAX_PPT_ASSET_BYTES = 24 * 1024 * 1024;
+const MAX_PPT_TOTAL_ASSET_BYTES = 96 * 1024 * 1024;
+const MAX_PPT_TABLE_CELLS = 25_000;
+const MAX_PPT_PARSE_MILLISECONDS = 20_000;
+const MAX_PPT_RENDER_MILLISECONDS = 15_000;
+
+type OfficeDocumentKind = "docx" | "xlsx" | "ppt" | "pptx";
+
+interface XlsxWorksheetMeta {
+  readonly name: string;
+  readonly path: string;
+}
+
+interface ParsedXlsxWorksheet {
+  readonly cells: ReadonlyMap<number, ReadonlyMap<number, XlsxPreviewCell>>;
+  readonly rowCount: number;
+  readonly columnCount: number;
+  readonly columnWidths: ReadonlyMap<number, number>;
+  readonly mergedFollowers: ReadonlySet<number>;
+  readonly truncated: boolean;
+}
+
+interface XlsxSharedStrings {
+  readonly values: readonly string[];
+  readonly truncated: boolean;
+}
+
+interface XlsxCellStyle {
+  bold?: boolean;
+  italic?: boolean;
+  strike?: boolean;
+  underline?: boolean;
+  fontFamily?: string;
+  fontSizePoints?: number;
+  color?: string;
+  backgroundColor?: string;
+  horizontal?: "left" | "center" | "right" | "justify";
+  vertical?: "top" | "middle" | "bottom";
+  wrapText?: boolean;
+}
+
+interface XlsxPreviewCell {
+  readonly text: string;
+  readonly style: XlsxCellStyle | null;
+}
+
+interface XlsxStyleTable {
+  readonly cellStyles: readonly XlsxCellStyle[];
+  readonly truncated: boolean;
+}
+
+interface XlsxRange {
+  readonly startRow: number;
+  readonly startColumn: number;
+  readonly endRow: number;
+  readonly endColumn: number;
+}
+
+const OFFICE_MIME_TYPES: Readonly<Record<string, OfficeDocumentKind>> = Object.freeze({
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-powerpoint": "ppt",
+  [NATIVE_POWERPOINT_PREVIEW_MIME]: "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+});
+const DOCX_SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+const DOCX_ALLOWED_SVG_TAGS = new Set(["ellipse", "foreignobject", "g", "image", "line", "rect", "svg"]);
+const DOCX_ALLOWED_SVG_ATTRIBUTES = new Set([
+  "class",
+  "cx",
+  "cy",
+  "fill",
+  "height",
+  "href",
+  "rx",
+  "ry",
+  "stroke",
+  "stroke-width",
+  "style",
+  "width",
+  "x",
+  "x1",
+  "x2",
+  "y",
+  "y1",
+  "y2",
+]);
 
 export type MainPreviewLineEnding = "lf" | "crlf" | "none" | "mixed";
 
@@ -15,6 +172,7 @@ export type MainPreviewUnavailableReason =
   | "binary"
   | "invalid-utf8"
   | "sensitive"
+  | "previewer-disabled"
   | "unsupported-type"
   | "unknown";
 
@@ -45,6 +203,13 @@ export interface MainPreviewEmptyView extends MainPreviewFileBase {
   readonly lineEnding?: MainPreviewLineEnding;
 }
 
+export interface MainPreviewMediaView extends MainPreviewFileBase {
+  readonly kind: "image" | "video" | "pdf" | "audio" | "office";
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+  readonly bytes: Uint8Array;
+}
+
 export interface MainPreviewUnsupportedView extends MainPreviewFileBase {
   readonly kind: "unsupported";
   readonly sizeBytes: number;
@@ -61,12 +226,14 @@ export type MainPreviewFileView =
   | MainPreviewLoadingView
   | MainPreviewTextView
   | MainPreviewEmptyView
+  | MainPreviewMediaView
   | MainPreviewUnsupportedView
   | MainPreviewErrorView;
 
 export interface MainPreviewState {
   readonly activePath: string | null;
   readonly tabs: readonly MainPreviewFileView[];
+  readonly enabledPreviewers?: readonly string[];
   readonly editor?: MainPreviewEditorState;
 }
 
@@ -101,6 +268,269 @@ export type MainPreviewSaveEvent = CustomEvent<MainPreviewPathDetail>;
 export type MainPreviewReloadEvent = CustomEvent<MainPreviewPathDetail>;
 
 const CONVERSATION_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.25 3.25h11.5v7.5H7l-3.5 2.5v-2.5H2.25z"/></svg>`;
+
+const MARKDOWN_ALLOWED_TAGS = [
+  "a",
+  "blockquote",
+  "br",
+  "code",
+  "del",
+  "em",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "s",
+  "span",
+  "strong",
+  "table",
+  "tbody",
+  "td",
+  "th",
+  "thead",
+  "tr",
+  "ul",
+] as const;
+
+const MARKDOWN_FENCE_EXTENSIONS: Readonly<Record<string, string>> = Object.freeze({
+  bash: "sh",
+  c: "c",
+  cpp: "cpp",
+  csharp: "cs",
+  cs: "cs",
+  css: "css",
+  diff: "diff",
+  go: "go",
+  html: "html",
+  java: "java",
+  javascript: "js",
+  js: "js",
+  json: "json",
+  jsx: "jsx",
+  kotlin: "kt",
+  markdown: "md",
+  md: "md",
+  powershell: "ps1",
+  ps1: "ps1",
+  py: "py",
+  python: "py",
+  rust: "rs",
+  rs: "rs",
+  shell: "sh",
+  sh: "sh",
+  sql: "sql",
+  ts: "ts",
+  tsx: "tsx",
+  typescript: "ts",
+  xml: "xml",
+  yaml: "yaml",
+  yml: "yml",
+});
+
+function escapeMarkdownHtml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+function markdownFencePath(language: string): string {
+  const requested = language.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? "";
+  const extension = MARKDOWN_FENCE_EXTENSIONS[requested] ?? "txt";
+  return `markdown-fence.${extension}`;
+}
+
+function renderMarkdownFence(source: string, language: string): string {
+  const highlighted = highlightSyntaxForPath(markdownFencePath(language), source);
+  let rendered = "";
+  for (const run of highlighted.runs) {
+    const text = escapeMarkdownHtml(source.slice(run.start, run.end));
+    rendered += run.kind === "plain" ? text : `<span class="tok-${run.kind}">${text}</span>`;
+  }
+  return rendered;
+}
+
+function isMarkdownPreviewPath(path: string): boolean {
+  const normalized = path.replaceAll("\\", "/").toLowerCase();
+  return normalized.endsWith(".md") || normalized.endsWith(".markdown");
+}
+
+function isSafeMarkdownLink(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("#")) return true;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" || parsed.protocol === "mailto:";
+  } catch {
+    return false;
+  }
+}
+
+function escapeMarkdownLabel(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
+}
+
+function markdownDestination(value: string): string {
+  const escaped = value.replaceAll("\\", "\\\\").replaceAll(">", "\\>");
+  return /[\s()]/.test(escaped) ? `<${escaped}>` : escaped.replaceAll(")", "\\)");
+}
+
+function markdownTitle(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function escapeMarkdownTableCell(value: string): string {
+  const flattened = value.replace(/[ \t]*(?:\r?\n)+[ \t]*/g, "<br>").trim();
+  return flattened.replace(/(^|[^\\])\|/g, "$1\\|");
+}
+
+function splitMarkdownFrontMatter(source: string): { readonly body: string; readonly frontMatter?: string } {
+  const match = source.match(/^---[ \t]*\n([\s\S]*?)\n(?:---|\.\.\.)[ \t]*(?:\n|$)/);
+  const body = match?.[1] ?? "";
+  if (!match || !/^[A-Za-z_][\w.-]*\s*:/m.test(body)) return { body: source };
+  return {
+    body: source.slice(match[0].length),
+    frontMatter: match[0].replace(/\n$/, ""),
+  };
+}
+
+function normalizedRenderedMarkdown(value: string, preserveTrailingNewline: boolean): string {
+  const normalized = value.replaceAll("\u00a0", " ").replaceAll("\r\n", "\n").replaceAll("\r", "\n").trim();
+  return normalized ? `${normalized}${preserveTrailingNewline ? "\n" : ""}` : "";
+}
+
+const markdownRenderer = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: false,
+  breaks: false,
+  highlight: renderMarkdownFence,
+});
+
+const markdownEditorRenderer = new MarkdownIt({
+  html: true,
+  linkify: false,
+  typographer: false,
+  breaks: false,
+  highlight: (source) => escapeMarkdownHtml(source),
+});
+
+function configureMarkdownRenderer(renderer: typeof markdownRenderer, editable: boolean): void {
+  renderer.renderer.rules.image = (tokens, index) => {
+    const token = tokens[index];
+    const alt = String(token?.content ?? "").trim() || String(token?.attrGet("alt") ?? "").trim() || "Image";
+    const source = String(token?.attrGet("src") ?? "");
+    const title = String(token?.attrGet("title") ?? "");
+    return `<span class="markdown-image-placeholder" data-markdown-image-alt="${escapeMarkdownHtml(alt)}" data-markdown-image-src="${escapeMarkdownHtml(source)}" data-markdown-image-title="${escapeMarkdownHtml(title)}">Image · ${escapeMarkdownHtml(alt)}</span>`;
+  };
+
+  renderer.renderer.rules.link_open = (tokens, index, options, _env, self) => {
+    const token = tokens[index];
+    if (token) {
+      const href = String(token.attrGet("href") ?? "");
+      const title = String(token.attrGet("title") ?? "");
+      if (href) token.attrSet("data-markdown-href", href);
+      if (title) token.attrSet("data-markdown-title", title);
+      const hrefIndex = token.attrIndex("href");
+      if (hrefIndex >= 0) token.attrs?.splice(hrefIndex, 1);
+      const titleIndex = token.attrIndex("title");
+      if (titleIndex >= 0) token.attrs?.splice(titleIndex, 1);
+    }
+    return self.renderToken(tokens, index, options);
+  };
+
+  for (const rule of ["th_open", "td_open"] as const) {
+    renderer.renderer.rules[rule] = (tokens, index, options, _env, self) => {
+      const token = tokens[index];
+      const alignment = String(token?.attrGet("style") ?? "").match(/^text-align:\s*(left|center|right)\s*;?$/i)?.[1]?.toLowerCase();
+      const styleIndex = token?.attrIndex("style") ?? -1;
+      if (styleIndex >= 0) token?.attrs?.splice(styleIndex, 1);
+      if (alignment) {
+        token?.attrJoin("class", `markdown-align-${alignment}`);
+        token?.attrSet("align", alignment);
+      }
+      return self.renderToken(tokens, index, options);
+    };
+  }
+
+  if (editable) {
+    const preservedComment = (content: string, block: boolean): string => {
+      if (!/^\s*<!--[\s\S]*-->\s*$/.test(content)) return content;
+      const encoded = escapeMarkdownHtml(encodeURIComponent(content.trimEnd()));
+      return `<span class="markdown-comment-placeholder" data-markdown-comment="${encoded}" data-markdown-comment-block="${String(block)}">HTML comment</span>`;
+    };
+    renderer.renderer.rules.html_block = (tokens, index) => preservedComment(String(tokens[index]?.content ?? ""), true);
+    renderer.renderer.rules.html_inline = (tokens, index) => preservedComment(String(tokens[index]?.content ?? ""), false);
+  }
+}
+
+configureMarkdownRenderer(markdownRenderer, false);
+configureMarkdownRenderer(markdownEditorRenderer, true);
+
+const markdownSerializer = new TurndownService({
+  headingStyle: "atx",
+  bulletListMarker: "-",
+  codeBlockStyle: "fenced",
+  fence: "```",
+  emDelimiter: "*",
+  strongDelimiter: "**",
+  linkStyle: "inlined",
+});
+markdownSerializer.use(turndownGfm as TurndownService.Plugin);
+markdownSerializer.addRule("renderedMarkdownTableCell", {
+  filter: ["th", "td"],
+  replacement: (content, node) => {
+    const siblings = node.parentNode?.childNodes;
+    const index = siblings ? Array.prototype.indexOf.call(siblings, node) : 0;
+    return `${index === 0 ? "| " : " "}${escapeMarkdownTableCell(content)} |`;
+  },
+});
+markdownSerializer.addRule("preservedMarkdownFrontMatter", {
+  filter: (node) => node.nodeName === "DIV" && node.classList.contains("markdown-front-matter-placeholder"),
+  replacement: (_content, node) => `\n\n${node.getAttribute("data-markdown-front-matter") ?? ""}\n\n`,
+});
+markdownSerializer.addRule("preservedMarkdownComment", {
+  filter: (node) => node.nodeName === "SPAN" && node.classList.contains("markdown-comment-placeholder"),
+  replacement: (_content, node) => {
+    const encoded = node.getAttribute("data-markdown-comment") ?? "";
+    let comment = "";
+    try {
+      comment = decodeURIComponent(encoded);
+    } catch {
+      comment = "";
+    }
+    return node.getAttribute("data-markdown-comment-block") === "true" ? `\n\n${comment}\n\n` : comment;
+  },
+});
+markdownSerializer.addRule("preservedMarkdownLink", {
+  filter: (node) => node.nodeName === "A" && node.hasAttribute("data-markdown-href"),
+  replacement: (content, node) => {
+    const href = node.getAttribute("data-markdown-href") ?? "";
+    const title = node.getAttribute("data-markdown-title") ?? "";
+    return `[${content}](${markdownDestination(href)}${title ? ` "${markdownTitle(title)}"` : ""})`;
+  },
+});
+markdownSerializer.addRule("preservedMarkdownImage", {
+  filter: (node) => node.nodeName === "SPAN" && node.classList.contains("markdown-image-placeholder"),
+  replacement: (_content, node) => {
+    const alt = node.getAttribute("data-markdown-image-alt") ?? "Image";
+    const source = node.getAttribute("data-markdown-image-src") ?? "";
+    const title = node.getAttribute("data-markdown-image-title") ?? "";
+    return `![${escapeMarkdownLabel(alt)}](${markdownDestination(source)}${title ? ` "${markdownTitle(title)}"` : ""})`;
+  },
+});
+markdownSerializer.addRule("renderedTaskCheckbox", {
+  filter: (node) => node.nodeName === "INPUT" && node.getAttribute("type") === "checkbox" && node.closest("li") !== null,
+  replacement: (_content, node) => `${(node as HTMLInputElement).checked ? "[x]" : "[ ]"} `,
+});
+markdownSerializer.addRule("gfmStrikethrough", {
+  filter: ["del", "s"],
+  replacement: (content) => `~~${content}~~`,
+});
 
 const mainPreviewStyles = String.raw`
   :host {
@@ -392,6 +822,430 @@ const mainPreviewStyles = String.raw`
     overflow: hidden;
   }
 
+  .preview-content.editor-mode.markdown-editor-mode {
+    display: block;
+    overflow: auto;
+  }
+
+  .media-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 24px;
+    overflow: hidden;
+  }
+
+  .media-preview-image,
+  .media-preview-video,
+  .media-preview-audio {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  .media-preview-image {
+    width: auto;
+    height: auto;
+  }
+
+  .media-preview-video {
+    width: min(100%, 1200px);
+    height: auto;
+    background: #000000;
+  }
+
+  .media-preview[data-kind="pdf"] {
+    display: block;
+    padding: 0;
+    overflow: auto;
+    background: var(--cle-main-raised);
+  }
+
+  .media-preview-pdf {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: 100%;
+    min-height: 100%;
+  }
+
+  .pdf-preview-toolbar {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 42px;
+    padding: 6px 12px;
+    box-sizing: border-box;
+    color: var(--cle-main-muted);
+    background: color-mix(in srgb, var(--cle-main-bg) 94%, transparent);
+    border-bottom: 1px solid var(--cle-main-line);
+    backdrop-filter: blur(10px);
+  }
+
+  .pdf-preview-toolbar button {
+    min-width: 70px;
+    min-height: 28px;
+    padding: 4px 10px;
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .pdf-preview-toolbar button:hover:not(:disabled) { background: var(--cle-main-hover); }
+  .pdf-preview-toolbar button:focus-visible { outline: 2px solid var(--cle-main-focus); outline-offset: 1px; }
+  .pdf-preview-toolbar button[aria-disabled="true"] { cursor: default; opacity: .42; }
+
+  .pdf-page-status {
+    min-width: 84px;
+    color: var(--cle-main-muted);
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .pdf-page-stage {
+    display: grid;
+    place-items: start center;
+    min-width: 0;
+    min-height: 100%;
+    padding: 24px;
+    box-sizing: border-box;
+    background: color-mix(in srgb, var(--cle-main-raised) 88%, var(--cle-main-text));
+  }
+
+  .pdf-page-canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    background: #ffffff;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .22), 0 1px 3px rgba(0, 0, 0, .2);
+  }
+
+  .pdf-preview-loading,
+  .pdf-page-error {
+    align-self: center;
+    max-width: 440px;
+    margin: auto;
+    padding: 24px;
+    color: var(--cle-main-muted);
+    text-align: center;
+  }
+
+  .pdf-page-error { color: var(--cle-syntax-deleted); }
+
+  @media (max-width: 640px) {
+    .pdf-preview-toolbar { gap: 6px; }
+    .pdf-preview-toolbar button { min-width: 60px; padding-inline: 8px; }
+    .pdf-page-stage { padding: 12px; }
+  }
+
+  .media-preview-audio {
+    width: min(100%, 720px);
+    height: 54px;
+  }
+
+  ${__CODE_CODEX_PPT_VIEWER_STYLES__}
+
+  .office-preview {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--cle-main-bg);
+  }
+
+  .office-preview-stage {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .office-preview-loading {
+    display: grid;
+    min-height: 100%;
+    place-items: center;
+    padding: 24px;
+    box-sizing: border-box;
+    color: var(--cle-main-muted);
+    text-align: center;
+  }
+
+  .office-preview[data-kind="docx"] {
+    overflow: auto;
+    background: color-mix(in srgb, var(--cle-main-raised) 88%, var(--cle-main-text));
+  }
+
+  .office-preview[data-kind="docx"] .office-preview-stage {
+    height: auto;
+    min-height: 100%;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+
+  .office-word-document {
+    width: max-content;
+    min-width: 100%;
+    margin: 0 auto;
+    color: #1f2328;
+    font-family: Aptos, Calibri, "Segoe UI", sans-serif;
+  }
+
+  .office-word-document > div {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  .office-word-document section {
+    flex: 0 0 auto;
+    margin: 0 auto 20px;
+    background: #ffffff;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .22), 0 1px 3px rgba(0, 0, 0, .2) !important;
+  }
+
+  .office-word-document section img {
+    max-width: 100%;
+  }
+
+  .office-preview-notice {
+    display: block;
+    padding: 8px 12px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border-top: 1px solid var(--cle-main-line);
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .office-workbook,
+  .office-presentation {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .office-sheet-tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    min-height: 38px;
+    padding: 5px 8px 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    box-sizing: border-box;
+    background: var(--cle-main-raised);
+    border-bottom: 1px solid var(--cle-main-line);
+    scrollbar-width: thin;
+  }
+
+  .office-sheet-tabs button {
+    flex: 0 0 auto;
+    max-width: 220px;
+    min-height: 28px;
+    padding: 4px 10px;
+    overflow: hidden;
+    color: var(--cle-main-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .office-sheet-tabs button:hover { color: var(--cle-main-text); background: var(--cle-main-hover); }
+  .office-sheet-tabs button[aria-selected="true"] {
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+    border-color: var(--cle-main-line);
+    border-bottom-color: var(--cle-main-bg);
+  }
+  .office-sheet-tabs button:focus-visible { outline: 2px solid var(--cle-main-focus); outline-offset: -2px; }
+  .office-sheet-overflow { flex: 0 0 auto; padding: 0 7px; color: var(--cle-main-faint); font-size: 11px; }
+
+  .office-sheet-viewport {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    background: var(--cle-main-bg);
+  }
+
+  .office-sheet-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+    font: 12px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .office-sheet-table caption {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .office-sheet-table th,
+  .office-sheet-table td {
+    min-width: 72px;
+    height: 26px;
+    padding: 4px 7px;
+    box-sizing: border-box;
+    overflow: hidden;
+    border-right: 1px solid var(--cle-main-line);
+    border-bottom: 1px solid var(--cle-main-line);
+    text-align: left;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    white-space: pre;
+  }
+
+  .office-sheet-table thead th {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    min-width: 72px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .office-sheet-table tbody th,
+  .office-sheet-corner {
+    position: sticky;
+    z-index: 1;
+    left: 0;
+    min-width: 44px;
+    width: 44px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    font-weight: 400;
+    text-align: right;
+  }
+
+  .office-sheet-corner { z-index: 3 !important; top: 0; }
+
+  .office-preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 42px;
+    padding: 6px 12px;
+    box-sizing: border-box;
+    color: var(--cle-main-muted);
+    background: color-mix(in srgb, var(--cle-main-bg) 94%, transparent);
+    border-bottom: 1px solid var(--cle-main-line);
+  }
+
+  .office-preview-toolbar button {
+    min-width: 70px;
+    min-height: 28px;
+    padding: 4px 10px;
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .office-preview-toolbar button:hover:not([aria-disabled="true"]) { background: var(--cle-main-hover); }
+  .office-preview-toolbar button:focus-visible { outline: 2px solid var(--cle-main-focus); outline-offset: 1px; }
+  .office-preview-toolbar button[aria-disabled="true"] { cursor: default; opacity: .42; }
+  .office-page-status {
+    min-width: 96px;
+    color: var(--cle-main-muted);
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .office-slide-viewport {
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+    padding: 20px;
+    overflow: auto;
+    box-sizing: border-box;
+    place-items: center;
+    background: color-mix(in srgb, var(--cle-main-raised) 88%, var(--cle-main-text));
+  }
+
+  .office-slide-viewport > * { max-width: 100%; }
+
+  .office-preview[data-kind="ppt"] .office-slide-viewport {
+    padding: 0;
+    overflow: hidden;
+    place-items: stretch;
+  }
+
+  .office-preview[data-kind="ppt"] .rpv-root {
+    width: 100%;
+    height: 100%;
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+    border: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .office-preview[data-kind="ppt"] .rpv-workspace {
+    min-height: 100%;
+    max-height: 100%;
+  }
+
+  .office-preview[data-kind="ppt"] .rpv-stage,
+  .office-preview[data-kind="ppt"] .rpv-viewport,
+  .office-preview[data-kind="ppt"] .rpv-status {
+    background: color-mix(in srgb, var(--cle-main-raised) 88%, var(--cle-main-text));
+  }
+
+  .office-preview[data-kind="ppt"] .rpv-viewport { padding: 20px; }
+
+  .office-native-slide {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    background: #fff;
+  }
+
+  @media (max-width: 640px) {
+    .office-preview[data-kind="docx"] .office-preview-stage { padding: 12px; }
+    .office-preview-toolbar { gap: 6px; }
+    .office-preview-toolbar button { min-width: 60px; padding-inline: 8px; }
+    .office-slide-viewport { padding: 10px; }
+  }
+
   .literal-text,
   .code-line-numbers,
   .code-editor-highlight,
@@ -565,6 +1419,196 @@ const mainPreviewStyles = String.raw`
   .tok-inserted { color: var(--cle-syntax-inserted); }
   .tok-deleted { color: var(--cle-syntax-deleted); }
 
+  .markdown-reader {
+    min-width: 0;
+    min-height: 100%;
+    padding: 0 0 64px;
+    color: var(--cle-main-text);
+    background: var(--cle-main-bg);
+  }
+
+  .markdown-body {
+    width: min(100%, 920px);
+    margin: 0 auto;
+    padding: 30px clamp(24px, 5vw, 52px) 20px;
+    color: var(--cle-main-text);
+    font: 14px/1.62 -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", sans-serif;
+    overflow-wrap: anywhere;
+  }
+  .markdown-editor { min-height: 100%; }
+  .markdown-editor-surface {
+    min-height: calc(100% - 64px);
+    caret-color: var(--cle-main-text);
+    cursor: text;
+    outline: none;
+  }
+  .markdown-editor-surface:focus-visible {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cle-main-focus) 42%, transparent);
+  }
+  .markdown-editor-surface[data-limit-reached="true"] {
+    box-shadow: inset 0 0 0 1px var(--cle-syntax-deleted);
+  }
+  .markdown-editor-surface a { cursor: text; }
+  .markdown-editor-surface .task-list-item input { cursor: pointer; }
+  .markdown-editor-surface .markdown-image-placeholder {
+    cursor: default;
+    user-select: none;
+  }
+  .markdown-front-matter-placeholder,
+  .markdown-comment-placeholder {
+    display: block;
+    margin: 0 0 16px;
+    padding: 7px 10px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border: 1px dashed var(--cle-main-line);
+    border-radius: 5px;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    user-select: all;
+  }
+  .markdown-comment-placeholder {
+    display: inline-flex;
+    margin: 0 3px;
+    padding-block: 1px;
+  }
+  .markdown-body > :first-child { margin-top: 0 !important; }
+  .markdown-body > :last-child { margin-bottom: 0 !important; }
+  .markdown-body h1,
+  .markdown-body h2,
+  .markdown-body h3,
+  .markdown-body h4,
+  .markdown-body h5,
+  .markdown-body h6 {
+    margin: 1.45em 0 .6em;
+    color: var(--cle-main-text);
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  .markdown-body h1 {
+    padding-bottom: .28em;
+    border-bottom: 1px solid var(--cle-main-line);
+    font-size: 2em;
+    font-weight: 500;
+  }
+  .markdown-body h2 {
+    padding-bottom: .26em;
+    border-bottom: 1px solid var(--cle-main-line);
+    font-size: 1.5em;
+    font-weight: 500;
+  }
+  .markdown-body h3 { font-size: 1.25em; }
+  .markdown-body h4 { font-size: 1em; }
+  .markdown-body h5 { font-size: .875em; }
+  .markdown-body h6 { color: var(--cle-main-muted); font-size: .85em; }
+  .markdown-body p,
+  .markdown-body blockquote,
+  .markdown-body ul,
+  .markdown-body ol,
+  .markdown-body table,
+  .markdown-body pre { margin: 0 0 16px; }
+  .markdown-body ul,
+  .markdown-body ol { padding-left: 2em; }
+  .markdown-body li + li { margin-top: .25em; }
+  .markdown-body li > p { margin: 8px 0; }
+  .markdown-body blockquote {
+    padding: 1px 0 1px 16px;
+    color: var(--cle-main-muted);
+    border-left: 4px solid var(--cle-main-line);
+  }
+  .markdown-body blockquote > :last-child { margin-bottom: 0; }
+  .markdown-body hr {
+    height: 2px;
+    margin: 24px 0;
+    background: var(--cle-main-line);
+    border: 0;
+  }
+  .markdown-body a {
+    color: var(--cle-syntax-function);
+    text-decoration: none;
+    cursor: not-allowed;
+  }
+  .markdown-body a:hover { text-decoration: underline; }
+  .markdown-body strong { font-weight: 650; }
+  .markdown-body code {
+    padding: .12em .32em;
+    color: var(--cle-main-text);
+    background: var(--cle-main-hover);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 4px;
+    font: .91em/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .markdown-body pre {
+    max-width: 100%;
+    padding: 14px 16px;
+    overflow: auto;
+    color: var(--cle-main-text);
+    background: var(--cle-main-raised);
+    border: 1px solid var(--cle-main-line);
+    border-radius: 6px;
+    tab-size: 4;
+  }
+  .markdown-body pre code {
+    display: block;
+    min-width: max-content;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre;
+  }
+  .markdown-body table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow: auto;
+    border-spacing: 0;
+    border-collapse: collapse;
+  }
+  .markdown-body th,
+  .markdown-body td {
+    padding: 6px 12px;
+    border: 1px solid var(--cle-main-line);
+  }
+  .markdown-body th {
+    font-weight: 600;
+    background: var(--cle-main-raised);
+  }
+  .markdown-body .markdown-align-left { text-align: left; }
+  .markdown-body .markdown-align-center { text-align: center; }
+  .markdown-body .markdown-align-right { text-align: right; }
+  .markdown-body tr:nth-child(2n) td { background: var(--cle-main-hover); }
+  .markdown-body .task-list { padding-left: .4em; list-style: none; }
+  .markdown-body .task-list-item { list-style: none; }
+  .markdown-body .task-list-item input {
+    width: 14px;
+    height: 14px;
+    margin: 0 7px 0 0;
+    vertical-align: -2px;
+    accent-color: var(--cle-main-focus);
+  }
+  .markdown-image-placeholder {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 2px 8px;
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border: 1px dashed var(--cle-main-line);
+    border-radius: 5px;
+    font-size: 11px;
+  }
+  .markdown-truncated {
+    width: min(100%, 920px);
+    margin: 18px auto -10px;
+    padding: 8px clamp(24px, 5vw, 52px);
+    color: var(--cle-main-muted);
+    background: var(--cle-main-raised);
+    border-bottom: 1px solid var(--cle-main-line);
+    font-size: 11px;
+  }
+
   .view-state {
     display: grid;
     place-items: center;
@@ -652,11 +1696,35 @@ const mainPreviewStyles = String.raw`
   @media (prefers-reduced-motion: reduce) {
     .spinner { animation: none; border-top-color: var(--cle-main-line); }
   }
+
+  @media (max-width: 640px) {
+    .markdown-body { padding: 22px 18px 16px; }
+    .markdown-truncated { padding-inline: 18px; }
+  }
 `;
 
 interface SuppressedAttributes {
   readonly inert: string | null;
   readonly ariaHidden: string | null;
+}
+
+interface PdfPreviewJob {
+  readonly generation: number;
+  data: Uint8Array | null;
+  loadingTask: PDFDocumentLoadingTask | null;
+  document: PDFDocumentProxy | null;
+  renderTask: RenderTask | null;
+  pageGeneration: number;
+}
+
+interface OfficePreviewJob {
+  readonly generation: number;
+  readonly abortController: AbortController;
+  viewer: PptxViewer | null;
+  legacyPptRoot: Root | null;
+  legacyPptWorker: Worker | null;
+  nativePptObjectUrl: { readonly url: string; readonly revoke: () => void } | null;
+  resourceObserver: MutationObserver | null;
 }
 
 type FocusSnapshot =
@@ -671,6 +1739,13 @@ type FocusSnapshot =
       readonly scrollTop: number;
       readonly scrollLeft: number;
     }
+  | {
+      readonly kind: "markdown-editor";
+      readonly anchorOffset: number;
+      readonly focusOffset: number;
+      readonly scrollTop: number;
+      readonly scrollLeft: number;
+    }
   | null;
 
 let nextInstanceId = 0;
@@ -678,6 +1753,222 @@ let nextInstanceId = 0;
 function fileNameFromPath(path: string): string {
   const normalized = path.replaceAll("\\", "/");
   return normalized.slice(normalized.lastIndexOf("/") + 1) || path || "File";
+}
+
+function isMediaPreviewView(view: MainPreviewFileView | undefined): view is MainPreviewMediaView {
+  return view?.kind === "image" || view?.kind === "video" || view?.kind === "pdf" || view?.kind === "audio" || view?.kind === "office";
+}
+
+function previewerIdForMediaKind(kind: MainPreviewMediaView["kind"]): string {
+  switch (kind) {
+    case "image":
+      return IMAGE_PREVIEWER_ID;
+    case "video":
+      return VIDEO_PREVIEWER_ID;
+    case "pdf":
+      return PDF_PREVIEWER_ID;
+    case "audio":
+      return AUDIO_PREVIEWER_ID;
+    case "office":
+      return OFFICE_PREVIEWER_ID;
+  }
+}
+
+function officeDocumentKind(mimeType: string): OfficeDocumentKind | null {
+  return OFFICE_MIME_TYPES[mimeType.trim().toLowerCase()] ?? null;
+}
+
+function excelColumnLabel(index: number): string {
+  let value = Math.max(1, Math.trunc(index));
+  let label = "";
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
+}
+
+function xmlAttribute(element: Element, requestedName: string): string | null {
+  const normalizedName = requestedName.toLowerCase();
+  for (const attribute of element.attributes) {
+    if (attribute.localName.toLowerCase() === normalizedName) return attribute.value;
+  }
+  return null;
+}
+
+function directXmlChild(element: Element, requestedName: string): Element | null {
+  const normalizedName = requestedName.toLowerCase();
+  for (const child of element.children) {
+    if (child.localName.toLowerCase() === normalizedName) return child;
+  }
+  return null;
+}
+
+function boundedDirectXmlChildren(
+  element: Element,
+  requestedName: string,
+  maximum: number,
+): { readonly elements: readonly Element[]; readonly truncated: boolean } {
+  const normalizedName = requestedName.toLowerCase();
+  const elements: Element[] = [];
+  let total = 0;
+  for (const child of element.children) {
+    if (child.localName.toLowerCase() !== normalizedName) continue;
+    total += 1;
+    if (elements.length < maximum) elements.push(child);
+  }
+  return { elements, truncated: total > maximum };
+}
+
+function xlsxTextContent(element: Element): string {
+  let text = "";
+  const textNodes = element.getElementsByTagNameNS("*", "t");
+  for (const textNode of textNodes) {
+    let ancestor = textNode.parentElement;
+    let phonetic = false;
+    while (ancestor && ancestor !== element) {
+      if (ancestor.localName.toLowerCase() === "rph") {
+        phonetic = true;
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (!phonetic) {
+      const remaining = MAX_EXCEL_CELL_TEXT_UNITS + 1 - text.length;
+      if (remaining <= 0) break;
+      text += (textNode.textContent ?? "").slice(0, remaining);
+    }
+  }
+  return text;
+}
+
+function xlsxCellCoordinate(reference: string): { readonly row: number; readonly column: number } | null {
+  const match = reference.trim().match(/^\$?([A-Za-z]{1,3})\$?([1-9]\d{0,6})$/);
+  if (!match) return null;
+  let column = 0;
+  for (const character of match[1]!.toUpperCase()) {
+    column = column * 26 + character.charCodeAt(0) - 64;
+  }
+  const row = Number(match[2]);
+  if (column < 1 || column > 16_384 || !Number.isSafeInteger(row) || row > 1_048_576) return null;
+  return { row, column };
+}
+
+function xlsxRange(reference: string): XlsxRange | null {
+  const parts = reference.trim().split(":");
+  if (parts.length < 1 || parts.length > 2) return null;
+  const start = xlsxCellCoordinate(parts[0] ?? "");
+  const end = xlsxCellCoordinate(parts[1] ?? parts[0] ?? "");
+  if (!start || !end || start.row > end.row || start.column > end.column) return null;
+  return {
+    startRow: start.row,
+    startColumn: start.column,
+    endRow: end.row,
+    endColumn: end.column,
+  };
+}
+
+function xlsxMergedCellKey(row: number, column: number): number {
+  return row * (MAX_EXCEL_COLUMNS + 1) + column;
+}
+
+function xmlBooleanElement(element: Element, childName: string): boolean {
+  const child = directXmlChild(element, childName);
+  if (!child) return false;
+  const value = (xmlAttribute(child, "val") ?? "1").trim().toLowerCase();
+  return value !== "0" && value !== "false" && value !== "off" && value !== "none";
+}
+
+function directArgbColor(element: Element | null): string | null {
+  const value = element ? xmlAttribute(element, "rgb")?.trim() ?? "" : "";
+  if (/^[0-9a-f]{8}$/i.test(value)) return `#${value.slice(2).toUpperCase()}`;
+  if (/^[0-9a-f]{6}$/i.test(value)) return `#${value.toUpperCase()}`;
+  return null;
+}
+
+function applyXlsxCellStyle(element: HTMLElement, style: XlsxCellStyle | null): void {
+  if (!style) return;
+  if (style.bold) element.style.fontWeight = "700";
+  if (style.italic) element.style.fontStyle = "italic";
+  const decorations: string[] = [];
+  if (style.underline) decorations.push("underline");
+  if (style.strike) decorations.push("line-through");
+  if (decorations.length > 0) element.style.textDecorationLine = decorations.join(" ");
+  if (style.fontFamily) element.style.fontFamily = style.fontFamily;
+  if (style.fontSizePoints !== undefined) element.style.fontSize = `${style.fontSizePoints}pt`;
+  if (style.color) element.style.color = style.color;
+  if (style.backgroundColor) element.style.backgroundColor = style.backgroundColor;
+  if (style.horizontal) element.style.textAlign = style.horizontal;
+  if (style.vertical) element.style.verticalAlign = style.vertical;
+  if (style.wrapText) {
+    element.style.whiteSpace = "pre-wrap";
+    element.style.overflowWrap = "anywhere";
+    element.style.textOverflow = "clip";
+  }
+}
+
+function normalizeXlsxEntryName(value: string): string | null {
+  if (!value || value.includes("\\") || value.includes("\0") || value.startsWith("/")) return null;
+  const segments = value.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === "..")) return null;
+  return segments.join("/");
+}
+
+function decodedOfficeTarget(value: string): string {
+  let decoded = value.trim();
+  for (let pass = 0; pass < 2; pass += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+  return decoded;
+}
+
+function isExternalOfficeTarget(value: string): boolean {
+  const decoded = decodedOfficeTarget(value);
+  return /^[a-z][a-z0-9+.-]*:/i.test(decoded) || decoded.startsWith("//") || decoded.startsWith("\\\\");
+}
+
+function resolveXlsxRelationshipTarget(baseFile: string, target: string): string | null {
+  const decoded = decodedOfficeTarget(target);
+  if (
+    !decoded ||
+    decoded.includes("\\") ||
+    decoded.includes("\0") ||
+    decoded.includes("?") ||
+    decoded.includes("#") ||
+    isExternalOfficeTarget(decoded)
+  ) {
+    return null;
+  }
+  const segments = decoded.startsWith("/") ? [] : baseFile.split("/").slice(0, -1);
+  for (const segment of decoded.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return normalizeXlsxEntryName(segments.join("/"));
+}
+
+function safeXlsxSheetName(value: string | null, index: number): string {
+  const normalized = (value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  if (!normalized) return `Sheet ${index + 1}`;
+  return normalized.length > 80 ? `${normalized.slice(0, 79)}\u2026` : normalized;
+}
+
+function declaredZipEntryBytes(entry: JSZip.JSZipObject): number | null {
+  const privateData = (entry as unknown as { readonly _data?: { readonly uncompressedSize?: unknown } })._data;
+  const size = privateData?.uncompressedSize;
+  return typeof size === "number" && Number.isSafeInteger(size) && size >= 0 ? size : null;
 }
 
 function cloneView(view: MainPreviewFileView): MainPreviewFileView {
@@ -707,6 +1998,19 @@ function cloneView(view: MainPreviewFileView): MainPreviewFileView {
         ...(view.version === undefined ? {} : { version: view.version }),
         ...(view.lineEnding === undefined ? {} : { lineEnding: view.lineEnding }),
       };
+    case "image":
+    case "video":
+    case "pdf":
+    case "audio":
+    case "office":
+      return {
+        kind: view.kind,
+        path: view.path,
+        name,
+        mimeType: view.mimeType,
+        sizeBytes: view.sizeBytes,
+        bytes: view.bytes,
+      };
     case "unsupported":
       return {
         kind: "unsupported",
@@ -731,6 +2035,16 @@ function normalizeState(state: MainPreviewState): MainPreviewState {
     tabs.push(cloneView(view));
   }
   const activePath = state.activePath !== null && seen.has(state.activePath) ? state.activePath : null;
+  const enabledPreviewers = [
+    MARKDOWN_PREVIEWER_ID,
+    IMAGE_PREVIEWER_ID,
+    VIDEO_PREVIEWER_ID,
+    PDF_PREVIEWER_ID,
+    AUDIO_PREVIEWER_ID,
+    OFFICE_PREVIEWER_ID,
+  ].filter(
+    (previewer) => state.enabledPreviewers?.includes(previewer) === true,
+  );
   const editor = state.editor && state.editor.path === activePath
     ? {
         path: state.editor.path,
@@ -739,7 +2053,7 @@ function normalizeState(state: MainPreviewState): MainPreviewState {
         ...(state.editor.error === undefined ? {} : { error: state.editor.error }),
       }
     : undefined;
-  return { activePath, tabs, ...(editor ? { editor } : {}) };
+  return { activePath, tabs, enabledPreviewers, ...(editor ? { editor } : {}) };
 }
 
 function formatBytes(value: number): string {
@@ -770,6 +2084,44 @@ function sourceLineCount(source: string): number {
   return count;
 }
 
+function firstVisibleLineOffset(source: string, scrollTop: number, lineHeight: number, paddingTop: number): number {
+  const visibleLine = Math.max(0, Math.floor((scrollTop - paddingTop) / lineHeight));
+  let offset = 0;
+  for (let line = 0; line < visibleLine; line += 1) {
+    const newline = source.indexOf("\n", offset);
+    if (newline < 0) return source.length;
+    offset = newline + 1;
+  }
+  return offset;
+}
+
+function selectionOffsetWithin(root: HTMLElement, node: Node | null, offset: number): number | null {
+  if (!node || (node !== root && !root.contains(node))) return null;
+  try {
+    const range = root.ownerDocument.createRange();
+    range.selectNodeContents(root);
+    range.setEnd(node, offset);
+    return range.toString().length;
+  } catch {
+    return null;
+  }
+}
+
+function textPositionAtOffset(root: HTMLElement, requestedOffset: number): { readonly node: Node; readonly offset: number } {
+  const offset = Math.max(0, requestedOffset);
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  let lastText: Text | null = null;
+  for (let current = walker.nextNode(); current; current = walker.nextNode()) {
+    if (!(current instanceof Text)) continue;
+    lastText = current;
+    if (remaining <= current.data.length) return { node: current, offset: remaining };
+    remaining -= current.data.length;
+  }
+  if (lastText) return { node: lastText, offset: lastText.data.length };
+  return { node: root, offset: Math.min(offset, root.childNodes.length) };
+}
+
 function unsupportedCopy(reason: MainPreviewUnavailableReason): string {
   switch (reason) {
     case "binary":
@@ -778,6 +2130,8 @@ function unsupportedCopy(reason: MainPreviewUnavailableReason): string {
       return "This file is not valid UTF-8 text.";
     case "sensitive":
       return "Preview is disabled for sensitive files.";
+    case "previewer-disabled":
+      return "Enable this file preview extension in Preview Market.";
     case "unsupported-type":
       return "This file type does not support a text preview.";
     case "unknown":
@@ -798,6 +2152,16 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   readonly #tabIds = new Map<string, string>();
   readonly #suppressedChildren = new Map<Element, SuppressedAttributes>();
   readonly #syntaxCache = new Map<string, { source: string; highlight: SyntaxHighlight }>();
+  readonly #mediaObjectUrls = new Map<string, {
+    readonly bytes: Uint8Array;
+    readonly mimeType: string;
+    readonly url: string;
+    readonly revoke: () => void;
+  }>();
+  #pdfGeneration = 0;
+  #pdfJob: PdfPreviewJob | null = null;
+  #officeGeneration = 0;
+  #officeJob: OfficePreviewJob | null = null;
   #state: MainPreviewState = { activePath: null, tabs: [] };
   #rovingPath: string | null = null;
   #nextTabId = 0;
@@ -825,6 +2189,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   connectedCallback(): void {
     this.#connected = true;
+    this.#render();
     this.#syncSuppression();
     queueMicrotask(() => {
       if (this.#connected) this.#scrollSelectedTabIntoView();
@@ -833,7 +2198,11 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   disconnectedCallback(): void {
     this.#connected = false;
+    this.#cancelPdfPreview();
+    this.#cancelOfficePreview();
     this.#syntaxCache.clear();
+    this.#revokeAllMediaObjectUrls();
+    this.#panelMount.replaceChildren();
     this.#restoreSuppressedChildren();
   }
 
@@ -842,6 +2211,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     return {
       activePath: this.#state.activePath,
       tabs: this.#state.tabs.map((view) => cloneView(view)),
+      enabledPreviewers: [...(this.#state.enabledPreviewers ?? [])],
       ...(editor
         ? {
             editor: {
@@ -861,7 +2231,21 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   setState(state: MainPreviewState): void {
     const nextState = normalizeState(state);
-    const enteringEditor = Boolean(nextState.editor && nextState.editor.path !== this.#state.editor?.path);
+    const previousEditorPath = this.#state.editor?.path ?? null;
+    const nextEditorPath = nextState.editor?.path ?? null;
+    const editorTransition = nextEditorPath !== previousEditorPath;
+    const enteringEditor = nextEditorPath !== null && nextEditorPath !== previousEditorPath;
+    const preserveActiveViewport = nextState.activePath !== null && nextState.activePath === this.#state.activePath;
+    const readerViewport = editorTransition || preserveActiveViewport
+      ? (() => {
+          const scroller = this.#panelMount.querySelector<HTMLElement>(".code-editor") ??
+            this.#panelMount.querySelector<HTMLElement>(".preview-content");
+          return {
+            scrollTop: scroller?.scrollTop ?? 0,
+            scrollLeft: scroller?.scrollLeft ?? 0,
+          };
+        })()
+      : undefined;
     const retainedPaths = new Set(nextState.tabs.map((view) => view.path));
     for (const path of this.#tabIds.keys()) {
       if (!retainedPaths.has(path)) this.#tabIds.delete(path);
@@ -871,16 +2255,49 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       const cached = this.#syntaxCache.get(path);
       if (view?.kind !== "text" || cached?.source !== view.text) this.#syntaxCache.delete(path);
     }
+    this.#reconcileMediaObjectUrls(nextState);
     const activeChanged = nextState.activePath !== this.#state.activePath;
     const rovingStillExists = this.#rovingPath === null || nextState.tabs.some((view) => view.path === this.#rovingPath);
     this.#state = nextState;
     if (activeChanged || !rovingStillExists) this.#rovingPath = nextState.activePath;
     this.#render();
     this.#syncSuppression();
-    if (enteringEditor) {
+    if (readerViewport) {
       queueMicrotask(() => {
-        if (this.#connected && this.#state.editor?.path === nextState.editor?.path) {
-          this.#panelMount.querySelector<HTMLTextAreaElement>(".code-editor")?.focus();
+        if (this.#connected && this.#state.activePath === nextState.activePath) {
+          const previewContent = this.#panelMount.querySelector<HTMLElement>(".preview-content");
+          const markdownEditor = this.#panelMount.querySelector<HTMLElement>(".markdown-editor-surface");
+          if (markdownEditor) {
+            if (previewContent) {
+              previewContent.scrollTop = readerViewport.scrollTop;
+              previewContent.scrollLeft = readerViewport.scrollLeft;
+            }
+            return;
+          }
+          const editor = this.#panelMount.querySelector<HTMLTextAreaElement>(".code-editor");
+          if (editor) {
+            if (enteringEditor) {
+              const computed = getComputedStyle(editor);
+              const lineHeight = Number.parseFloat(computed.lineHeight);
+              const paddingTop = Number.parseFloat(computed.paddingTop);
+              const caret = firstVisibleLineOffset(
+                editor.value,
+                readerViewport.scrollTop,
+                Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20.25,
+                Number.isFinite(paddingTop) ? paddingTop : 20,
+              );
+              editor.setSelectionRange(caret, caret);
+              editor.focus({ preventScroll: true });
+            }
+            editor.scrollTop = readerViewport.scrollTop;
+            editor.scrollLeft = readerViewport.scrollLeft;
+            this.#syncEditorScroll(editor);
+            return;
+          }
+          if (previewContent) {
+            previewContent.scrollTop = readerViewport.scrollTop;
+            previewContent.scrollLeft = readerViewport.scrollLeft;
+          }
         }
       });
     }
@@ -946,6 +2363,8 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   }
 
   #renderPanel(): void {
+    this.#cancelPdfPreview();
+    this.#cancelOfficePreview();
     if (this.#state.activePath === null) {
       this.#panelMount.replaceChildren();
       return;
@@ -970,12 +2389,24 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     metaBar.append(this.#staticIcon(getFileIcon(view.name).markup, "panel-icon"));
     const location = this.#textSpan(view.path, "preview-location");
     location.title = view.path;
-    metaBar.append(location, this.#textSpan(this.#metadataFor(view), "preview-metadata"));
+    const editor = this.#state.editor?.path === view.path ? this.#state.editor : undefined;
+    const markdownEditing = Boolean(
+      editor &&
+      (view.kind === "text" || view.kind === "empty") &&
+      this.#state.enabledPreviewers?.includes(MARKDOWN_PREVIEWER_ID) === true &&
+      isMarkdownPreviewPath(view.path),
+    );
+    const markdownPreview = view.kind === "text" &&
+      this.#state.enabledPreviewers?.includes(MARKDOWN_PREVIEWER_ID) === true &&
+      isMarkdownPreviewPath(view.path) &&
+      !editor;
+    const metadata = `${markdownEditing ? "Rendered Markdown edit · " : markdownPreview ? "Markdown preview · " : ""}${this.#metadataFor(view)}`;
+    metaBar.append(location, this.#textSpan(metadata, "preview-metadata"));
 
     const content = this.ownerDocument.createElement("div");
     content.className = "preview-content";
-    const editor = this.#state.editor?.path === view.path ? this.#state.editor : undefined;
     if (editor) content.classList.add("editor-mode");
+    if (markdownEditing) content.classList.add("markdown-editor-mode");
     this.#renderViewContent(content, view, editor);
     panel.append(metaBar, content);
     this.#panelMount.replaceChildren(panel);
@@ -983,6 +2414,11 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   #renderViewContent(content: HTMLElement, view: MainPreviewFileView, editor?: MainPreviewEditorState): void {
     if (editor && (view.kind === "text" || view.kind === "empty")) {
+      if (this.#state.enabledPreviewers?.includes(MARKDOWN_PREVIEWER_ID) && isMarkdownPreviewPath(view.path)) {
+        content.append(this.#markdownEditor(view, editor));
+        this.#appendEditorError(content, view, editor);
+        return;
+      }
       const stack = this.ownerDocument.createElement("div");
       stack.className = "code-editor-stack";
       const lineNumbers = this.#lineNumberGutter(stack, editor.draft, "code-editor-line-numbers");
@@ -1027,22 +2463,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       });
       stack.append(lineNumbers, mirror, textarea);
       content.append(stack);
-      if (editor.error) {
-        const error = this.ownerDocument.createElement("div");
-        error.className = "editor-error";
-        error.setAttribute("role", "alert");
-        const copy = this.#textSpan(editor.error, "editor-error-copy");
-        copy.title = editor.error;
-        const reload = this.ownerDocument.createElement("button");
-        reload.type = "button";
-        reload.className = "editor-reload";
-        reload.textContent = "Reload file";
-        reload.addEventListener("click", () => {
-          this.#dispatchPathEvent<MainPreviewPathDetail>(MAIN_PREVIEW_RELOAD_EVENT, { path: view.path });
-        });
-        error.append(copy, reload);
-        content.append(error);
-      }
+      this.#appendEditorError(content, view, editor);
       return;
     }
     switch (view.kind) {
@@ -1052,6 +2473,10 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       case "text":
         if (view.text.length === 0) {
           content.append(this.#statePanel("Empty file", "This file is empty.", "empty", view));
+          return;
+        }
+        if (this.#state.enabledPreviewers?.includes(MARKDOWN_PREVIEWER_ID) && isMarkdownPreviewPath(view.path)) {
+          content.append(this.#markdownReader(view));
           return;
         }
         {
@@ -1067,6 +2492,13 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
           content.append(reader);
         }
         return;
+      case "image":
+      case "video":
+      case "pdf":
+      case "audio":
+      case "office":
+        content.append(this.#mediaPreview(view));
+        return;
       case "empty":
         content.append(this.#statePanel("Empty file", "This file is empty.", "empty", view));
         return;
@@ -1080,6 +2512,2277 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     }
   }
 
+  #mediaPreview(view: MainPreviewMediaView): HTMLElement {
+    const previewerId = previewerIdForMediaKind(view.kind);
+    if (!this.#state.enabledPreviewers?.includes(previewerId)) {
+      return this.#statePanel("Preview unavailable", "Enable this file preview extension in Preview Market.", "unsupported", view);
+    }
+
+    if (view.kind === "pdf") return this.#pdfPreview(view);
+    if (view.kind === "office") return this.#officePreview(view);
+
+    let audioPreview: HTMLAudioElement | undefined;
+    if (view.kind === "audio") {
+      audioPreview = this.ownerDocument.createElement("audio");
+      if (!audioPreview.canPlayType(view.mimeType)) {
+        return this.#statePanel(
+          "Audio preview unavailable",
+          "This Codex build cannot play this audio format.",
+          "unsupported",
+          view,
+        );
+      }
+    }
+
+    const url = this.#mediaObjectUrl(view);
+    if (!url) {
+      return this.#statePanel("Media preview failed", "This file could not be prepared for preview.", "error", view);
+    }
+
+    const container = this.ownerDocument.createElement("div");
+    container.className = "media-preview";
+    container.dataset.kind = view.kind;
+    if (view.kind === "image") {
+      const image = this.ownerDocument.createElement("img");
+      image.className = "media-preview-image";
+      image.src = url;
+      image.alt = view.name;
+      image.draggable = false;
+      container.append(image);
+      return container;
+    }
+
+    if (view.kind === "audio") {
+      const audio = audioPreview ?? this.ownerDocument.createElement("audio");
+      audio.className = "media-preview-audio";
+      audio.src = url;
+      audio.controls = true;
+      audio.preload = "metadata";
+      audio.autoplay = false;
+      audio.setAttribute("aria-label", `Play ${view.name}`);
+      audio.addEventListener("error", () => {
+        if (!container.isConnected || this.#mediaObjectUrls.get(view.path)?.url !== url) return;
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+        this.#revokeMediaObjectUrl(view.path);
+        container.replaceWith(
+          this.#statePanel("Audio preview failed", "This audio file could not be played.", "error", view),
+        );
+      }, { once: true });
+      container.append(audio);
+      return container;
+    }
+
+    const video = this.ownerDocument.createElement("video");
+    video.className = "media-preview-video";
+    video.src = url;
+    video.controls = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.autoplay = false;
+    video.setAttribute("aria-label", `Preview ${view.name}`);
+    container.append(video);
+    return container;
+  }
+
+  #pdfPreview(view: MainPreviewMediaView): HTMLElement {
+    const container = this.ownerDocument.createElement("div");
+    container.className = "media-preview";
+    container.dataset.kind = "pdf";
+    container.setAttribute("aria-label", `PDF preview: ${view.name}`);
+    container.setAttribute("aria-busy", "true");
+
+    const documentPreview = this.ownerDocument.createElement("div");
+    documentPreview.className = "media-preview-pdf";
+
+    const toolbar = this.ownerDocument.createElement("nav");
+    toolbar.className = "pdf-preview-toolbar";
+    toolbar.setAttribute("aria-label", "PDF page navigation");
+
+    const previous = this.ownerDocument.createElement("button");
+    previous.type = "button";
+    previous.textContent = "Previous";
+    previous.setAttribute("aria-label", "Show previous PDF page");
+    previous.setAttribute("aria-disabled", "true");
+
+    const pageStatus = this.ownerDocument.createElement("span");
+    pageStatus.className = "pdf-page-status";
+    pageStatus.setAttribute("role", "status");
+    pageStatus.setAttribute("aria-live", "polite");
+    pageStatus.textContent = "Loading PDF";
+
+    const next = this.ownerDocument.createElement("button");
+    next.type = "button";
+    next.textContent = "Next";
+    next.setAttribute("aria-label", "Show next PDF page");
+    next.setAttribute("aria-disabled", "true");
+    toolbar.append(previous, pageStatus, next);
+
+    const stage = this.ownerDocument.createElement("div");
+    stage.className = "pdf-page-stage";
+    stage.setAttribute("aria-label", `${view.name} page preview`);
+    const loading = this.#textSpan("Loading PDF…", "pdf-preview-loading");
+    loading.setAttribute("role", "status");
+    stage.append(loading);
+    documentPreview.append(toolbar, stage);
+    container.append(documentPreview);
+
+    const job: PdfPreviewJob = {
+      generation: ++this.#pdfGeneration,
+      data: null,
+      loadingTask: null,
+      document: null,
+      renderTask: null,
+      pageGeneration: 0,
+    };
+    this.#pdfJob = job;
+    let pageNumber = 1;
+    let pageCount = 0;
+    let pageBusy = true;
+
+    const isCurrent = (): boolean =>
+      this.#connected && this.#pdfJob === job && this.#pdfGeneration === job.generation && container.isConnected;
+
+    const updateControls = (busy: boolean): void => {
+      pageBusy = busy;
+      previous.setAttribute("aria-disabled", String(busy || pageNumber <= 1));
+      next.setAttribute("aria-disabled", String(busy || pageNumber >= pageCount));
+      pageStatus.textContent = pageCount > 0 ? `Page ${pageNumber} of ${pageCount}` : "Loading PDF";
+      container.setAttribute("aria-busy", String(busy));
+    };
+
+    const releaseJob = (): void => {
+      job.pageGeneration += 1;
+      job.renderTask?.cancel();
+      job.renderTask = null;
+      job.data = null;
+      const cleanup = job.loadingTask?.destroy() ?? job.document?.destroy();
+      job.loadingTask = null;
+      job.document = null;
+      if (cleanup) void cleanup.catch(() => undefined);
+    };
+
+    const showError = (message: string): void => {
+      if (!isCurrent()) return;
+      const error = this.#textSpan(message, "pdf-page-error");
+      error.setAttribute("role", "alert");
+      stage.replaceChildren(error);
+      pageStatus.textContent = "Preview unavailable";
+      pageBusy = true;
+      previous.setAttribute("aria-disabled", "true");
+      next.setAttribute("aria-disabled", "true");
+      container.setAttribute("aria-busy", "false");
+      releaseJob();
+    };
+
+    const renderPage = async (requestedPage: number): Promise<void> => {
+      const document = job.document;
+      if (!document || !isCurrent()) return;
+      const targetPage = Math.max(1, Math.min(pageCount, requestedPage));
+      const pageGeneration = ++job.pageGeneration;
+      job.renderTask?.cancel();
+      job.renderTask = null;
+      pageNumber = targetPage;
+      updateControls(true);
+      const rendering = this.#textSpan(`Rendering page ${targetPage}…`, "pdf-preview-loading");
+      rendering.setAttribute("role", "status");
+      stage.replaceChildren(rendering);
+
+      let page: PDFPageProxy | undefined;
+      try {
+        page = await document.getPage(targetPage);
+        if (!isCurrent() || pageGeneration !== job.pageGeneration) return;
+
+        if (stage.clientWidth <= 0) {
+          await new Promise<void>((resolve) => {
+            const window = this.ownerDocument.defaultView;
+            if (window) window.requestAnimationFrame(() => resolve());
+            else setTimeout(resolve, 0);
+          });
+        }
+        if (!isCurrent() || pageGeneration !== job.pageGeneration) return;
+
+        const baseViewport = page.getViewport({ scale: 1 });
+        if (
+          !Number.isFinite(baseViewport.width) ||
+          !Number.isFinite(baseViewport.height) ||
+          baseViewport.width <= 0 ||
+          baseViewport.height <= 0
+        ) {
+          throw new Error("Invalid PDF page dimensions");
+        }
+        const window = this.ownerDocument.defaultView;
+        const computed = window?.getComputedStyle(stage);
+        const horizontalPadding = computed
+          ? (Number.parseFloat(computed.paddingLeft) || 0) + (Number.parseFloat(computed.paddingRight) || 0)
+          : 0;
+        const availableWidth = Math.max(1, stage.clientWidth - horizontalPadding);
+        const fitScale = availableWidth / baseViewport.width;
+        const baseArea = baseViewport.width * baseViewport.height;
+        if (!Number.isFinite(baseArea) || baseArea <= 0) throw new Error("Invalid PDF page area");
+        const canvasAreaScale = Math.sqrt(MAX_PDF_CANVAS_PIXELS / baseArea);
+        const canvasDimensionScale = Math.min(
+          MAX_PDF_CANVAS_DIMENSION / baseViewport.width,
+          MAX_PDF_CANVAS_DIMENSION / baseViewport.height,
+        );
+        const cssScale = Math.min(MAX_PDF_CSS_SCALE, fitScale, canvasAreaScale, canvasDimensionScale);
+        if (!Number.isFinite(cssScale) || cssScale <= 0) throw new Error("Invalid PDF page scale");
+        const viewport = page.getViewport({ scale: cssScale });
+        const viewportArea = viewport.width * viewport.height;
+        if (
+          !Number.isFinite(viewport.width) ||
+          !Number.isFinite(viewport.height) ||
+          !Number.isFinite(viewportArea) ||
+          viewport.width <= 0 ||
+          viewport.height <= 0 ||
+          viewportArea <= 0
+        ) {
+          throw new Error("Invalid PDF canvas dimensions");
+        }
+        const requestedOutputScale = Math.min(MAX_PDF_OUTPUT_SCALE, Math.max(1, window?.devicePixelRatio ?? 1));
+        const outputAreaScale = Math.sqrt(MAX_PDF_CANVAS_PIXELS / viewportArea);
+        const outputDimensionScale = Math.min(
+          MAX_PDF_CANVAS_DIMENSION / viewport.width,
+          MAX_PDF_CANVAS_DIMENSION / viewport.height,
+        );
+        const outputScale = Math.min(requestedOutputScale, outputAreaScale, outputDimensionScale);
+        if (!Number.isFinite(outputScale) || outputScale <= 0) throw new Error("Invalid PDF output scale");
+        const bitmapWidth = Math.floor(viewport.width * outputScale);
+        const bitmapHeight = Math.floor(viewport.height * outputScale);
+        const bitmapArea = bitmapWidth * bitmapHeight;
+        if (
+          !Number.isSafeInteger(bitmapWidth) ||
+          !Number.isSafeInteger(bitmapHeight) ||
+          !Number.isSafeInteger(bitmapArea) ||
+          bitmapWidth < 1 ||
+          bitmapHeight < 1 ||
+          bitmapWidth > MAX_PDF_CANVAS_DIMENSION ||
+          bitmapHeight > MAX_PDF_CANVAS_DIMENSION ||
+          bitmapArea > MAX_PDF_CANVAS_PIXELS
+        ) {
+          throw new Error("PDF canvas exceeds preview limits");
+        }
+
+        const canvas = this.ownerDocument.createElement("canvas");
+        canvas.className = "pdf-page-canvas";
+        canvas.width = bitmapWidth;
+        canvas.height = bitmapHeight;
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        canvas.setAttribute("role", "img");
+        canvas.setAttribute("aria-label", `${view.name}, page ${targetPage} of ${pageCount}`);
+        stage.replaceChildren(canvas);
+
+        const renderTask = page.render({
+          canvas,
+          viewport,
+          annotationMode: AnnotationMode.DISABLE,
+          ...(outputScale === 1 ? {} : { transform: [outputScale, 0, 0, outputScale, 0, 0] }),
+        });
+        job.renderTask = renderTask;
+        await renderTask.promise;
+        if (!isCurrent() || pageGeneration !== job.pageGeneration) return;
+        job.renderTask = null;
+        updateControls(false);
+      } catch (error) {
+        const cancelled = error instanceof Error && error.name === "RenderingCancelledException";
+        if (!cancelled && isCurrent() && pageGeneration === job.pageGeneration) {
+          showError("This PDF page could not be rendered.");
+        }
+      } finally {
+        page?.cleanup();
+      }
+    };
+
+    previous.addEventListener("click", () => {
+      if (!pageBusy && pageNumber > 1) void renderPage(pageNumber - 1);
+    });
+    next.addEventListener("click", () => {
+      if (!pageBusy && pageNumber < pageCount) void renderPage(pageNumber + 1);
+    });
+
+    queueMicrotask(() => {
+      void (async () => {
+        if (!isCurrent()) return;
+        try {
+          const data = view.bytes.slice();
+          job.data = data;
+          const loadingTask = getDocument({
+            data,
+            ownerDocument: this.ownerDocument,
+            verbosity: VerbosityLevel.ERRORS,
+            isEvalSupported: false,
+            enableXfa: false,
+            useWorkerFetch: false,
+            useWasm: false,
+          });
+          job.data = null;
+          job.loadingTask = loadingTask;
+          const document = await loadingTask.promise;
+          if (!isCurrent()) {
+            if (job.loadingTask === loadingTask) releaseJob();
+            return;
+          }
+          job.document = document;
+          pageCount = document.numPages;
+          if (pageCount < 1) {
+            showError("This PDF does not contain any pages.");
+            return;
+          }
+          updateControls(true);
+          await renderPage(1);
+        } catch (error) {
+          job.data = null;
+          if (!isCurrent()) return;
+          const passwordProtected = error instanceof Error && error.name === "PasswordException";
+          showError(passwordProtected ? "Password-protected PDFs cannot be previewed." : "This PDF could not be opened.");
+        }
+      })();
+    });
+    return container;
+  }
+
+  #cancelPdfPreview(): void {
+    this.#pdfGeneration += 1;
+    const job = this.#pdfJob;
+    this.#pdfJob = null;
+    if (!job) return;
+    job.pageGeneration += 1;
+    job.renderTask?.cancel();
+    job.renderTask = null;
+    job.data = null;
+    const cleanup = job.loadingTask?.destroy() ?? job.document?.destroy();
+    if (cleanup) void cleanup.catch(() => undefined);
+    job.loadingTask = null;
+    job.document = null;
+  }
+
+  #officePreview(view: MainPreviewMediaView): HTMLElement {
+    const documentKind = officeDocumentKind(view.mimeType);
+    if (!documentKind) {
+      return this.#statePanel("Office preview unavailable", "This Office file type is not supported.", "unsupported", view);
+    }
+
+    const container = this.ownerDocument.createElement("div");
+    container.className = "office-preview";
+    container.dataset.kind = documentKind;
+    container.setAttribute("aria-label", `${documentKind.toUpperCase()} preview: ${view.name}`);
+    container.setAttribute("aria-busy", "true");
+
+    const stage = this.ownerDocument.createElement("div");
+    stage.className = "office-preview-stage";
+    const loading = this.#textSpan(`Loading ${documentKind.toUpperCase()}\u2026`, "office-preview-loading");
+    loading.setAttribute("role", "status");
+    stage.append(loading);
+    container.append(stage);
+
+    const job: OfficePreviewJob = {
+      generation: ++this.#officeGeneration,
+      abortController: new AbortController(),
+      viewer: null,
+      legacyPptRoot: null,
+      legacyPptWorker: null,
+      nativePptObjectUrl: null,
+      resourceObserver: null,
+    };
+    this.#officeJob = job;
+
+    const isCurrent = (): boolean =>
+      this.#connected &&
+      this.#officeJob === job &&
+      this.#officeGeneration === job.generation &&
+      !job.abortController.signal.aborted &&
+      container.isConnected;
+
+    const showError = (message: string): void => {
+      if (!isCurrent()) return;
+      job.resourceObserver?.disconnect();
+      job.resourceObserver = null;
+      job.viewer?.destroy();
+      job.viewer = null;
+      job.legacyPptWorker?.terminate();
+      job.legacyPptWorker = null;
+      job.legacyPptRoot?.unmount();
+      job.legacyPptRoot = null;
+      job.nativePptObjectUrl?.revoke();
+      job.nativePptObjectUrl = null;
+      container.setAttribute("aria-busy", "false");
+      stage.replaceChildren(this.#statePanel("Office preview failed", message, "error", view));
+    };
+
+    queueMicrotask(() => {
+      void (async () => {
+        if (!isCurrent()) return;
+        try {
+          if (documentKind === "docx") {
+            await this.#renderDocxOffice(view, container, stage, job, isCurrent);
+          } else if (documentKind === "xlsx") {
+            await this.#renderXlsxOffice(view, container, stage, job, isCurrent);
+          } else if (documentKind === "ppt") {
+            if (view.mimeType === NATIVE_POWERPOINT_PREVIEW_MIME) {
+              await this.#renderNativePptOffice(view, container, stage, job, isCurrent);
+            } else {
+              await this.#renderLegacyPptOffice(view, container, stage, job, isCurrent);
+            }
+          } else {
+            await this.#renderPptxOffice(view, container, stage, job, isCurrent);
+          }
+          if (isCurrent()) container.setAttribute("aria-busy", "false");
+        } catch (error) {
+          if (!isCurrent()) return;
+          const message = error instanceof Error && error.name === "AbortError"
+            ? "The preview was cancelled."
+            : error instanceof Error && error.name === "ExternalOfficeResourceError"
+              ? "This Office file contains external links and cannot be previewed safely."
+              : `This ${documentKind.toUpperCase()} file could not be opened.`;
+          showError(message);
+        }
+      })();
+    });
+
+    return container;
+  }
+
+  async #renderDocxOffice(
+    view: MainPreviewMediaView,
+    container: HTMLElement,
+    stage: HTMLElement,
+    job: OfficePreviewJob,
+    isCurrent: () => boolean,
+  ): Promise<void> {
+    const docxClassName = `cle-docx-${job.generation}`;
+    const documentRoot = this.ownerDocument.createElement("article");
+    documentRoot.className = "office-word-document";
+    const generatedStyleHost = this.ownerDocument.createElement("div");
+
+    await renderDocxAsync(view.bytes.slice(), documentRoot, generatedStyleHost, {
+      inWrapper: true,
+      hideWrapperOnPrint: false,
+      ignoreWidth: false,
+      ignoreHeight: false,
+      ignoreFonts: true,
+      breakPages: true,
+      debug: false,
+      experimental: false,
+      className: docxClassName,
+      trimXmlDeclaration: true,
+      renderHeaders: true,
+      renderFooters: true,
+      renderFootnotes: true,
+      renderEndnotes: true,
+      ignoreLastRenderedPageBreak: false,
+      useBase64URL: true,
+      renderChanges: true,
+      renderComments: false,
+      renderAltChunks: false,
+    });
+    if (!isCurrent()) return;
+    const generatedStyles = this.#takeSanitizedDocxStyles(generatedStyleHost, docxClassName);
+    for (const style of documentRoot.querySelectorAll("style")) style.remove();
+    this.#sanitizeDetachedDocx(documentRoot);
+    const truncated = this.#boundOfficeDom(documentRoot);
+    if (!isCurrent()) return;
+    stage.replaceChildren(...generatedStyles, documentRoot);
+    this.#observeOfficeResources(documentRoot, job);
+    if (truncated) {
+      const notice = this.#textSpan("Preview limited for performance.", "office-preview-notice");
+      notice.setAttribute("role", "status");
+      container.append(notice);
+    }
+  }
+
+  #throwIfOfficeAborted(signal: AbortSignal): void {
+    if (!signal.aborted) return;
+    const error = new Error("Office preview cancelled");
+    error.name = "AbortError";
+    throw error;
+  }
+
+  #parseXlsxXml(bytes: Uint8Array, label: string): Document {
+    const xml = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const declaredEncoding = xml.slice(0, 512).match(/<\?xml\s+[^?]*\bencoding\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (
+      xml.includes("\0") ||
+      /<!\s*(?:doctype|entity)\b/i.test(xml) ||
+      (declaredEncoding !== undefined && !/^utf-?8$/i.test(declaredEncoding.trim()))
+    ) {
+      throw new Error(`Unsafe ${label} XML`);
+    }
+    const Parser = this.ownerDocument.defaultView?.DOMParser;
+    if (!Parser) throw new Error("XML parser is unavailable");
+    const document = new Parser().parseFromString(xml, "application/xml");
+    if (
+      !document.documentElement ||
+      document.documentElement.localName.toLowerCase() === "parsererror" ||
+      document.getElementsByTagName("parsererror").length > 0 ||
+      document.getElementsByTagNameNS("*", "parsererror").length > 0
+    ) {
+      throw new Error(`Invalid ${label} XML`);
+    }
+    return document;
+  }
+
+  async #readXlsxXmlEntry(
+    entry: JSZip.JSZipObject,
+    maximumBytes: number,
+    signal: AbortSignal,
+    label: string,
+  ): Promise<Document> {
+    this.#throwIfOfficeAborted(signal);
+    const declaredBytes = declaredZipEntryBytes(entry);
+    if (declaredBytes === null || declaredBytes > maximumBytes) {
+      throw new Error(`${label} exceeds preview limits`);
+    }
+    const bytes = await entry.async("uint8array");
+    this.#throwIfOfficeAborted(signal);
+    if (bytes.byteLength > maximumBytes || bytes.byteLength !== declaredBytes) {
+      throw new Error(`${label} exceeds preview limits`);
+    }
+    return this.#parseXlsxXml(bytes, label);
+  }
+
+  #xlsxArchiveEntries(archive: JSZip): ReadonlyMap<string, JSZip.JSZipObject> {
+    const files = Object.values(archive.files).filter((entry) => !entry.dir);
+    if (files.length > MAX_XLSX_ZIP_ENTRIES) throw new Error("Workbook contains too many files");
+    const entries = new Map<string, JSZip.JSZipObject>();
+    const foldedNames = new Set<string>();
+    for (const entry of files) {
+      const normalizedName = normalizeXlsxEntryName(entry.name);
+      const normalizedOriginalName = normalizeXlsxEntryName(entry.unsafeOriginalName ?? entry.name);
+      if (!normalizedName || normalizedName !== normalizedOriginalName) {
+        throw new Error("Workbook contains an unsafe file path");
+      }
+      const foldedName = normalizedName.toLowerCase();
+      if (entries.has(normalizedName) || foldedNames.has(foldedName)) {
+        throw new Error("Workbook contains duplicate file paths");
+      }
+      foldedNames.add(foldedName);
+      entries.set(normalizedName, entry);
+    }
+    return entries;
+  }
+
+  async #xlsxWorksheetMetadata(
+    entries: ReadonlyMap<string, JSZip.JSZipObject>,
+    signal: AbortSignal,
+  ): Promise<{ readonly worksheets: readonly XlsxWorksheetMeta[]; readonly total: number }> {
+    const workbookEntry = entries.get("xl/workbook.xml");
+    const relationshipsEntry = entries.get("xl/_rels/workbook.xml.rels");
+    if (!workbookEntry || !relationshipsEntry) throw new Error("Workbook structure is incomplete");
+    const [workbook, relationships] = await Promise.all([
+      this.#readXlsxXmlEntry(workbookEntry, MAX_XLSX_WORKBOOK_XML_BYTES, signal, "workbook"),
+      this.#readXlsxXmlEntry(relationshipsEntry, MAX_XLSX_RELATIONSHIP_XML_BYTES, signal, "workbook relationships"),
+    ]);
+    this.#throwIfOfficeAborted(signal);
+    if (workbook.documentElement.localName.toLowerCase() !== "workbook") {
+      throw new Error("Invalid workbook root");
+    }
+
+    const worksheetRelationships = new Map<string, string>();
+    const seenRelationshipIds = new Set<string>();
+    const relationshipNodes = relationships.getElementsByTagNameNS("*", "Relationship");
+    if (relationshipNodes.length > MAX_XLSX_ZIP_ENTRIES) {
+      throw new Error("Workbook contains too many relationships");
+    }
+    for (let relationshipIndex = 0; relationshipIndex < relationshipNodes.length; relationshipIndex += 1) {
+      const relationship = relationshipNodes[relationshipIndex];
+      if (!relationship) continue;
+      if (relationshipIndex > 0 && relationshipIndex % 256 === 0) {
+        await this.#yieldOfficeRender();
+        this.#throwIfOfficeAborted(signal);
+      }
+      const id = xmlAttribute(relationship, "id")?.trim() ?? "";
+      const type = xmlAttribute(relationship, "type")?.trim() ?? "";
+      const target = xmlAttribute(relationship, "target")?.trim() ?? "";
+      const targetMode = xmlAttribute(relationship, "targetmode")?.trim().toLowerCase() ?? "";
+      if (!id || seenRelationshipIds.has(id)) throw new Error("Invalid workbook relationship ID");
+      seenRelationshipIds.add(id);
+      if (targetMode === "external" || isExternalOfficeTarget(target)) {
+        const error = new Error("Workbook contains external relationships");
+        error.name = "ExternalOfficeResourceError";
+        throw error;
+      }
+      const worksheetRelationship =
+        type === "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" ||
+        type === "http://purl.oclc.org/ooxml/officeDocument/relationships/worksheet";
+      if (!worksheetRelationship) continue;
+      if (!id || !target || (targetMode && targetMode !== "internal") || worksheetRelationships.has(id)) {
+        throw new Error("Invalid worksheet relationship");
+      }
+      const path = resolveXlsxRelationshipTarget("xl/workbook.xml", target);
+      if (!path || !/^xl\/worksheets\/[^/]+\.xml$/.test(path) || !entries.has(path)) {
+        throw new Error("Invalid worksheet path");
+      }
+      worksheetRelationships.set(id, path);
+    }
+
+    const sheetNodes = workbook.getElementsByTagNameNS("*", "sheet");
+    if (sheetNodes.length > MAX_XLSX_ZIP_ENTRIES) throw new Error("Workbook contains too many sheets");
+    const worksheets: XlsxWorksheetMeta[] = [];
+    const seenPaths = new Set<string>();
+    const maximum = Math.min(sheetNodes.length, MAX_EXCEL_SHEETS);
+    for (let index = 0; index < maximum; index += 1) {
+      const sheet = sheetNodes[index];
+      if (!sheet) continue;
+      const relationshipId = xmlAttribute(sheet, "id")?.trim() ?? "";
+      const path = worksheetRelationships.get(relationshipId);
+      if (!path || seenPaths.has(path)) throw new Error("Invalid worksheet definition");
+      seenPaths.add(path);
+      worksheets.push({
+        name: safeXlsxSheetName(xmlAttribute(sheet, "name"), index),
+        path,
+      });
+    }
+    if (worksheets.length === 0) throw new Error("Workbook contains no worksheets");
+    return { worksheets, total: sheetNodes.length };
+  }
+
+  async #xlsxSharedStrings(
+    entries: ReadonlyMap<string, JSZip.JSZipObject>,
+    signal: AbortSignal,
+  ): Promise<XlsxSharedStrings> {
+    const entry = entries.get("xl/sharedStrings.xml");
+    if (!entry) return { values: [], truncated: false };
+    const document = await this.#readXlsxXmlEntry(
+      entry,
+      MAX_XLSX_SHARED_STRINGS_XML_BYTES,
+      signal,
+      "shared strings",
+    );
+    const items = document.getElementsByTagNameNS("*", "si");
+    const values: string[] = [];
+    let textUnits = 0;
+    let truncated = items.length > MAX_XLSX_SHARED_STRINGS;
+    const maximum = Math.min(items.length, MAX_XLSX_SHARED_STRINGS);
+    for (let index = 0; index < maximum; index += 1) {
+      this.#throwIfOfficeAborted(signal);
+      const item = items[index];
+      if (!item) continue;
+      let text = xlsxTextContent(item);
+      const remaining = Math.max(0, MAX_EXCEL_TOTAL_TEXT_UNITS - textUnits);
+      const permitted = Math.min(MAX_EXCEL_CELL_TEXT_UNITS, remaining);
+      if (text.length > permitted) {
+        text = permitted > 0 ? `${text.slice(0, Math.max(0, permitted - 1))}\u2026` : "";
+        truncated = true;
+      }
+      values.push(text);
+      textUnits += text.length;
+      if (remaining === 0) {
+        truncated = truncated || index + 1 < items.length;
+        break;
+      }
+      if ((index + 1) % 5_000 === 0) await this.#yieldOfficeRender();
+    }
+    return { values, truncated };
+  }
+
+  async #xlsxStyles(
+    entries: ReadonlyMap<string, JSZip.JSZipObject>,
+    signal: AbortSignal,
+  ): Promise<XlsxStyleTable> {
+    const entry = entries.get("xl/styles.xml");
+    if (!entry) return { cellStyles: [], truncated: false };
+    const document = await this.#readXlsxXmlEntry(entry, MAX_XLSX_STYLES_XML_BYTES, signal, "styles");
+    if (document.documentElement.localName.toLowerCase() !== "stylesheet") {
+      throw new Error("Invalid styles root");
+    }
+
+    let truncated = false;
+    const fonts: XlsxCellStyle[] = [];
+    const fontsRoot = directXmlChild(document.documentElement, "fonts");
+    if (fontsRoot) {
+      const fontRecords = boundedDirectXmlChildren(fontsRoot, "font", MAX_XLSX_STYLE_RECORDS);
+      if (fontRecords.truncated) truncated = true;
+      for (const font of fontRecords.elements) {
+        const style: XlsxCellStyle = {};
+        if (xmlBooleanElement(font, "b")) style.bold = true;
+        if (xmlBooleanElement(font, "i")) style.italic = true;
+        if (xmlBooleanElement(font, "strike")) style.strike = true;
+        if (xmlBooleanElement(font, "u")) style.underline = true;
+        const nameElement = directXmlChild(font, "name");
+        const family = (nameElement ? xmlAttribute(nameElement, "val") ?? "" : "")
+          .replace(/[\u0000-\u001f\u007f]/g, " ")
+          .trim();
+        if (family) style.fontFamily = family.slice(0, 80);
+        const sizeElement = directXmlChild(font, "sz");
+        const size = Number(sizeElement ? xmlAttribute(sizeElement, "val") : Number.NaN);
+        if (Number.isFinite(size) && size >= 4 && size <= 96) style.fontSizePoints = size;
+        const color = directArgbColor(directXmlChild(font, "color"));
+        if (color) style.color = color;
+        fonts.push(style);
+      }
+    }
+
+    const fills: Array<string | null> = [];
+    const fillsRoot = directXmlChild(document.documentElement, "fills");
+    if (fillsRoot) {
+      const fillRecords = boundedDirectXmlChildren(fillsRoot, "fill", MAX_XLSX_STYLE_RECORDS);
+      if (fillRecords.truncated) truncated = true;
+      for (const fill of fillRecords.elements) {
+        const pattern = directXmlChild(fill, "patternfill");
+        const solid = (pattern ? xmlAttribute(pattern, "patterntype") ?? "" : "").trim().toLowerCase() === "solid";
+        fills.push(solid && pattern ? directArgbColor(directXmlChild(pattern, "fgcolor")) : null);
+      }
+    }
+
+    const cellStyles: XlsxCellStyle[] = [];
+    const cellFormatsRoot = directXmlChild(document.documentElement, "cellxfs");
+    if (cellFormatsRoot) {
+      const formatRecords = boundedDirectXmlChildren(cellFormatsRoot, "xf", MAX_XLSX_STYLE_RECORDS);
+      if (formatRecords.truncated) truncated = true;
+      for (const format of formatRecords.elements) {
+        const style: XlsxCellStyle = {};
+        const fontId = Number(xmlAttribute(format, "fontid"));
+        if (Number.isInteger(fontId) && fontId >= 0 && fonts[fontId]) Object.assign(style, fonts[fontId]);
+        const fillId = Number(xmlAttribute(format, "fillid"));
+        const fill = Number.isInteger(fillId) && fillId >= 0 ? fills[fillId] : null;
+        if (fill) style.backgroundColor = fill;
+        const alignment = directXmlChild(format, "alignment");
+        if (alignment) {
+          const horizontal = (xmlAttribute(alignment, "horizontal") ?? "").trim().toLowerCase();
+          if (horizontal === "left" || horizontal === "center" || horizontal === "right" || horizontal === "justify") {
+            style.horizontal = horizontal;
+          }
+          const vertical = (xmlAttribute(alignment, "vertical") ?? "").trim().toLowerCase();
+          if (vertical === "top" || vertical === "bottom") style.vertical = vertical;
+          else if (vertical === "center") style.vertical = "middle";
+          const wrapText = (xmlAttribute(alignment, "wraptext") ?? "").trim().toLowerCase();
+          if (wrapText === "1" || wrapText === "true" || wrapText === "on") style.wrapText = true;
+        }
+        cellStyles.push(style);
+      }
+    }
+    return { cellStyles, truncated };
+  }
+
+  async #parseXlsxWorksheet(
+    entry: JSZip.JSZipObject,
+    sharedStrings: XlsxSharedStrings,
+    styles: XlsxStyleTable,
+    signal: AbortSignal,
+  ): Promise<ParsedXlsxWorksheet> {
+    const document = await this.#readXlsxXmlEntry(
+      entry,
+      MAX_XLSX_WORKSHEET_XML_BYTES,
+      signal,
+      "worksheet",
+    );
+    if (document.documentElement.localName.toLowerCase() !== "worksheet") {
+      throw new Error("Invalid worksheet root");
+    }
+
+    const columnWidths = new Map<number, number>();
+    const columnDefinitions = document.getElementsByTagNameNS("*", "col");
+    let truncated = columnDefinitions.length > MAX_XLSX_ZIP_ENTRIES || sharedStrings.truncated || styles.truncated;
+    const columnDefinitionLimit = Math.min(columnDefinitions.length, MAX_XLSX_ZIP_ENTRIES);
+    for (let index = 0; index < columnDefinitionLimit; index += 1) {
+      const definition = columnDefinitions[index];
+      if (!definition) continue;
+      const minimum = Number(xmlAttribute(definition, "min"));
+      const maximum = Number(xmlAttribute(definition, "max"));
+      const width = Number(xmlAttribute(definition, "width"));
+      if (
+        !Number.isInteger(minimum) ||
+        !Number.isInteger(maximum) ||
+        minimum < 1 ||
+        maximum < minimum ||
+        !Number.isFinite(width) ||
+        width <= 0
+      ) {
+        continue;
+      }
+      for (let column = minimum; column <= Math.min(maximum, MAX_EXCEL_COLUMNS); column += 1) {
+        columnWidths.set(column, Math.min(255, width));
+      }
+    }
+
+    const cells = new Map<number, Map<number, XlsxPreviewCell>>();
+    const cellNodes = document.getElementsByTagNameNS("*", "c");
+    const cellLimit = Math.min(cellNodes.length, MAX_EXCEL_CELLS);
+    if (cellNodes.length > cellLimit) truncated = true;
+    let rowCount = 0;
+    let columnCount = 0;
+    let textUnits = 0;
+    let validCellCount = 0;
+    for (let index = 0; index < cellLimit; index += 1) {
+      this.#throwIfOfficeAborted(signal);
+      const cell = cellNodes[index];
+      if (!cell) continue;
+      const coordinate = xlsxCellCoordinate(xmlAttribute(cell, "r") ?? "");
+      if (!coordinate) {
+        truncated = true;
+        continue;
+      }
+      validCellCount += 1;
+      rowCount = Math.max(rowCount, coordinate.row);
+      columnCount = Math.max(columnCount, coordinate.column);
+      if (coordinate.row > MAX_EXCEL_ROWS || coordinate.column > MAX_EXCEL_COLUMNS) {
+        truncated = true;
+        continue;
+      }
+
+      const type = (xmlAttribute(cell, "t") ?? "").trim().toLowerCase();
+      const rawValue = directXmlChild(cell, "v")?.textContent ?? "";
+      let text = rawValue;
+      if (type === "s") {
+        const sharedIndex = /^\d+$/.test(rawValue.trim()) ? Number(rawValue.trim()) : -1;
+        text = Number.isSafeInteger(sharedIndex) && sharedIndex >= 0
+          ? sharedStrings.values[sharedIndex] ?? ""
+          : "";
+        if (!Number.isSafeInteger(sharedIndex) || sharedIndex < 0 || sharedIndex >= sharedStrings.values.length) {
+          truncated = true;
+        }
+      } else if (type === "inlinestr") {
+        const inlineString = directXmlChild(cell, "is");
+        text = inlineString ? xlsxTextContent(inlineString) : "";
+      } else if (type === "b") {
+        text = rawValue.trim() === "1" ? "TRUE" : rawValue.trim() === "0" ? "FALSE" : rawValue;
+      }
+
+      const remaining = Math.max(0, MAX_EXCEL_TOTAL_TEXT_UNITS - textUnits);
+      const permitted = Math.min(MAX_EXCEL_CELL_TEXT_UNITS, remaining);
+      if (text.length > permitted) {
+        text = permitted > 0 ? `${text.slice(0, Math.max(0, permitted - 1))}\u2026` : "";
+        truncated = true;
+      }
+      textUnits += text.length;
+      const rawStyleId = (xmlAttribute(cell, "s") ?? "").trim();
+      const styleId = /^\d+$/.test(rawStyleId) ? Number(rawStyleId) : -1;
+      const style = Number.isSafeInteger(styleId) && styleId >= 0 ? styles.cellStyles[styleId] ?? null : null;
+      if (rawStyleId && !style) truncated = true;
+      if (text || style) {
+        const row = cells.get(coordinate.row) ?? new Map<number, XlsxPreviewCell>();
+        row.set(coordinate.column, { text, style });
+        cells.set(coordinate.row, row);
+      }
+      if ((index + 1) % 5_000 === 0) await this.#yieldOfficeRender();
+    }
+
+    if (validCellCount > 0) {
+      const dimension = document.getElementsByTagNameNS("*", "dimension")[0];
+      const dimensionReference = dimension ? xmlAttribute(dimension, "ref") ?? "" : "";
+      const dimensionRange = dimensionReference ? xlsxRange(dimensionReference) : null;
+      if (dimensionRange) {
+        rowCount = Math.max(rowCount, dimensionRange.endRow);
+        columnCount = Math.max(columnCount, dimensionRange.endColumn);
+        if (dimensionRange.endRow > MAX_EXCEL_ROWS || dimensionRange.endColumn > MAX_EXCEL_COLUMNS) truncated = true;
+      } else if (dimensionReference) {
+        truncated = true;
+      }
+    }
+    const mergedRanges: XlsxRange[] = [];
+    const mergedElements = document.getElementsByTagNameNS("*", "mergeCell");
+    if (mergedElements.length > MAX_XLSX_MERGED_RANGES) truncated = true;
+    const mergedLimit = Math.min(mergedElements.length, MAX_XLSX_MERGED_RANGES);
+    for (let index = 0; index < mergedLimit; index += 1) {
+      const mergedElement = mergedElements[index];
+      const range = mergedElement ? xlsxRange(xmlAttribute(mergedElement, "ref") ?? "") : null;
+      if (!range) {
+        truncated = true;
+        continue;
+      }
+      mergedRanges.push(range);
+      rowCount = Math.max(rowCount, range.endRow);
+      columnCount = Math.max(columnCount, range.endColumn);
+      if (range.endRow > MAX_EXCEL_ROWS || range.endColumn > MAX_EXCEL_COLUMNS) truncated = true;
+    }
+
+    const mergedFollowers = new Set<number>();
+    if (rowCount > 0 && columnCount > 0) {
+      const renderedRows = Math.min(MAX_EXCEL_ROWS, rowCount);
+      const columnBudget = Math.max(1, Math.floor(MAX_EXCEL_CELLS / renderedRows));
+      const renderedColumns = Math.min(MAX_EXCEL_COLUMNS, columnCount, columnBudget);
+      let mergeVisits = 0;
+      mergeRanges: for (const range of mergedRanges) {
+        this.#throwIfOfficeAborted(signal);
+        const finalRow = Math.min(range.endRow, renderedRows);
+        const finalColumn = Math.min(range.endColumn, renderedColumns);
+        for (let row = range.startRow; row <= finalRow; row += 1) {
+          for (let column = range.startColumn; column <= finalColumn; column += 1) {
+            if (mergeVisits >= MAX_EXCEL_CELLS) {
+              truncated = true;
+              break mergeRanges;
+            }
+            mergeVisits += 1;
+            if (row !== range.startRow || column !== range.startColumn) {
+              mergedFollowers.add(xlsxMergedCellKey(row, column));
+            }
+          }
+          if (mergeVisits > 0 && mergeVisits % 5_000 === 0) {
+            await this.#yieldOfficeRender();
+            this.#throwIfOfficeAborted(signal);
+          }
+        }
+      }
+    }
+    return { cells, rowCount, columnCount, columnWidths, mergedFollowers, truncated };
+  }
+
+  async #renderXlsxOffice(
+    view: MainPreviewMediaView,
+    container: HTMLElement,
+    stage: HTMLElement,
+    job: OfficePreviewJob,
+    isCurrent: () => boolean,
+  ): Promise<void> {
+    const signal = job.abortController.signal;
+    this.#throwIfOfficeAborted(signal);
+    const archive = await JSZip.loadAsync(view.bytes.slice(), { checkCRC32: false, createFolders: false });
+    this.#throwIfOfficeAborted(signal);
+    const entries = this.#xlsxArchiveEntries(archive);
+    const [{ worksheets, total }, sharedStrings, styles] = await Promise.all([
+      this.#xlsxWorksheetMetadata(entries, signal),
+      this.#xlsxSharedStrings(entries, signal),
+      this.#xlsxStyles(entries, signal),
+    ]);
+    if (!isCurrent()) return;
+
+    const shell = this.ownerDocument.createElement("div");
+    shell.className = "office-workbook";
+    const sheetTabs = this.ownerDocument.createElement("div");
+    sheetTabs.className = "office-sheet-tabs";
+    sheetTabs.setAttribute("role", "tablist");
+    sheetTabs.setAttribute("aria-label", "Workbook sheets");
+    const sheetViewport = this.ownerDocument.createElement("div");
+    sheetViewport.className = "office-sheet-viewport";
+    shell.append(sheetTabs, sheetViewport);
+    stage.replaceChildren(shell);
+
+    let sheetGeneration = 0;
+    const buttons: HTMLButtonElement[] = [];
+    const renderSheet = async (sheet: XlsxWorksheetMeta, sheetIndex: number): Promise<void> => {
+      const generation = ++sheetGeneration;
+      for (let index = 0; index < buttons.length; index += 1) {
+        const selected = index === sheetIndex;
+        buttons[index]?.setAttribute("aria-selected", String(selected));
+        if (buttons[index]) buttons[index]!.tabIndex = selected ? 0 : -1;
+      }
+      sheetViewport.setAttribute("aria-busy", "true");
+      container.setAttribute("aria-busy", "true");
+      const loadingSheet = this.#textSpan(`Loading ${sheet.name}\u2026`, "office-preview-loading");
+      loadingSheet.setAttribute("role", "status");
+      sheetViewport.replaceChildren(loadingSheet);
+
+      const entry = entries.get(sheet.path);
+      if (!entry) throw new Error("Worksheet is missing");
+      const parsed = await this.#parseXlsxWorksheet(entry, sharedStrings, styles, signal);
+      if (!isCurrent() || generation !== sheetGeneration) return;
+      const sourceRows = parsed.rowCount;
+      const sourceColumns = parsed.columnCount;
+      if (sourceRows < 1 || sourceColumns < 1) {
+        sheetViewport.replaceChildren(this.#textSpan("This worksheet is empty.", "office-preview-loading"));
+        sheetViewport.setAttribute("aria-busy", "false");
+        container.setAttribute("aria-busy", "false");
+        return;
+      }
+
+      const rowCount = Math.min(MAX_EXCEL_ROWS, sourceRows);
+      const columnBudget = Math.max(1, Math.floor(MAX_EXCEL_CELLS / rowCount));
+      const columnCount = Math.min(MAX_EXCEL_COLUMNS, sourceColumns, columnBudget);
+      const table = this.ownerDocument.createElement("table");
+      table.className = "office-sheet-table";
+      const caption = this.ownerDocument.createElement("caption");
+      caption.textContent = sheet.name;
+      const columnGroup = this.ownerDocument.createElement("colgroup");
+      columnGroup.append(this.ownerDocument.createElement("col"));
+      for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
+        const column = this.ownerDocument.createElement("col");
+        const excelWidth = parsed.columnWidths.get(columnIndex);
+        if (excelWidth !== undefined) {
+          column.style.width = `${Math.min(420, Math.max(48, excelWidth * 7))}px`;
+        }
+        columnGroup.append(column);
+      }
+      const head = this.ownerDocument.createElement("thead");
+      const headingRow = this.ownerDocument.createElement("tr");
+      const corner = this.ownerDocument.createElement("th");
+      corner.className = "office-sheet-corner";
+      corner.setAttribute("aria-hidden", "true");
+      headingRow.append(corner);
+      for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
+        const heading = this.ownerDocument.createElement("th");
+        heading.scope = "col";
+        heading.textContent = excelColumnLabel(columnIndex);
+        headingRow.append(heading);
+      }
+      head.append(headingRow);
+      const body = this.ownerDocument.createElement("tbody");
+      for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
+        if (!isCurrent() || generation !== sheetGeneration || signal.aborted) return;
+        const row = this.ownerDocument.createElement("tr");
+        const rowHeading = this.ownerDocument.createElement("th");
+        rowHeading.scope = "row";
+        rowHeading.textContent = String(rowIndex);
+        row.append(rowHeading);
+        const sourceRow = parsed.cells.get(rowIndex);
+        for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
+          const dataCell = this.ownerDocument.createElement("td");
+          const sourceCell = sourceRow?.get(columnIndex) ?? null;
+          dataCell.textContent = parsed.mergedFollowers.has(xlsxMergedCellKey(rowIndex, columnIndex))
+            ? ""
+            : sourceCell?.text ?? "";
+          applyXlsxCellStyle(dataCell, sourceCell?.style ?? null);
+          row.append(dataCell);
+        }
+        body.append(row);
+        if (rowIndex % 100 === 0) await this.#yieldOfficeRender();
+      }
+
+      if (!isCurrent() || generation !== sheetGeneration) return;
+      table.append(caption, columnGroup, head, body);
+      const fragment = this.ownerDocument.createDocumentFragment();
+      fragment.append(table);
+      if (sourceRows > rowCount || sourceColumns > columnCount || parsed.truncated) {
+        fragment.append(this.#textSpan("Preview limited for performance.", "office-preview-notice"));
+      }
+      sheetViewport.replaceChildren(fragment);
+      sheetViewport.setAttribute("aria-busy", "false");
+      container.setAttribute("aria-busy", "false");
+    };
+
+    const showSheetError = (): void => {
+      if (!isCurrent()) return;
+      sheetViewport.replaceChildren(this.#textSpan("This worksheet could not be opened.", "office-preview-loading"));
+      sheetViewport.setAttribute("aria-busy", "false");
+      container.setAttribute("aria-busy", "false");
+    };
+    for (let index = 0; index < worksheets.length; index += 1) {
+      const worksheet = worksheets[index];
+      if (!worksheet) continue;
+      const button = this.ownerDocument.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "tab");
+      button.textContent = worksheet.name;
+      button.title = worksheet.name;
+      button.addEventListener("click", () => void renderSheet(worksheet, index).catch(showSheetError));
+      buttons.push(button);
+      sheetTabs.append(button);
+    }
+    if (total > worksheets.length) {
+      sheetTabs.append(this.#textSpan(`+${total - worksheets.length}`, "office-sheet-overflow"));
+    }
+    await renderSheet(worksheets[0]!, 0);
+  }
+
+  async #renderNativePptOffice(
+    view: MainPreviewMediaView,
+    container: HTMLElement,
+    stage: HTMLElement,
+    job: OfficePreviewJob,
+    isCurrent: () => boolean,
+  ): Promise<void> {
+    const window = this.ownerDocument.defaultView;
+    const urlApi = window?.URL;
+    const BlobType = window?.Blob;
+    if (!window || !urlApi || !BlobType || typeof urlApi.createObjectURL !== "function") {
+      throw new Error("Native PowerPoint slide images are unavailable");
+    }
+    const archive = await JSZip.loadAsync(view.bytes, { checkCRC32: true, createFolders: false });
+    if (job.abortController.signal.aborted) {
+      const error = new Error("Office preview cancelled");
+      error.name = "AbortError";
+      throw error;
+    }
+    const manifestEntry = archive.file("manifest.json");
+    if (!manifestEntry) throw new Error("Native PowerPoint manifest is missing");
+    const manifestText = await manifestEntry.async("string");
+    if (manifestText.length > 4_096) throw new Error("Native PowerPoint manifest exceeds preview limits");
+    const parsedManifest = JSON.parse(manifestText) as unknown;
+    const manifest = parsedManifest && typeof parsedManifest === "object" && !Array.isArray(parsedManifest)
+      ? parsedManifest as Record<string, unknown>
+      : null;
+    const slideCount = manifest?.slideCount;
+    const slideWidth = manifest?.width;
+    const slideHeight = manifest?.height;
+    if (
+      manifest?.schemaVersion !== 1 ||
+      !Number.isSafeInteger(slideCount) ||
+      (slideCount as number) < 1 ||
+      (slideCount as number) > MAX_PPT_SLIDES ||
+      !Number.isSafeInteger(slideWidth) ||
+      (slideWidth as number) < 1 ||
+      (slideWidth as number) > 4_096 ||
+      !Number.isSafeInteger(slideHeight) ||
+      (slideHeight as number) < 1 ||
+      (slideHeight as number) > 4_096
+    ) {
+      throw new Error("Native PowerPoint manifest is invalid");
+    }
+    const count = slideCount as number;
+    const width = slideWidth as number;
+    const height = slideHeight as number;
+    const slideNames = Array.from({ length: count }, (_, index) => `slide-${String(index + 1).padStart(4, "0")}.png`);
+    const expectedNames = new Set(["manifest.json", ...slideNames]);
+    const actualNames = Object.values(archive.files)
+      .filter((entry) => !entry.dir)
+      .map((entry) => entry.name);
+    if (actualNames.length !== expectedNames.size || actualNames.some((name) => !expectedNames.has(name))) {
+      throw new Error("Native PowerPoint archive contains unexpected files");
+    }
+    const slideEntries = slideNames.map((name) => {
+      const entry = archive.file(name);
+      if (!entry) throw new Error("Native PowerPoint slide is missing");
+      return entry;
+    });
+
+    const shell = this.ownerDocument.createElement("div");
+    shell.className = "office-presentation";
+    const toolbar = this.ownerDocument.createElement("nav");
+    toolbar.className = "office-preview-toolbar";
+    toolbar.setAttribute("aria-label", "Presentation slide navigation");
+    const previous = this.ownerDocument.createElement("button");
+    previous.type = "button";
+    previous.textContent = "Previous";
+    const status = this.#textSpan("Loading presentation", "office-page-status");
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    const next = this.ownerDocument.createElement("button");
+    next.type = "button";
+    next.textContent = "Next";
+    toolbar.append(previous, status, next);
+    const slideViewport = this.ownerDocument.createElement("div");
+    slideViewport.className = "office-slide-viewport";
+    slideViewport.setAttribute("aria-label", `${view.name} slide preview`);
+    shell.append(toolbar, slideViewport);
+    stage.replaceChildren(shell);
+
+    let slideIndex = 0;
+    let busy = false;
+    const updateControls = (): void => {
+      previous.setAttribute("aria-disabled", String(busy || slideIndex <= 0));
+      next.setAttribute("aria-disabled", String(busy || slideIndex >= count - 1));
+      status.textContent = `Slide ${slideIndex + 1} of ${count}`;
+      container.setAttribute("aria-busy", String(busy));
+    };
+    const createSlideUrl = (bytes: Uint8Array): { readonly url: string; readonly revoke: () => void } => {
+      const underlying = bytes.buffer;
+      let buffer: ArrayBuffer;
+      if (underlying instanceof ArrayBuffer && bytes.byteOffset === 0 && bytes.byteLength === underlying.byteLength) {
+        buffer = underlying;
+      } else if (underlying instanceof ArrayBuffer) {
+        buffer = underlying.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      } else {
+        buffer = new ArrayBuffer(bytes.byteLength);
+        new Uint8Array(buffer).set(bytes);
+      }
+      const url = urlApi.createObjectURL(new BlobType([buffer], { type: "image/png" }));
+      return { url, revoke: () => urlApi.revokeObjectURL(url) };
+    };
+    const validatePng = (bytes: Uint8Array): boolean => {
+      if (
+        bytes.byteLength < 24 ||
+        ![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((value, index) => bytes[index] === value) ||
+        String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR"
+      ) {
+        return false;
+      }
+      const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      return data.getUint32(16, false) === width && data.getUint32(20, false) === height;
+    };
+    const waitForImage = async (image: HTMLImageElement): Promise<void> => {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const finish = (callback: () => void): void => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          job.abortController.signal.removeEventListener("abort", abort);
+          image.removeEventListener("load", loaded);
+          image.removeEventListener("error", failed);
+          callback();
+        };
+        const loaded = (): void => finish(resolve);
+        const failed = (): void => finish(() => reject(new Error("PowerPoint slide image could not be decoded")));
+        const abort = (): void => {
+          const error = new Error("Office preview cancelled");
+          error.name = "AbortError";
+          finish(() => reject(error));
+        };
+        const timeout = window.setTimeout(
+          () => finish(() => reject(new Error("PowerPoint slide rendering timed out"))),
+          MAX_PPT_RENDER_MILLISECONDS,
+        );
+        image.addEventListener("load", loaded, { once: true });
+        image.addEventListener("error", failed, { once: true });
+        job.abortController.signal.addEventListener("abort", abort, { once: true });
+        if (job.abortController.signal.aborted) abort();
+        else if (image.complete) window.queueMicrotask(image.naturalWidth > 0 ? loaded : failed);
+      });
+    };
+    const renderSlide = async (requested: number): Promise<void> => {
+      if (busy || !isCurrent()) return;
+      const target = Math.max(0, Math.min(count - 1, requested));
+      busy = true;
+      updateControls();
+      let candidateUrl: { readonly url: string; readonly revoke: () => void } | null = null;
+      try {
+        const bytes = await slideEntries[target]!.async("uint8array");
+        if (bytes.byteLength < 24 || bytes.byteLength > 16 * 1024 * 1024 || !validatePng(bytes)) {
+          throw new Error("Native PowerPoint slide image is invalid");
+        }
+        candidateUrl = createSlideUrl(bytes);
+        const image = this.ownerDocument.createElement("img");
+        image.className = "office-native-slide";
+        image.alt = `${view.name}, slide ${target + 1}`;
+        image.draggable = false;
+        image.src = candidateUrl.url;
+        await waitForImage(image);
+        if (!isCurrent()) return;
+        const previousUrl = job.nativePptObjectUrl;
+        job.nativePptObjectUrl = candidateUrl;
+        candidateUrl = null;
+        previousUrl?.revoke();
+        slideIndex = target;
+        slideViewport.replaceChildren(image);
+        this.#sanitizeOfficeTree(slideViewport);
+        if (this.#boundOfficeDom(slideViewport)) throw new Error("Slide exceeds preview limits");
+      } finally {
+        candidateUrl?.revoke();
+        busy = false;
+        if (isCurrent()) updateControls();
+      }
+    };
+    const showSlideError = (): void => {
+      if (!isCurrent()) return;
+      busy = true;
+      previous.setAttribute("aria-disabled", "true");
+      next.setAttribute("aria-disabled", "true");
+      status.textContent = "Preview unavailable";
+      container.setAttribute("aria-busy", "false");
+      job.nativePptObjectUrl?.revoke();
+      job.nativePptObjectUrl = null;
+      slideViewport.replaceChildren(this.#statePanel("Office preview failed", "This presentation slide could not be rendered.", "error", view));
+    };
+    previous.addEventListener("click", () => {
+      if (!busy && slideIndex > 0) void renderSlide(slideIndex - 1).catch(showSlideError);
+    });
+    next.addEventListener("click", () => {
+      if (!busy && slideIndex < count - 1) void renderSlide(slideIndex + 1).catch(showSlideError);
+    });
+    updateControls();
+    await renderSlide(0);
+  }
+
+  async #renderLegacyPptOffice(
+    view: MainPreviewMediaView,
+    container: HTMLElement,
+    stage: HTMLElement,
+    job: OfficePreviewJob,
+    isCurrent: () => boolean,
+  ): Promise<void> {
+    const parsed = this.#sanitizeLegacyPptPresentation(await this.#parseLegacyPpt(view.bytes, job));
+    if (!isCurrent()) return;
+
+    const slideCount = parsed.document.slides.length;
+    if (slideCount < 1) throw new Error("Presentation contains no slides");
+    const shell = this.ownerDocument.createElement("div");
+    shell.className = "office-presentation";
+    const toolbar = this.ownerDocument.createElement("nav");
+    toolbar.className = "office-preview-toolbar";
+    toolbar.setAttribute("aria-label", "Presentation slide navigation");
+    const previous = this.ownerDocument.createElement("button");
+    previous.type = "button";
+    previous.textContent = "Previous";
+    previous.setAttribute("aria-disabled", "true");
+    const status = this.#textSpan("Loading presentation", "office-page-status");
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    const next = this.ownerDocument.createElement("button");
+    next.type = "button";
+    next.textContent = "Next";
+    next.setAttribute("aria-disabled", "true");
+    toolbar.append(previous, status, next);
+    const slideViewport = this.ownerDocument.createElement("div");
+    slideViewport.className = "office-slide-viewport";
+    slideViewport.setAttribute("aria-label", `${view.name} slide preview`);
+    const suppressSlideNavigation = (event: Event): void => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    slideViewport.addEventListener("click", suppressSlideNavigation, { capture: true });
+    slideViewport.addEventListener("auxclick", suppressSlideNavigation, { capture: true });
+    shell.append(toolbar, slideViewport);
+    stage.replaceChildren(shell);
+    this.#observeOfficeResources(slideViewport, job);
+
+    const root = createRoot(slideViewport);
+    job.legacyPptRoot = root;
+    const controllerHolder: { current: PptxViewerController | null } = { current: null };
+    let slideIndex = 0;
+    let busy = true;
+    const updateControls = (): void => {
+      previous.setAttribute("aria-disabled", String(busy || slideIndex <= 0));
+      next.setAttribute("aria-disabled", String(busy || slideIndex >= slideCount - 1));
+      status.textContent = `Slide ${slideIndex + 1} of ${slideCount}`;
+      container.setAttribute("aria-busy", String(busy));
+    };
+    updateControls();
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const window = this.ownerDocument.defaultView;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        if (timeout !== undefined) window?.clearTimeout(timeout);
+        job.abortController.signal.removeEventListener("abort", abort);
+        callback();
+      };
+      const abort = (): void => {
+        const error = new Error("Office preview cancelled");
+        error.name = "AbortError";
+        finish(() => reject(error));
+      };
+      const timeout = window?.setTimeout(
+        () => finish(() => reject(new Error("Presentation rendering timed out"))),
+        MAX_PPT_RENDER_MILLISECONDS,
+      );
+      job.abortController.signal.addEventListener("abort", abort, { once: true });
+      root.render(createElement(ReactPptxViewer, {
+        source: parsed,
+        mode: "slide",
+        initialSlide: 0,
+        fitMode: "contain",
+        height: "100%",
+        showToolbar: false,
+        showThumbnails: false,
+        showNotes: false,
+        showDiagnostics: false,
+        showSlideLabels: false,
+        virtualization: false,
+        fonts: {
+          loadEmbeddedFonts: false,
+          waitForFonts: false,
+          reportMissingFonts: false,
+          useOfficeFallbacks: true,
+        },
+        style: { width: "100%", height: "100%" },
+        onReady: (readyController) => {
+          controllerHolder.current = readyController;
+          slideIndex = Math.max(0, Math.min(slideCount - 1, readyController.getSlideIndex()));
+          finish(resolve);
+        },
+        onError: (error) => finish(() => reject(error)),
+        onSlideChange: (index) => {
+          slideIndex = Math.max(0, Math.min(slideCount - 1, index));
+          if (isCurrent()) updateControls();
+        },
+        onSlideRendered: (_index, element) => {
+          if (!isCurrent()) return;
+          this.#sanitizeOfficeTree(element);
+        },
+      }));
+      if (job.abortController.signal.aborted) abort();
+    });
+    if (!isCurrent()) return;
+    const readyController = controllerHolder.current;
+    if (!readyController) throw new Error("Presentation viewer did not initialize");
+    busy = false;
+    this.#sanitizeOfficeTree(slideViewport);
+    if (this.#boundOfficeDom(slideViewport)) throw new Error("Slide exceeds preview limits");
+    updateControls();
+
+    const showSlideError = (): void => {
+      if (!isCurrent()) return;
+      busy = true;
+      previous.setAttribute("aria-disabled", "true");
+      next.setAttribute("aria-disabled", "true");
+      status.textContent = "Preview unavailable";
+      container.setAttribute("aria-busy", "false");
+      job.resourceObserver?.disconnect();
+      job.resourceObserver = null;
+      job.legacyPptRoot?.unmount();
+      job.legacyPptRoot = null;
+      slideViewport.replaceChildren(this.#statePanel("Office preview failed", "This presentation slide could not be rendered.", "error", view));
+    };
+    const renderSlide = async (requested: number): Promise<void> => {
+      if (busy || !isCurrent()) return;
+      const target = Math.max(0, Math.min(slideCount - 1, requested));
+      busy = true;
+      updateControls();
+      try {
+        await readyController.goToSlide(target);
+        if (!isCurrent()) return;
+        // The controller applies React state asynchronously. Reading it back
+        // immediately can return the previous slide even though navigation
+        // succeeded, leaving the toolbar one step behind the rendered slide.
+        slideIndex = target;
+        this.#sanitizeOfficeTree(slideViewport);
+        if (this.#boundOfficeDom(slideViewport)) throw new Error("Slide exceeds preview limits");
+      } finally {
+        busy = false;
+        if (isCurrent()) updateControls();
+      }
+    };
+    previous.addEventListener("click", () => {
+      if (!busy && slideIndex > 0) void renderSlide(slideIndex - 1).catch(showSlideError);
+    });
+    next.addEventListener("click", () => {
+      if (!busy && slideIndex < slideCount - 1) void renderSlide(slideIndex + 1).catch(showSlideError);
+    });
+  }
+
+  async #parseLegacyPpt(bytes: Uint8Array, job: OfficePreviewJob): Promise<ParsedPresentation> {
+    const cfbMagic = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+    if (bytes.byteLength < cfbMagic.length || !cfbMagic.every((value, index) => bytes[index] === value)) {
+      throw new Error("Invalid legacy PowerPoint signature");
+    }
+    const window = this.ownerDocument.defaultView;
+    const WorkerType = window?.Worker;
+    const BlobType = window?.Blob;
+    const urlApi = window?.URL;
+    if (!window || !WorkerType || !BlobType || !urlApi || typeof urlApi.createObjectURL !== "function") {
+      throw new Error("Legacy PowerPoint workers are unavailable");
+    }
+
+    const workerUrl = urlApi.createObjectURL(new BlobType([__CODE_CODEX_PPT_WORKER_SOURCE__], { type: "text/javascript" }));
+    let worker: Worker;
+    try {
+      worker = new WorkerType(workerUrl, { type: "module", name: "code-codex-ppt-parser" });
+    } catch (error) {
+      urlApi.revokeObjectURL(workerUrl);
+      throw error;
+    }
+    job.legacyPptWorker = worker;
+
+    let wasmBinary: string;
+    try {
+      wasmBinary = window.atob(__CODE_CODEX_PPT_WASM_BASE64__);
+    } catch {
+      worker.terminate();
+      job.legacyPptWorker = null;
+      urlApi.revokeObjectURL(workerUrl);
+      throw new Error("Legacy PowerPoint parser is unavailable");
+    }
+    const wasmBytes = new Uint8Array(wasmBinary.length);
+    for (let index = 0; index < wasmBinary.length; index += 1) wasmBytes[index] = wasmBinary.charCodeAt(index);
+    const ownedBytes = bytes.slice().buffer;
+    const ownedWasm = wasmBytes.buffer;
+
+    const result = await new Promise<unknown>((resolve, reject) => {
+      let settled = false;
+      const cleanup = (): void => {
+        job.abortController.signal.removeEventListener("abort", abort);
+        worker.removeEventListener("message", handleMessage);
+        worker.removeEventListener("error", handleError);
+        worker.removeEventListener("messageerror", handleMessageError);
+        window.clearTimeout(timeout);
+        worker.terminate();
+        if (job.legacyPptWorker === worker) job.legacyPptWorker = null;
+        urlApi.revokeObjectURL(workerUrl);
+      };
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback();
+      };
+      const abort = (): void => {
+        const error = new Error("Office preview cancelled");
+        error.name = "AbortError";
+        finish(() => reject(error));
+      };
+      const handleMessage = (event: MessageEvent<unknown>): void => {
+        if (!event.data || typeof event.data !== "object") {
+          finish(() => reject(new Error("Presentation parser returned an unreadable response")));
+          return;
+        }
+        const response = event.data as { readonly id?: unknown; readonly result?: unknown; readonly error?: unknown };
+        if (response.id !== job.generation) return;
+        if (typeof response.error === "string" && response.error) {
+          const message = response.error;
+          finish(() => reject(new Error(message)));
+        } else {
+          finish(() => resolve(response.result));
+        }
+      };
+      const handleError = (event: ErrorEvent): void => {
+        finish(() => reject(event.error instanceof Error ? event.error : new Error(event.message || "Presentation parser failed")));
+      };
+      const handleMessageError = (): void => {
+        finish(() => reject(new Error("Presentation parser returned an unreadable response")));
+      };
+      const timeout = window.setTimeout(
+        () => finish(() => reject(new Error("Presentation parsing timed out"))),
+        MAX_PPT_PARSE_MILLISECONDS,
+      );
+      job.abortController.signal.addEventListener("abort", abort, { once: true });
+      worker.addEventListener("message", handleMessage);
+      worker.addEventListener("error", handleError);
+      worker.addEventListener("messageerror", handleMessageError);
+      if (job.abortController.signal.aborted) {
+        abort();
+        return;
+      }
+      try {
+        worker.postMessage(
+          { id: job.generation, bytes: ownedBytes, wasmSource: ownedWasm },
+          [ownedBytes, ownedWasm],
+        );
+      } catch (error) {
+        finish(() => reject(error));
+      }
+    });
+
+    let documentValue = result;
+    if (typeof documentValue === "string") {
+      if (documentValue.length > MAX_OFFICE_TEXT_UNITS) throw new Error("Presentation model exceeds preview limits");
+      documentValue = JSON.parse(documentValue) as unknown;
+    }
+    if (!documentValue || typeof documentValue !== "object") throw new Error("Presentation parser returned no document");
+    const document = documentValue as PresentationDocument;
+    if (document.format !== "ppt" || !Array.isArray(document.slides) || !Array.isArray(document.warnings)) {
+      throw new Error("Presentation parser returned an invalid document");
+    }
+    return { kind: "parsed-presentation", document, warnings: document.warnings };
+  }
+
+  #sanitizeLegacyPptPresentation(parsed: ParsedPresentation): ParsedPresentation {
+    const document = parsed.document;
+    if (
+      document.format !== "ppt" ||
+      !document.size ||
+      !Number.isFinite(document.size.widthEmu) ||
+      !Number.isFinite(document.size.heightEmu) ||
+      document.size.widthEmu <= 0 ||
+      document.size.heightEmu <= 0 ||
+      document.size.widthEmu > 100_000_000 ||
+      document.size.heightEmu > 100_000_000 ||
+      !Array.isArray(document.slides) ||
+      document.slides.length > MAX_PPT_SLIDES ||
+      !Array.isArray(document.masters) ||
+      !Array.isArray(document.layouts) ||
+      document.masters.length > 64 ||
+      document.layouts.length > 128 ||
+      !document.assets ||
+      typeof document.assets !== "object" ||
+      Array.isArray(document.assets)
+    ) {
+      throw new Error("Presentation model exceeds preview limits");
+    }
+
+    const allowedAssetTypes = new Set([
+      "image/bmp",
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/emf",
+      "image/wmf",
+      "image/x-emf",
+      "image/x-wmf",
+    ]);
+    const allowedAssets = new Set<string>();
+    const assets = Object.entries(document.assets);
+    if (assets.length > MAX_PPT_ASSETS) throw new Error("Presentation contains too many assets");
+    let totalAssetBytes = 0;
+    for (const [key, asset] of assets) {
+      const validData = asset.data instanceof Uint8Array && asset.data.byteLength === asset.byteLength;
+      if (
+        !key ||
+        key.length > 512 ||
+        !asset ||
+        typeof asset.id !== "string" ||
+        asset.id.length > 512 ||
+        !allowedAssetTypes.has(String(asset.contentType).toLowerCase()) ||
+        !validData ||
+        asset.byteLength <= 0 ||
+        asset.byteLength > MAX_PPT_ASSET_BYTES
+      ) {
+        delete document.assets[key];
+        continue;
+      }
+      totalAssetBytes += asset.byteLength;
+      if (totalAssetBytes > MAX_PPT_TOTAL_ASSET_BYTES) throw new Error("Presentation assets exceed preview limits");
+      delete asset.url;
+      if (asset.fileName && asset.fileName.length > 512) delete asset.fileName;
+      allowedAssets.add(asset.id);
+      allowedAssets.add(key);
+    }
+
+    let nodeCount = 0;
+    let textUnits = 0;
+    let tableCells = 0;
+    const accountText = (text: string): void => {
+      textUnits += text.length;
+      if (textUnits > MAX_PPT_TEXT_UNITS) throw new Error("Presentation text exceeds preview limits");
+    };
+    const sanitizeFont = (value: string | undefined): string | undefined => {
+      if (!value || value.length > 128 || /[\u0000-\u001f\u007f;{}'"\\]/.test(value)) return undefined;
+      return value;
+    };
+    const sanitizeFill = (fill: PresentationDocument["slides"][number]["background"]): PresentationDocument["slides"][number]["background"] => {
+      if (!fill) return undefined;
+      if (fill.type === "image" && !allowedAssets.has(fill.assetId)) return undefined;
+      if (fill.type === "gradient" && (!Array.isArray(fill.stops) || fill.stops.length > 64)) return undefined;
+      return fill;
+    };
+    const sanitizeNodes = (nodes: SlideNode[], depth: number): SlideNode[] => {
+      if (!Array.isArray(nodes) || depth > MAX_PPT_NODE_DEPTH) return [];
+      const result: SlideNode[] = [];
+      for (const node of nodes) {
+        nodeCount += 1;
+        if (nodeCount > MAX_PPT_NODES) throw new Error("Presentation contains too many elements");
+        if (
+          !node ||
+          !node.transform ||
+          ![node.transform.x, node.transform.y, node.transform.width, node.transform.height].every(Number.isFinite) ||
+          Math.abs(node.transform.x) > 200_000_000 ||
+          Math.abs(node.transform.y) > 200_000_000 ||
+          node.transform.width < 0 ||
+          node.transform.height < 0 ||
+          node.transform.width > 200_000_000 ||
+          node.transform.height > 200_000_000
+        ) {
+          continue;
+        }
+        delete node.hyperlink;
+        delete node.sourcePart;
+        if (node.name && node.name.length > 512) node.name = node.name.slice(0, 512);
+        if (node.altText) {
+          accountText(node.altText);
+          if (node.altText.length > 4_096) node.altText = node.altText.slice(0, 4_096);
+        }
+        if (node.type === "media") continue;
+        if (node.type === "image" && !allowedAssets.has(node.assetId)) continue;
+        if (node.type === "unknown") {
+          if (!node.fallbackAssetId || !allowedAssets.has(node.fallbackAssetId)) continue;
+        } else if (node.type === "group") {
+          node.children = sanitizeNodes(node.children, depth + 1);
+        } else if (node.type === "shape") {
+          const fill = sanitizeFill(node.fill);
+          if (fill) node.fill = fill;
+          else delete node.fill;
+          if (node.geometry.path) {
+            accountText(node.geometry.path);
+            if (node.geometry.path.length > 256_000) continue;
+          }
+          if (Array.isArray(node.paragraphs)) {
+            for (const paragraph of node.paragraphs) {
+              if (!Array.isArray(paragraph.runs)) {
+                paragraph.runs = [];
+                continue;
+              }
+              for (const run of paragraph.runs) {
+                if (typeof run.text !== "string") run.text = "";
+                accountText(run.text);
+                delete run.hyperlink;
+                for (const property of ["fontFamily", "eastAsianFontFamily", "complexScriptFontFamily", "symbolFontFamily"] as const) {
+                  const font = sanitizeFont(run[property]);
+                  if (font) run[property] = font;
+                  else delete run[property];
+                }
+              }
+            }
+          } else {
+            delete node.paragraphs;
+          }
+        } else if (node.type === "table") {
+          if (!Array.isArray(node.rows)) continue;
+          for (const row of node.rows) {
+            if (!Array.isArray(row)) continue;
+            tableCells += row.length;
+            if (tableCells > MAX_PPT_TABLE_CELLS) throw new Error("Presentation tables exceed preview limits");
+            for (const cell of row) {
+              const fill = sanitizeFill(cell.fill);
+              if (fill) cell.fill = fill;
+              else delete cell.fill;
+              if (!Array.isArray(cell.paragraphs)) {
+                cell.paragraphs = [];
+                continue;
+              }
+              for (const paragraph of cell.paragraphs) {
+                if (!Array.isArray(paragraph.runs)) {
+                  paragraph.runs = [];
+                  continue;
+                }
+                for (const run of paragraph.runs) {
+                  if (typeof run.text !== "string") run.text = "";
+                  accountText(run.text);
+                  delete run.hyperlink;
+                }
+              }
+            }
+          }
+        } else if (node.type === "chart") {
+          delete node.chartXml;
+          delete node.chartStyleXml;
+          delete node.chartColorsXml;
+          if (!Array.isArray(node.series) || node.series.length > 128) continue;
+          if (node.title) accountText(node.title);
+          for (const series of node.series) {
+            if (!Array.isArray(series.values) || series.values.length > 10_000) throw new Error("Presentation chart exceeds preview limits");
+            if (series.name) accountText(series.name);
+            if (series.categories) {
+              if (!Array.isArray(series.categories) || series.categories.length > 10_000) throw new Error("Presentation chart exceeds preview limits");
+              for (const category of series.categories) if (typeof category === "string") accountText(category);
+            }
+          }
+        }
+        result.push(node);
+      }
+      return result;
+    };
+
+    for (const slide of document.slides) {
+      slide.nodes = sanitizeNodes(slide.nodes, 0);
+      const background = sanitizeFill(slide.background);
+      if (background) slide.background = background;
+      else delete slide.background;
+      delete slide.notes;
+      delete slide.comments;
+      delete slide.sourcePart;
+    }
+    for (const master of document.masters) master.nodes = sanitizeNodes(master.nodes, 0);
+    for (const layout of document.layouts) layout.nodes = sanitizeNodes(layout.nodes, 0);
+    document.embeddedFonts = [];
+    delete document.metadata;
+    const warnings: PresentationWarning[] = [];
+    for (const warning of document.warnings.slice(0, 64)) {
+      if (!warning || typeof warning.message !== "string") continue;
+      accountText(warning.message);
+      warnings.push({
+        code: warning.code,
+        message: warning.message.slice(0, 1_024),
+        severity: ["info", "warning", "error"].includes(warning.severity) ? warning.severity : "warning",
+        ...(Number.isInteger(warning.slideIndex) ? { slideIndex: warning.slideIndex } : {}),
+      });
+    }
+    document.warnings = warnings;
+    return { kind: "parsed-presentation", document, warnings };
+  }
+
+  async #renderPptxOffice(
+    view: MainPreviewMediaView,
+    container: HTMLElement,
+    stage: HTMLElement,
+    job: OfficePreviewJob,
+    isCurrent: () => boolean,
+  ): Promise<void> {
+    await this.#assertPptxHasNoExternalRelationships(view.bytes, job.abortController.signal);
+    if (!isCurrent()) return;
+    const shell = this.ownerDocument.createElement("div");
+    shell.className = "office-presentation";
+    const toolbar = this.ownerDocument.createElement("nav");
+    toolbar.className = "office-preview-toolbar";
+    toolbar.setAttribute("aria-label", "Presentation slide navigation");
+    const previous = this.ownerDocument.createElement("button");
+    previous.type = "button";
+    previous.textContent = "Previous";
+    previous.setAttribute("aria-disabled", "true");
+    const status = this.#textSpan("Loading presentation", "office-page-status");
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    const next = this.ownerDocument.createElement("button");
+    next.type = "button";
+    next.textContent = "Next";
+    next.setAttribute("aria-disabled", "true");
+    toolbar.append(previous, status, next);
+    const slideViewport = this.ownerDocument.createElement("div");
+    slideViewport.className = "office-slide-viewport";
+    const suppressSlideNavigation = (event: Event): void => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    slideViewport.addEventListener("click", suppressSlideNavigation, { capture: true });
+    slideViewport.addEventListener("auxclick", suppressSlideNavigation, { capture: true });
+    shell.append(toolbar, slideViewport);
+    stage.replaceChildren(shell);
+    this.#observeOfficeResources(slideViewport, job);
+
+    await this.#yieldOfficeRender();
+    if (!isCurrent()) return;
+    const viewer = new PptxViewer(slideViewport, {
+      fitMode: "contain",
+      zipLimits: {
+        ...RECOMMENDED_ZIP_LIMITS,
+        maxEntryUncompressedBytes: 24 * 1024 * 1024,
+        maxTotalUncompressedBytes: 128 * 1024 * 1024,
+        maxMediaBytes: 96 * 1024 * 1024,
+      },
+      lazyMedia: true,
+      lazySlides: true,
+      pdfjs: false,
+    });
+    job.viewer = viewer;
+    await viewer.open(view.bytes.slice(), {
+      renderMode: "slide",
+      signal: job.abortController.signal,
+      lazyMedia: true,
+      lazySlides: true,
+    });
+    if (!isCurrent()) return;
+    const slideCount = viewer.slideCount;
+    if (slideCount < 1) throw new Error("Presentation contains no slides");
+    let slideIndex = Math.max(0, viewer.currentSlideIndex);
+    let busy = false;
+
+    const updateControls = (): void => {
+      previous.setAttribute("aria-disabled", String(busy || slideIndex <= 0));
+      next.setAttribute("aria-disabled", String(busy || slideIndex >= slideCount - 1));
+      status.textContent = `Slide ${slideIndex + 1} of ${slideCount}`;
+      container.setAttribute("aria-busy", String(busy));
+    };
+    const renderSlide = async (requested: number): Promise<void> => {
+      if (busy || !isCurrent()) return;
+      const target = Math.max(0, Math.min(slideCount - 1, requested));
+      busy = true;
+      updateControls();
+      try {
+        await viewer.renderSlide(target);
+        if (!isCurrent()) return;
+        slideIndex = target;
+        this.#sanitizeOfficeTree(slideViewport);
+        if (this.#boundOfficeDom(slideViewport)) throw new Error("Slide exceeds preview limits");
+      } finally {
+        busy = false;
+        if (isCurrent()) updateControls();
+      }
+    };
+    const showSlideError = (): void => {
+      if (!isCurrent()) return;
+      busy = true;
+      previous.setAttribute("aria-disabled", "true");
+      next.setAttribute("aria-disabled", "true");
+      status.textContent = "Preview unavailable";
+      container.setAttribute("aria-busy", "false");
+      job.resourceObserver?.disconnect();
+      job.resourceObserver = null;
+      viewer.destroy();
+      if (job.viewer === viewer) job.viewer = null;
+      slideViewport.replaceChildren(this.#statePanel("Office preview failed", "This presentation slide could not be rendered.", "error", view));
+    };
+    previous.addEventListener("click", () => {
+      if (!busy && slideIndex > 0) void renderSlide(slideIndex - 1).catch(showSlideError);
+    });
+    next.addEventListener("click", () => {
+      if (!busy && slideIndex < slideCount - 1) void renderSlide(slideIndex + 1).catch(showSlideError);
+    });
+    this.#sanitizeOfficeTree(slideViewport);
+    if (this.#boundOfficeDom(slideViewport)) throw new Error("Slide exceeds preview limits");
+    updateControls();
+  }
+
+  async #assertPptxHasNoExternalRelationships(bytes: Uint8Array, signal: AbortSignal): Promise<void> {
+    const throwIfAborted = (): void => {
+      if (!signal.aborted) return;
+      const error = new Error("Office preview cancelled");
+      error.name = "AbortError";
+      throw error;
+    };
+    throwIfAborted();
+    const archive = await JSZip.loadAsync(bytes.slice(), { checkCRC32: false, createFolders: false });
+    throwIfAborted();
+    const relationshipFiles = Object.values(archive.files).filter(
+      (entry) => !entry.dir && entry.name.toLowerCase().endsWith(".rels"),
+    );
+    if (relationshipFiles.length > MAX_PPTX_RELATIONSHIP_FILES) {
+      throw new Error("Presentation contains too many relationship files");
+    }
+
+    const Parser = this.ownerDocument.defaultView?.DOMParser;
+    if (!Parser) throw new Error("XML parser is unavailable");
+    const parser = new Parser();
+    let totalBytes = 0;
+    for (const entry of relationshipFiles) {
+      throwIfAborted();
+      const contents = await entry.async("uint8array");
+      throwIfAborted();
+      totalBytes += contents.byteLength;
+      if (
+        contents.byteLength > MAX_PPTX_RELATIONSHIP_FILE_BYTES ||
+        totalBytes > MAX_PPTX_RELATIONSHIP_TOTAL_BYTES
+      ) {
+        throw new Error("Presentation relationships exceed preview limits");
+      }
+      const xml = new TextDecoder("utf-8", { fatal: true }).decode(contents);
+      if (/<!\s*(?:doctype|entity)\b/i.test(xml)) throw new Error("Unsafe relationship XML");
+      const document = parser.parseFromString(xml, "application/xml");
+      if (document.getElementsByTagName("parsererror").length > 0) {
+        throw new Error("Invalid relationship XML");
+      }
+      const relationships = document.getElementsByTagNameNS("*", "Relationship");
+      for (const relationship of relationships) {
+        let target = "";
+        let targetMode = "";
+        for (const attribute of relationship.attributes) {
+          const name = attribute.localName.toLowerCase();
+          if (name === "target") target = attribute.value.trim();
+          else if (name === "targetmode") targetMode = attribute.value.trim();
+        }
+        let decodedTarget = target;
+        for (let pass = 0; pass < 2; pass += 1) {
+          try {
+            const decoded = decodeURIComponent(decodedTarget);
+            if (decoded === decodedTarget) break;
+            decodedTarget = decoded;
+          } catch {
+            break;
+          }
+        }
+        const externalTarget = /^[a-z][a-z0-9+.-]*:/i.test(decodedTarget) ||
+          decodedTarget.startsWith("//") ||
+          decodedTarget.startsWith("\\\\");
+        if (targetMode.toLowerCase() === "external" || externalTarget) {
+          const error = new Error("Presentation contains external relationships");
+          error.name = "ExternalOfficeResourceError";
+          throw error;
+        }
+      }
+    }
+  }
+
+  #cancelOfficePreview(): void {
+    this.#officeGeneration += 1;
+    const job = this.#officeJob;
+    this.#officeJob = null;
+    if (!job) return;
+    job.abortController.abort();
+    job.resourceObserver?.disconnect();
+    job.resourceObserver = null;
+    job.viewer?.destroy();
+    job.viewer = null;
+    job.legacyPptWorker?.terminate();
+    job.legacyPptWorker = null;
+    job.legacyPptRoot?.unmount();
+    job.legacyPptRoot = null;
+    job.nativePptObjectUrl?.revoke();
+    job.nativePptObjectUrl = null;
+  }
+
+  #observeOfficeResources(root: HTMLElement, job: OfficePreviewJob): void {
+    job.resourceObserver?.disconnect();
+    const Observer = this.ownerDocument.defaultView?.MutationObserver;
+    if (!Observer) return;
+    const observer = new Observer((records) => {
+      if (this.#officeJob !== job || job.abortController.signal.aborted) return;
+      for (const record of records) {
+        if (record.type === "attributes") {
+          if (record.target instanceof Element) this.#sanitizeOfficeElement(record.target);
+          continue;
+        }
+        for (const node of record.addedNodes) {
+          if (node instanceof Element) this.#sanitizeOfficeTree(node);
+        }
+      }
+    });
+    observer.observe(root, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["href", "src", "srcset", "poster", "data", "action", "formaction", "style"],
+    });
+    job.resourceObserver = observer;
+  }
+
+  #takeSanitizedDocxStyles(host: HTMLElement, className: string): HTMLStyleElement[] {
+    const result: HTMLStyleElement[] = [];
+    for (const generatedStyle of host.querySelectorAll("style")) {
+      const cssText = this.#sanitizeDocxCss(generatedStyle.textContent ?? "", className);
+      if (!cssText) continue;
+      const style = this.ownerDocument.createElement("style");
+      style.dataset.officePreview = "docx";
+      style.textContent = cssText;
+      result.push(style);
+    }
+    host.replaceChildren();
+    return result;
+  }
+
+  #sanitizeDocxCss(cssText: string, className: string): string {
+    const inertDocument = this.ownerDocument.implementation.createHTMLDocument("");
+    const style = inertDocument.createElement("style");
+    style.textContent = this.#sanitizeOfficeCssUrls(cssText.replace(/@import\s+[^;{}]+;?/gi, ""));
+    inertDocument.head.append(style);
+
+    try {
+      const sheet = style.sheet;
+      if (!sheet) return "";
+      const rules: string[] = [];
+      for (const rule of [...sheet.cssRules]) {
+        if (rule.type !== 1) continue;
+        const styleRule = rule as CSSStyleRule;
+        if (!this.#isScopedDocxSelector(styleRule.selectorText, className)) continue;
+        this.#sanitizeOfficeStyleDeclaration(styleRule.style);
+        if (styleRule.style.length > 0) rules.push(styleRule.cssText);
+      }
+      return rules.join("\n");
+    } catch {
+      return "";
+    }
+  }
+
+  #isScopedDocxSelector(selectorList: string, className: string): boolean {
+    const escapedClassName = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const scope = new RegExp(`^(?:[a-z][a-z0-9-]*)?\\.${escapedClassName}(?:[-_][a-z0-9_-]+)?(?:[:.#\\[]|$)`, "i");
+    return selectorList.split(",").every((entry) => {
+      const selector = entry.trim();
+      if (!selector || /[+~]/.test(selector)) return false;
+      const firstCompound = selector.match(/^[^\s>+~]+/)?.[0] ?? "";
+      return scope.test(firstCompound);
+    });
+  }
+
+  #sanitizeOfficeStyleDeclaration(style: CSSStyleDeclaration): void {
+    for (let index = style.length - 1; index >= 0; index -= 1) {
+      const property = style.item(index);
+      const foldedProperty = property.toLowerCase();
+      const value = style.getPropertyValue(property);
+      const urls = [...value.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)].map((match) => match[2] ?? "");
+      const unsafeCustomProperty = foldedProperty.startsWith("--") &&
+        !/^--(?:docx|cle-docx-\d+)-[a-z0-9_-]+$/i.test(foldedProperty);
+      const unsafeProperty = unsafeCustomProperty ||
+        foldedProperty === "behavior" ||
+        foldedProperty === "-moz-binding" ||
+        foldedProperty.startsWith("animation") ||
+        foldedProperty.startsWith("transition");
+      const unsafeValue = /(?:expression\s*\(|javascript\s*:|vbscript\s*:|@import|[\u0000-\u0008\u000b\u000c\u000e-\u001f])/i.test(value) ||
+        (foldedProperty === "position" && /^(?:fixed|sticky)$/i.test(value.trim())) ||
+        urls.some((url) => !this.#isLocalOfficeResource(url));
+      if (unsafeProperty || unsafeValue) style.removeProperty(property);
+    }
+  }
+
+  #sanitizeOfficeCssUrls(value: string): string {
+    return value.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (match, _quote: string, url: string) =>
+      this.#isLocalOfficeResource(url) ? match : "url(\"\")");
+  }
+
+  #sanitizeDetachedDocx(root: HTMLElement): void {
+    const unsafeTags = new Set([
+      "audio",
+      "base",
+      "button",
+      "embed",
+      "form",
+      "iframe",
+      "input",
+      "link",
+      "meta",
+      "object",
+      "script",
+      "select",
+      "source",
+      "style",
+      "textarea",
+      "track",
+      "video",
+    ]);
+    const linkableAttributes = new Set([
+      "action",
+      "background",
+      "data",
+      "formaction",
+      "href",
+      "ping",
+      "poster",
+      "src",
+      "srcdoc",
+      "srcset",
+    ]);
+    const elements = [root, ...root.querySelectorAll("*")];
+    for (const element of elements) {
+      const tagName = element.localName.toLowerCase();
+      const isSvgElement = element.namespaceURI === DOCX_SVG_NAMESPACE;
+      if (isSvgElement && !DOCX_ALLOWED_SVG_TAGS.has(tagName)) {
+        element.remove();
+        continue;
+      }
+      if (unsafeTags.has(tagName)) {
+        element.remove();
+        continue;
+      }
+      for (const attribute of [...element.attributes]) {
+        const name = attribute.localName.toLowerCase();
+        if (isSvgElement && !DOCX_ALLOWED_SVG_ATTRIBUTES.has(name)) {
+          element.removeAttribute(attribute.name);
+          continue;
+        }
+        if (attribute.name.toLowerCase().startsWith("on")) {
+          element.removeAttribute(attribute.name);
+          continue;
+        }
+        if (!linkableAttributes.has(name)) continue;
+        if (tagName === "a" || !this.#isLocalOfficeResource(attribute.value)) element.removeAttribute(attribute.name);
+      }
+      this.#sanitizeOfficeElement(element);
+    }
+  }
+
+  #sanitizeOfficeTree(root: Element): void {
+    this.#sanitizeOfficeElement(root);
+    for (const element of root.querySelectorAll("*")) this.#sanitizeOfficeElement(element);
+  }
+
+  #sanitizeOfficeElement(element: Element): void {
+    const tagName = element.localName.toLowerCase();
+    if (["base", "embed", "form", "iframe", "link", "object", "script"].includes(tagName)) {
+      element.remove();
+      return;
+    }
+    for (const attribute of [...element.attributes]) {
+      const attributeName = attribute.name.toLowerCase();
+      if (attributeName.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (attribute.localName.toLowerCase() === "srcset") {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (
+        ["action", "background", "data", "formaction", "href", "poster", "src"].includes(attribute.localName.toLowerCase()) &&
+        !this.#isLocalOfficeResource(attribute.value)
+      ) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+    if (tagName === "a") {
+      for (const attribute of ["download", "href", "ping", "rel", "target"]) element.removeAttribute(attribute);
+    }
+    element.removeAttribute("srcdoc");
+    if (element instanceof HTMLElement || element instanceof SVGElement) {
+      this.#sanitizeOfficeStyleDeclaration(element.style);
+    }
+    if (tagName === "style" && element.textContent) {
+      element.textContent = element.textContent
+        .replace(/@import\s+[^;]+;?/gi, "");
+      element.textContent = this.#sanitizeOfficeCssUrls(element.textContent);
+    }
+  }
+
+  #isLocalOfficeResource(value: string): boolean {
+    const normalized = value.trim().replace(/^['"]|['"]$/g, "").toLowerCase();
+    return normalized === "" ||
+      normalized.startsWith("#") ||
+      normalized.startsWith("blob:") ||
+      /^data:image\/(?:bmp|gif|jpeg|png|webp);base64,/.test(normalized);
+  }
+
+  #boundOfficeDom(root: HTMLElement): boolean {
+    let nodeCount = 0;
+    let textUnits = 0;
+    let truncated = false;
+    let current: Node | null = root.firstChild;
+    const nextAfterSubtree = (node: Node): Node | null => {
+      let cursor: Node | null = node;
+      while (cursor && cursor !== root) {
+        if (cursor.nextSibling) return cursor.nextSibling;
+        cursor = cursor.parentNode;
+      }
+      return null;
+    };
+
+    while (current) {
+      nodeCount += 1;
+      if (nodeCount > MAX_OFFICE_DOM_NODES) {
+        const next = nextAfterSubtree(current);
+        current.parentNode?.removeChild(current);
+        current = next;
+        truncated = true;
+        continue;
+      }
+      if (current.nodeType === Node.TEXT_NODE) {
+        const text = current.nodeValue ?? "";
+        const remaining = Math.max(0, MAX_OFFICE_TEXT_UNITS - textUnits);
+        if (remaining === 0 && text.length > 0) {
+          const next = nextAfterSubtree(current);
+          current.parentNode?.removeChild(current);
+          current = next;
+          truncated = true;
+          continue;
+        }
+        if (text.length > remaining) {
+          current.nodeValue = remaining > 0 ? `${text.slice(0, Math.max(0, remaining - 1))}\u2026` : "";
+          textUnits = MAX_OFFICE_TEXT_UNITS;
+          truncated = true;
+        } else {
+          textUnits += text.length;
+        }
+      }
+      current = current.firstChild ?? nextAfterSubtree(current);
+    }
+    return truncated;
+  }
+
+  async #yieldOfficeRender(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const window = this.ownerDocument.defaultView;
+      if (window) window.setTimeout(resolve, 0);
+      else setTimeout(resolve, 0);
+    });
+  }
+
+  #mediaObjectUrl(view: MainPreviewMediaView): string | null {
+    if (!this.#connected) return null;
+    const cached = this.#mediaObjectUrls.get(view.path);
+    if (cached?.bytes === view.bytes && cached.mimeType === view.mimeType) return cached.url;
+    if (cached) this.#revokeMediaObjectUrl(view.path);
+
+    const urlApi = this.ownerDocument.defaultView?.URL ?? globalThis.URL;
+    const BlobType = this.ownerDocument.defaultView?.Blob ?? globalThis.Blob;
+    if (typeof urlApi?.createObjectURL !== "function" || typeof BlobType !== "function") return null;
+    try {
+      const underlying = view.bytes.buffer;
+      let buffer: ArrayBuffer;
+      if (
+        underlying instanceof ArrayBuffer &&
+        view.bytes.byteOffset === 0 &&
+        view.bytes.byteLength === underlying.byteLength
+      ) {
+        buffer = underlying;
+      } else if (underlying instanceof ArrayBuffer) {
+        buffer = underlying.slice(view.bytes.byteOffset, view.bytes.byteOffset + view.bytes.byteLength);
+      } else {
+        buffer = new ArrayBuffer(view.bytes.byteLength);
+        new Uint8Array(buffer).set(view.bytes);
+      }
+      const blob = new BlobType([buffer], { type: view.mimeType });
+      const url = urlApi.createObjectURL(blob);
+      this.#mediaObjectUrls.set(view.path, {
+        bytes: view.bytes,
+        mimeType: view.mimeType,
+        url,
+        revoke: () => urlApi.revokeObjectURL(url),
+      });
+      return url;
+    } catch {
+      return null;
+    }
+  }
+
+  #reconcileMediaObjectUrls(state: MainPreviewState): void {
+    for (const [path, cached] of this.#mediaObjectUrls) {
+      const view = state.tabs.find((candidate) => candidate.path === path);
+      const enabled = isMediaPreviewView(view) &&
+        state.enabledPreviewers?.includes(previewerIdForMediaKind(view.kind)) === true;
+      if (
+        !isMediaPreviewView(view) ||
+        view.bytes !== cached.bytes ||
+        view.mimeType !== cached.mimeType ||
+        !enabled
+      ) {
+        this.#revokeMediaObjectUrl(path);
+      }
+    }
+  }
+
+  #revokeMediaObjectUrl(path: string): void {
+    const cached = this.#mediaObjectUrls.get(path);
+    if (!cached) return;
+    this.#mediaObjectUrls.delete(path);
+    try {
+      cached.revoke();
+    } catch {
+      // The document may already be torn down; dropping the cache is sufficient.
+    }
+  }
+
+  #revokeAllMediaObjectUrls(): void {
+    for (const path of [...this.#mediaObjectUrls.keys()]) this.#revokeMediaObjectUrl(path);
+  }
+
   #statePanel(
     title: string,
     copy: string,
@@ -1089,6 +4792,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     const panel = this.ownerDocument.createElement("div");
     panel.className = `view-state ${kind}`;
     if (kind === "loading") panel.setAttribute("role", "status");
+    else if (kind === "error") panel.setAttribute("role", "alert");
 
     const card = this.ownerDocument.createElement("div");
     card.className = "state-card";
@@ -1120,6 +4824,18 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
         return view.truncated ? `${formatBytes(view.sizeBytes)} \u00b7 Preview truncated` : formatBytes(view.sizeBytes);
       case "empty":
         return formatBytes(view.sizeBytes);
+      case "image":
+        return `Image \u00b7 ${formatBytes(view.sizeBytes)}`;
+      case "video":
+        return `Video \u00b7 ${formatBytes(view.sizeBytes)}`;
+      case "pdf":
+        return `PDF \u00b7 ${formatBytes(view.sizeBytes)}`;
+      case "audio":
+        return `Audio \u00b7 ${formatBytes(view.sizeBytes)}`;
+      case "office": {
+        const kind = officeDocumentKind(view.mimeType);
+        return `${kind?.toUpperCase() ?? "Office"} \u00b7 ${formatBytes(view.sizeBytes)}`;
+      }
       case "unsupported":
         return formatBytes(view.sizeBytes);
       case "error":
@@ -1140,6 +4856,194 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     code.className = "syntax-code";
     this.#replaceHighlightedSource(code, path, source);
     return code;
+  }
+
+  #markdownReader(view: MainPreviewTextView): HTMLElement {
+    return this.#createMarkdownSurface(view, view.text, false);
+  }
+
+  #markdownEditor(view: MainPreviewTextView | MainPreviewEmptyView, editor: MainPreviewEditorState): HTMLElement {
+    const reader = this.#createMarkdownSurface(view, editor.draft, true);
+    const article = reader.querySelector<HTMLElement>(".markdown-editor-surface");
+    if (!article) return reader;
+    let acceptedDraft = editor.draft;
+    const preserveTrailingNewline = editor.draft.endsWith("\n");
+    const syncDraft = (): void => {
+      const draft = normalizedRenderedMarkdown(markdownSerializer.turndown(article), preserveTrailingNewline);
+      if (draft.length > MAX_SYNTAX_SOURCE_UNITS) {
+        article.dataset.limitReached = "true";
+        this.#populateMarkdownArticle(article, acceptedDraft, true);
+        article.focus({ preventScroll: true });
+        return;
+      }
+      delete article.dataset.limitReached;
+      acceptedDraft = draft;
+      this.#dispatchPathEvent<MainPreviewDraftDetail>(MAIN_PREVIEW_DRAFT_EVENT, { path: view.path, text: draft });
+    };
+    article.addEventListener("input", syncDraft);
+    article.addEventListener("change", (event) => {
+      if (event.target instanceof HTMLInputElement && event.target.type === "checkbox") syncDraft();
+    });
+    article.addEventListener("paste", (event) => this.#pastePlainText(event, article));
+    article.addEventListener("drop", (event) => event.preventDefault());
+    return reader;
+  }
+
+  #createMarkdownSurface(
+    view: MainPreviewTextView | MainPreviewEmptyView,
+    source: string,
+    editable: boolean,
+  ): HTMLElement {
+    const reader = this.ownerDocument.createElement("div");
+    reader.className = "markdown-reader";
+    if (editable) reader.classList.add("markdown-editor");
+    const article = this.ownerDocument.createElement("article");
+    article.className = "markdown-body";
+    article.setAttribute("aria-label", editable ? `Edit ${view.name} in rendered Markdown` : `${view.name} rendered Markdown preview`);
+    if (editable) {
+      article.classList.add("markdown-editor-surface");
+      article.contentEditable = "true";
+      article.spellcheck = true;
+      article.setAttribute("role", "textbox");
+      article.setAttribute("aria-multiline", "true");
+      article.setAttribute("aria-busy", String(this.#state.editor?.saving === true));
+    }
+    this.#populateMarkdownArticle(article, source, editable);
+    article.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target.closest("a") : null;
+      if (!target || !article.contains(target)) return;
+      if (!editable) event.preventDefault();
+      event.stopPropagation();
+    });
+
+    if (view.kind === "text" && view.truncated) {
+      const notice = this.ownerDocument.createElement("div");
+      notice.className = "markdown-truncated";
+      notice.textContent = "Preview truncated at the safe file-size limit.";
+      reader.append(notice);
+    }
+    reader.append(article);
+    return reader;
+  }
+
+  #populateMarkdownArticle(article: HTMLElement, source: string, editable: boolean): void {
+    const prepared = editable ? splitMarkdownFrontMatter(source) : { body: source };
+    const rendered = (editable ? markdownEditorRenderer : markdownRenderer).render(prepared.body);
+    const fragment = DOMPurify.sanitize(rendered, {
+      ALLOWED_TAGS: [...MARKDOWN_ALLOWED_TAGS],
+      ALLOWED_ATTR: [
+        "align",
+        "class",
+        "start",
+        "title",
+        "data-markdown-href",
+        "data-markdown-title",
+        "data-markdown-image-alt",
+        "data-markdown-image-src",
+        "data-markdown-image-title",
+        "data-markdown-comment",
+        "data-markdown-comment-block",
+      ],
+      ALLOW_ARIA_ATTR: false,
+      ALLOW_DATA_ATTR: false,
+      FORBID_TAGS: ["audio", "button", "embed", "form", "iframe", "img", "input", "math", "object", "select", "source", "style", "svg", "textarea", "video"],
+      FORBID_ATTR: ["formaction", "ping", "src", "srcset", "style"],
+      KEEP_CONTENT: true,
+      RETURN_DOM_FRAGMENT: true,
+      SANITIZE_NAMED_PROPS: true,
+    }) as DocumentFragment;
+    article.replaceChildren(fragment);
+    const renderedBodyEmpty = !article.hasChildNodes();
+    if (editable && renderedBodyEmpty) {
+      const paragraph = this.ownerDocument.createElement("p");
+      paragraph.append(this.ownerDocument.createElement("br"));
+      article.append(paragraph);
+    }
+    if (editable && prepared.frontMatter) {
+      const frontMatter = this.ownerDocument.createElement("div");
+      frontMatter.className = "markdown-front-matter-placeholder";
+      frontMatter.contentEditable = "false";
+      frontMatter.setAttribute("data-markdown-front-matter", prepared.frontMatter);
+      frontMatter.textContent = "YAML front matter · source preserved";
+      article.prepend(frontMatter);
+    }
+
+    for (const anchor of article.querySelectorAll<HTMLAnchorElement>("a")) {
+      const href = anchor.getAttribute("data-markdown-href") ?? "";
+      anchor.title = href && isSafeMarkdownLink(href) ? `External link disabled in preview: ${href}` : "Link disabled in preview";
+      anchor.removeAttribute("href");
+      anchor.draggable = false;
+    }
+    for (const list of article.querySelectorAll<HTMLOListElement>("ol[start]")) {
+      const start = Number(list.getAttribute("start"));
+      if (!Number.isSafeInteger(start) || start < -1_000_000 || start > 1_000_000) list.removeAttribute("start");
+    }
+    for (const placeholder of article.querySelectorAll<HTMLElement>(".markdown-image-placeholder")) {
+      placeholder.contentEditable = "false";
+    }
+    for (const placeholder of article.querySelectorAll<HTMLElement>(".markdown-comment-placeholder")) {
+      placeholder.contentEditable = "false";
+    }
+    this.#decorateMarkdownTaskLists(article, editable);
+  }
+
+  #decorateMarkdownTaskLists(article: HTMLElement, editable: boolean): void {
+    for (const item of article.querySelectorAll<HTMLLIElement>("li")) {
+      const textHost = item.firstElementChild?.tagName === "P" ? item.firstElementChild : item;
+      if (!textHost) continue;
+      const walker = this.ownerDocument.createTreeWalker(textHost, NodeFilter.SHOW_TEXT);
+      const firstText = walker.nextNode();
+      if (!(firstText instanceof Text)) continue;
+      const match = firstText.data.match(/^\s*\[([ xX])\]\s+/);
+      if (!match) continue;
+      firstText.data = firstText.data.slice(match[0].length);
+      const checkbox = this.ownerDocument.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.disabled = !editable;
+      checkbox.checked = match[1]?.toLowerCase() === "x";
+      checkbox.contentEditable = "false";
+      checkbox.setAttribute("aria-label", checkbox.checked ? "Completed task" : "Incomplete task");
+      firstText.parentNode?.insertBefore(checkbox, firstText);
+      item.classList.add("task-list-item");
+      item.parentElement?.classList.add("task-list");
+    }
+  }
+
+  #pastePlainText(event: ClipboardEvent, article: HTMLElement): void {
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    event.preventDefault();
+    if (!text) return;
+    if (this.ownerDocument.execCommand("insertText", false, text)) return;
+    const selection = this.ownerDocument.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (!article.contains(range.commonAncestorContainer)) return;
+    range.deleteContents();
+    const inserted = this.ownerDocument.createTextNode(text);
+    range.insertNode(inserted);
+    range.setStartAfter(inserted);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    article.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  #appendEditorError(content: HTMLElement, view: MainPreviewFileView, editor: MainPreviewEditorState): void {
+    if (!editor.error) return;
+    const error = this.ownerDocument.createElement("div");
+    error.className = "editor-error";
+    error.setAttribute("role", "alert");
+    const copy = this.#textSpan(editor.error, "editor-error-copy");
+    copy.title = editor.error;
+    const reload = this.ownerDocument.createElement("button");
+    reload.type = "button";
+    reload.className = "editor-reload";
+    reload.textContent = "Reload file";
+    reload.addEventListener("click", () => {
+      this.#dispatchPathEvent<MainPreviewPathDetail>(MAIN_PREVIEW_RELOAD_EVENT, { path: view.path });
+    });
+    error.append(copy, reload);
+    content.append(error);
   }
 
   #replaceHighlightedSource(code: HTMLElement, path: string, source: string): void {
@@ -1330,6 +5234,20 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
         scrollLeft: active.scrollLeft,
       };
     }
+    if (active.matches(".markdown-editor-surface")) {
+      const article = active;
+      const selection = this.ownerDocument.getSelection();
+      const anchorOffset = selectionOffsetWithin(article, selection?.anchorNode ?? null, selection?.anchorOffset ?? 0);
+      const focusOffset = selectionOffsetWithin(article, selection?.focusNode ?? null, selection?.focusOffset ?? 0);
+      const scroller = article.closest<HTMLElement>(".preview-content");
+      return {
+        kind: "markdown-editor",
+        anchorOffset: anchorOffset ?? 0,
+        focusOffset: focusOffset ?? anchorOffset ?? 0,
+        scrollTop: scroller?.scrollTop ?? 0,
+        scrollLeft: scroller?.scrollLeft ?? 0,
+      };
+    }
     if (active.matches("[role='tab']")) return { kind: "tab", path: this.#pathForTab(active) };
     if (active.matches("button[data-close-path]")) {
       const path = active.dataset.closePath;
@@ -1351,6 +5269,34 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
         this.#syncEditorScroll(editor);
       } else {
         this.#focusActiveTab();
+      }
+      return;
+    }
+    if (focus.kind === "markdown-editor") {
+      const article = this.#panelMount.querySelector<HTMLElement>(".markdown-editor-surface");
+      if (!article) {
+        this.#focusActiveTab();
+        return;
+      }
+      article.focus({ preventScroll: true });
+      const selection = this.ownerDocument.getSelection();
+      if (selection) {
+        const anchor = textPositionAtOffset(article, focus.anchorOffset);
+        const selectionFocus = textPositionAtOffset(article, focus.focusOffset);
+        try {
+          selection.setBaseAndExtent(anchor.node, anchor.offset, selectionFocus.node, selectionFocus.offset);
+        } catch {
+          const range = this.ownerDocument.createRange();
+          range.setStart(anchor.node, anchor.offset);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      }
+      const scroller = article.closest<HTMLElement>(".preview-content");
+      if (scroller) {
+        scroller.scrollTop = focus.scrollTop;
+        scroller.scrollLeft = focus.scrollLeft;
       }
       return;
     }

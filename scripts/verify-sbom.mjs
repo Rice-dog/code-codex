@@ -1,8 +1,14 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const sbomPath = resolve(process.argv[2] ?? "artifacts/sbom.spdx.json");
 const document = JSON.parse(await readFile(sbomPath, "utf8"));
+const uiRoot = resolve(repoRoot, "packages", "explorer-ui");
+const uiManifest = JSON.parse(await readFile(resolve(uiRoot, "package.json"), "utf8"));
+const embeddedManifest = uiManifest.codeCodex?.embeddedWasm;
 const fail = (message) => { throw new Error(`Invalid SPDX SBOM: ${message}`); };
 
 if (document.spdxVersion !== "SPDX-2.3") fail("unexpected SPDX version");
@@ -53,6 +59,57 @@ for (const pkg of document.packages) {
   if (pkg.name !== "code-codex" && !dependencyIds.has(pkg.SPDXID)) {
     fail(`package has no dependency relationship: ${pkg.name}@${pkg.versionInfo}`);
   }
+}
+
+const embeddedWasm = document.packages.find((pkg) =>
+  pkg.name === "pptx-wasm" &&
+  pkg.externalRefs?.some((reference) => reference.referenceLocator?.startsWith("pkg:github/extend-hq/react-pptx@")),
+);
+if (!embeddedWasm?.checksums?.some((checksum) =>
+  checksum.algorithm === "SHA256" && /^[0-9a-f]{64}$/.test(checksum.checksumValue))) {
+  fail("embedded PowerPoint WASM component is missing or unhashed");
+}
+const embeddedRelationships = (document.relationships ?? []).filter((relationship) =>
+  relationship.spdxElementId === embeddedWasm.SPDXID && relationship.relationshipType === "DEPENDS_ON",
+);
+if (!embeddedManifest || !Array.isArray(embeddedManifest.cargoPackages) || embeddedManifest.cargoPackages.length !== 47) {
+  fail("embedded PowerPoint WASM source manifest is missing or incomplete");
+}
+const expectedEmbeddedIds = new Set();
+for (const expected of embeddedManifest.cargoPackages) {
+  const matches = document.packages.filter((pkg) => pkg.name === expected.name && pkg.versionInfo === expected.version);
+  if (matches.length !== 1) fail(`embedded package is missing or ambiguous: ${expected.name}@${expected.version}`);
+  const pkg = matches[0];
+  if (pkg.licenseDeclared !== expected.license) fail(`embedded package license mismatch: ${expected.name}@${expected.version}`);
+  if (expected.checksum && !pkg.checksums?.some((checksum) =>
+    checksum.algorithm === "SHA256" && checksum.checksumValue === expected.checksum)) {
+    fail(`embedded package checksum mismatch: ${expected.name}@${expected.version}`);
+  }
+  expectedEmbeddedIds.add(pkg.SPDXID);
+}
+const actualEmbeddedIds = new Set(embeddedRelationships.map((relationship) => relationship.relatedSpdxElement));
+if (embeddedRelationships.length !== embeddedManifest.cargoPackages.length ||
+    actualEmbeddedIds.size !== expectedEmbeddedIds.size ||
+    [...expectedEmbeddedIds].some((id) => !actualEmbeddedIds.has(id))) {
+  fail("embedded PowerPoint WASM dependency relationships do not match the pinned manifest");
+}
+if (!["arbitrary", "crossbeam-utils", "derive_arbitrary"].every((name) =>
+  !embeddedRelationships.some((relationship) => document.packages.find((pkg) => pkg.SPDXID === relationship.relatedSpdxElement)?.name === name))) {
+  fail("inactive upstream lockfile packages were incorrectly marked as embedded");
+}
+const [wasmBytes, workerBytes] = await Promise.all([
+  readFile(resolve(uiRoot, embeddedManifest.file)),
+  readFile(resolve(uiRoot, embeddedManifest.workerFile)),
+]);
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+if (sha256(wasmBytes) !== embeddedManifest.sha256 || sha256(workerBytes) !== embeddedManifest.workerSha256) {
+  fail("embedded PowerPoint parser bytes do not match the pinned source manifest");
+}
+if (!embeddedWasm.sourceInfo?.includes(embeddedManifest.cargoLockSha256) ||
+    !embeddedWasm.sourceInfo?.includes(`Rust ${embeddedManifest.rustVersion}`) ||
+    !embeddedWasm.sourceInfo?.includes(`wasm-pack ${embeddedManifest.wasmPackVersion}`) ||
+    !embeddedWasm.sourceInfo?.includes(embeddedManifest.target)) {
+  fail("embedded PowerPoint build provenance is incomplete");
 }
 
 console.log(`Verified SPDX SBOM with ${document.packages.length - 1} dependencies: ${sbomPath}`);

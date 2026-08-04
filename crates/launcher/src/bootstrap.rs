@@ -4,7 +4,7 @@ use cdp_client::{CapabilityToken, PRIMARY_BINDING_NAME};
 use serde::Serialize;
 use thiserror::Error;
 
-const MAX_UI_BUNDLE_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_UI_BUNDLE_BYTES: u64 = 8 * 1024 * 1024;
 const EMBEDDED_UI_BUNDLE: &str = include_str!("../../../packages/explorer-ui/dist/explorer.js");
 
 #[derive(Debug, Error)]

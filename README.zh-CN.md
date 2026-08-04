@@ -20,15 +20,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.1.33-x64-setup.exe`
-- 备选：`CodeCodex-0.1.33-x64.msi`
-- 便携包：`CodeCodex-0.1.33-x64.zip`
+- 推荐：`CodeCodex-0.1.43-x64-setup.exe`
+- 备选：`CodeCodex-0.1.43-x64.msi`
+- 便携包：`CodeCodex-0.1.43-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.1.33-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.1.43-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -43,7 +43,7 @@ Get-FileHash .\CodeCodex-0.1.33-x64-setup.exe -Algorithm SHA256
 
 - Windows 11 x64。
 - Rust，并安装 MSVC toolchain。
-- Node.js 20 或更高版本。
+- Node.js 20.19 或更高版本。
 - Visual Studio Build Tools，包含 Desktop C++。
 - 如果要生成 MSI，还需要 .NET SDK。
 
@@ -67,7 +67,7 @@ Get-FileHash .\CodeCodex-0.1.33-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.33
+./scripts/package.ps1 -Version 0.1.43
 ```
 
 生成结果会写入 `releases/`。
@@ -91,6 +91,8 @@ Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创
 - Codex 侧边栏中的本地工作区文件树。
 - 位于对话旁边的主窗口文件标签页。
 - 文本预览与编辑，包括多语言 Markdown 内容。
+- 可在预览市场中独立启用图片、视频、PDF、音频和 Office 预览。
+- 在本地以只读方式预览 DOCX 文档、XLSX 工作簿和 PPT/PPTX 演示文稿。
 - 右键菜单：新建、重命名、删除、复制路径、在资源管理器中显示、刷新。
 - 文件和文件夹拖拽移动。
 - 用于受限工作区操作的本地 bridge 代码。

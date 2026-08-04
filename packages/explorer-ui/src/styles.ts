@@ -834,6 +834,8 @@ export const styles = String.raw`
   .state-action:focus-visible { outline: 2px solid var(--cle-focus); outline-offset: 2px; }
 
   .statusbar {
+    position: relative;
+    z-index: 12;
     grid-row: 4;
     display: flex;
     align-items: center;
@@ -845,6 +847,214 @@ export const styles = String.raw`
     border-top: 1px solid var(--cle-rule);
     font-size: 11px;
     line-height: 16px;
+  }
+  .preview-market-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    min-height: 24px;
+    margin: 0 0 0 -6px;
+    padding: 2px 6px;
+    overflow: hidden;
+    color: var(--cle-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .preview-market-button span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .preview-market-button svg {
+    flex: 0 0 auto;
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.25;
+  }
+  .preview-market-button:hover,
+  .preview-market-button[aria-expanded="true"] {
+    color: var(--cle-ink);
+    background: var(--cle-hover);
+  }
+  .preview-market-button:focus-visible {
+    outline: 2px solid var(--cle-focus);
+    outline-offset: 0;
+  }
+
+  .preview-market-popover {
+    position: absolute;
+    z-index: 20;
+    bottom: calc(100% + 8px);
+    left: 8px;
+    width: min(320px, calc(100% - 16px));
+    max-height: min(390px, calc(100vh - 126px));
+    overflow: visible;
+    color: var(--cle-ink);
+    background: var(--cle-paper-raised);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 10px;
+    box-shadow: 0 14px 34px rgba(12, 18, 28, 0.2), 0 3px 10px rgba(12, 18, 28, 0.12);
+    font-size: 12px;
+    line-height: 1.45;
+    animation: cle-market-in 130ms cubic-bezier(.2, .8, .2, 1) both;
+  }
+  .preview-market-popover[hidden] { display: none; }
+  .preview-market-popover::after {
+    content: "";
+    position: absolute;
+    bottom: -6px;
+    left: 18px;
+    width: 10px;
+    height: 10px;
+    background: var(--cle-paper-raised);
+    border-right: 1px solid var(--cle-rule-strong);
+    border-bottom: 1px solid var(--cle-rule-strong);
+    transform: rotate(45deg);
+  }
+  .preview-market-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 13px 10px 14px;
+    border-bottom: 1px solid var(--cle-rule);
+  }
+  .preview-market-header h3 {
+    margin: 0;
+    color: var(--cle-ink);
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 18px;
+  }
+  .preview-market-header p {
+    margin: 1px 0 0;
+    color: var(--cle-muted);
+    font-size: 10.5px;
+  }
+  .preview-market-close {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    color: var(--cle-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .preview-market-close:hover { color: var(--cle-ink); background: var(--cle-hover); }
+  .preview-market-close:focus-visible,
+  .preview-extension-action:focus-visible { outline: 2px solid var(--cle-focus); outline-offset: 1px; }
+  .preview-market-close svg {
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.3;
+  }
+  .preview-market-list {
+    display: grid;
+    gap: 8px;
+    max-height: min(300px, calc(100vh - 210px));
+    padding: 8px;
+    overflow: auto;
+  }
+  .preview-extension {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    column-gap: 10px;
+    row-gap: 9px;
+    padding: 10px;
+    background: var(--cle-paper);
+    border: 1px solid var(--cle-rule);
+    border-radius: 8px;
+  }
+  .preview-extension-icon {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    color: var(--cle-icon-blue);
+    background: color-mix(in srgb, var(--cle-icon-blue) 10%, var(--cle-paper));
+    border: 1px solid color-mix(in srgb, var(--cle-icon-blue) 20%, var(--cle-rule));
+    border-radius: 8px;
+  }
+  .preview-extension-icon svg {
+    width: 23px;
+    height: 23px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.15;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .preview-extension-copy { min-width: 0; }
+  .preview-extension-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .preview-extension h4 {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--cle-ink);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 17px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .preview-extension-status {
+    flex: 0 0 auto;
+    padding: 1px 5px;
+    color: var(--cle-muted);
+    background: var(--cle-subtle);
+    border-radius: 999px;
+    font-size: 9px;
+    line-height: 15px;
+  }
+  .preview-extension-status[data-enabled="true"] {
+    color: var(--cle-added);
+    background: color-mix(in srgb, var(--cle-added) 11%, var(--cle-paper));
+  }
+  .preview-extension-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+  .preview-extension-meta span {
+    padding: 1px 5px;
+    color: var(--cle-muted);
+    background: var(--cle-subtle);
+    border: 1px solid var(--cle-rule);
+    border-radius: 4px;
+    font: 9.5px/14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .preview-extension-action {
+    grid-column: 2;
+    justify-self: start;
+    min-width: 58px;
+    min-height: 25px;
+    padding: 3px 10px;
+    color: #ffffff;
+    background: var(--cle-signal);
+    border: 1px solid color-mix(in srgb, var(--cle-signal) 80%, #000000);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .preview-extension-action:hover { filter: brightness(1.06); }
+  .preview-extension-action[data-enabled="true"] {
+    color: var(--cle-muted);
+    background: transparent;
+    border-color: var(--cle-rule-strong);
   }
   .status-code {
     color: var(--cle-ink);
@@ -938,8 +1148,14 @@ export const styles = String.raw`
 
   @media (prefers-reduced-motion: reduce) {
     :host,
-    :host([data-busy="true"]) .activity-bus { animation: none !important; }
+    :host([data-busy="true"]) .activity-bus,
+    .preview-market-popover { animation: none !important; }
     .activity-bus,
     .twisty svg { transition: none; }
+  }
+
+  @keyframes cle-market-in {
+    from { opacity: 0; transform: translateY(5px) scale(.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
   }
 `;

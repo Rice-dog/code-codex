@@ -31,7 +31,7 @@ pub const PRIMARY_BINDING_NAME: &str = "__codeCodex";
 // A 64 KiB UTF-8 edit expands to about 86 KiB as Base64. Keep ingress tightly
 // bounded while leaving room for the authenticated JSON request envelope.
 const MAX_BINDING_PAYLOAD_BYTES: usize = 96 * 1024;
-const MAX_CDP_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_CDP_MESSAGE_BYTES: usize = 12 * 1024 * 1024;
 const MAX_DISCOVERY_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_REQUESTS_PER_SECOND: usize = 120;
 const MAX_IN_FLIGHT_REQUESTS: usize = 16;
@@ -2568,9 +2568,7 @@ mod tests {
         assert!(RENDERER_LAYOUT_PROBE.contains("location.protocol==='app:'"));
         assert!(RENDERER_LAYOUT_PROBE.contains("location.host==='-'"));
         assert!(RENDERER_LAYOUT_PROBE.contains("main.main-surface"));
-        assert!(
-            RENDERER_LAYOUT_PROBE.contains("main[data-app-shell-main-surface=\"default\"]")
-        );
+        assert!(RENDERER_LAYOUT_PROBE.contains("main[data-app-shell-main-surface=\"default\"]"));
         assert!(RENDERER_LAYOUT_PROBE.contains("m.length===1"));
         assert!(RENDERER_LAYOUT_PROBE.contains(":scope > aside.app-shell-left-panel"));
     }

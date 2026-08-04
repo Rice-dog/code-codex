@@ -4,9 +4,16 @@ import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, E
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
 import { getFileIcon, icons } from "./icons";
 import {
+  AUDIO_PREVIEWER_ID,
   CodeCodexMainPreviewElement,
+  IMAGE_PREVIEWER_ID,
   MAIN_PREVIEW_TAG,
+  MARKDOWN_PREVIEWER_ID,
+  NATIVE_POWERPOINT_PREVIEW_MIME,
+  OFFICE_PREVIEWER_ID,
+  PDF_PREVIEWER_ID,
   registerMainPreviewElement,
+  VIDEO_PREVIEWER_ID,
   type MainPreviewFileView,
   type MainPreviewLineEnding,
 } from "./main-preview";
@@ -44,9 +51,131 @@ const DROP_EXPAND_DELAY_MS = 650;
 const INTERNAL_DRAG_TYPE = "application/x-code-codex-entry";
 const DEFAULT_SETTINGS: ExplorerSettings = { width: 260, collapsed: false, showHidden: true, showIgnored: true };
 const SETTINGS_KEY = "code-codex:ui-settings:v1";
+const PREVIEWER_SETTINGS_KEY = "code-codex:previewers:v1";
+const MAX_MEDIA_CHUNK_BYTES = 2 * 1024 * 1024;
+const MAX_IMAGE_PREVIEW_BYTES = 32 * 1024 * 1024;
+const MAX_VIDEO_PREVIEW_BYTES = 128 * 1024 * 1024;
+const MAX_PDF_PREVIEW_BYTES = 64 * 1024 * 1024;
+const MAX_AUDIO_PREVIEW_BYTES = 128 * 1024 * 1024;
+const MAX_OFFICE_PREVIEW_BYTES = 64 * 1024 * 1024;
+
+type MediaPreviewKind = "image" | "video" | "pdf" | "audio" | "office";
+
+interface PreviewerDefinition {
+  readonly id: string;
+  readonly kind: "markdown" | MediaPreviewKind;
+  readonly title: string;
+  readonly iconFileName: string;
+  readonly extensions: readonly string[];
+}
+
+interface MediaPreviewRoute {
+  readonly previewerId: string;
+  readonly kind: MediaPreviewKind;
+  readonly mimeTypes: readonly string[];
+  readonly maxBytes: number;
+}
+
+const PREVIEWER_DEFINITIONS: readonly PreviewerDefinition[] = Object.freeze([
+  {
+    id: MARKDOWN_PREVIEWER_ID,
+    kind: "markdown",
+    title: "Markdown Preview",
+    iconFileName: "README.md",
+    extensions: [".md", ".markdown"],
+  },
+  {
+    id: IMAGE_PREVIEWER_ID,
+    kind: "image",
+    title: "Image Preview",
+    iconFileName: "preview.png",
+    extensions: [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".avif"],
+  },
+  {
+    id: VIDEO_PREVIEWER_ID,
+    kind: "video",
+    title: "Video Preview",
+    iconFileName: "preview.mp4",
+    extensions: [".mp4", ".webm", ".ogv", ".mov", ".m4v"],
+  },
+  {
+    id: PDF_PREVIEWER_ID,
+    kind: "pdf",
+    title: "PDF Preview",
+    iconFileName: "preview.pdf",
+    extensions: [".pdf"],
+  },
+  {
+    id: AUDIO_PREVIEWER_ID,
+    kind: "audio",
+    title: "Audio Preview",
+    iconFileName: "preview.mp3",
+    extensions: [".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aac"],
+  },
+  {
+    id: OFFICE_PREVIEWER_ID,
+    kind: "office",
+    title: "Office Preview",
+    iconFileName: "preview.docx",
+    extensions: [".docx", ".xlsx", ".ppt", ".pptx"],
+  },
+]);
+
+const PREVIEWER_IDS = new Set(PREVIEWER_DEFINITIONS.map((previewer) => previewer.id));
+const MEDIA_PREVIEW_ROUTES: Readonly<Record<string, MediaPreviewRoute>> = Object.freeze({
+  png: { previewerId: IMAGE_PREVIEWER_ID, kind: "image", mimeTypes: ["image/png"], maxBytes: MAX_IMAGE_PREVIEW_BYTES },
+  jpg: { previewerId: IMAGE_PREVIEWER_ID, kind: "image", mimeTypes: ["image/jpeg"], maxBytes: MAX_IMAGE_PREVIEW_BYTES },
+  jpeg: { previewerId: IMAGE_PREVIEWER_ID, kind: "image", mimeTypes: ["image/jpeg"], maxBytes: MAX_IMAGE_PREVIEW_BYTES },
+  gif: { previewerId: IMAGE_PREVIEWER_ID, kind: "image", mimeTypes: ["image/gif"], maxBytes: MAX_IMAGE_PREVIEW_BYTES },
+  webp: { previewerId: IMAGE_PREVIEWER_ID, kind: "image", mimeTypes: ["image/webp"], maxBytes: MAX_IMAGE_PREVIEW_BYTES },
+  bmp: { previewerId: IMAGE_PREVIEWER_ID, kind: "image", mimeTypes: ["image/bmp"], maxBytes: MAX_IMAGE_PREVIEW_BYTES },
+  ico: {
+    previewerId: IMAGE_PREVIEWER_ID,
+    kind: "image",
+    mimeTypes: ["image/x-icon", "image/vnd.microsoft.icon"],
+    maxBytes: MAX_IMAGE_PREVIEW_BYTES,
+  },
+  avif: { previewerId: IMAGE_PREVIEWER_ID, kind: "image", mimeTypes: ["image/avif"], maxBytes: MAX_IMAGE_PREVIEW_BYTES },
+  mp4: { previewerId: VIDEO_PREVIEWER_ID, kind: "video", mimeTypes: ["video/mp4"], maxBytes: MAX_VIDEO_PREVIEW_BYTES },
+  webm: { previewerId: VIDEO_PREVIEWER_ID, kind: "video", mimeTypes: ["video/webm"], maxBytes: MAX_VIDEO_PREVIEW_BYTES },
+  ogv: { previewerId: VIDEO_PREVIEWER_ID, kind: "video", mimeTypes: ["video/ogg"], maxBytes: MAX_VIDEO_PREVIEW_BYTES },
+  mov: { previewerId: VIDEO_PREVIEWER_ID, kind: "video", mimeTypes: ["video/quicktime"], maxBytes: MAX_VIDEO_PREVIEW_BYTES },
+  m4v: { previewerId: VIDEO_PREVIEWER_ID, kind: "video", mimeTypes: ["video/mp4", "video/x-m4v"], maxBytes: MAX_VIDEO_PREVIEW_BYTES },
+  pdf: { previewerId: PDF_PREVIEWER_ID, kind: "pdf", mimeTypes: ["application/pdf"], maxBytes: MAX_PDF_PREVIEW_BYTES },
+  mp3: { previewerId: AUDIO_PREVIEWER_ID, kind: "audio", mimeTypes: ["audio/mpeg"], maxBytes: MAX_AUDIO_PREVIEW_BYTES },
+  wav: { previewerId: AUDIO_PREVIEWER_ID, kind: "audio", mimeTypes: ["audio/wav"], maxBytes: MAX_AUDIO_PREVIEW_BYTES },
+  flac: { previewerId: AUDIO_PREVIEWER_ID, kind: "audio", mimeTypes: ["audio/flac"], maxBytes: MAX_AUDIO_PREVIEW_BYTES },
+  m4a: { previewerId: AUDIO_PREVIEWER_ID, kind: "audio", mimeTypes: ["audio/mp4"], maxBytes: MAX_AUDIO_PREVIEW_BYTES },
+  ogg: { previewerId: AUDIO_PREVIEWER_ID, kind: "audio", mimeTypes: ["audio/ogg"], maxBytes: MAX_AUDIO_PREVIEW_BYTES },
+  aac: { previewerId: AUDIO_PREVIEWER_ID, kind: "audio", mimeTypes: ["audio/aac"], maxBytes: MAX_AUDIO_PREVIEW_BYTES },
+  docx: {
+    previewerId: OFFICE_PREVIEWER_ID,
+    kind: "office",
+    mimeTypes: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    maxBytes: MAX_OFFICE_PREVIEW_BYTES,
+  },
+  xlsx: {
+    previewerId: OFFICE_PREVIEWER_ID,
+    kind: "office",
+    mimeTypes: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    maxBytes: MAX_OFFICE_PREVIEW_BYTES,
+  },
+  ppt: {
+    previewerId: OFFICE_PREVIEWER_ID,
+    kind: "office",
+    mimeTypes: ["application/vnd.ms-powerpoint", NATIVE_POWERPOINT_PREVIEW_MIME],
+    maxBytes: MAX_OFFICE_PREVIEW_BYTES,
+  },
+  pptx: {
+    previewerId: OFFICE_PREVIEWER_ID,
+    kind: "office",
+    mimeTypes: ["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+    maxBytes: MAX_OFFICE_PREVIEW_BYTES,
+  },
+});
 
 type StateCopy = { title: string; copy: string; action?: string };
-type PreviewUnavailableReason = "binary" | "invalid-utf8" | "sensitive" | "unsupported-type" | "unknown";
+type PreviewUnavailableReason = "binary" | "invalid-utf8" | "sensitive" | "previewer-disabled" | "unsupported-type" | "unknown";
 
 interface PreviewTab {
   readonly instanceId: number;
@@ -59,15 +188,39 @@ interface PreviewTab {
   view: MainPreviewFileView;
 }
 
-interface NormalizedPreview {
-  kind: "text" | "unsupported";
+interface NormalizedTextPreview {
+  kind: "text";
   text: string;
   sizeBytes: number;
   truncated: boolean;
-  reason: PreviewUnavailableReason;
   editable: boolean;
   version?: string;
   lineEnding?: MainPreviewLineEnding;
+}
+
+interface NormalizedUnsupportedPreview {
+  kind: "unsupported";
+  sizeBytes: number;
+  truncated: boolean;
+  reason: PreviewUnavailableReason;
+}
+
+interface NormalizedMediaPreview {
+  kind: MediaPreviewKind;
+  mimeType: string;
+  sizeBytes: number;
+  bytes: Uint8Array;
+}
+
+type NormalizedPreview = NormalizedTextPreview | NormalizedUnsupportedPreview | NormalizedMediaPreview;
+
+interface NormalizedMediaInfo {
+  readonly kind: MediaPreviewKind;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+  readonly chunkSize: number;
+  readonly chunkCount: number;
+  readonly version: string;
 }
 
 interface DetachedEditDraft {
@@ -148,6 +301,30 @@ function clearDetachedEditDraft(): void {
   detachedEditDraft = undefined;
 }
 
+function previewerCardMarkup(previewer: PreviewerDefinition): string {
+  const extensionTags = previewer.extensions.map((extension) => `<span>${extension}</span>`).join("");
+  return `
+    <article class="preview-extension" data-preview-extension="${previewer.id}">
+      <span class="preview-extension-icon" aria-hidden="true">${getFileIcon(previewer.iconFileName).markup}</span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>${previewer.title}</h4>
+          <span class="preview-extension-status">Disabled</span>
+        </div>
+        <div class="preview-extension-meta">${extensionTags}</div>
+      </div>
+      <button class="preview-extension-action" type="button">Enable</button>
+    </article>
+  `;
+}
+
+function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
+  const name = path.replaceAll("\\", "/").split("/").at(-1) ?? path;
+  const dot = name.lastIndexOf(".");
+  if (dot < 0 || dot === name.length - 1) return undefined;
+  return MEDIA_PREVIEW_ROUTES[name.slice(dot + 1).toLocaleLowerCase()];
+}
+
 export class CodeCodexElement extends HTMLElement {
   readonly #shadow: ShadowRoot;
   readonly #model = new TreeModel();
@@ -220,6 +397,8 @@ export class CodeCodexElement extends HTMLElement {
   #marquee: MarqueeState | undefined;
   #marqueeLongPressTimer: ReturnType<typeof setTimeout> | undefined;
   #suppressNextClick = false;
+  readonly #enabledPreviewers = new Set<string>();
+  #previewMarketOpen = false;
 
   readonly #treeShell: HTMLElement;
   readonly #frame: HTMLElement;
@@ -231,8 +410,12 @@ export class CodeCodexElement extends HTMLElement {
   readonly #rootLabel: HTMLElement;
   readonly #masthead: HTMLElement;
   readonly #editModeButton: HTMLButtonElement;
-  readonly #statusText: HTMLElement;
   readonly #statusCode: HTMLElement;
+  readonly #previewMarketButton: HTMLButtonElement;
+  readonly #previewMarketPopover: HTMLElement;
+  readonly #previewMarketCloseButton: HTMLButtonElement;
+  readonly #previewerButtons = new Map<string, HTMLButtonElement>();
+  readonly #previewerStatuses = new Map<string, HTMLElement>();
   readonly #liveRegion: HTMLElement;
   readonly #collapseButton: HTMLButtonElement;
   readonly #collapsedTab: HTMLButtonElement;
@@ -278,7 +461,20 @@ export class CodeCodexElement extends HTMLElement {
         </div>
         <section class="state" hidden></section>
         <div class="loading-veil" aria-hidden="true"><span class="loading-chip">Switching project</span></div>
-        <footer class="statusbar"><span class="status-text">Local bridge</span><span class="status-code">WAIT</span></footer>
+        <footer class="statusbar">
+          <div class="preview-market-popover" id="cle-preview-market" role="dialog" aria-modal="false" aria-labelledby="cle-preview-market-title" hidden>
+            <div class="preview-market-header">
+              <div>
+                <h3 id="cle-preview-market-title">Preview Market</h3>
+                <p>File preview extensions</p>
+              </div>
+              <button class="preview-market-close" type="button" title="Close Preview Market" aria-label="Close Preview Market">${icons.close}</button>
+            </div>
+            <div class="preview-market-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
+          </div>
+          <button class="preview-market-button" type="button" aria-haspopup="dialog" aria-controls="cle-preview-market" aria-expanded="false">${icons.preview}<span>Preview Market</span></button>
+          <span class="status-code">WAIT</span>
+        </footer>
         <div class="action-notice" hidden></div>
         <div class="context-menu" role="menu" aria-label="Explorer actions" aria-busy="false" hidden></div>
         <div class="resize-handle" role="separator" aria-label="Resize explorer" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="260" tabindex="0"></div>
@@ -297,8 +493,18 @@ export class CodeCodexElement extends HTMLElement {
     this.#rootLabel = this.#required<HTMLElement>(".root-label");
     this.#masthead = this.#required<HTMLElement>(".masthead");
     this.#editModeButton = this.#required<HTMLButtonElement>(".edit-mode-toggle");
-    this.#statusText = this.#required<HTMLElement>(".status-text");
     this.#statusCode = this.#required<HTMLElement>(".status-code");
+    this.#previewMarketButton = this.#required<HTMLButtonElement>(".preview-market-button");
+    this.#previewMarketPopover = this.#required<HTMLElement>(".preview-market-popover");
+    this.#previewMarketCloseButton = this.#required<HTMLButtonElement>(".preview-market-close");
+    for (const previewer of PREVIEWER_DEFINITIONS) {
+      const card = this.#required<HTMLElement>(`[data-preview-extension="${previewer.id}"]`);
+      const button = card.querySelector<HTMLButtonElement>(".preview-extension-action");
+      const status = card.querySelector<HTMLElement>(".preview-extension-status");
+      if (!button || !status) throw new Error(`Preview Market is missing ${previewer.id}.`);
+      this.#previewerButtons.set(previewer.id, button);
+      this.#previewerStatuses.set(previewer.id, status);
+    }
     this.#liveRegion = this.#required<HTMLElement>(".live-region");
     this.#collapseButton = this.#required<HTMLButtonElement>(".collapse");
     this.#collapsedTab = this.#required<HTMLButtonElement>(".collapsed-tab");
@@ -319,6 +525,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#requestedPlacement = this.dataset.placement || "inline";
     this.#rememberInlineMount();
     this.#settings = this.#readLocalSettings();
+    for (const previewer of this.#readEnabledPreviewers()) this.#enabledPreviewers.add(previewer);
+    this.#renderPreviewMarket();
     this.#applySettings();
     this.#applyResponsivePlacement();
     this.#applyTheme();
@@ -345,6 +553,7 @@ export class CodeCodexElement extends HTMLElement {
     if (this.#reparenting) return;
     if (!this.#connected) return;
     this.#closeContextMenu(false);
+    this.#closePreviewMarket(false);
     this.#clearDragState();
     this.#cancelMarquee();
     this.#preserveDetachedDraft();
@@ -374,6 +583,7 @@ export class CodeCodexElement extends HTMLElement {
     window.removeEventListener("beforeunload", this.#onBeforeUnload);
     window.removeEventListener("pointerdown", this.#onWindowPointerDown, true);
     window.removeEventListener("dragend", this.#onWindowDragEnd, true);
+    window.removeEventListener("keydown", this.#onWindowKeyDown, true);
     this.#clearTimers();
   }
 
@@ -386,6 +596,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#settings = { ...this.#settings, collapsed };
     if (collapsed) {
       this.#closeContextMenu(false);
+      this.#closePreviewMarket(false);
     }
     this.#applySettings();
     this.#persistSettings();
@@ -399,6 +610,7 @@ export class CodeCodexElement extends HTMLElement {
   async disable(): Promise<void> {
     if (this.#disableButton.disabled) return;
     this.#closeContextMenu(false);
+    this.#closePreviewMarket(false);
     if (!this.#leaveEditing("Hide Code-Codex and discard your unsaved changes?")) return;
     this.#disableButton.disabled = true;
     this.#dismissed = true;
@@ -537,6 +749,11 @@ export class CodeCodexElement extends HTMLElement {
       this.#collapseButton.addEventListener("click", () => this.collapse(true));
       this.#collapsedTab.addEventListener("click", () => this.collapse(false));
       this.#editModeButton.addEventListener("click", () => this.#toggleEditing());
+      this.#previewMarketButton.addEventListener("click", () => this.#togglePreviewMarket());
+      this.#previewMarketCloseButton.addEventListener("click", () => this.#closePreviewMarket(true));
+      for (const previewer of PREVIEWER_DEFINITIONS) {
+        this.#previewerButtons.get(previewer.id)?.addEventListener("click", () => this.#togglePreviewer(previewer));
+      }
       this.#disableButton.addEventListener("click", () => void this.disable());
       this.#fileFilterInput.addEventListener("input", () => this.#applyFileFilter(this.#fileFilterInput.value));
       this.#fileFilterInput.addEventListener("keydown", (event) => this.#onFileFilterKeyDown(event));
@@ -573,6 +790,7 @@ export class CodeCodexElement extends HTMLElement {
     window.addEventListener("beforeunload", this.#onBeforeUnload);
     window.addEventListener("pointerdown", this.#onWindowPointerDown, true);
     window.addEventListener("dragend", this.#onWindowDragEnd, true);
+    window.addEventListener("keydown", this.#onWindowKeyDown, true);
 
     this.#themeObserver = new MutationObserver(() => this.#applyTheme());
     this.#themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
@@ -651,6 +869,8 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowResize = (): void => {
     this.#closeContextMenu(false);
+    const marketHasFocus = this.#previewMarketPopover.contains(this.#shadow.activeElement);
+    this.#closePreviewMarket(marketHasFocus);
     this.#applyResponsivePlacement();
     this.#applySettings();
     this.#renderVisible();
@@ -663,8 +883,18 @@ export class CodeCodexElement extends HTMLElement {
   };
 
   #onWindowPointerDown = (event: PointerEvent): void => {
-    if (this.#contextMenu.hidden || event.composedPath().includes(this.#contextMenu)) return;
-    this.#closeContextMenu(false);
+    const path = event.composedPath();
+    if (!this.#contextMenu.hidden && !path.includes(this.#contextMenu)) this.#closeContextMenu(false);
+    if (!this.#previewMarketPopover.hidden && !path.includes(this.#previewMarketPopover) && !path.includes(this.#previewMarketButton)) {
+      this.#closePreviewMarket(false);
+    }
+  };
+
+  #onWindowKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== "Escape" || !this.#previewMarketOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.#closePreviewMarket(true);
   };
 
   #onWindowDragEnd = (): void => {
@@ -2768,7 +2998,7 @@ export class CodeCodexElement extends HTMLElement {
 
   async #verifySavedPreview(
     tab: PreviewTab,
-    saved: NormalizedPreview,
+    saved: NormalizedTextPreview,
     bridge: ExplorerBridge,
     context: ExplorerContext,
     mainPreview: CodeCodexMainPreviewElement,
@@ -2777,7 +3007,7 @@ export class CodeCodexElement extends HTMLElement {
     instanceId: number,
     path: string,
     editSession: number,
-  ): Promise<NormalizedPreview | null> {
+  ): Promise<NormalizedTextPreview | null> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       tab.modifiedDuringSave = false;
       const raw = await bridge.request<unknown>("explorer.preview", { relativePath: path });
@@ -2821,7 +3051,7 @@ export class CodeCodexElement extends HTMLElement {
     return null;
   }
 
-  #finishSuccessfulSave(tab: PreviewTab, preview: NormalizedPreview, operation: number, exitAfterSave: boolean): void {
+  #finishSuccessfulSave(tab: PreviewTab, preview: NormalizedTextPreview, operation: number, exitAfterSave: boolean): void {
     tab.view = this.#previewView(tab, preview);
     tab.dirty = false;
     tab.modifiedDuringSave = false;
@@ -3029,19 +3259,75 @@ export class CodeCodexElement extends HTMLElement {
     revision: number,
   ): Promise<void> {
     if (!this.#canApplyPreview(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, revision)) return;
+    const mediaRoute = mediaPreviewRoute(tab.path);
+    if (mediaRoute && !this.#enabledPreviewers.has(mediaRoute.previewerId)) {
+      tab.view = { kind: "unsupported", path: tab.path, name: tab.name, sizeBytes: 0, reason: "previewer-disabled" };
+      this.#syncMainPreview();
+      this.#announce(`Preview extension disabled for ${tab.name}`);
+      return;
+    }
     try {
-      const raw = await bridge.request<unknown>("explorer.preview", { relativePath: tab.path });
-      if (!this.#canApplyPreview(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, revision)) return;
-      const preview = normalizePreview(raw);
+      const canContinue = (): boolean =>
+        (!mediaRoute || this.#enabledPreviewers.has(mediaRoute.previewerId)) &&
+        this.#canApplyPreview(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, revision);
+      const preview = mediaRoute
+        ? await this.#requestMediaPreview(tab.path, bridge, mediaRoute, canContinue)
+        : normalizePreview(await bridge.request<unknown>("explorer.preview", { relativePath: tab.path }));
+      if (!preview || !canContinue()) return;
       tab.view = this.#previewView(tab, preview);
       this.#syncMainPreview();
-      this.#announce(preview.kind === "text" ? `Preview loaded for ${tab.name}` : `Preview unavailable for ${tab.name}`);
+      this.#announce(preview.kind === "unsupported" ? `Preview unavailable for ${tab.name}` : `Preview loaded for ${tab.name}`);
     } catch (error) {
       if (!this.#canApplyPreview(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, revision)) return;
-      tab.view = { kind: "error", path: tab.path, name: tab.name, code: errorCode(error) };
+      const code = errorCode(error);
+      const message = mediaRoute ? mediaPreviewError(error) : undefined;
+      tab.view = message
+        ? { kind: "error", path: tab.path, name: tab.name, code, message }
+        : { kind: "error", path: tab.path, name: tab.name, code };
       this.#syncMainPreview();
       this.#announce(`Preview could not load for ${tab.name}`);
     }
+  }
+
+  async #requestMediaPreview(
+    relativePath: string,
+    bridge: ExplorerBridge,
+    route: MediaPreviewRoute,
+    canContinue: () => boolean,
+  ): Promise<NormalizedMediaPreview | undefined> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (!canContinue()) return undefined;
+      try {
+        const rawInfo = await bridge.request<unknown>("explorer.media.info", { relativePath });
+        if (!canContinue()) return undefined;
+        const info = normalizeMediaInfo(rawInfo, route);
+        const bytes = new Uint8Array(info.sizeBytes);
+        let offset = 0;
+        for (let chunkIndex = 0; chunkIndex < info.chunkCount; chunkIndex += 1) {
+          if (!canContinue()) return undefined;
+          const length = Math.min(info.chunkSize, info.sizeBytes - offset);
+          const rawChunk = await bridge.request<unknown>("explorer.media.chunk", {
+            relativePath,
+            offset,
+            length,
+            expectedSizeBytes: info.sizeBytes,
+            expectedVersion: info.version,
+          });
+          if (!canContinue()) return undefined;
+          const chunk = normalizeMediaChunk(rawChunk, offset, length, info.sizeBytes);
+          bytes.set(chunk.bytes, offset);
+          offset += chunk.bytes.byteLength;
+        }
+        if (offset !== info.sizeBytes) {
+          throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview ended before the complete file was received." });
+        }
+        return { kind: info.kind, mimeType: info.mimeType, sizeBytes: info.sizeBytes, bytes };
+      } catch (error) {
+        if (attempt === 0 && errorCode(error) === "CONFLICT" && canContinue()) continue;
+        throw error;
+      }
+    }
+    return undefined;
   }
 
   #previewView(tab: PreviewTab, preview: NormalizedPreview): MainPreviewFileView {
@@ -3052,6 +3338,16 @@ export class CodeCodexElement extends HTMLElement {
         name: tab.name,
         sizeBytes: preview.sizeBytes,
         reason: preview.reason,
+      };
+    }
+    if ("bytes" in preview) {
+      return {
+        kind: preview.kind,
+        path: tab.path,
+        name: tab.name,
+        mimeType: preview.mimeType,
+        sizeBytes: preview.sizeBytes,
+        bytes: preview.bytes,
       };
     }
     const editability = {
@@ -3129,10 +3425,16 @@ export class CodeCodexElement extends HTMLElement {
     const [closed] = this.#previewTabs.splice(index, 1);
     if (!closed) return;
     this.#disposePreviewTab(closed);
+    let activatedTab: PreviewTab | undefined;
     if (this.#activePreviewPath === path) {
       this.#activePreviewPath = this.#previewTabs[index]?.path ?? this.#previewTabs[index - 1]?.path ?? null;
+      activatedTab = this.#previewTabs.find((candidate) => candidate.path === this.#activePreviewPath);
     }
-    this.#syncMainPreview();
+    if (activatedTab && (activatedTab.dirty || activatedTab.view.kind === "error" || activatedTab.revision === 0)) {
+      this.#schedulePreview(activatedTab, 0);
+    } else {
+      this.#syncMainPreview();
+    }
     if (!this.#previewTabs.length) this.#detachMainPreview(false);
     this.#renderVisible();
     if (announce) this.#announce(`${closed.name} closed`);
@@ -3159,6 +3461,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #syncMainPreview(): void {
+    this.#releaseInactiveMediaPreviews();
     this.dataset.previewTabs = String(this.#previewTabs.length);
     const editor = this.#editingPath
       ? {
@@ -3171,9 +3474,24 @@ export class CodeCodexElement extends HTMLElement {
     this.#mainPreview?.setState({
       activePath: this.#activePreviewPath,
       tabs: this.#previewTabs.map((tab) => tab.view),
+      enabledPreviewers: [...this.#enabledPreviewers],
       ...(editor ? { editor } : {}),
     });
     this.#syncEditModeButton();
+  }
+
+  #releaseInactiveMediaPreviews(): void {
+    for (const tab of this.#previewTabs) {
+      if (tab.path === this.#activePreviewPath) continue;
+      const route = mediaPreviewRoute(tab.path);
+      if (!route || !this.#enabledPreviewers.has(route.previewerId)) continue;
+      if (tab.dirty && tab.view.kind === "loading" && tab.timer === undefined) continue;
+      if (tab.timer) clearTimeout(tab.timer);
+      tab.timer = undefined;
+      tab.revision += 1;
+      tab.dirty = true;
+      tab.view = { kind: "loading", path: tab.path, name: tab.name };
+    }
   }
 
   #ensureMainPreview(): CodeCodexMainPreviewElement | undefined {
@@ -3228,6 +3546,7 @@ export class CodeCodexElement extends HTMLElement {
     if (detail?.kind !== "file" || typeof detail.path !== "string") return;
     const tab = this.#previewTabs.find((candidate) => candidate.path === detail.path);
     if (!tab) return;
+    if (this.#activePreviewPath === tab.path) return;
     if (
       this.#editingPath !== null &&
       this.#editingPath !== tab.path &&
@@ -3331,6 +3650,92 @@ export class CodeCodexElement extends HTMLElement {
     return Math.min(this.#settings.width, viewportLimit);
   }
 
+  #readEnabledPreviewers(): readonly string[] {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(PREVIEWER_SETTINGS_KEY) || "[]");
+      if (!Array.isArray(value)) return [];
+      return [...new Set(value.filter((entry): entry is string => typeof entry === "string" && PREVIEWER_IDS.has(entry)))];
+    } catch {
+      return [];
+    }
+  }
+
+  #writeEnabledPreviewers(): void {
+    try {
+      localStorage.setItem(PREVIEWER_SETTINGS_KEY, JSON.stringify([...this.#enabledPreviewers]));
+    } catch {
+      // Preview extensions remain enabled for this session when DOM storage is unavailable.
+    }
+  }
+
+  #togglePreviewMarket(): void {
+    if (this.#previewMarketOpen) {
+      this.#closePreviewMarket(true);
+      return;
+    }
+    this.#closeContextMenu(false);
+    this.#previewMarketOpen = true;
+    this.#previewMarketPopover.hidden = false;
+    this.#previewMarketButton.setAttribute("aria-expanded", "true");
+    this.#renderPreviewMarket();
+    queueMicrotask(() => {
+      if (this.#previewMarketOpen) this.#previewMarketCloseButton.focus();
+    });
+  }
+
+  #closePreviewMarket(restoreFocus: boolean): void {
+    if (!this.#previewMarketOpen && this.#previewMarketPopover.hidden) return;
+    this.#previewMarketOpen = false;
+    this.#previewMarketPopover.hidden = true;
+    this.#previewMarketButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus && this.#previewMarketButton.isConnected) this.#previewMarketButton.focus();
+  }
+
+  #togglePreviewer(previewer: PreviewerDefinition): void {
+    const wasEnabled = this.#enabledPreviewers.has(previewer.id);
+    if (wasEnabled) this.#enabledPreviewers.delete(previewer.id);
+    else this.#enabledPreviewers.add(previewer.id);
+    this.#writeEnabledPreviewers();
+    this.#renderPreviewMarket();
+    if (previewer.kind === "markdown") {
+      this.#syncMainPreview();
+    } else {
+      this.#applyMediaPreviewerToggle(previewer.id, !wasEnabled);
+    }
+    this.#announce(`${previewer.title} ${wasEnabled ? "disabled" : "enabled"}`);
+  }
+
+  #renderPreviewMarket(): void {
+    for (const previewer of PREVIEWER_DEFINITIONS) {
+      const enabled = this.#enabledPreviewers.has(previewer.id);
+      const status = this.#previewerStatuses.get(previewer.id);
+      const button = this.#previewerButtons.get(previewer.id);
+      if (!status || !button) continue;
+      status.textContent = enabled ? "Enabled" : "Disabled";
+      status.dataset.enabled = String(enabled);
+      button.textContent = enabled ? "Disable" : "Enable";
+      button.dataset.enabled = String(enabled);
+      button.setAttribute("aria-label", `${enabled ? "Disable" : "Enable"} ${previewer.title}`);
+    }
+  }
+
+  #applyMediaPreviewerToggle(previewerId: string, enabled: boolean): void {
+    let activeReload: PreviewTab | undefined;
+    for (const tab of this.#previewTabs) {
+      if (mediaPreviewRoute(tab.path)?.previewerId !== previewerId) continue;
+      if (tab.timer) clearTimeout(tab.timer);
+      tab.timer = undefined;
+      tab.revision += 1;
+      tab.dirty = enabled;
+      tab.view = enabled
+        ? { kind: "loading", path: tab.path, name: tab.name }
+        : { kind: "unsupported", path: tab.path, name: tab.name, sizeBytes: 0, reason: "previewer-disabled" };
+      if (enabled && tab.path === this.#activePreviewPath) activeReload = tab;
+    }
+    if (activeReload) this.#schedulePreview(activeReload, 0);
+    else this.#syncMainPreview();
+  }
+
   #readLocalSettings(): ExplorerSettings {
     try {
       return normalizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null"));
@@ -3389,16 +3794,6 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderStatus(): void {
-    const stateLabels: Record<ExplorerViewState, string> = {
-      booting: "Connecting",
-      loading: "Resolving task",
-      ready: this.#watching ? "Watching workspace" : "Snapshot mode",
-      empty: this.#watching ? "Watching workspace" : "Snapshot mode",
-      "no-project": "Select a local task",
-      error: "Bridge stopped safely",
-      incompatible: "Compatibility stop",
-    };
-    this.#statusText.textContent = stateLabels[this.#state];
     this.#statusCode.textContent = this.#state === "ready" || this.#state === "empty" ? `${this.#rows.filter((row) => row.kind === "node").length} VIS` : this.#state.toUpperCase().slice(0, 8);
   }
 
@@ -3492,11 +3887,9 @@ function normalizePreview(raw: unknown): NormalizedPreview {
   if (object.kind === "unsupported") {
     return {
       kind: "unsupported",
-      text: "",
       sizeBytes,
       truncated: object.truncated,
       reason: normalizePreviewReason(object.reason),
-      editable: false,
     };
   }
   if (typeof object.text !== "string") {
@@ -3512,11 +3905,81 @@ function normalizePreview(raw: unknown): NormalizedPreview {
     text: capped,
     sizeBytes,
     truncated,
-    reason: "unknown",
     editable,
     ...(version === undefined ? {} : { version }),
     ...(lineEnding === undefined ? {} : { lineEnding }),
   };
+}
+
+function normalizeMediaInfo(raw: unknown, route: MediaPreviewRoute): NormalizedMediaInfo {
+  const object = asRecord(raw);
+  if (
+    !object ||
+    object.kind !== route.kind ||
+    typeof object.mimeType !== "string" ||
+    !route.mimeTypes.includes(object.mimeType) ||
+    !Number.isSafeInteger(object.sizeBytes) ||
+    (object.sizeBytes as number) <= 0 ||
+    (object.sizeBytes as number) > route.maxBytes ||
+    !Number.isSafeInteger(object.chunkSize) ||
+    (object.chunkSize as number) <= 0 ||
+    (object.chunkSize as number) > MAX_MEDIA_CHUNK_BYTES ||
+    !Number.isSafeInteger(object.chunkCount) ||
+    (object.chunkCount as number) <= 0 ||
+    typeof object.version !== "string" ||
+    !/^[0-9a-f]{64}$/.test(object.version)
+  ) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview metadata was not valid." });
+  }
+  const sizeBytes = object.sizeBytes as number;
+  const chunkSize = object.chunkSize as number;
+  const chunkCount = object.chunkCount as number;
+  if (chunkCount !== Math.ceil(sizeBytes / chunkSize)) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview chunk count was not valid." });
+  }
+  return {
+    kind: route.kind,
+    mimeType: object.mimeType,
+    sizeBytes,
+    chunkSize,
+    chunkCount,
+    version: object.version,
+  };
+}
+
+function normalizeMediaChunk(
+  raw: unknown,
+  expectedOffset: number,
+  expectedLength: number,
+  totalSizeBytes: number,
+): { readonly bytes: Uint8Array; readonly eof: boolean } {
+  const object = asRecord(raw);
+  const maxEncodedLength = Math.ceil(expectedLength / 3) * 4 + 4;
+  if (
+    !object ||
+    object.offset !== expectedOffset ||
+    typeof object.dataBase64 !== "string" ||
+    object.dataBase64.length > maxEncodedLength ||
+    typeof object.eof !== "boolean"
+  ) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview chunk was not valid." });
+  }
+  let binary: string;
+  try {
+    binary = window.atob(object.dataBase64);
+  } catch {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview chunk was not valid Base64." });
+  }
+  if (binary.length !== expectedLength) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview chunk had an unexpected length." });
+  }
+  const eof = expectedOffset + expectedLength === totalSizeBytes;
+  if (object.eof !== eof) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview ended at an unexpected position." });
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return { bytes, eof };
 }
 
 function normalizeLineEnding(value: unknown): MainPreviewLineEnding | undefined {
@@ -3572,6 +4035,20 @@ function editSaveError(error: unknown): string {
   }
   if (code === "NO_BRIDGE") return "Code-Codex is disconnected. Your draft has been kept.";
   return "Changes could not be saved. Try again or reload the file.";
+}
+
+function mediaPreviewError(error: unknown): string {
+  const code = errorCode(error);
+  if (code === "CONTENT_TOO_LARGE" || code === "PAYLOAD_TOO_LARGE" || code === "TOO_LARGE") {
+    return "This media file is larger than the preview limit.";
+  }
+  if (code === "NOT_EDITABLE" || code === "UNSUPPORTED_TYPE") {
+    return "The file contents do not match the selected preview format.";
+  }
+  if (code === "CONFLICT") return "The file changed while it was loading. Select it again to retry.";
+  if (code === "ACCESS_DENIED" || code === "OUTSIDE_WORKSPACE") return "Preview is blocked for this file.";
+  if (code === "NO_BRIDGE") return "Code-Codex is disconnected.";
+  return "The media file could not be loaded. Select it again to retry.";
 }
 
 function normalizePreviewReason(value: unknown): PreviewUnavailableReason {

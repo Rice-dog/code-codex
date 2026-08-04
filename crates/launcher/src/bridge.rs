@@ -38,9 +38,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 #[cfg(windows)]
 use windows_sys::core::BOOL;
 use workspace_service::{
-    CreateEntryKind, ErrorCode, ListOptions, ListPage, MAX_PREVIEW_BYTES, PreparedSettings,
-    PreviewResult, Settings, SettingsPatch, SettingsStore, WatchSubscription, WatchVisibility,
-    WatchVisibilityHandle, Workspace, WorkspaceError, WorkspaceWatcher,
+    CreateEntryKind, ErrorCode, ListOptions, ListPage, MAX_MEDIA_CHUNK_BYTES, MAX_PREVIEW_BYTES,
+    MediaInfo, PreparedSettings, PreviewResult, Settings, SettingsPatch, SettingsStore,
+    WatchSubscription, WatchVisibility, WatchVisibilityHandle, Workspace, WorkspaceError,
+    WorkspaceWatcher,
 };
 
 #[derive(Clone)]
@@ -121,6 +122,30 @@ struct PreviewSaveParams {
     relative_path: String,
     expected_version: String,
     content_base64: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MediaInfoParams {
+    relative_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MediaChunkParams {
+    relative_path: String,
+    offset: u64,
+    length: usize,
+    expected_size_bytes: u64,
+    expected_version: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaChunkResult {
+    offset: u64,
+    data_base64: String,
+    eof: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -361,6 +386,55 @@ impl NativeBridge {
             },
         )
         .await
+    }
+
+    async fn media_info(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        self.media_info_with_reader(params, epoch, |workspace, relative_path| {
+            workspace.media_info(&relative_path)
+        })
+        .await
+    }
+
+    async fn media_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: MediaChunkParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        if params.length == 0
+            || params.length > MAX_MEDIA_CHUNK_BYTES
+            || params.offset >= params.expected_size_bytes
+            || !valid_content_version(&params.expected_version)
+        {
+            return Err(BridgeError::invalid_request());
+        }
+
+        let context = {
+            let state = lock_unpoisoned(&self.inner.state);
+            self.ensure_epoch(epoch)?;
+            state.current.clone().ok_or_else(no_context_error)?
+        };
+        if context.lifecycle_epoch != epoch {
+            return Err(no_context_error());
+        }
+        let workspace = context.workspace.clone();
+        let chunk = tokio::task::spawn_blocking(move || {
+            workspace.media_chunk(
+                &params.relative_path,
+                params.offset,
+                params.length,
+                params.expected_size_bytes,
+                &params.expected_version,
+            )
+        })
+        .await;
+        self.ensure_active_context(&context, epoch)?;
+        let chunk = chunk
+            .map_err(|_| internal_error())?
+            .map_err(map_media_error)?;
+        serde_json::to_value(MediaChunkResult {
+            offset: chunk.offset,
+            data_base64: BASE64_STANDARD.encode(chunk.data),
+            eof: chunk.eof,
+        })
+        .map_err(|_| internal_error())
     }
 
     async fn entry_create(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
@@ -627,6 +701,36 @@ impl NativeBridge {
             .map_err(|_| internal_error())?
             .map_err(map_workspace_error)?;
         serde_json::to_value(preview).map_err(|_| internal_error())
+    }
+
+    async fn media_info_with_reader<F>(
+        &self,
+        params: Value,
+        epoch: u64,
+        reader: F,
+    ) -> Result<Value, BridgeError>
+    where
+        F: FnOnce(Arc<Workspace>, String) -> Result<MediaInfo, WorkspaceError> + Send + 'static,
+    {
+        self.ensure_epoch(epoch)?;
+        let params: MediaInfoParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let context = {
+            let state = lock_unpoisoned(&self.inner.state);
+            self.ensure_epoch(epoch)?;
+            state.current.clone().ok_or_else(no_context_error)?
+        };
+        if context.lifecycle_epoch != epoch {
+            return Err(no_context_error());
+        }
+        let workspace = context.workspace.clone();
+        let info =
+            tokio::task::spawn_blocking(move || reader(workspace, params.relative_path)).await;
+        self.ensure_active_context(&context, epoch)?;
+        let info = info
+            .map_err(|_| internal_error())?
+            .map_err(map_media_error)?;
+        serde_json::to_value(info).map_err(|_| internal_error())
     }
 
     async fn settings_get(&self, params: Value) -> Result<Value, BridgeError> {
@@ -912,6 +1016,8 @@ impl BridgeHandler for NativeBridge {
             "explorer.list" => self.list(request.params, epoch).await,
             "explorer.preview" => self.preview(request.params, epoch).await,
             "explorer.preview.save" => self.preview_save(request.params, epoch).await,
+            "explorer.media.info" => self.media_info(request.params, epoch).await,
+            "explorer.media.chunk" => self.media_chunk(request.params, epoch).await,
             "explorer.entry.create" => self.entry_create(request.params, epoch).await,
             "explorer.entry.rename" => self.entry_rename(request.params, epoch).await,
             "explorer.entry.move" => self.entry_move_batch(request.params, epoch).await,
@@ -965,6 +1071,13 @@ fn require_empty_object(value: &Value) -> Result<(), BridgeError> {
     } else {
         Err(BridgeError::invalid_request())
     }
+}
+
+fn valid_content_version(version: &str) -> bool {
+    version.len() == 64
+        && version
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn no_context_error() -> BridgeError {
@@ -1248,6 +1361,20 @@ fn map_workspace_error(error: WorkspaceError) -> BridgeError {
     BridgeError::new(code, error.public_message())
 }
 
+fn map_media_error(error: WorkspaceError) -> BridgeError {
+    match error.code() {
+        ErrorCode::ContentTooLarge => BridgeError::new(
+            "CONTENT_TOO_LARGE",
+            "This media file exceeds the native preview size limit.",
+        ),
+        ErrorCode::NotEditable => BridgeError::new(
+            "NOT_EDITABLE",
+            "This file is not a supported media preview.",
+        ),
+        _ => map_workspace_error(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1497,6 +1624,158 @@ mod tests {
             .await
             .expect_err("oversized content");
         assert_eq!(oversized.code, "CONTENT_TOO_LARGE");
+    }
+
+    #[tokio::test]
+    async fn media_bridge_returns_bounded_base64_chunks_and_rejects_stale_descriptors() {
+        let (directory, bridge) = manual_bridge().await;
+        let mut contents = vec![0x5a; 100];
+        contents[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        fs::write(directory.path().join("preview.png"), &contents).expect("image");
+
+        let info = bridge
+            .handle(request(
+                "explorer.media.info",
+                json!({ "relativePath": "preview.png" }),
+            ))
+            .await
+            .expect("media info");
+        assert_eq!(info["kind"], "image");
+        assert_eq!(info["mimeType"], "image/png");
+        assert_eq!(info["sizeBytes"], contents.len() as u64);
+        assert_eq!(info["chunkSize"], MAX_MEDIA_CHUNK_BYTES);
+        assert_eq!(info["chunkCount"], 1);
+        assert_eq!(info["version"].as_str().map(str::len), Some(64));
+
+        let version = info["version"].as_str().expect("media version");
+        let chunk = bridge
+            .handle(request(
+                "explorer.media.chunk",
+                json!({
+                    "relativePath": "preview.png",
+                    "offset": 0,
+                    "length": 32,
+                    "expectedSizeBytes": info["sizeBytes"],
+                    "expectedVersion": version,
+                }),
+            ))
+            .await
+            .expect("media chunk");
+        assert_eq!(chunk["offset"], 0);
+        assert_eq!(chunk["eof"], false);
+        assert_eq!(
+            BASE64_STANDARD
+                .decode(chunk["dataBase64"].as_str().expect("base64 data"))
+                .expect("decode chunk"),
+            contents[..32]
+        );
+
+        let last = bridge
+            .handle(request(
+                "explorer.media.chunk",
+                json!({
+                    "relativePath": "preview.png",
+                    "offset": 96,
+                    "length": MAX_MEDIA_CHUNK_BYTES,
+                    "expectedSizeBytes": info["sizeBytes"],
+                    "expectedVersion": version,
+                }),
+            ))
+            .await
+            .expect("last media chunk");
+        assert_eq!(last["eof"], true);
+        assert_eq!(
+            BASE64_STANDARD
+                .decode(last["dataBase64"].as_str().expect("last base64 data"))
+                .expect("decode last chunk"),
+            contents[96..]
+        );
+
+        for (params, expected_code) in [
+            (
+                json!({
+                    "relativePath": "preview.png",
+                    "offset": 0,
+                    "length": 1,
+                    "expectedSizeBytes": info["sizeBytes"],
+                    "expectedVersion": "0".repeat(64),
+                }),
+                "CONFLICT",
+            ),
+            (
+                json!({
+                    "relativePath": "preview.png",
+                    "offset": 0,
+                    "length": 1,
+                    "expectedSizeBytes": 101,
+                    "expectedVersion": version,
+                }),
+                "CONFLICT",
+            ),
+        ] {
+            let error = bridge
+                .handle(request("explorer.media.chunk", params))
+                .await
+                .expect_err("stale media descriptor");
+            assert_eq!(error.code, expected_code);
+        }
+
+        for invalid in [
+            json!({}),
+            json!({ "relativePath": "preview.png", "extra": true }),
+        ] {
+            let error = bridge
+                .handle(request("explorer.media.info", invalid))
+                .await
+                .expect_err("invalid media info schema");
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
+
+        for invalid in [
+            json!({}),
+            json!({
+                "relativePath": "preview.png",
+                "offset": 0,
+                "length": 0,
+                "expectedSizeBytes": info["sizeBytes"],
+                "expectedVersion": version,
+            }),
+            json!({
+                "relativePath": "preview.png",
+                "offset": 0,
+                "length": MAX_MEDIA_CHUNK_BYTES + 1,
+                "expectedSizeBytes": info["sizeBytes"],
+                "expectedVersion": version,
+            }),
+            json!({
+                "relativePath": "preview.png",
+                "offset": info["sizeBytes"],
+                "length": 1,
+                "expectedSizeBytes": info["sizeBytes"],
+                "expectedVersion": version,
+            }),
+            json!({
+                "relativePath": "preview.png",
+                "offset": 0,
+                "length": 1,
+                "expectedSizeBytes": info["sizeBytes"],
+                "expectedVersion": "not-a-version",
+            }),
+            json!({
+                "relativePath": "preview.png",
+                "offset": 0,
+                "length": 1,
+                "expectedSizeBytes": info["sizeBytes"],
+                "expectedVersion": version,
+                "force": true,
+            }),
+        ] {
+            let error = bridge
+                .handle(request("explorer.media.chunk", invalid))
+                .await
+                .expect_err("invalid media chunk schema");
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
     }
 
     #[tokio::test]

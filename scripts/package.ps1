@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.33"
+    [string]$Version = "0.1.43"
 )
 
 $ErrorActionPreference = "Stop"
@@ -145,6 +145,29 @@ foreach ($releaseFile in @(
     (Join-Path $Artifacts "SHA256SUMS.txt")
 )) {
     Copy-Item -LiteralPath $releaseFile -Destination $ReleaseRoot -Force
+}
+
+$currentPackageNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($currentPackage in @($setup, $msi, $zip)) {
+    [void]$currentPackageNames.Add((Split-Path -Leaf $currentPackage))
+}
+foreach ($packageRoot in @($Artifacts, $ReleaseRoot)) {
+    Get-ChildItem -LiteralPath $packageRoot -File | Where-Object {
+        $_.Name -match '^CodeCodex-.+-x64(?:-setup\.exe|\.msi|\.zip)$' -and
+        -not $currentPackageNames.Contains($_.Name)
+    } | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Force
+    }
+}
+
+Get-ChildItem -LiteralPath $Artifacts -Directory | Where-Object {
+    $_.Name -match '^CodeCodex-.+-x64$'
+} | ForEach-Object {
+    $stagingDirectory = [IO.Path]::GetFullPath($_.FullName)
+    if (-not $stagingDirectory.StartsWith($ExpectedStageRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe staging directory: $stagingDirectory"
+    }
+    Remove-Item -LiteralPath $stagingDirectory -Recurse -Force
 }
 
 Write-Host "Created $zip"

@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 cap-fs-ext = { version = "4.0.2", default-features = false }
 cap-primitives = "4.0.2"
+cfb = "0.14.0"
 directories.workspace = true
 dunce.workspace = true
 ignore.workspace = true
@@ -22,6 +23,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true
