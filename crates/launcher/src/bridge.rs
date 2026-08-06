@@ -3,6 +3,8 @@ use std::ffi::OsString;
 #[cfg(windows)]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
+#[cfg(windows)]
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 #[cfg(windows)]
@@ -14,6 +16,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+#[cfg(windows)]
+use cdp_client::CapabilityToken;
 use cdp_client::{BindingRequest, BridgeError, BridgeHandler, BridgeNotification};
 use context_resolver::{AppServerClient, ResolverError};
 use serde::{Deserialize, Serialize};
@@ -21,19 +25,41 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::{HWND, LPARAM, RPC_E_CHANGED_MODE, S_FALSE, S_OK};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, E_INVALIDARG, GetLastError, HWND, LPARAM, RECT, RPC_E_CHANGED_MODE, S_FALSE, S_OK,
+    SetLastError, WAIT_TIMEOUT,
+};
+#[cfg(all(windows, test))]
+use windows_sys::Win32::Graphics::Dwm::DWMSBT_MAINWINDOW;
+#[cfg(windows)]
+use windows_sys::Win32::Graphics::Dwm::{
+    DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+    DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
+};
 #[cfg(windows)]
 use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
+#[cfg(windows)]
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{
+    GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    WaitForSingleObject,
+};
+#[cfg(windows)]
+use windows_sys::Win32::UI::Controls::MARGINS;
 #[cfg(windows)]
 use windows_sys::Win32::UI::Shell::{
     ILFree, SHOpenFolderAndSelectItems, SHParseDisplayName, ShellExecuteW,
 };
 #[cfg(windows)]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GetClassNameW,
-    GetForegroundWindow, GetWindowTextW, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST,
-    IsWindowVisible, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
-    SetForegroundWindow, SetWindowPos, ShowWindowAsync,
+    ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GW_OWNER, GWL_EXSTYLE,
+    GetClassNameW, GetForegroundWindow, GetPropW, GetSystemMetrics, GetWindow, GetWindowLongPtrW,
+    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HWND_BOTTOM, HWND_NOTOPMOST,
+    HWND_TOPMOST, IsWindow, IsWindowVisible, RemovePropW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_SHOWWINDOW, SetForegroundWindow, SetPropW, SetWindowPos, ShowWindowAsync, WS_EX_APPWINDOW,
+    WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 #[cfg(windows)]
 use windows_sys::core::BOOL;
@@ -61,6 +87,7 @@ struct BridgeInner {
     context_revision: AtomicU64,
     lifecycle_epoch: AtomicU64,
     notification_sender: RwLock<Option<broadcast::Sender<BridgeNotification>>>,
+    window_transparency: WindowTransparencyController,
 }
 
 struct BridgeState {
@@ -212,6 +239,1198 @@ struct SettingsWrapper {
     settings: SettingsPatch,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WindowTransparencyParams {
+    enabled: bool,
+}
+
+const WINDOW_TRANSPARENCY_BACKGROUND: &str = "transparent";
+#[cfg(windows)]
+const WCA_ACCENT_POLICY: i32 = 19;
+#[cfg(windows)]
+const ACCENT_DISABLED: i32 = 0;
+#[cfg(windows)]
+const ACCENT_ENABLE_TRANSPARENT_GRADIENT: i32 = 2;
+#[cfg(windows)]
+const WINDOW_TRANSPARENCY_ACCENT_FLAGS: u32 = 2;
+#[cfg(windows)]
+const NO_EXTENDED_CLIENT_FRAME: MARGINS = MARGINS {
+    cxLeftWidth: 0,
+    cxRightWidth: 0,
+    cyTopHeight: 0,
+    cyBottomHeight: 0,
+};
+#[cfg(windows)]
+const FULL_EXTENDED_CLIENT_FRAME: MARGINS = MARGINS {
+    cxLeftWidth: -1,
+    cxRightWidth: -1,
+    cyTopHeight: -1,
+    cyBottomHeight: -1,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowTransparencyError {
+    Unsupported,
+    Unavailable,
+    Native,
+    Cancelled,
+}
+
+struct WindowTransparencyController {
+    #[cfg(windows)]
+    state: StdMutex<WindowTransparencyState>,
+    #[cfg(windows)]
+    marker: WindowTransparencyMarker,
+}
+
+#[cfg(windows)]
+#[derive(Default)]
+struct WindowTransparencyState {
+    process: Option<BoundWindowProcess>,
+    active: Option<ActiveWindowTransparency>,
+}
+
+#[cfg(windows)]
+struct BoundWindowProcess {
+    pid: u32,
+    handle: isize,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AccentPolicy {
+    state: i32,
+    flags: u32,
+    gradient_color: u32,
+    animation_id: u32,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct WindowCompositionAttributeData {
+    attribute: i32,
+    data: *mut std::ffi::c_void,
+    size_of_data: usize,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OriginalAccentPolicy {
+    Known(AccentPolicy),
+    Unknown,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SystemBackdropSnapshot {
+    Unsupported,
+    Value(i32),
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowCornerPreferenceSnapshot {
+    Unsupported,
+    Value(i32),
+}
+
+#[cfg(windows)]
+struct WindowTransparencyMarker {
+    property_name: Vec<u16>,
+    cookie: usize,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy)]
+struct ActiveWindowTransparency {
+    window: isize,
+    pid: u32,
+    thread_id: u32,
+    original_accent_policy: OriginalAccentPolicy,
+    original_system_backdrop: SystemBackdropSnapshot,
+    original_window_corner_preference: WindowCornerPreferenceSnapshot,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowRectangle {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowCandidate {
+    window: isize,
+    pid: u32,
+    thread_id: u32,
+    visible: bool,
+    unowned: bool,
+    chrome_widget: bool,
+    app_window: bool,
+    tool_window: bool,
+    no_redirection_bitmap: bool,
+    rectangle: WindowRectangle,
+}
+
+#[cfg(windows)]
+struct WindowEnumerationContext {
+    pid: u32,
+    virtual_screen: WindowRectangle,
+    candidates: Vec<WindowCandidate>,
+}
+
+impl WindowTransparencyController {
+    fn new() -> Self {
+        Self {
+            #[cfg(windows)]
+            state: StdMutex::new(WindowTransparencyState::default()),
+            #[cfg(windows)]
+            marker: WindowTransparencyMarker::new(),
+        }
+    }
+
+    fn bind_verified_process(&self, pid: u32) -> Result<(), WindowTransparencyError> {
+        #[cfg(not(windows))]
+        {
+            let _ = pid;
+            Err(WindowTransparencyError::Unsupported)
+        }
+        #[cfg(windows)]
+        {
+            if pid == 0 {
+                return Err(WindowTransparencyError::Unavailable);
+            }
+            let handle = unsafe {
+                OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                    0,
+                    pid,
+                )
+            };
+            if handle.is_null() {
+                return Err(WindowTransparencyError::Unavailable);
+            }
+            let process = BoundWindowProcess {
+                pid,
+                handle: handle as isize,
+            };
+            if !process.is_live() {
+                return Err(WindowTransparencyError::Unavailable);
+            }
+
+            let mut state = lock_unpoisoned(&self.state);
+            if state
+                .process
+                .as_ref()
+                .is_some_and(|existing| existing.pid == pid && existing.is_live())
+            {
+                return Ok(());
+            }
+            Self::restore_locked(&mut state, &self.marker)?;
+            state.process = Some(process);
+            Ok(())
+        }
+    }
+
+    fn set_enabled(
+        &self,
+        enabled: bool,
+        lifecycle_epoch: &AtomicU64,
+        expected_epoch: u64,
+    ) -> Result<(), WindowTransparencyError> {
+        #[cfg(not(windows))]
+        {
+            let _ = (enabled, lifecycle_epoch, expected_epoch);
+            Err(WindowTransparencyError::Unsupported)
+        }
+        #[cfg(windows)]
+        {
+            let mut state = lock_unpoisoned(&self.state);
+            if lifecycle_epoch.load(Ordering::Acquire) != expected_epoch {
+                return Err(WindowTransparencyError::Cancelled);
+            }
+            if enabled {
+                Self::enable_locked(&mut state, &self.marker)
+            } else {
+                Self::restore_locked(&mut state, &self.marker)
+            }
+        }
+    }
+
+    fn restore(&self) -> Result<(), WindowTransparencyError> {
+        #[cfg(not(windows))]
+        {
+            Ok(())
+        }
+        #[cfg(windows)]
+        {
+            Self::restore_locked(&mut lock_unpoisoned(&self.state), &self.marker)
+        }
+    }
+
+    #[cfg(windows)]
+    fn enable_locked(
+        state: &mut WindowTransparencyState,
+        marker: &WindowTransparencyMarker,
+    ) -> Result<(), WindowTransparencyError> {
+        let process = state
+            .process
+            .as_ref()
+            .ok_or(WindowTransparencyError::Unsupported)?;
+        if !process.is_live() {
+            state.active = None;
+            return Err(WindowTransparencyError::Unavailable);
+        }
+        if let Some(active) = state.active.take() {
+            if active.still_belongs_to(process, marker) {
+                let mut refresh_changed_native_state = false;
+                if apply_window_transparency(
+                    active.window as HWND,
+                    active.original_system_backdrop,
+                    active.original_window_corner_preference,
+                    &mut refresh_changed_native_state,
+                    || active.still_belongs_to(process, marker),
+                )
+                .is_ok()
+                {
+                    state.active = Some(active);
+                    return Ok(());
+                }
+                let mut active = active;
+                if let Err(error) = restore_active_window(process, marker, &mut active) {
+                    state.active = Some(active);
+                    return Err(error);
+                }
+            }
+        }
+
+        let candidate = select_codex_window(process.pid)?;
+        if !candidate_still_belongs_to_process(&candidate, process) {
+            return Err(WindowTransparencyError::Unavailable);
+        }
+        claim_window_marker(candidate.window as HWND, marker)?;
+        if !candidate_still_belongs_to_process(&candidate, process)
+            || !window_has_marker(candidate.window as HWND, marker)
+        {
+            release_window_marker(candidate.window as HWND, marker);
+            return Err(WindowTransparencyError::Unavailable);
+        }
+        let original_ex_style = match read_extended_style(candidate.window as HWND) {
+            Ok(style) => style,
+            Err(error) => {
+                release_window_marker(candidate.window as HWND, marker);
+                return Err(error);
+            }
+        };
+        if let Err(error) = validate_transparency_window_style(original_ex_style) {
+            release_window_marker(candidate.window as HWND, marker);
+            return Err(error);
+        }
+        let original_system_backdrop = match read_window_system_backdrop(candidate.window as HWND) {
+            Ok(backdrop) => backdrop,
+            Err(error) => {
+                release_window_marker(candidate.window as HWND, marker);
+                return Err(error);
+            }
+        };
+        let original_window_corner_preference =
+            match read_window_corner_preference(candidate.window as HWND) {
+                Ok(preference) => preference,
+                Err(error) => {
+                    release_window_marker(candidate.window as HWND, marker);
+                    return Err(error);
+                }
+            };
+        let original_accent_policy = snapshot_window_accent_policy(candidate.window as HWND);
+        let mut active = ActiveWindowTransparency {
+            window: candidate.window,
+            pid: candidate.pid,
+            thread_id: candidate.thread_id,
+            original_accent_policy,
+            original_system_backdrop,
+            original_window_corner_preference,
+        };
+
+        if !active.still_belongs_to(process, marker) {
+            release_window_marker(candidate.window as HWND, marker);
+            return Err(WindowTransparencyError::Unavailable);
+        }
+        let mut native_state_changed = false;
+        let applied = apply_window_transparency(
+            candidate.window as HWND,
+            original_system_backdrop,
+            original_window_corner_preference,
+            &mut native_state_changed,
+            || active.still_belongs_to(process, marker),
+        );
+        if applied.is_ok() {
+            state.active = Some(active);
+            return Ok(());
+        }
+
+        if native_state_changed && restore_active_window(process, marker, &mut active).is_err() {
+            state.active = Some(active);
+        } else if !native_state_changed {
+            release_window_marker(candidate.window as HWND, marker);
+        }
+        applied
+    }
+
+    #[cfg(windows)]
+    fn restore_locked(
+        state: &mut WindowTransparencyState,
+        marker: &WindowTransparencyMarker,
+    ) -> Result<(), WindowTransparencyError> {
+        let Some(mut active) = state.active.take() else {
+            return Ok(());
+        };
+        let Some(process) = state.process.as_ref() else {
+            return Ok(());
+        };
+        if let Err(error) = restore_active_window(process, marker, &mut active) {
+            state.active = Some(active);
+            return Err(error);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for WindowTransparencyController {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            let state = self
+                .state
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _ = Self::restore_locked(state, &self.marker);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl BoundWindowProcess {
+    fn is_live(&self) -> bool {
+        let handle = self.handle as *mut std::ffi::c_void;
+        !handle.is_null()
+            && unsafe { GetProcessId(handle) } == self.pid
+            && unsafe { WaitForSingleObject(handle, 0) } == WAIT_TIMEOUT
+    }
+}
+
+#[cfg(windows)]
+impl Drop for BoundWindowProcess {
+    fn drop(&mut self) {
+        let handle = self.handle as *mut std::ffi::c_void;
+        if !handle.is_null() {
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+impl WindowTransparencyMarker {
+    fn new() -> Self {
+        let launcher_pid = std::process::id();
+        let nonce = CapabilityToken::generate();
+        let mut property_name = format!(
+            "CodeCodex.Transparency.Owner.{launcher_pid}.{}",
+            nonce.expose()
+        )
+        .encode_utf16()
+        .collect::<Vec<_>>();
+        property_name.push(0);
+        let cookie = nonce
+            .expose()
+            .bytes()
+            .take(std::mem::size_of::<usize>())
+            .fold(0_usize, |value, byte| {
+                value.rotate_left(7) ^ usize::from(byte)
+            })
+            .max(1);
+        Self {
+            property_name,
+            cookie,
+        }
+    }
+
+    fn property_name(&self) -> *const u16 {
+        self.property_name.as_ptr()
+    }
+
+    fn cookie(&self) -> *mut std::ffi::c_void {
+        self.cookie as *mut std::ffi::c_void
+    }
+}
+
+#[cfg(windows)]
+impl ActiveWindowTransparency {
+    fn still_belongs_to(
+        &self,
+        process: &BoundWindowProcess,
+        marker: &WindowTransparencyMarker,
+    ) -> bool {
+        process.pid == self.pid
+            && process.is_live()
+            && window_identity(self.window as HWND) == Some((self.pid, self.thread_id))
+            && window_class(self.window as HWND) == "Chrome_WidgetWin_1"
+            && window_has_marker(self.window as HWND, marker)
+    }
+}
+
+#[cfg(windows)]
+fn restore_active_window(
+    process: &BoundWindowProcess,
+    marker: &WindowTransparencyMarker,
+    active: &mut ActiveWindowTransparency,
+) -> Result<(), WindowTransparencyError> {
+    if !process.is_live() || unsafe { IsWindow(active.window as HWND) } == 0 {
+        return Ok(());
+    }
+    if !active.still_belongs_to(process, marker) {
+        // A destroyed/reused HWND must never be mutated, even if that means
+        // there is no longer a live window on which restoration is meaningful.
+        return Ok(());
+    }
+
+    let accent_result =
+        restore_window_accent_policy(active.window as HWND, active.original_accent_policy, || {
+            active.still_belongs_to(process, marker)
+        });
+    let backdrop_result = restore_window_system_backdrop(
+        active.window as HWND,
+        active.original_system_backdrop,
+        || active.still_belongs_to(process, marker),
+    );
+    let corner_result = restore_window_corner_preference(
+        active.window as HWND,
+        active.original_window_corner_preference,
+        || active.still_belongs_to(process, marker),
+    );
+    // Transparency temporarily removes Electron's full DWM client frame.
+    // Restore it with the native backdrop so Codex's unpainted shell regions
+    // do not fall back to black after the extension is disabled.
+    let frame_result = restore_extended_client_frame(active.window as HWND, || {
+        active.still_belongs_to(process, marker)
+    });
+    accent_result?;
+    backdrop_result?;
+    corner_result?;
+    frame_result?;
+    if active.still_belongs_to(process, marker) {
+        remove_window_marker(active.window as HWND, marker)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn restore_window_system_backdrop<F>(
+    window: HWND,
+    original_system_backdrop: SystemBackdropSnapshot,
+    mut still_owned: F,
+) -> Result<(), WindowTransparencyError>
+where
+    F: FnMut() -> bool,
+{
+    let original_system_backdrop = match original_system_backdrop {
+        SystemBackdropSnapshot::Unsupported => return Ok(()),
+        SystemBackdropSnapshot::Value(backdrop) => backdrop,
+    };
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    write_window_system_backdrop(window, original_system_backdrop)?;
+    if still_owned() {
+        Ok(())
+    } else {
+        Err(WindowTransparencyError::Unavailable)
+    }
+}
+
+#[cfg(windows)]
+fn read_window_system_backdrop(
+    window: HWND,
+) -> Result<SystemBackdropSnapshot, WindowTransparencyError> {
+    let mut backdrop = 0_i32;
+    let result = unsafe {
+        DwmGetWindowAttribute(
+            window,
+            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+            std::ptr::addr_of_mut!(backdrop).cast(),
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
+    classify_system_backdrop_read(result, backdrop)
+}
+
+#[cfg(windows)]
+fn classify_system_backdrop_read(
+    result: i32,
+    backdrop: i32,
+) -> Result<SystemBackdropSnapshot, WindowTransparencyError> {
+    if result >= 0 {
+        Ok(SystemBackdropSnapshot::Value(backdrop))
+    } else if result == E_INVALIDARG {
+        // Windows 10 exposes DwmGetWindowAttribute but does not implement this
+        // Windows 11 attribute. Other failures are not capability signals.
+        Ok(SystemBackdropSnapshot::Unsupported)
+    } else {
+        Err(WindowTransparencyError::Native)
+    }
+}
+
+#[cfg(windows)]
+fn write_window_system_backdrop(
+    window: HWND,
+    backdrop: i32,
+) -> Result<(), WindowTransparencyError> {
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            window,
+            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+            std::ptr::addr_of!(backdrop).cast(),
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
+    if result < 0 {
+        return Err(WindowTransparencyError::Native);
+    }
+    match read_window_system_backdrop(window)? {
+        SystemBackdropSnapshot::Value(current) if current == backdrop => Ok(()),
+        SystemBackdropSnapshot::Value(_) | SystemBackdropSnapshot::Unsupported => {
+            Err(WindowTransparencyError::Unavailable)
+        }
+    }
+}
+
+#[cfg(windows)]
+fn restore_window_corner_preference<F>(
+    window: HWND,
+    original_window_corner_preference: WindowCornerPreferenceSnapshot,
+    mut still_owned: F,
+) -> Result<(), WindowTransparencyError>
+where
+    F: FnMut() -> bool,
+{
+    let original_window_corner_preference = match original_window_corner_preference {
+        WindowCornerPreferenceSnapshot::Unsupported => return Ok(()),
+        WindowCornerPreferenceSnapshot::Value(preference) => preference,
+    };
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    write_window_corner_preference(window, original_window_corner_preference)?;
+    if still_owned() {
+        Ok(())
+    } else {
+        Err(WindowTransparencyError::Unavailable)
+    }
+}
+
+#[cfg(windows)]
+fn read_window_corner_preference(
+    window: HWND,
+) -> Result<WindowCornerPreferenceSnapshot, WindowTransparencyError> {
+    let mut preference = 0_i32;
+    let result = unsafe {
+        DwmGetWindowAttribute(
+            window,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            std::ptr::addr_of_mut!(preference).cast(),
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
+    classify_window_corner_preference_read(result, preference)
+}
+
+#[cfg(windows)]
+fn classify_window_corner_preference_read(
+    result: i32,
+    preference: i32,
+) -> Result<WindowCornerPreferenceSnapshot, WindowTransparencyError> {
+    if result >= 0 {
+        Ok(WindowCornerPreferenceSnapshot::Value(preference))
+    } else if result == E_INVALIDARG {
+        // Rounded-corner preferences were introduced in Windows 11. Windows 10
+        // has no rounded compositor path to disable for restored windows.
+        Ok(WindowCornerPreferenceSnapshot::Unsupported)
+    } else {
+        Err(WindowTransparencyError::Native)
+    }
+}
+
+#[cfg(windows)]
+fn write_window_corner_preference(
+    window: HWND,
+    preference: i32,
+) -> Result<(), WindowTransparencyError> {
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            window,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            std::ptr::addr_of!(preference).cast(),
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
+    if result < 0 {
+        return Err(WindowTransparencyError::Native);
+    }
+    match read_window_corner_preference(window)? {
+        WindowCornerPreferenceSnapshot::Value(current) if current == preference => Ok(()),
+        WindowCornerPreferenceSnapshot::Value(_) | WindowCornerPreferenceSnapshot::Unsupported => {
+            Err(WindowTransparencyError::Unavailable)
+        }
+    }
+}
+
+#[cfg(windows)]
+fn clear_extended_client_frame<F>(
+    window: HWND,
+    still_owned: F,
+) -> Result<(), WindowTransparencyError>
+where
+    F: FnMut() -> bool,
+{
+    clear_extended_client_frame_with(window, still_owned, |window, margins| unsafe {
+        DwmExtendFrameIntoClientArea(window, margins)
+    })
+}
+
+#[cfg(windows)]
+fn clear_extended_client_frame_with<F, E>(
+    window: HWND,
+    mut still_owned: F,
+    mut extend_frame: E,
+) -> Result<(), WindowTransparencyError>
+where
+    F: FnMut() -> bool,
+    E: FnMut(HWND, *const MARGINS) -> i32,
+{
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    let result = extend_frame(window, &NO_EXTENDED_CLIENT_FRAME);
+    if result < 0 {
+        return Err(WindowTransparencyError::Native);
+    }
+    if still_owned() {
+        Ok(())
+    } else {
+        Err(WindowTransparencyError::Unavailable)
+    }
+}
+
+#[cfg(windows)]
+fn restore_extended_client_frame<F>(
+    window: HWND,
+    mut still_owned: F,
+) -> Result<(), WindowTransparencyError>
+where
+    F: FnMut() -> bool,
+{
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    let result = unsafe { DwmExtendFrameIntoClientArea(window, &FULL_EXTENDED_CLIENT_FRAME) };
+    if result < 0 {
+        return Err(WindowTransparencyError::Native);
+    }
+    if still_owned() {
+        Ok(())
+    } else {
+        Err(WindowTransparencyError::Unavailable)
+    }
+}
+
+#[cfg(windows)]
+fn claim_window_marker(
+    window: HWND,
+    marker: &WindowTransparencyMarker,
+) -> Result<(), WindowTransparencyError> {
+    if !unsafe { GetPropW(window, marker.property_name()) }.is_null() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    let claimed = unsafe { SetPropW(window, marker.property_name(), marker.cookie()) } != 0;
+    if !claimed {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    if !window_has_marker(window, marker) {
+        cleanup_claimed_window_marker(window, marker);
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn window_has_marker(window: HWND, marker: &WindowTransparencyMarker) -> bool {
+    !window.is_null() && unsafe { IsWindow(window) } != 0 && raw_window_has_marker(window, marker)
+}
+
+#[cfg(windows)]
+fn raw_window_has_marker(window: HWND, marker: &WindowTransparencyMarker) -> bool {
+    !window.is_null() && unsafe { GetPropW(window, marker.property_name()) } == marker.cookie()
+}
+
+#[cfg(windows)]
+fn cleanup_claimed_window_marker(window: HWND, marker: &WindowTransparencyMarker) {
+    if raw_window_has_marker(window, marker) {
+        let _ = unsafe { RemovePropW(window, marker.property_name()) };
+    }
+}
+
+#[cfg(windows)]
+fn remove_window_marker(
+    window: HWND,
+    marker: &WindowTransparencyMarker,
+) -> Result<(), WindowTransparencyError> {
+    if !window_has_marker(window, marker) {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    let removed = unsafe { RemovePropW(window, marker.property_name()) };
+    if removed != marker.cookie() {
+        return Err(WindowTransparencyError::Native);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn release_window_marker(window: HWND, marker: &WindowTransparencyMarker) {
+    if window_has_marker(window, marker) {
+        let _ = unsafe { RemovePropW(window, marker.property_name()) };
+    }
+}
+
+#[cfg(windows)]
+type SetWindowCompositionAttributeFn =
+    unsafe extern "system" fn(HWND, *mut WindowCompositionAttributeData) -> BOOL;
+
+#[cfg(windows)]
+type GetWindowCompositionAttributeFn =
+    unsafe extern "system" fn(HWND, *mut WindowCompositionAttributeData) -> BOOL;
+
+#[cfg(windows)]
+const TRANSPARENT_ACCENT_POLICY: AccentPolicy = AccentPolicy {
+    state: ACCENT_ENABLE_TRANSPARENT_GRADIENT,
+    flags: WINDOW_TRANSPARENCY_ACCENT_FLAGS,
+    gradient_color: 0,
+    animation_id: 0,
+};
+
+#[cfg(windows)]
+const DISABLED_ACCENT_POLICY: AccentPolicy = AccentPolicy {
+    state: ACCENT_DISABLED,
+    flags: 0,
+    gradient_color: 0,
+    animation_id: 0,
+};
+
+#[cfg(windows)]
+fn resolve_set_window_composition_attribute() -> Option<SetWindowCompositionAttributeFn> {
+    static FUNCTION: OnceLock<Option<SetWindowCompositionAttributeFn>> = OnceLock::new();
+    *FUNCTION.get_or_init(|| {
+        let module = unsafe { GetModuleHandleW(windows_sys::w!("user32.dll")) };
+        if module.is_null() {
+            return None;
+        }
+        let raw = unsafe { GetProcAddress(module, b"SetWindowCompositionAttribute\0".as_ptr()) }?;
+        // GetProcAddress erases the signature; this is the system ABI used by
+        // the compositor export on supported Windows builds.
+        Some(unsafe {
+            std::mem::transmute::<
+                unsafe extern "system" fn() -> isize,
+                SetWindowCompositionAttributeFn,
+            >(raw)
+        })
+    })
+}
+
+#[cfg(windows)]
+fn resolve_get_window_composition_attribute() -> Option<GetWindowCompositionAttributeFn> {
+    static FUNCTION: OnceLock<Option<GetWindowCompositionAttributeFn>> = OnceLock::new();
+    *FUNCTION.get_or_init(|| {
+        let module = unsafe { GetModuleHandleW(windows_sys::w!("user32.dll")) };
+        if module.is_null() {
+            return None;
+        }
+        let raw = unsafe { GetProcAddress(module, b"GetWindowCompositionAttribute\0".as_ptr()) }?;
+        Some(unsafe {
+            std::mem::transmute::<
+                unsafe extern "system" fn() -> isize,
+                GetWindowCompositionAttributeFn,
+            >(raw)
+        })
+    })
+}
+
+#[cfg(windows)]
+fn read_window_accent_policy(window: HWND) -> Option<AccentPolicy> {
+    let function = resolve_get_window_composition_attribute()?;
+    let mut policy = DISABLED_ACCENT_POLICY;
+    let mut data = WindowCompositionAttributeData {
+        attribute: WCA_ACCENT_POLICY,
+        data: std::ptr::addr_of_mut!(policy).cast(),
+        size_of_data: std::mem::size_of::<AccentPolicy>(),
+    };
+    (unsafe { function(window, std::ptr::addr_of_mut!(data)) } != 0).then_some(policy)
+}
+
+#[cfg(windows)]
+fn snapshot_window_accent_policy(window: HWND) -> OriginalAccentPolicy {
+    read_window_accent_policy(window)
+        .map(OriginalAccentPolicy::Known)
+        .unwrap_or(OriginalAccentPolicy::Unknown)
+}
+
+#[cfg(windows)]
+fn write_window_accent_policy(
+    window: HWND,
+    policy: AccentPolicy,
+) -> Result<(), WindowTransparencyError> {
+    let function =
+        resolve_set_window_composition_attribute().ok_or(WindowTransparencyError::Unsupported)?;
+    let mut policy = policy;
+    let mut data = WindowCompositionAttributeData {
+        attribute: WCA_ACCENT_POLICY,
+        data: std::ptr::addr_of_mut!(policy).cast(),
+        size_of_data: std::mem::size_of::<AccentPolicy>(),
+    };
+    if unsafe { function(window, std::ptr::addr_of_mut!(data)) } == 0 {
+        return Err(WindowTransparencyError::Native);
+    }
+    if read_window_accent_policy(window).is_some_and(|current| current != policy) {
+        Err(WindowTransparencyError::Unavailable)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn validate_transparency_window_style(style: isize) -> Result<(), WindowTransparencyError> {
+    if has_extended_style(style, WS_EX_LAYERED)
+        || has_extended_style(style, WS_EX_TRANSPARENT)
+        || has_extended_style(style, WS_EX_NOREDIRECTIONBITMAP)
+    {
+        Err(WindowTransparencyError::Unavailable)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn apply_window_transparency<F>(
+    window: HWND,
+    original_system_backdrop: SystemBackdropSnapshot,
+    original_window_corner_preference: WindowCornerPreferenceSnapshot,
+    native_state_changed: &mut bool,
+    mut still_owned: F,
+) -> Result<(), WindowTransparencyError>
+where
+    F: FnMut() -> bool,
+{
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    let original_style = read_extended_style(window)?;
+    validate_transparency_window_style(original_style)?;
+    if resolve_set_window_composition_attribute().is_none() {
+        return Err(WindowTransparencyError::Unsupported);
+    }
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    match original_system_backdrop {
+        SystemBackdropSnapshot::Unsupported => {}
+        SystemBackdropSnapshot::Value(_) => match read_window_system_backdrop(window)? {
+            SystemBackdropSnapshot::Value(DWMSBT_NONE) => {}
+            SystemBackdropSnapshot::Value(_) => {
+                *native_state_changed = true;
+                write_window_system_backdrop(window, DWMSBT_NONE)?;
+            }
+            SystemBackdropSnapshot::Unsupported => {
+                return Err(WindowTransparencyError::Unavailable);
+            }
+        },
+    }
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+
+    match original_window_corner_preference {
+        WindowCornerPreferenceSnapshot::Unsupported => {}
+        WindowCornerPreferenceSnapshot::Value(_) => match read_window_corner_preference(window)? {
+            WindowCornerPreferenceSnapshot::Value(DWMWCP_DONOTROUND) => {}
+            WindowCornerPreferenceSnapshot::Value(_) => {
+                *native_state_changed = true;
+                write_window_corner_preference(window, DWMWCP_DONOTROUND)?;
+            }
+            WindowCornerPreferenceSnapshot::Unsupported => {
+                return Err(WindowTransparencyError::Unavailable);
+            }
+        },
+    }
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+
+    *native_state_changed = true;
+    write_window_accent_policy(window, TRANSPARENT_ACCENT_POLICY)?;
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    // Electron extends the DWM frame across the restored client area. That
+    // path flattens Chromium's transparent pixels to white even though the
+    // renderer still supplies alpha. Zero margins retain normal input while
+    // allowing the transparent accent surface to reach the desktop.
+    clear_extended_client_frame(window, &mut still_owned)?;
+    let applied_style = read_extended_style(window)?;
+    if applied_style != original_style {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    validate_transparency_window_style(applied_style)?;
+    if matches!(original_system_backdrop, SystemBackdropSnapshot::Value(_)) {
+        match read_window_system_backdrop(window)? {
+            SystemBackdropSnapshot::Value(DWMSBT_NONE) => {}
+            SystemBackdropSnapshot::Value(_) | SystemBackdropSnapshot::Unsupported => {
+                return Err(WindowTransparencyError::Unavailable);
+            }
+        }
+    }
+    if matches!(
+        original_window_corner_preference,
+        WindowCornerPreferenceSnapshot::Value(_)
+    ) {
+        match read_window_corner_preference(window)? {
+            WindowCornerPreferenceSnapshot::Value(DWMWCP_DONOTROUND) => {}
+            WindowCornerPreferenceSnapshot::Value(_)
+            | WindowCornerPreferenceSnapshot::Unsupported => {
+                return Err(WindowTransparencyError::Unavailable);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn restore_window_accent_policy<F>(
+    window: HWND,
+    original_accent_policy: OriginalAccentPolicy,
+    mut still_owned: F,
+) -> Result<(), WindowTransparencyError>
+where
+    F: FnMut() -> bool,
+{
+    if !still_owned() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    // GetWindowCompositionAttribute is undocumented and may not be exported.
+    // When it cannot snapshot the host state, ACCENT_DISABLED is the only
+    // deterministic non-transparent restoration policy.
+    let policy = match original_accent_policy {
+        OriginalAccentPolicy::Known(policy) => policy,
+        OriginalAccentPolicy::Unknown => DISABLED_ACCENT_POLICY,
+    };
+    write_window_accent_policy(window, policy)?;
+    if still_owned() {
+        Ok(())
+    } else {
+        Err(WindowTransparencyError::Unavailable)
+    }
+}
+
+#[cfg(windows)]
+fn read_extended_style(window: HWND) -> Result<isize, WindowTransparencyError> {
+    unsafe {
+        SetLastError(0);
+    }
+    let style = unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) };
+    if style == 0 && unsafe { GetLastError() } != 0 {
+        Err(WindowTransparencyError::Native)
+    } else {
+        Ok(style)
+    }
+}
+
+#[cfg(windows)]
+fn has_extended_style(style: isize, flag: u32) -> bool {
+    style & flag as isize != 0
+}
+
+#[cfg(windows)]
+fn window_identity(window: HWND) -> Option<(u32, u32)> {
+    if window.is_null() || unsafe { IsWindow(window) } == 0 {
+        return None;
+    }
+    let mut pid = 0;
+    let thread_id = unsafe { GetWindowThreadProcessId(window, &mut pid) };
+    (pid != 0 && thread_id != 0).then_some((pid, thread_id))
+}
+
+#[cfg(windows)]
+fn candidate_still_belongs_to_process(
+    candidate: &WindowCandidate,
+    process: &BoundWindowProcess,
+) -> bool {
+    process.is_live()
+        && window_identity(candidate.window as HWND) == Some((candidate.pid, candidate.thread_id))
+        && candidate.pid == process.pid
+        && window_class(candidate.window as HWND) == "Chrome_WidgetWin_1"
+}
+
+#[cfg(windows)]
+fn select_codex_window(pid: u32) -> Result<WindowCandidate, WindowTransparencyError> {
+    let virtual_screen = virtual_screen_rectangle()?;
+    let foreground = unsafe { GetForegroundWindow() };
+    if let Some(candidate) = inspect_window_candidate(foreground, virtual_screen) {
+        if candidate.qualifies(pid, virtual_screen) {
+            return Ok(candidate);
+        }
+    }
+
+    let mut context = WindowEnumerationContext {
+        pid,
+        virtual_screen,
+        candidates: Vec::new(),
+    };
+    let enumerated = unsafe {
+        EnumWindows(
+            Some(collect_codex_window_candidate),
+            &mut context as *mut WindowEnumerationContext as LPARAM,
+        )
+    } != 0;
+    if !enumerated {
+        return Err(WindowTransparencyError::Native);
+    }
+    select_unique_candidate(None, &context.candidates, pid, virtual_screen)
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn collect_codex_window_candidate(window: HWND, parameter: LPARAM) -> BOOL {
+    let context = unsafe { &mut *(parameter as *mut WindowEnumerationContext) };
+    if let Some(candidate) = inspect_window_candidate(window, context.virtual_screen) {
+        if candidate.qualifies(context.pid, context.virtual_screen) {
+            context.candidates.push(candidate);
+        }
+    }
+    1
+}
+
+#[cfg(windows)]
+fn inspect_window_candidate(
+    window: HWND,
+    virtual_screen: WindowRectangle,
+) -> Option<WindowCandidate> {
+    let (pid, thread_id) = window_identity(window)?;
+    let mut rectangle = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    if unsafe { GetWindowRect(window, &mut rectangle) } == 0 {
+        return None;
+    }
+    let ex_style = read_extended_style(window).ok()?;
+    Some(WindowCandidate {
+        window: window as isize,
+        pid,
+        thread_id,
+        visible: unsafe { IsWindowVisible(window) } != 0,
+        unowned: unsafe { GetWindow(window, GW_OWNER) }.is_null(),
+        chrome_widget: window_class(window) == "Chrome_WidgetWin_1",
+        app_window: has_extended_style(ex_style, WS_EX_APPWINDOW),
+        tool_window: has_extended_style(ex_style, WS_EX_TOOLWINDOW),
+        no_redirection_bitmap: has_extended_style(ex_style, WS_EX_NOREDIRECTIONBITMAP),
+        rectangle: WindowRectangle {
+            left: rectangle.left,
+            top: rectangle.top,
+            right: rectangle.right,
+            bottom: rectangle.bottom,
+        },
+    })
+    .filter(|candidate| rectangle_is_nontrivial(candidate.rectangle, virtual_screen))
+}
+
+#[cfg(windows)]
+impl WindowCandidate {
+    fn qualifies(&self, pid: u32, virtual_screen: WindowRectangle) -> bool {
+        self.pid == pid
+            && self.thread_id != 0
+            && self.visible
+            && self.unowned
+            && self.chrome_widget
+            && self.app_window
+            && !self.tool_window
+            && !self.no_redirection_bitmap
+            && rectangle_is_nontrivial(self.rectangle, virtual_screen)
+    }
+}
+
+#[cfg(windows)]
+fn select_unique_candidate(
+    foreground: Option<WindowCandidate>,
+    candidates: &[WindowCandidate],
+    pid: u32,
+    virtual_screen: WindowRectangle,
+) -> Result<WindowCandidate, WindowTransparencyError> {
+    if let Some(candidate) = foreground {
+        if candidate.qualifies(pid, virtual_screen) {
+            return Ok(candidate);
+        }
+    }
+    let mut matches = candidates
+        .iter()
+        .copied()
+        .filter(|candidate| candidate.qualifies(pid, virtual_screen));
+    let candidate = matches.next().ok_or(WindowTransparencyError::Unavailable)?;
+    if matches.next().is_some() {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    Ok(candidate)
+}
+
+#[cfg(windows)]
+fn virtual_screen_rectangle() -> Result<WindowRectangle, WindowTransparencyError> {
+    let left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+    if width <= 0 || height <= 0 {
+        return Err(WindowTransparencyError::Unavailable);
+    }
+    Ok(WindowRectangle {
+        left,
+        top,
+        right: left.saturating_add(width),
+        bottom: top.saturating_add(height),
+    })
+}
+
+#[cfg(windows)]
+fn rectangle_is_nontrivial(rectangle: WindowRectangle, screen: WindowRectangle) -> bool {
+    const MINIMUM_WIDTH: i64 = 300;
+    const MINIMUM_HEIGHT: i64 = 180;
+    const MINIMUM_VISIBLE_WIDTH: i64 = 150;
+    const MINIMUM_VISIBLE_HEIGHT: i64 = 90;
+
+    let width = i64::from(rectangle.right) - i64::from(rectangle.left);
+    let height = i64::from(rectangle.bottom) - i64::from(rectangle.top);
+    let visible_width =
+        i64::from(rectangle.right.min(screen.right)) - i64::from(rectangle.left.max(screen.left));
+    let visible_height =
+        i64::from(rectangle.bottom.min(screen.bottom)) - i64::from(rectangle.top.max(screen.top));
+    width >= MINIMUM_WIDTH
+        && height >= MINIMUM_HEIGHT
+        && visible_width >= MINIMUM_VISIBLE_WIDTH
+        && visible_height >= MINIMUM_VISIBLE_HEIGHT
+}
+
 impl NativeBridge {
     pub fn new(
         resolver: Option<AppServerClient>,
@@ -237,8 +1456,16 @@ impl NativeBridge {
                 context_revision: AtomicU64::new(0),
                 lifecycle_epoch: AtomicU64::new(0),
                 notification_sender: RwLock::new(None),
+                window_transparency: WindowTransparencyController::new(),
             }),
         }
+    }
+
+    pub fn bind_verified_window_process(&self, pid: u32) -> bool {
+        self.inner
+            .window_transparency
+            .bind_verified_process(pid)
+            .is_ok()
     }
 
     pub async fn initialize_manual(&self) {
@@ -739,6 +1966,21 @@ impl NativeBridge {
             .map_err(|_| internal_error())
     }
 
+    fn window_transparency_set(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        self.ensure_epoch(epoch)?;
+        let params: WindowTransparencyParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        self.inner
+            .window_transparency
+            .set_enabled(params.enabled, &self.inner.lifecycle_epoch, epoch)
+            .map_err(map_window_transparency_error)?;
+        self.ensure_epoch(epoch)?;
+        Ok(json!({
+            "enabled": params.enabled,
+            "background": WINDOW_TRANSPARENCY_BACKGROUND,
+        }))
+    }
+
     async fn settings_set(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         self.settings_set_with_preparer(params, epoch, |store, settings| store.prepare(&settings))
             .await
@@ -1028,6 +2270,9 @@ impl BridgeHandler for NativeBridge {
             "explorer.watch.stop" => self.watch_stop(request.params, epoch),
             "explorer.settings.get" => self.settings_get(request.params).await,
             "explorer.settings.set" => self.settings_set(request.params, epoch).await,
+            "explorer.window.transparency.set" => {
+                self.window_transparency_set(request.params, epoch)
+            }
             _ => Err(BridgeError::new(
                 "INVALID_REQUEST",
                 "The native method is not allowed.",
@@ -1040,9 +2285,12 @@ impl BridgeHandler for NativeBridge {
     }
 
     fn invalidate_lifecycle(&self) {
+        self.inner.lifecycle_epoch.fetch_add(1, Ordering::AcqRel);
+        if self.inner.window_transparency.restore().is_err() {
+            tracing::warn!(event = "window_transparency_restore_failed");
+        }
         let mut state = lock_unpoisoned(&self.inner.state);
         self.bump_context_request_generation();
-        self.inner.lifecycle_epoch.fetch_add(1, Ordering::AcqRel);
         self.stop_watcher_locked(&mut state);
         state.current = None;
         self.inner.context_revision.fetch_add(1, Ordering::AcqRel);
@@ -1086,6 +2334,20 @@ fn no_context_error() -> BridgeError {
 
 fn internal_error() -> BridgeError {
     BridgeError::new("INTERNAL", "The native operation failed.")
+}
+
+fn map_window_transparency_error(error: WindowTransparencyError) -> BridgeError {
+    match error {
+        WindowTransparencyError::Unsupported => BridgeError::new(
+            "UNSUPPORTED",
+            "Window transparency is unavailable in this launch mode.",
+        ),
+        WindowTransparencyError::Unavailable | WindowTransparencyError::Native => BridgeError::new(
+            "WINDOW_UNAVAILABLE",
+            "Window transparency is unavailable for this Codex window.",
+        ),
+        WindowTransparencyError::Cancelled => cancelled_error(),
+    }
 }
 
 fn cancelled_error() -> BridgeError {
@@ -1386,6 +2648,13 @@ mod tests {
         AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, duplex, split,
     };
     use tokio::sync::oneshot;
+    #[cfg(windows)]
+    use windows_sys::Win32::Foundation::POINT;
+    #[cfg(windows)]
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_POPUP,
+        WindowFromPoint,
+    };
 
     use super::*;
 
@@ -1430,6 +2699,465 @@ mod tests {
         let mut encoded = serde_json::to_vec(&value).expect("encode JSONL");
         encoded.push(b'\n');
         writer.write_all(&encoded).await.expect("write JSONL");
+    }
+
+    #[cfg(windows)]
+    struct TransparencyTestWindow(HWND);
+
+    #[cfg(windows)]
+    impl TransparencyTestWindow {
+        fn new(ex_style: u32) -> Self {
+            let window = unsafe {
+                CreateWindowExW(
+                    ex_style,
+                    windows_sys::w!("BUTTON"),
+                    windows_sys::w!("CodeCodex transparency test"),
+                    WS_POPUP,
+                    0,
+                    0,
+                    32,
+                    32,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            };
+            assert!(
+                !window.is_null(),
+                "create disposable transparency test window"
+            );
+            Self(window)
+        }
+
+        fn handle(&self) -> HWND {
+            self.0
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for TransparencyTestWindow {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = DestroyWindow(self.0);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn window_transparency_rpc_is_strict_and_unbound_launches_fail_closed() {
+        let (_directory, bridge) = manual_bridge().await;
+        let unsupported = bridge
+            .handle(request(
+                "explorer.window.transparency.set",
+                json!({ "enabled": true }),
+            ))
+            .await
+            .expect_err("manual/attach-style bridge must not target a window");
+        assert_eq!(unsupported.code, "UNSUPPORTED");
+
+        for invalid in [
+            json!({}),
+            json!({ "enabled": "true" }),
+            json!({ "enabled": true, "window": 123 }),
+        ] {
+            let error = bridge
+                .handle(request("explorer.window.transparency.set", invalid))
+                .await
+                .expect_err("invalid transparency request");
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_compositor_policy_preserves_style_and_input_ownership() {
+        let window = TransparencyTestWindow::new(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+        let original_style =
+            read_extended_style(window.handle()).expect("initial non-layered ex-style");
+        let original_backdrop =
+            read_window_system_backdrop(window.handle()).expect("probe system backdrop");
+        let original_corner =
+            read_window_corner_preference(window.handle()).expect("probe corner preference");
+        let original_accent = snapshot_window_accent_policy(window.handle());
+        let mut changed = false;
+
+        assert!(
+            unsafe { DwmExtendFrameIntoClientArea(window.handle(), &FULL_EXTENDED_CLIENT_FRAME) }
+                >= 0
+        );
+
+        apply_window_transparency(
+            window.handle(),
+            original_backdrop,
+            original_corner,
+            &mut changed,
+            || true,
+        )
+        .expect("apply compositor transparency");
+        assert!(changed);
+        let applied_style = read_extended_style(window.handle()).expect("active ex-style");
+        assert_eq!(applied_style, original_style);
+        assert!(!has_extended_style(applied_style, WS_EX_LAYERED));
+        assert!(!has_extended_style(applied_style, WS_EX_TRANSPARENT));
+        if let Some(applied_policy) = read_window_accent_policy(window.handle()) {
+            assert_eq!(applied_policy, TRANSPARENT_ACCENT_POLICY);
+        }
+        if matches!(original_corner, WindowCornerPreferenceSnapshot::Value(_)) {
+            assert_eq!(
+                read_window_corner_preference(window.handle()),
+                Ok(WindowCornerPreferenceSnapshot::Value(DWMWCP_DONOTROUND))
+            );
+        }
+        if let WindowCornerPreferenceSnapshot::Value(preference) = original_corner
+            && preference != DWMWCP_DONOTROUND
+        {
+            write_window_corner_preference(window.handle(), preference)
+                .expect("simulate restored-window corner reset");
+            let mut refreshed = false;
+            apply_window_transparency(
+                window.handle(),
+                original_backdrop,
+                original_corner,
+                &mut refreshed,
+                || true,
+            )
+            .expect("reapply transparency after restored-window transition");
+            assert!(refreshed);
+            assert_eq!(
+                read_window_corner_preference(window.handle()),
+                Ok(WindowCornerPreferenceSnapshot::Value(DWMWCP_DONOTROUND))
+            );
+        }
+
+        assert_ne!(
+            unsafe {
+                SetWindowPos(
+                    window.handle(),
+                    HWND_TOPMOST,
+                    48,
+                    48,
+                    32,
+                    32,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                )
+            },
+            0
+        );
+        assert_eq!(
+            unsafe { WindowFromPoint(POINT { x: 56, y: 56 }) },
+            window.handle(),
+            "transparent client pixels must remain owned by the Codex HWND"
+        );
+
+        restore_window_accent_policy(window.handle(), original_accent, || true)
+            .expect("restore original accent");
+        restore_window_system_backdrop(window.handle(), original_backdrop, || true)
+            .expect("restore original backdrop");
+        restore_window_corner_preference(window.handle(), original_corner, || true)
+            .expect("restore original corner preference");
+        restore_extended_client_frame(window.handle(), || true)
+            .expect("restore Electron's full client frame");
+        if let OriginalAccentPolicy::Known(policy) = original_accent {
+            assert_eq!(read_window_accent_policy(window.handle()), Some(policy));
+        }
+        if let WindowCornerPreferenceSnapshot::Value(preference) = original_corner {
+            assert_eq!(
+                read_window_corner_preference(window.handle()),
+                Ok(WindowCornerPreferenceSnapshot::Value(preference))
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_frame_normalization_is_zero_owned_and_fail_closed() {
+        let window = 41_isize as HWND;
+        let mut ownership_checks = 0;
+        let mut calls = 0;
+        clear_extended_client_frame_with(
+            window,
+            || {
+                ownership_checks += 1;
+                true
+            },
+            |received_window, margins| {
+                calls += 1;
+                assert_eq!(received_window, window);
+                let margins = unsafe { &*margins };
+                assert_eq!(margins.cxLeftWidth, 0);
+                assert_eq!(margins.cxRightWidth, 0);
+                assert_eq!(margins.cyTopHeight, 0);
+                assert_eq!(margins.cyBottomHeight, 0);
+                S_OK
+            },
+        )
+        .expect("normalize the owned client frame");
+        assert_eq!(ownership_checks, 2);
+        assert_eq!(calls, 1);
+
+        assert_eq!(
+            clear_extended_client_frame_with(window, || true, |_, _| E_INVALIDARG),
+            Err(WindowTransparencyError::Native)
+        );
+        assert_eq!(
+            clear_extended_client_frame_with(
+                window,
+                || false,
+                |_, _| panic!("an unowned window must not be mutated"),
+            ),
+            Err(WindowTransparencyError::Unavailable)
+        );
+
+        let mut first_check = true;
+        assert_eq!(
+            clear_extended_client_frame_with(
+                window,
+                || {
+                    let owned = first_check;
+                    first_check = false;
+                    owned
+                },
+                |_, _| S_OK,
+            ),
+            Err(WindowTransparencyError::Unavailable)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_system_backdrop_probe_only_accepts_invalid_argument_as_unsupported() {
+        assert_eq!(
+            classify_system_backdrop_read(S_OK, DWMSBT_MAINWINDOW),
+            Ok(SystemBackdropSnapshot::Value(DWMSBT_MAINWINDOW))
+        );
+        assert_eq!(
+            classify_system_backdrop_read(E_INVALIDARG, 0),
+            Ok(SystemBackdropSnapshot::Unsupported)
+        );
+        assert_eq!(
+            classify_system_backdrop_read(0x8000_4005_u32 as i32, 0),
+            Err(WindowTransparencyError::Native)
+        );
+        assert_eq!(
+            classify_window_corner_preference_read(S_OK, DWMWCP_DONOTROUND),
+            Ok(WindowCornerPreferenceSnapshot::Value(DWMWCP_DONOTROUND))
+        );
+        assert_eq!(
+            classify_window_corner_preference_read(E_INVALIDARG, 0),
+            Ok(WindowCornerPreferenceSnapshot::Unsupported)
+        );
+        assert_eq!(
+            classify_window_corner_preference_read(0x8000_4005_u32 as i32, 0),
+            Err(WindowTransparencyError::Native)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_rejects_click_through_or_incompatible_styles_before_mutation() {
+        for rejected_style in [WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_NOREDIRECTIONBITMAP] {
+            let initial_style = WS_EX_APPWINDOW | rejected_style;
+            let window = TransparencyTestWindow::new(initial_style);
+            let mut changed = false;
+            assert_eq!(
+                apply_window_transparency(
+                    window.handle(),
+                    SystemBackdropSnapshot::Unsupported,
+                    WindowCornerPreferenceSnapshot::Unsupported,
+                    &mut changed,
+                    || true,
+                ),
+                Err(WindowTransparencyError::Unavailable)
+            );
+            assert!(!changed);
+            assert_eq!(
+                read_extended_style(window.handle()).expect("unchanged ex-style"),
+                initial_style as isize
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_marker_mismatch_fails_before_native_mutation() {
+        let window = TransparencyTestWindow::new(WS_EX_APPWINDOW);
+        let marker = WindowTransparencyMarker::new();
+        let second_launch_marker = WindowTransparencyMarker::new();
+        assert_ne!(marker.property_name, second_launch_marker.property_name);
+        assert_ne!(marker.cookie, second_launch_marker.cookie);
+        claim_window_marker(window.handle(), &marker).expect("claim disposable window");
+        assert!(window_has_marker(window.handle(), &marker));
+        let mismatched = WindowTransparencyMarker {
+            property_name: marker.property_name.clone(),
+            cookie: marker.cookie.wrapping_add(1).max(1),
+        };
+        assert_ne!(mismatched.cookie, marker.cookie);
+        assert!(!window_has_marker(window.handle(), &mismatched));
+        let before = read_extended_style(window.handle()).expect("style before rejected restore");
+        assert_eq!(
+            restore_window_accent_policy(window.handle(), OriginalAccentPolicy::Unknown, || {
+                window_has_marker(window.handle(), &mismatched)
+            }),
+            Err(WindowTransparencyError::Unavailable)
+        );
+        assert_eq!(
+            read_extended_style(window.handle()).expect("style after rejected restore"),
+            before
+        );
+        remove_window_marker(window.handle(), &marker).expect("remove disposable marker");
+        assert!(!window_has_marker(window.handle(), &marker));
+
+        assert_ne!(
+            unsafe { SetPropW(window.handle(), marker.property_name(), marker.cookie()) },
+            0,
+            "simulate SetPropW succeeding before verification fails"
+        );
+        assert!(raw_window_has_marker(window.handle(), &marker));
+        cleanup_claimed_window_marker(window.handle(), &marker);
+        assert!(!raw_window_has_marker(window.handle(), &marker));
+    }
+
+    #[cfg(windows)]
+    fn transparency_test_screen() -> WindowRectangle {
+        WindowRectangle {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        }
+    }
+
+    #[cfg(windows)]
+    fn transparency_test_candidate(window: isize, pid: u32) -> WindowCandidate {
+        WindowCandidate {
+            window,
+            pid,
+            thread_id: 17,
+            visible: true,
+            unowned: true,
+            chrome_widget: true,
+            app_window: true,
+            tool_window: false,
+            no_redirection_bitmap: false,
+            rectangle: WindowRectangle {
+                left: 100,
+                top: 100,
+                right: 900,
+                bottom: 700,
+            },
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_selection_prefers_the_verified_foreground_window() {
+        let screen = transparency_test_screen();
+        let pid = 42;
+        let foreground = transparency_test_candidate(101, pid);
+        let candidates = [
+            transparency_test_candidate(202, pid),
+            transparency_test_candidate(303, pid),
+        ];
+        let selected = select_unique_candidate(Some(foreground), &candidates, pid, screen)
+            .expect("qualified foreground");
+        assert_eq!(selected.window, foreground.window);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_selection_requires_one_safe_fallback() {
+        let screen = transparency_test_screen();
+        let pid = 42;
+        let only = transparency_test_candidate(101, pid);
+        assert_eq!(
+            select_unique_candidate(None, &[only], pid, screen)
+                .expect("unique fallback")
+                .window,
+            only.window
+        );
+
+        let ambiguous = [only, transparency_test_candidate(202, pid)];
+        assert_eq!(
+            select_unique_candidate(None, &ambiguous, pid, screen),
+            Err(WindowTransparencyError::Unavailable)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_selection_accepts_composition_disabled_main_window_style() {
+        const COMPOSITION_DISABLED_MAIN_STYLE: isize = 0x0004_0100;
+        let screen = transparency_test_screen();
+        let pid = 42;
+        let mut stable_codex = transparency_test_candidate(101, pid);
+        stable_codex.app_window =
+            has_extended_style(COMPOSITION_DISABLED_MAIN_STYLE, WS_EX_APPWINDOW);
+        stable_codex.tool_window =
+            has_extended_style(COMPOSITION_DISABLED_MAIN_STYLE, WS_EX_TOOLWINDOW);
+        stable_codex.no_redirection_bitmap =
+            has_extended_style(COMPOSITION_DISABLED_MAIN_STYLE, WS_EX_NOREDIRECTIONBITMAP);
+
+        assert!(stable_codex.app_window);
+        assert!(!stable_codex.tool_window);
+        assert!(!stable_codex.no_redirection_bitmap);
+        assert!(stable_codex.qualifies(pid, screen));
+        assert_eq!(
+            select_unique_candidate(None, &[stable_codex], pid, screen)
+                .expect("stable Codex main HWND")
+                .window,
+            stable_codex.window
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_selection_rejects_unrelated_or_overlay_windows() {
+        let screen = transparency_test_screen();
+        let pid = 42;
+        let mut wrong_pid = transparency_test_candidate(101, pid + 1);
+        let mut owned = transparency_test_candidate(102, pid);
+        owned.unowned = false;
+        let mut wrong_class = transparency_test_candidate(103, pid);
+        wrong_class.chrome_widget = false;
+        let mut overlay = transparency_test_candidate(104, pid);
+        overlay.app_window = false;
+        overlay.tool_window = true;
+        overlay.rectangle = WindowRectangle {
+            left: 40,
+            top: 40,
+            right: 180,
+            bottom: 120,
+        };
+        let mut offscreen = transparency_test_candidate(105, pid);
+        offscreen.rectangle = WindowRectangle {
+            left: -32_000,
+            top: -32_000,
+            right: -31_200,
+            bottom: -31_400,
+        };
+        let mut direct_composition = transparency_test_candidate(106, pid);
+        direct_composition.no_redirection_bitmap = true;
+        let safe = transparency_test_candidate(107, pid);
+        let candidates = [
+            wrong_pid,
+            owned,
+            wrong_class,
+            overlay,
+            offscreen,
+            direct_composition,
+            safe,
+        ];
+        assert_eq!(
+            select_unique_candidate(None, &candidates, pid, screen)
+                .expect("only safe Codex host")
+                .window,
+            safe.window
+        );
+
+        wrong_pid.pid = pid;
+        wrong_pid.thread_id = 0;
+        assert!(!wrong_pid.qualifies(pid, screen));
     }
 
     #[tokio::test]
@@ -2535,6 +4263,38 @@ mod tests {
             }
         );
         assert!(!prepared_path.exists());
+    }
+
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn lifecycle_epoch_changes_before_transparency_restoration_can_block() {
+        let (_directory, bridge) = manual_bridge().await;
+        let transparency_guard = lock_unpoisoned(&bridge.inner.window_transparency.state);
+        let invalidating_bridge = bridge.clone();
+        let invalidation = std::thread::spawn(move || {
+            invalidating_bridge.invalidate_lifecycle();
+        });
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while bridge.lifecycle_epoch() == 0 && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            bridge.lifecycle_epoch(),
+            1,
+            "the stale document must be revoked before restoration waits for its native lock"
+        );
+
+        drop(transparency_guard);
+        invalidation.join().expect("lifecycle invalidation thread");
+        assert_eq!(
+            bridge
+                .inner
+                .window_transparency
+                .set_enabled(false, &bridge.inner.lifecycle_epoch, 0,),
+            Err(WindowTransparencyError::Cancelled),
+            "a request that passed its outer check before invalidation must fail again under the native lock"
+        );
     }
 
     #[tokio::test]

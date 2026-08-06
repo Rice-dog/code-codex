@@ -7,8 +7,6 @@ import type {
   BridgeResponse,
   ObjectBridge,
 } from "./types";
-import { codex26715Adapter } from "./adapters/codex-26.715";
-
 const MESSAGE_EVENT = "code-codex:message";
 
 function consumeBootstrap(): Readonly<BootstrapConfig> {
@@ -60,11 +58,8 @@ export function assessBootstrapCompatibility(config: Readonly<BootstrapConfig> =
     return {
       supported: false,
       ...(version ? { version } : {}),
-      reason: version ? `Codex ${version} has not been verified.` : "This Codex version has not been verified.",
+      reason: version ? `Codex ${version} failed runtime compatibility checks.` : "Codex failed runtime compatibility checks.",
     };
-  }
-  if (version && !codex26715Adapter.supportsVersion(version)) {
-    return { supported: false, version, reason: `Codex ${version} is outside the verified 26.715.x, 26.721.x, and 26.727.x adapter range.` };
   }
   return { supported: true, ...(version ? { version } : {}) };
 }

@@ -262,11 +262,7 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     )
     .await?;
 
-    let mut launch_arguments = vec![
-        "--remote-debugging-address=127.0.0.1".to_owned(),
-        format!("--remote-debugging-port={port}"),
-    ];
-    launch_arguments.extend(args.codex_args);
+    let launch_arguments = build_launch_arguments(port, &args.codex_args);
     reservation.release();
     let launched_after = SystemTime::now();
     let mut child = if installation.source == DiscoverySource::WindowsPackageManager {
@@ -321,6 +317,9 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         .await
         .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
         tracing::info!(event = "cdp_owner_verified");
+        if !bridge.bind_verified_window_process(launched_pid) {
+            tracing::warn!(event = "codex_window_process_binding_failed");
+        }
         let cancellation = CancellationToken::new();
         let supervisor = supervise(
             endpoint,
@@ -563,6 +562,23 @@ fn validate_extra_arguments(arguments: &[String]) -> Result<(), AppError> {
     Ok(())
 }
 
+const DISABLE_DIRECT_COMPOSITION_ARGUMENT: &str = "--disable-direct-composition";
+
+fn build_launch_arguments(port: u16, extra_arguments: &[String]) -> Vec<String> {
+    let mut arguments = vec![
+        "--remote-debugging-address=127.0.0.1".to_owned(),
+        format!("--remote-debugging-port={port}"),
+        DISABLE_DIRECT_COMPOSITION_ARGUMENT.to_owned(),
+    ];
+    arguments.extend(
+        extra_arguments
+            .iter()
+            .filter(|argument| !argument.eq_ignore_ascii_case(DISABLE_DIRECT_COMPOSITION_ARGUMENT))
+            .cloned(),
+    );
+    arguments
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DiagnosticReport {
@@ -672,6 +688,28 @@ mod tests {
             validate_extra_arguments(&["--remote-debugging-address=0.0.0.0".to_owned()]).is_err()
         );
         assert!(validate_extra_arguments(&["--REMOTE-DEBUGGING-PORT=80".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn codex_launch_disables_direct_composition_once() {
+        let arguments = build_launch_arguments(
+            4321,
+            &[
+                "--disable-gpu".to_owned(),
+                "--DISABLE-DIRECT-COMPOSITION".to_owned(),
+            ],
+        );
+        assert!(arguments.contains(&"--remote-debugging-port=4321".to_owned()));
+        assert!(arguments.contains(&"--disable-gpu".to_owned()));
+        assert_eq!(
+            arguments
+                .iter()
+                .filter(|argument| {
+                    argument.eq_ignore_ascii_case(DISABLE_DIRECT_COMPOSITION_ARGUMENT)
+                })
+                .count(),
+            1
+        );
     }
 
     #[test]

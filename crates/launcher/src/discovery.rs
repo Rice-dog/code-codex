@@ -1024,8 +1024,8 @@ mod tests {
         assert!(is_supported_version("26.715.10079.0"));
         assert!(is_supported_version("26.715.3651.0"));
         assert!(is_supported_version("26.721.4979.0"));
-        assert!(is_supported_version("26.715.4045.0"));
-        assert!(is_supported_version("26.715.9999.0"));
+        assert!(is_supported_version("26.730.8199.0"));
+        assert!(is_supported_version("999.999.9999.0"));
         assert!(is_supported_version("unknown"));
     }
 

@@ -2790,6 +2790,44 @@ const mainPreviewStyles = String.raw`
     --cle-syntax-deleted: #c12e35;
   }
 
+  :host-context(html[data-code-codex-transparent-background]) :is(
+    .tab-strip,
+    .tab-slot.active,
+    .preview-tab[aria-selected="true"],
+    .preview-panel,
+    .preview-meta-bar,
+    .preview-content,
+    .code-line-numbers,
+    .code-editor-stack,
+    .code-editor-highlight,
+    .code-editor,
+    .editor-error,
+    .markdown-reader,
+    .markdown-truncated,
+    .csv-preview,
+    .csv-table-scroll,
+    .diagram-preview,
+    .diagram-canvas,
+    .notebook-preview,
+    .media-preview[data-kind="pdf"],
+    .pdf-preview-toolbar,
+    .pdf-page-stage,
+    .office-preview,
+    .office-preview-notice,
+    .office-sheet-tabs,
+    .office-sheet-viewport,
+    .office-preview-toolbar,
+    .office-slide-viewport,
+    .rpv-root,
+    .rpv-stage,
+    .rpv-viewport,
+    .rpv-status
+  ) {
+    background-color: transparent !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
   *, *::before, *::after { box-sizing: border-box; }
   button { color: inherit; font: inherit; }
 
@@ -4222,6 +4260,8 @@ const mainPreviewStyles = String.raw`
 interface SuppressedAttributes {
   readonly inert: string | null;
   readonly ariaHidden: string | null;
+  readonly opacity: string;
+  readonly opacityPriority: string;
 }
 
 interface PdfPreviewJob {
@@ -10164,7 +10204,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   }
 
   #syncSuppression(): void {
-    const parent = this.#connected && this.#state.activePath !== null && this.parentElement?.matches(MAIN_SURFACE_SELECTOR)
+    const parent = this.#connected && this.#state.tabs.length > 0 && this.parentElement?.matches(MAIN_SURFACE_SELECTOR)
       ? this.parentElement
       : null;
     if (!parent) {
@@ -10174,31 +10214,44 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     if (this.#suppressedParent !== parent) {
       this.#restoreSuppressedChildren();
       this.#suppressedParent = parent;
-      this.#childObserver = new MutationObserver((records) => {
-        for (const record of records) {
-          for (const node of record.removedNodes) {
-            if (node instanceof Element && node.parentElement !== parent) this.#restoreSuppressedChild(node);
-          }
-          for (const node of record.addedNodes) {
-            if (node instanceof Element && node.parentElement === parent && node !== this) this.#suppressChild(node);
-          }
-        }
-      });
-      this.#childObserver.observe(parent, { childList: true });
+      this.#childObserver = new MutationObserver(() => this.#syncSuppression());
+      this.#childObserver.observe(parent, { childList: true, subtree: true });
     }
-    for (const child of Array.from(parent.children)) {
-      if (child !== this) this.#suppressChild(child);
+
+    const directChildren = Array.from(parent.children);
+    const nativeHeader = directChildren.find((child) => child.matches(
+      "header[data-app-shell-application-menu-bar], header[data-app-shell-header-edge-scroll]",
+    ));
+    const nativeHeaderSubject = nativeHeader?.querySelector(
+      '[data-testid="app-shell-header-context-menu-surface"]',
+    ) ?? nativeHeader;
+    const desired = new Set<Element>();
+    if (nativeHeaderSubject) desired.add(nativeHeaderSubject);
+
+    if (this.#state.activePath !== null) {
+      for (const child of directChildren) {
+        if (child !== this && child !== nativeHeader) desired.add(child);
+      }
     }
+
+    for (const child of Array.from(this.#suppressedChildren.keys())) {
+      if (!desired.has(child)) this.#restoreSuppressedChild(child);
+    }
+    for (const child of desired) this.#suppressChild(child);
   }
 
   #suppressChild(child: Element): void {
     if (this.#suppressedChildren.has(child)) return;
+    const style = (child as HTMLElement).style;
     this.#suppressedChildren.set(child, {
       inert: child.getAttribute("inert"),
       ariaHidden: child.getAttribute("aria-hidden"),
+      opacity: style.getPropertyValue("opacity"),
+      opacityPriority: style.getPropertyPriority("opacity"),
     });
     child.setAttribute("inert", "");
     child.setAttribute("aria-hidden", "true");
+    style.setProperty("opacity", "0", "important");
   }
 
   #restoreSuppressedChild(child: Element): void {
@@ -10206,6 +10259,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     if (!attributes) return;
     restoreAttribute(child, "inert", attributes.inert);
     restoreAttribute(child, "aria-hidden", attributes.ariaHidden);
+    const style = (child as HTMLElement).style;
+    if (attributes.opacity) style.setProperty("opacity", attributes.opacity, attributes.opacityPriority);
+    else style.removeProperty("opacity");
     this.#suppressedChildren.delete(child);
   }
 

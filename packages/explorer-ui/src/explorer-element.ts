@@ -55,6 +55,14 @@ const INTERNAL_DRAG_TYPE = "application/x-code-codex-entry";
 const DEFAULT_SETTINGS: ExplorerSettings = { width: 260, collapsed: false, showHidden: true, showIgnored: true };
 const SETTINGS_KEY = "code-codex:ui-settings:v1";
 const PREVIEWER_SETTINGS_KEY = "code-codex:previewers:v1";
+const APPEARANCE_PLUGIN_SETTINGS_KEY = "code-codex:appearance-plugins:v1";
+const TRANSPARENT_BACKGROUND_PLUGIN_ID = "code-codex.transparent-background";
+const APPEARANCE_PLUGIN_IDS = new Set([TRANSPARENT_BACKGROUND_PLUGIN_ID]);
+export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
+export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
+const TRANSPARENT_BACKGROUND_HEALTH_INTERVAL_MS = 1_500;
+const FORCED_COLORS_QUERY = "(forced-colors: active)";
+const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
 const MAX_MEDIA_CHUNK_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_PREVIEW_BYTES = 32 * 1024 * 1024;
 const MAX_VIDEO_PREVIEW_BYTES = 128 * 1024 * 1024;
@@ -349,6 +357,21 @@ function previewerCardMarkup(previewer: PreviewerDefinition): string {
   `;
 }
 
+function transparentBackgroundCardMarkup(): string {
+  return `
+    <article class="preview-extension appearance-extension" data-appearance-plugin="${TRANSPARENT_BACKGROUND_PLUGIN_ID}" aria-busy="false">
+      <span class="preview-extension-icon" aria-hidden="true">${icons.preview}</span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>Transparent Background</h4>
+          <span class="preview-extension-status" id="cle-transparent-background-status">Disabled</span>
+        </div>
+      </div>
+      <button class="preview-extension-action" type="button" aria-describedby="cle-transparent-background-status" aria-pressed="false">Enable</button>
+    </article>
+  `;
+}
+
 function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? path;
   const dot = name.lastIndexOf(".");
@@ -429,7 +452,18 @@ export class CodeCodexElement extends HTMLElement {
   #marqueeLongPressTimer: ReturnType<typeof setTimeout> | undefined;
   #suppressNextClick = false;
   readonly #enabledPreviewers = new Set<string>();
+  readonly #enabledAppearancePlugins = new Set<string>();
+  #appearancePluginPending = false;
+  #appearancePluginApplied: boolean | undefined;
+  #appearancePluginError: string | undefined;
+  #appearanceSyncQueued = false;
+  #appearanceHealthPending = false;
+  #appearanceHealthTimer: ReturnType<typeof setTimeout> | undefined;
+  #appearanceOperation = 0;
+  #appearanceRpcTail: Promise<void> = Promise.resolve();
   #previewMarketOpen = false;
+  #forcedColorsQuery: MediaQueryList | undefined;
+  #reducedTransparencyQuery: MediaQueryList | undefined;
 
   readonly #treeShell: HTMLElement;
   readonly #frame: HTMLElement;
@@ -447,6 +481,9 @@ export class CodeCodexElement extends HTMLElement {
   readonly #previewMarketCloseButton: HTMLButtonElement;
   readonly #previewerButtons = new Map<string, HTMLButtonElement>();
   readonly #previewerStatuses = new Map<string, HTMLElement>();
+  readonly #transparentBackgroundCard: HTMLElement;
+  readonly #transparentBackgroundButton: HTMLButtonElement;
+  readonly #transparentBackgroundStatus: HTMLElement;
   readonly #liveRegion: HTMLElement;
   readonly #collapseButton: HTMLButtonElement;
   readonly #collapsedTab: HTMLButtonElement;
@@ -501,7 +538,16 @@ export class CodeCodexElement extends HTMLElement {
               </div>
               <button class="preview-market-close" type="button" title="Close Preview Market" aria-label="Close Preview Market">${icons.close}</button>
             </div>
-            <div class="preview-market-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
+            <div class="preview-market-list">
+              <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
+                <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}</div>
+              </section>
+              <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
+                <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
+                <div class="preview-market-section-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
+              </section>
+            </div>
           </div>
           <button class="preview-market-button" type="button" aria-haspopup="dialog" aria-controls="cle-preview-market" aria-expanded="false">${icons.preview}<span>Preview Market</span></button>
           <span class="status-code">WAIT</span>
@@ -536,6 +582,13 @@ export class CodeCodexElement extends HTMLElement {
       this.#previewerButtons.set(previewer.id, button);
       this.#previewerStatuses.set(previewer.id, status);
     }
+    this.#transparentBackgroundCard = this.#required<HTMLElement>(`[data-appearance-plugin="${TRANSPARENT_BACKGROUND_PLUGIN_ID}"]`);
+    this.#transparentBackgroundButton = this.#required<HTMLButtonElement>(
+      `[data-appearance-plugin="${TRANSPARENT_BACKGROUND_PLUGIN_ID}"] .preview-extension-action`,
+    );
+    this.#transparentBackgroundStatus = this.#required<HTMLElement>(
+      `[data-appearance-plugin="${TRANSPARENT_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
+    );
     this.#liveRegion = this.#required<HTMLElement>(".live-region");
     this.#collapseButton = this.#required<HTMLButtonElement>(".collapse");
     this.#collapsedTab = this.#required<HTMLButtonElement>(".collapsed-tab");
@@ -557,6 +610,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#rememberInlineMount();
     this.#settings = this.#readLocalSettings();
     for (const previewer of this.#readEnabledPreviewers()) this.#enabledPreviewers.add(previewer);
+    this.#enabledAppearancePlugins.clear();
+    for (const plugin of this.#readEnabledAppearancePlugins()) this.#enabledAppearancePlugins.add(plugin);
+    this.#appearancePluginApplied = undefined;
+    this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
     this.#applySettings();
     this.#applyResponsivePlacement();
@@ -589,6 +646,12 @@ export class CodeCodexElement extends HTMLElement {
     this.#cancelMarquee();
     this.#preserveDetachedDraft();
     this.#connected = false;
+    this.#appearancePluginPending = false;
+    this.#appearancePluginApplied = undefined;
+    this.#appearancePluginError = undefined;
+    this.#appearanceSyncQueued = false;
+    this.#appearanceHealthPending = false;
+    this.#appearanceOperation += 1;
     this.#queuedThreadSwitch = undefined;
     this.#queuedMainPreviewReconcile = undefined;
     this.#queuedNativeReconnect = undefined;
@@ -610,6 +673,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#mountObserver = undefined;
     this.#resizeObserver?.disconnect();
     this.#resizeObserver = undefined;
+    this.#forcedColorsQuery?.removeEventListener("change", this.#onTransparencyPreferenceChange);
+    this.#reducedTransparencyQuery?.removeEventListener("change", this.#onTransparencyPreferenceChange);
     window.removeEventListener("resize", this.#onWindowResize);
     window.removeEventListener("beforeunload", this.#onBeforeUnload);
     window.removeEventListener("pointerdown", this.#onWindowPointerDown, true);
@@ -739,8 +804,17 @@ export class CodeCodexElement extends HTMLElement {
     this.#watching = false;
     this.#threadId = null;
     this.#context = undefined;
+    this.#appearancePluginPending = false;
+    this.#appearancePluginApplied = undefined;
+    this.#appearancePluginError = undefined;
+    this.#appearanceSyncQueued = false;
+    this.#appearanceHealthPending = false;
+    this.#appearanceOperation += 1;
+    this.#cancelAppearanceHealthCheck();
+    this.#clearTransparentBackgroundPresentation();
     this.#bridge?.dispose();
     this.#bridge = undefined;
+    this.#renderAppearancePlugin();
 
     if (!compatibility.supported) {
       this.#setState("incompatible", compatibility.reason);
@@ -759,6 +833,8 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   async #start(bridge: ExplorerBridge, generation: number, manualWorkspace: boolean): Promise<void> {
+    await this.#syncPersistedAppearance(bridge, true);
+    if (!this.#canUseBridge(bridge, generation)) return;
     await this.#loadNativeSettings(bridge, generation);
     if (!this.#canUseBridge(bridge, generation)) return;
     if (manualWorkspace) {
@@ -782,6 +858,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#editModeButton.addEventListener("click", () => this.#toggleEditing());
       this.#previewMarketButton.addEventListener("click", () => this.#togglePreviewMarket());
       this.#previewMarketCloseButton.addEventListener("click", () => this.#closePreviewMarket(true));
+      this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
       for (const previewer of PREVIEWER_DEFINITIONS) {
         this.#previewerButtons.get(previewer.id)?.addEventListener("click", () => this.#togglePreviewer(previewer));
       }
@@ -823,8 +900,25 @@ export class CodeCodexElement extends HTMLElement {
     window.addEventListener("dragend", this.#onWindowDragEnd, true);
     window.addEventListener("keydown", this.#onWindowKeyDown, true);
 
-    this.#themeObserver = new MutationObserver(() => this.#applyTheme());
-    this.#themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
+    this.#forcedColorsQuery ??= window.matchMedia(FORCED_COLORS_QUERY);
+    this.#reducedTransparencyQuery ??= window.matchMedia(REDUCED_TRANSPARENCY_QUERY);
+    this.#forcedColorsQuery.addEventListener("change", this.#onTransparencyPreferenceChange);
+    this.#reducedTransparencyQuery.addEventListener("change", this.#onTransparencyPreferenceChange);
+    this.#renderAppearancePlugin();
+
+    this.#themeObserver = new MutationObserver(() => {
+      this.#applyTheme();
+      if (
+        this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID) &&
+        !this.#transparentBackgroundPresentation()
+      ) {
+        this.#scheduleAppearanceHealthCheck(0);
+      }
+    });
+    this.#themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme", "style", TRANSPARENT_BACKGROUND_ATTRIBUTE],
+    });
     if (document.body) this.#themeObserver.observe(document.body, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
 
     if (typeof ResizeObserver !== "undefined") {
@@ -926,6 +1020,17 @@ export class CodeCodexElement extends HTMLElement {
     event.preventDefault();
     event.stopPropagation();
     this.#closePreviewMarket(true);
+  };
+
+  #onTransparencyPreferenceChange = (): void => {
+    this.#renderAppearancePlugin();
+    const bridge = this.#bridge;
+    if (!bridge?.available || !this.#connected || this.#dismissed) return;
+    if (this.#appearancePluginPending) {
+      this.#appearanceSyncQueued = true;
+      return;
+    }
+    void this.#syncPersistedAppearance(bridge, true);
   };
 
   #onWindowDragEnd = (): void => {
@@ -1088,6 +1193,10 @@ export class CodeCodexElement extends HTMLElement {
     return this.#connected && !this.#dismissed && this.#generation === generation && this.#bridge === bridge;
   }
 
+  #canUseAppearanceBridge(bridge: ExplorerBridge): boolean {
+    return this.#connected && !this.#dismissed && this.#bridge === bridge;
+  }
+
   async #stopWatch(bridge = this.#bridge): Promise<void> {
     const wasWatching = this.#watching;
     this.#watching = false;
@@ -1198,6 +1307,8 @@ export class CodeCodexElement extends HTMLElement {
     if (method === "explorer.resync") {
       for (const tab of [...this.#previewTabs]) this.#markPreviewModified(tab.path);
       void this.#refreshLoadedDirectories();
+      const bridge = this.#bridge;
+      if (bridge?.available) void this.#syncPersistedAppearance(bridge, false);
       return;
     }
     if (method === "explorer.incompatible") {
@@ -3699,6 +3810,223 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  #readEnabledAppearancePlugins(): readonly string[] {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(APPEARANCE_PLUGIN_SETTINGS_KEY) || "[]");
+      if (!Array.isArray(value)) return [];
+      return [...new Set(value.filter((entry): entry is string => typeof entry === "string" && APPEARANCE_PLUGIN_IDS.has(entry)))];
+    } catch {
+      return [];
+    }
+  }
+
+  #writeEnabledAppearancePlugins(): void {
+    try {
+      localStorage.setItem(APPEARANCE_PLUGIN_SETTINGS_KEY, JSON.stringify([...this.#enabledAppearancePlugins]));
+    } catch {
+      // Appearance plugins remain enabled for this session when DOM storage is unavailable.
+    }
+  }
+
+  #transparencyPreferenceBlocked(): boolean {
+    return this.#forcedColorsQuery?.matches === true || this.#reducedTransparencyQuery?.matches === true;
+  }
+
+  #transparentBackgroundPresentation(): string | undefined {
+    const root = document.documentElement;
+    if (!root.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE)) return undefined;
+    const background = root.style.getPropertyValue(TRANSPARENT_BACKGROUND_COLOR_PROPERTY).trim();
+    return background === "transparent" ? background : undefined;
+  }
+
+  #applyTransparentBackgroundPresentation(background: string): void {
+    const root = document.documentElement;
+    if (root.style.getPropertyValue(TRANSPARENT_BACKGROUND_COLOR_PROPERTY).trim() !== background) {
+      root.style.setProperty(TRANSPARENT_BACKGROUND_COLOR_PROPERTY, background);
+    }
+    if (!root.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE)) {
+      root.toggleAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE, true);
+    }
+  }
+
+  #clearTransparentBackgroundPresentation(): void {
+    document.documentElement.toggleAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(TRANSPARENT_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  #cancelAppearanceHealthCheck(): void {
+    if (this.#appearanceHealthTimer !== undefined) clearTimeout(this.#appearanceHealthTimer);
+    this.#appearanceHealthTimer = undefined;
+  }
+
+  #scheduleAppearanceHealthCheck(delay = TRANSPARENT_BACKGROUND_HEALTH_INTERVAL_MS): void {
+    if (
+      this.#appearanceHealthTimer !== undefined ||
+      !this.#connected ||
+      this.#dismissed ||
+      !this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID) ||
+      this.#transparencyPreferenceBlocked()
+    ) {
+      return;
+    }
+    this.#appearanceHealthTimer = setTimeout(() => {
+      this.#appearanceHealthTimer = undefined;
+      void this.#runAppearanceHealthCheck();
+    }, Math.max(0, delay));
+  }
+
+  async #runAppearanceHealthCheck(): Promise<void> {
+    if (
+      this.#appearanceHealthPending ||
+      this.#appearancePluginPending ||
+      !this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID) ||
+      this.#transparencyPreferenceBlocked()
+    ) {
+      this.#scheduleAppearanceHealthCheck(250);
+      return;
+    }
+    const bridge = this.#bridge;
+    if (!bridge?.available || !this.#canUseAppearanceBridge(bridge)) return;
+
+    this.#appearanceHealthPending = true;
+    const operation = this.#appearanceOperation;
+    let retryDelay = TRANSPARENT_BACKGROUND_HEALTH_INTERVAL_MS;
+    try {
+      const result = await this.#setWindowTransparency(bridge, true);
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      this.#applyTransparentBackgroundPresentation(result.background);
+      this.#appearancePluginApplied = true;
+      this.#appearancePluginError = undefined;
+    } catch (error) {
+      retryDelay = 500;
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      this.#clearTransparentBackgroundPresentation();
+      this.#appearancePluginApplied = false;
+      this.#appearancePluginError = transparencyActionError(error, true);
+    } finally {
+      this.#appearanceHealthPending = false;
+      if (this.#isCurrentAppearanceOperation(bridge, operation)) {
+        this.#renderAppearancePlugin();
+        this.#scheduleAppearanceHealthCheck(retryDelay);
+      }
+    }
+  }
+
+  async #toggleTransparentBackground(): Promise<void> {
+    if (this.#appearancePluginPending) return;
+    const bridge = this.#bridge;
+    const enabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+    const nextEnabled = !enabled;
+    const operation = ++this.#appearanceOperation;
+    if (!nextEnabled) this.#cancelAppearanceHealthCheck();
+
+    if (!bridge?.available) {
+      this.#appearancePluginApplied = undefined;
+      this.#appearancePluginError = "Restart Codex with Code-Codex, then try again.";
+      this.#renderAppearancePlugin();
+      this.#showActionNotice(`Transparent Background was not changed. ${this.#appearancePluginError}`, "error");
+      return;
+    }
+    if (nextEnabled && this.#transparencyPreferenceBlocked()) {
+      this.#appearancePluginError = "Turn off high contrast or reduced transparency, then try again.";
+      this.#renderAppearancePlugin();
+      this.#showActionNotice(`Transparent Background was not enabled. ${this.#appearancePluginError}`, "error");
+      return;
+    }
+
+    this.#appearancePluginPending = true;
+    this.#appearancePluginError = undefined;
+    this.#renderAppearancePlugin();
+    const previousBackground = this.#transparentBackgroundPresentation();
+    this.#clearTransparentBackgroundPresentation();
+    try {
+      const result = await this.#setWindowTransparency(bridge, nextEnabled);
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      if (nextEnabled) this.#applyTransparentBackgroundPresentation(result.background);
+      this.#appearancePluginApplied = nextEnabled;
+      if (nextEnabled) this.#enabledAppearancePlugins.add(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      else this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      this.#writeEnabledAppearancePlugins();
+      this.#announce(`Transparent Background ${nextEnabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      if (!nextEnabled && previousBackground) this.#applyTransparentBackgroundPresentation(previousBackground);
+      if (nextEnabled) this.#appearancePluginApplied = false;
+      this.#appearancePluginError = transparencyActionError(error, nextEnabled);
+      this.#showActionNotice(this.#appearancePluginError, "error");
+    } finally {
+      if (this.#isCurrentAppearanceOperation(bridge, operation)) {
+        this.#appearancePluginPending = false;
+        this.#renderAppearancePlugin();
+        this.#flushQueuedAppearanceSync(bridge);
+        if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          this.#scheduleAppearanceHealthCheck();
+        }
+      }
+    }
+  }
+
+  async #syncPersistedAppearance(bridge: ExplorerBridge, reportErrors: boolean): Promise<void> {
+    if (!this.#canUseAppearanceBridge(bridge)) return;
+    if (this.#appearancePluginPending) {
+      this.#appearanceSyncQueued = true;
+      return;
+    }
+    const persistedEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+    const requestedEnabled = persistedEnabled && !this.#transparencyPreferenceBlocked();
+    const operation = ++this.#appearanceOperation;
+    if (!requestedEnabled) this.#cancelAppearanceHealthCheck();
+    this.#appearancePluginPending = true;
+    this.#appearancePluginError = undefined;
+    this.#renderAppearancePlugin();
+    const previousBackground = this.#transparentBackgroundPresentation();
+    this.#clearTransparentBackgroundPresentation();
+    try {
+      const result = await this.#setWindowTransparency(bridge, requestedEnabled);
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      if (requestedEnabled) this.#applyTransparentBackgroundPresentation(result.background);
+      this.#appearancePluginApplied = requestedEnabled;
+    } catch (error) {
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      if (!requestedEnabled && previousBackground) this.#applyTransparentBackgroundPresentation(previousBackground);
+      if (requestedEnabled) this.#appearancePluginApplied = false;
+      this.#appearancePluginError = transparencyActionError(error, requestedEnabled);
+      if (reportErrors) this.#showActionNotice(this.#appearancePluginError, "error");
+    } finally {
+      if (this.#isCurrentAppearanceOperation(bridge, operation)) {
+        this.#appearancePluginPending = false;
+        this.#renderAppearancePlugin();
+        this.#flushQueuedAppearanceSync(bridge);
+        if (requestedEnabled) this.#scheduleAppearanceHealthCheck();
+      }
+    }
+  }
+
+  async #setWindowTransparency(bridge: ExplorerBridge, enabled: boolean): Promise<WindowTransparencyResult> {
+    const previous = this.#appearanceRpcTail;
+    let release: (() => void) | undefined;
+    this.#appearanceRpcTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      const raw = await bridge.request<unknown>("explorer.window.transparency.set", { enabled });
+      return validateTransparencyResult(raw, enabled);
+    } finally {
+      release?.();
+    }
+  }
+
+  #isCurrentAppearanceOperation(bridge: ExplorerBridge, operation: number): boolean {
+    return this.#appearanceOperation === operation && this.#canUseAppearanceBridge(bridge);
+  }
+
+  #flushQueuedAppearanceSync(bridge: ExplorerBridge): void {
+    if (!this.#appearanceSyncQueued) return;
+    this.#appearanceSyncQueued = false;
+    void this.#syncPersistedAppearance(bridge, true);
+  }
+
   #togglePreviewMarket(): void {
     if (this.#previewMarketOpen) {
       this.#closePreviewMarket(true);
@@ -3737,6 +4065,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderPreviewMarket(): void {
+    this.#renderAppearancePlugin();
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const enabled = this.#enabledPreviewers.has(previewer.id);
       const status = this.#previewerStatuses.get(previewer.id);
@@ -3748,6 +4077,42 @@ export class CodeCodexElement extends HTMLElement {
       button.dataset.enabled = String(enabled);
       button.setAttribute("aria-label", `${enabled ? "Disable" : "Enable"} ${previewer.title}`);
     }
+  }
+
+  #renderAppearancePlugin(): void {
+    const enabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+    const bridgeAvailable = this.#bridge?.available === true;
+    const preferenceBlocked = this.#transparencyPreferenceBlocked();
+    const presentationApplied = this.#transparentBackgroundPresentation() !== undefined;
+    const active = enabled && this.#appearancePluginApplied === true && presentationApplied && !preferenceBlocked;
+    let status = enabled ? "Enabled" : "Disabled";
+    if (enabled && preferenceBlocked) status = "Enabled · Paused";
+    else if (enabled && !active) status = "Enabled · Not applied";
+    else if (!enabled && this.#appearancePluginApplied === undefined) status = "Disabled · Not verified";
+
+    this.#transparentBackgroundStatus.textContent = status;
+    this.#transparentBackgroundStatus.dataset.enabled = String(active);
+    this.#transparentBackgroundStatus.dataset.pending = String(this.#appearancePluginPending);
+    this.#transparentBackgroundCard.setAttribute("aria-busy", String(this.#appearancePluginPending));
+
+    this.#transparentBackgroundButton.textContent = this.#appearancePluginPending ? "Applying…" : enabled ? "Disable" : "Enable";
+    this.#transparentBackgroundButton.dataset.enabled = String(enabled);
+    this.#transparentBackgroundButton.setAttribute("aria-pressed", String(enabled));
+    this.#transparentBackgroundButton.setAttribute(
+      "aria-label",
+      this.#appearancePluginPending
+        ? "Applying Transparent Background"
+        : `${enabled ? "Disable" : "Enable"} Transparent Background`,
+    );
+    this.#transparentBackgroundButton.disabled =
+      this.#appearancePluginPending || !bridgeAvailable || (!enabled && preferenceBlocked);
+
+    let title = "";
+    if (!bridgeAvailable) title = "Restart Codex with Code-Codex to change this extension.";
+    else if (!enabled && preferenceBlocked) title = "Turn off high contrast or reduced transparency to enable this extension.";
+    else if (this.#appearancePluginError) title = this.#appearancePluginError;
+    if (title) this.#transparentBackgroundButton.title = title;
+    else this.#transparentBackgroundButton.removeAttribute("title");
   }
 
   #applyMediaPreviewerToggle(previewerId: string, enabled: boolean): void {
@@ -3858,6 +4223,7 @@ export class CodeCodexElement extends HTMLElement {
     if (this.#persistTimer) clearTimeout(this.#persistTimer);
     if (this.#typeaheadTimer) clearTimeout(this.#typeaheadTimer);
     if (this.#marqueeLongPressTimer) clearTimeout(this.#marqueeLongPressTimer);
+    this.#cancelAppearanceHealthCheck();
     this.#hideActionNotice();
     for (const tab of this.#previewTabs) {
       if (tab.timer) clearTimeout(tab.timer);
@@ -4149,6 +4515,42 @@ function errorCode(error: unknown): string {
   if (error instanceof ExplorerBridgeError) return String(error.code);
   if (error instanceof BridgeUnavailableError) return "NO_BRIDGE";
   return "INTERNAL";
+}
+
+interface WindowTransparencyResult {
+  readonly enabled: boolean;
+  readonly background: "transparent";
+}
+
+function validateTransparencyResult(raw: unknown, requestedEnabled: boolean): WindowTransparencyResult {
+  const result = asRecord(raw);
+  if (
+    !result ||
+    Object.keys(result).length !== 2 ||
+    result.enabled !== requestedEnabled ||
+    result.background !== "transparent"
+  ) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The window transparency response was not valid." });
+  }
+  return { enabled: requestedEnabled, background: "transparent" };
+}
+
+function transparencyActionError(error: unknown, requestedEnabled: boolean): string {
+  const action = requestedEnabled ? "enabled" : "disabled";
+  const code = errorCode(error);
+  if (code === "NO_BRIDGE") return `Transparent Background was not ${action}. Restart Codex with Code-Codex, then try again.`;
+  if (code === "TIMEOUT") return `Transparent Background was not ${action}. Try again.`;
+  if (code === "ACCESS_DENIED") return `Transparent Background was not ${action} because Windows denied access.`;
+  if (
+    code === "UNSUPPORTED" ||
+    code === "UNSUPPORTED_VERSION" ||
+    code === "NOT_SUPPORTED" ||
+    code === "METHOD_NOT_FOUND" ||
+    code === "WINDOW_UNAVAILABLE"
+  ) {
+    return "Transparent Background is not supported by this Codex window.";
+  }
+  return `Transparent Background was not ${action}. Try again.`;
 }
 
 function isPathWithin(parent: string, candidate: string): boolean {

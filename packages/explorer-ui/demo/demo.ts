@@ -185,6 +185,7 @@ const DEMO_MEDIA_VERSION = "d".repeat(64);
 const DEMO_MEDIA_CHUNK_BYTES = 2 * 1024 * 1024;
 let settings = { width: 270, collapsed: false, showHidden: true, showIgnored: true };
 let watching = false;
+let transparentBackgroundEnabled = false;
 
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value);
@@ -783,6 +784,11 @@ const bridge: ObjectBridge = {
       };
       return { panelWidth: settings.width, ...settings };
     }
+    if (method === "explorer.window.transparency.set") {
+      if (Object.keys(params).length !== 1 || typeof params.enabled !== "boolean") throw new Error("INVALID_REQUEST");
+      transparentBackgroundEnabled = params.enabled;
+      return { enabled: transparentBackgroundEnabled, background: "transparent" };
+    }
     if (method === "explorer.context") {
       return {
         threadId: String(params.threadId),
@@ -873,7 +879,7 @@ const bridge: ObjectBridge = {
 
 window.__CODE_CODEX_BOOTSTRAP__ = {
   token: "local-demo-token",
-  codexVersion: "26.715.10079.0",
+  codexVersion: "26.730.8199.0",
   channel: "demo",
 };
 window.__codeCodex = bridge;

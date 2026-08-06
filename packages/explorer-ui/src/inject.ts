@@ -1,5 +1,9 @@
 import { getBootstrapConfig } from "./bridge";
-import { CodeCodexElement } from "./explorer-element";
+import {
+  CodeCodexElement,
+  TRANSPARENT_BACKGROUND_ATTRIBUTE,
+  TRANSPARENT_BACKGROUND_COLOR_PROPERTY,
+} from "./explorer-element";
 import { codex26715Adapter, MAIN_SURFACE_SELECTOR, plausibleThreadId } from "./adapters/codex-26.715";
 import {
   clearExplorerDismissalForSession,
@@ -11,6 +15,7 @@ export const EXPLORER_TAG = "code-codex";
 const DISMISS_EVENT = "code-codex:dismiss";
 const RESELECTION_LISTENER_STATE = Symbol.for("code-codex:reselection-listener:v1");
 const SHELL_LAYOUT_STYLE_SELECTOR = 'style[data-code-codex-shell-layout="codex-26.715"]';
+const TRANSPARENT_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-transparent-background="v1"]';
 const SHELL_LAYOUT_CSS = `
 code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + ${MAIN_SURFACE_SELECTOR} > header[data-app-shell-header-edge-scroll] {
   position: absolute !important;
@@ -25,6 +30,43 @@ code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface
   code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + ${MAIN_SURFACE_SELECTOR} .thread-scroll-container[data-app-action-timeline-scroll] [data-pip-obstacle="thread-footer"] {
     max-width: min(var(--thread-content-max-width), calc(100% - 100px)) !important;
   }
+}
+`;
+const TRANSPARENT_BACKGROUND_CSS = `
+html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] {
+  background-color: var(${TRANSPARENT_BACKGROUND_COLOR_PROPERTY}) !important;
+}
+
+html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body,
+html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body :where(
+  div,
+  main,
+  aside,
+  section,
+  article,
+  header,
+  footer,
+  nav,
+  form,
+  dialog,
+  ul,
+  ol,
+  li,
+  button,
+  input,
+  textarea,
+  select
+):not([role="img"]):not([data-icon]):not([class*="icon" i]) {
+  background-color: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body :is(
+  [class*="bg-gradient-to-t"],
+  [class*="MainContentTopFade"]
+) {
+  background-image: none !important;
 }
 `;
 
@@ -130,7 +172,18 @@ function installShellLayoutStyle(): void {
   if (style.textContent !== SHELL_LAYOUT_CSS) style.textContent = SHELL_LAYOUT_CSS;
 }
 
+function installTransparentBackgroundStyle(): void {
+  let style = document.querySelector<HTMLStyleElement>(TRANSPARENT_BACKGROUND_STYLE_SELECTOR);
+  if (!style) {
+    style = document.createElement("style");
+    style.dataset.codeCodexTransparentBackground = "v1";
+    (document.head ?? document.documentElement).append(style);
+  }
+  if (style.textContent !== TRANSPARENT_BACKGROUND_CSS) style.textContent = TRANSPARENT_BACKGROUND_CSS;
+}
+
 export function injectExplorer(): CodeCodexElement | null {
+  installTransparentBackgroundStyle();
   const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
   if (sessionDismissed()) return existing;
   const mount = chooseMount();
@@ -260,6 +313,7 @@ function installRemountObserver(): void {
 
 export function installInjector(): void {
   window.__codeCodexInject = injectExplorer;
+  installTransparentBackgroundStyle();
   installReselectionListener();
   const start = () => {
     const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);

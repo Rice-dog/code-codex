@@ -153,6 +153,28 @@ export const styles = String.raw`
     }
   }
 
+  :host-context(html[data-code-codex-transparent-background]) :is(
+    .frame,
+    .masthead,
+    .file-search-toolbar,
+    .file-filter,
+    .tree-shell,
+    .loading-chip,
+    .context-menu,
+    .context-dialog-input,
+    .action-notice,
+    .state-action,
+    .statusbar,
+    .preview-market-popover,
+    .preview-extension,
+    .collapsed-tab
+  ),
+  :host-context(html[data-code-codex-transparent-background]) .preview-market-popover::after {
+    background-color: transparent !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
   *, *::before, *::after { box-sizing: border-box; }
   button { font: inherit; }
 
@@ -963,10 +985,27 @@ export const styles = String.raw`
   }
   .preview-market-list {
     display: grid;
-    gap: 8px;
+    gap: 12px;
     max-height: min(300px, calc(100vh - 210px));
     padding: 8px;
     overflow: auto;
+  }
+  .preview-market-section {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+  .preview-market-section-title {
+    padding: 0 2px;
+    color: var(--cle-muted);
+    font-size: 10px;
+    font-weight: 650;
+    line-height: 15px;
+    letter-spacing: .01em;
+  }
+  .preview-market-section-list {
+    display: grid;
+    gap: 8px;
   }
   .preview-extension {
     display: grid;
@@ -1003,6 +1042,11 @@ export const styles = String.raw`
     align-items: center;
     justify-content: space-between;
     gap: 6px;
+  }
+  .appearance-extension .preview-extension-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
   .preview-extension h4 {
     min-width: 0;
@@ -1052,6 +1096,11 @@ export const styles = String.raw`
     font-weight: 600;
   }
   .preview-extension-action:hover { filter: brightness(1.06); }
+  .preview-extension-action:disabled {
+    cursor: default;
+    filter: none;
+    opacity: .56;
+  }
   .preview-extension-action[data-enabled="true"] {
     color: var(--cle-muted);
     background: transparent;

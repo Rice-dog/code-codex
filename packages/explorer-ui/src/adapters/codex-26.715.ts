@@ -43,8 +43,8 @@ export function annotationConsensusThreadId(root: ParentNode = document): string
 }
 
 export const codex26715Adapter: RendererAdapter = Object.freeze({
-  id: "codex-26.715-26.727",
-  supportsVersion: (version: string) => /^26\.(715|721|727)\./.test(version),
+  id: "codex-runtime-qualified",
+  supportsVersion: (_version: string) => true,
   qualifiesRenderer: (root: ParentNode = document) => {
     const mains = root.querySelectorAll(MAIN_SURFACE_SELECTOR);
     const parent = mains.length === 1 ? mains[0]?.parentElement : null;
