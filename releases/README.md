@@ -5,6 +5,42 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.61
+
+- `CodeCodex-0.1.61-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.61-x64.msi`: MSI installer.
+- `CodeCodex-0.1.61-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Keeps setup and uninstall progress and result windows centered.
+- Reasserts final success and error dialog activation after display so they stay above other applications without moving toward the screen edge.
+
+## v0.1.60
+
+- `CodeCodex-0.1.60-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.60-x64.msi`: MSI installer.
+- `CodeCodex-0.1.60-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Restores centered placement for setup and uninstall progress and result windows.
+- Uses a topmost modal owner so final success and error dialogs open above other applications and receive foreground focus.
+
+## v0.1.59
+
+- `CodeCodex-0.1.59-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.59-x64.msi`: MSI installer.
+- `CodeCodex-0.1.59-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Places setup and uninstall progress, completion, and error windows at the top center of the active monitor.
+- Keeps those windows topmost and brings them to the foreground on Windows 10 and Windows 11.
+
+## v0.1.58
+
+- `CodeCodex-0.1.58-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.58-x64.msi`: MSI installer.
+- `CodeCodex-0.1.58-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Keeps setup and uninstall progress, completion, and error windows above ordinary application windows.
+- Shows uninstall progress through the final MSI or installed-file removal stage instead of ending after preparation.
+
 ## v0.1.57
 
 - `CodeCodex-0.1.57-x64-setup.exe`: recommended installer.
@@ -242,5 +278,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.57
+./scripts/package.ps1 -Version 0.1.61
 ```

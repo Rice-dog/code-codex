@@ -421,6 +421,7 @@ try {
         }
         Start-Process -FilePath $powerShellPath -WindowStyle Hidden -ArgumentList $delegateArguments
         $finalizerLaunched = $true
+        Write-Host "CODE_CODEX_UNINSTALL_DELEGATED"
         Write-Host "Windows Installer will remove Code-Codex after this window closes."
         return
     }
@@ -500,6 +501,7 @@ if ($uninstallerLauncherPid -gt 0) {
 }
 Start-Process -FilePath $powerShellPath -WindowStyle Hidden -ArgumentList $finalizerArguments
 $finalizerLaunched = $true
+Write-Host "CODE_CODEX_UNINSTALL_DELEGATED"
 
 Write-Host "The Codex or ChatGPT desktop shortcut was restored, or the Code-Codex shortcut was removed. Code-Codex will be removed after this window closes."
 }

@@ -7,7 +7,8 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{ExitCode, Output};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[path = "../gui_support.rs"]
 mod gui_support;
@@ -16,6 +17,7 @@ mod script_wrapper;
 
 const TITLE: &str = "Code-Codex uninstall";
 const UNINSTALL_SCRIPT_NAME: &str = "Uninstall-CodeCodex.ps1";
+const DELEGATED_UNINSTALL_MARKER: &str = "CODE_CODEX_UNINSTALL_DELEGATED";
 const EMBEDDED_UNINSTALL_SCRIPT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../installer/Uninstall-CodeCodex.ps1"
@@ -23,13 +25,24 @@ const EMBEDDED_UNINSTALL_SCRIPT: &str = include_str!(concat!(
 
 fn main() -> ExitCode {
     let arguments: Vec<_> = env::args_os().skip(1).collect();
-    let result = run_uninstall(&arguments);
+    let mut progress = gui_support::ProgressDialog::open(TITLE, "Preparing uninstall...", 5);
+    let result = run_uninstall(&arguments, &mut progress);
     match result {
         Ok(output) if output.status.success() => {
+            if stdout_indicates_delegation(&output.stdout) {
+                progress.set_progress(55, "Continuing uninstall...");
+                thread::sleep(Duration::from_millis(250));
+                progress.close();
+                return ExitCode::SUCCESS;
+            }
+            progress.set_progress(100, "Uninstallation complete");
+            thread::sleep(Duration::from_millis(650));
+            progress.close();
             gui_support::show_dialog(TITLE, "Code-Codex was uninstalled successfully.", false);
             ExitCode::SUCCESS
         }
         Ok(output) => {
+            progress.close();
             let exit_detail = output.status.code().map_or_else(
                 || "The uninstall script stopped without an exit code.".to_owned(),
                 |code| format!("The uninstall script exited with code {code}."),
@@ -45,6 +58,7 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         Err(error) => {
+            progress.close();
             gui_support::show_dialog(
                 TITLE,
                 &format!("Code-Codex could not be uninstalled: {error}"),
@@ -55,7 +69,12 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_uninstall(arguments: &[OsString]) -> Result<Output, String> {
+fn run_uninstall(
+    arguments: &[OsString],
+    progress: &mut gui_support::ProgressDialog,
+) -> Result<Output, String> {
+    progress.set_progress(15, "Checking the installed files...");
+    progress.set_marquee("Preparing Code-Codex removal...");
     if let Some(output) = script_wrapper::run_sibling_script_captured(
         UNINSTALL_SCRIPT_NAME,
         arguments.iter().cloned(),
@@ -63,6 +82,7 @@ fn run_uninstall(arguments: &[OsString]) -> Result<Output, String> {
         return Ok(output);
     }
 
+    progress.set_progress(25, "Preparing the uninstaller...");
     let script = embedded_script_path()?;
     fs::write(&script, EMBEDDED_UNINSTALL_SCRIPT).map_err(|error| {
         format!(
@@ -70,9 +90,16 @@ fn run_uninstall(arguments: &[OsString]) -> Result<Output, String> {
             script.display()
         )
     })?;
+    progress.set_marquee("Preparing Code-Codex removal...");
     let result = script_wrapper::run_script_captured(&script, arguments.iter().cloned());
     let _ = fs::remove_file(&script);
     result
+}
+
+fn stdout_indicates_delegation(bytes: &[u8]) -> bool {
+    sanitize_script_output(bytes)
+        .lines()
+        .any(|line| line.trim() == DELEGATED_UNINSTALL_MARKER)
 }
 
 fn captured_failure_detail(output: &Output) -> Option<String> {
@@ -153,7 +180,17 @@ fn embedded_script_path() -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::first_meaningful_line;
+    use super::{first_meaningful_line, stdout_indicates_delegation};
+
+    #[test]
+    fn recognizes_the_finalizer_handoff_marker() {
+        assert!(stdout_indicates_delegation(
+            b"Preparing removal\r\nCODE_CODEX_UNINSTALL_DELEGATED\r\n"
+        ));
+        assert!(!stdout_indicates_delegation(
+            b"Code-Codex is not installed.\r\n"
+        ));
+    }
 
     #[test]
     fn extracts_the_actionable_powershell_error() {
