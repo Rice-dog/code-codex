@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -26,11 +26,18 @@ pub const MAX_PDF_PREVIEW_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_AUDIO_PREVIEW_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_NOTEBOOK_PREVIEW_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_OFFICE_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
+pub const MAX_MODEL_PREVIEW_BYTES: u64 = 128 * 1024 * 1024;
+pub const MAX_MODEL_RESOURCE_BYTES: u64 = 128 * 1024 * 1024;
+pub const MAX_MODEL_RESOURCE_AGGREGATE_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_NATIVE_POWERPOINT_PREVIEW_BYTES: u64 = 64 * 1024 * 1024;
 
 pub const NATIVE_POWERPOINT_PREVIEW_MIME: &str = "application/vnd.code-codex.powerpoint-slides+zip";
 
 const MEDIA_SIGNATURE_BYTES: usize = 4 * 1024;
+const MAX_MODEL_JSON_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_MODEL_EXTERNAL_RESOURCES: usize = 256;
+const MAX_MODEL_RESOURCE_URI_BYTES: usize = 2 * 1024;
+const MAX_MODEL_RESOURCE_CACHE_ENTRIES: usize = 8;
 const MAX_OFFICE_ENTRIES: usize = 4_096;
 const MAX_OFFICE_ENTRY_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_OFFICE_XML_BYTES: u64 = 8 * 1024 * 1024;
@@ -55,6 +62,7 @@ pub enum MediaKind {
     Audio,
     Notebook,
     Office,
+    Model,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -73,6 +81,27 @@ pub struct MediaChunk {
     pub offset: u64,
     pub data: Vec<u8>,
     pub eof: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelResourceInfo {
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub version: String,
+    pub chunk_size: usize,
+    pub chunk_count: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelResourceChunkRequest<'a> {
+    pub model_relative_path: &'a str,
+    pub resource_uri: &'a str,
+    pub expected_model_version: &'a str,
+    pub offset: u64,
+    pub length: usize,
+    pub expected_size_bytes: u64,
+    pub expected_version: &'a str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -190,6 +219,61 @@ enum MediaSignature {
     Xlsx,
     Ppt,
     Pptx,
+    GltfJson,
+    Glb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelResourceKind {
+    Buffer,
+    Image,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelResourceSignature {
+    Any,
+    Png,
+    Jpeg,
+    Webp,
+    Avif,
+    Ktx2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ModelResourcePolicy {
+    mime_type: &'static str,
+    maximum_size: u64,
+    signature: ModelResourceSignature,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelResourceReference {
+    uri: String,
+    relative_path: PathBuf,
+    policy: ModelResourcePolicy,
+    declared_size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelResourceDescriptor {
+    reference: ModelResourceReference,
+    size_bytes: u64,
+    version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelResourceCacheKey {
+    root: PathBuf,
+    model_relative_path: PathBuf,
+    signature: MediaSignature,
+    model_size_bytes: u64,
+    model_version: String,
+}
+
+#[derive(Debug, Clone)]
+struct ModelResourceCacheEntry {
+    key: ModelResourceCacheKey,
+    resources: Arc<Vec<ModelResourceDescriptor>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,6 +302,42 @@ struct NativePowerPointCacheEntry {
 struct NativePowerPointBundle {
     bytes: Arc<Vec<u8>>,
     version: String,
+}
+
+fn model_resource_cache() -> &'static Mutex<VecDeque<ModelResourceCacheEntry>> {
+    static CACHE: OnceLock<Mutex<VecDeque<ModelResourceCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+fn cached_model_resources(
+    key: &ModelResourceCacheKey,
+) -> Option<Arc<Vec<ModelResourceDescriptor>>> {
+    let mut cache = model_resource_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let index = cache.iter().position(|entry| entry.key == *key)?;
+    let entry = cache.remove(index)?;
+    let resources = entry.resources.clone();
+    cache.push_back(entry);
+    Some(resources)
+}
+
+fn cache_model_resources(key: ModelResourceCacheKey, resources: Arc<Vec<ModelResourceDescriptor>>) {
+    let mut cache = model_resource_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.retain(|entry| entry.key != key);
+    cache.push_back(ModelResourceCacheEntry { key, resources });
+    while cache.len() > MAX_MODEL_RESOURCE_CACHE_ENTRIES {
+        cache.pop_front();
+    }
+}
+
+fn invalidate_cached_model_resources(key: &ModelResourceCacheKey) {
+    let mut cache = model_resource_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.retain(|entry| entry.key != *key);
 }
 
 fn office_validation_cache() -> &'static Mutex<VecDeque<OfficeValidationCacheKey>> {
@@ -404,6 +524,284 @@ impl Workspace {
         })
     }
 
+    /// Returns metadata for an external buffer or texture referenced by one
+    /// specific glTF model. The resource URI is never treated as a general
+    /// workspace path: it must occur in the version-bound model manifest and
+    /// resolve, component by component, inside the retained workspace root.
+    pub fn model_resource_info(
+        &self,
+        model_relative_path: &str,
+        resource_uri: &str,
+        expected_model_version: &str,
+    ) -> Result<ModelResourceInfo, WorkspaceError> {
+        let (mut model, policy, model_size, model_version) =
+            self.open_media(model_relative_path)?;
+        if policy.kind != MediaKind::Model {
+            return Err(WorkspaceError::NotEditable);
+        }
+        if model_version != expected_model_version {
+            return Err(WorkspaceError::Conflict);
+        }
+        let model_path = validate_relative(model_relative_path)?;
+        let (cache_key, resources) = self.model_resource_snapshot(
+            &model_path,
+            &mut model,
+            policy.signature,
+            model_size,
+            &model_version,
+        )?;
+        let descriptor = resources
+            .iter()
+            .find(|descriptor| descriptor.reference.uri == resource_uri)
+            .ok_or(WorkspaceError::InvalidPath)?;
+        let (resource, size_bytes, version) = match self.open_model_resource(&descriptor.reference)
+        {
+            Ok(opened) => opened,
+            Err(error) => {
+                invalidate_cached_model_resources(&cache_key);
+                return Err(error);
+            }
+        };
+        if size_bytes != descriptor.size_bytes || version != descriptor.version {
+            invalidate_cached_model_resources(&cache_key);
+            return Err(WorkspaceError::Conflict);
+        }
+        drop(resource);
+        self.ensure_model_version(&model, model_size, expected_model_version)?;
+        self.ensure_root_valid()?;
+        let chunk_size = MEDIA_CHUNK_BYTES;
+        Ok(ModelResourceInfo {
+            mime_type: descriptor.reference.policy.mime_type.to_owned(),
+            size_bytes,
+            version,
+            chunk_size,
+            chunk_count: size_bytes.div_ceil(chunk_size as u64),
+        })
+    }
+
+    /// Reads one bounded range from a model-scoped external resource. Both the
+    /// model and resource descriptors are revalidated before returning bytes,
+    /// so stale manifests and same-name replacements fail closed.
+    pub fn model_resource_chunk(
+        &self,
+        request: ModelResourceChunkRequest<'_>,
+    ) -> Result<MediaChunk, WorkspaceError> {
+        if request.length == 0
+            || request.length > MAX_MEDIA_CHUNK_BYTES
+            || request.offset >= request.expected_size_bytes
+        {
+            return Err(WorkspaceError::InvalidPath);
+        }
+        request
+            .offset
+            .checked_add(request.length as u64)
+            .ok_or(WorkspaceError::InvalidPath)?;
+
+        let (mut model, policy, model_size, model_version) =
+            self.open_media(request.model_relative_path)?;
+        if policy.kind != MediaKind::Model {
+            return Err(WorkspaceError::NotEditable);
+        }
+        if model_version != request.expected_model_version {
+            return Err(WorkspaceError::Conflict);
+        }
+        let model_path = validate_relative(request.model_relative_path)?;
+        let (cache_key, resources) = self.model_resource_snapshot(
+            &model_path,
+            &mut model,
+            policy.signature,
+            model_size,
+            &model_version,
+        )?;
+        let descriptor = resources
+            .iter()
+            .find(|descriptor| descriptor.reference.uri == request.resource_uri)
+            .ok_or(WorkspaceError::InvalidPath)?;
+        let (mut resource, size_bytes, version) =
+            match self.open_model_resource(&descriptor.reference) {
+                Ok(opened) => opened,
+                Err(error) => {
+                    invalidate_cached_model_resources(&cache_key);
+                    return Err(error);
+                }
+            };
+        if size_bytes != descriptor.size_bytes
+            || version != descriptor.version
+            || size_bytes != request.expected_size_bytes
+            || version != request.expected_version
+        {
+            invalidate_cached_model_resources(&cache_key);
+            return Err(WorkspaceError::Conflict);
+        }
+
+        let remaining = request.expected_size_bytes.saturating_sub(request.offset);
+        let read_length = remaining.min(request.length as u64) as usize;
+        resource
+            .seek(SeekFrom::Start(request.offset))
+            .map_err(|error| map_io(&error))?;
+        let mut data = Vec::with_capacity(read_length);
+        Read::by_ref(&mut resource)
+            .take(read_length as u64)
+            .read_to_end(&mut data)
+            .map_err(|error| map_io(&error))?;
+        let final_metadata = resource.metadata().map_err(|error| map_io(&error))?;
+        let final_version = media_version(&resource, &final_metadata)?;
+        if final_metadata.len() != request.expected_size_bytes
+            || final_version != request.expected_version
+            || data.len() != read_length
+        {
+            return Err(WorkspaceError::Conflict);
+        }
+        drop(resource);
+        self.ensure_model_version(&model, model_size, request.expected_model_version)?;
+        drop(model);
+        self.ensure_root_valid()?;
+
+        let end = request
+            .offset
+            .checked_add(data.len() as u64)
+            .ok_or(WorkspaceError::InvalidPath)?;
+        Ok(MediaChunk {
+            offset: request.offset,
+            data,
+            eof: end == request.expected_size_bytes,
+        })
+    }
+
+    fn model_resource_snapshot(
+        &self,
+        model_relative_path: &Path,
+        model: &mut std::fs::File,
+        signature: MediaSignature,
+        model_size_bytes: u64,
+        model_version: &str,
+    ) -> Result<(ModelResourceCacheKey, Arc<Vec<ModelResourceDescriptor>>), WorkspaceError> {
+        let key = ModelResourceCacheKey {
+            root: self.root_path().to_path_buf(),
+            model_relative_path: model_relative_path.to_path_buf(),
+            signature,
+            model_size_bytes,
+            model_version: model_version.to_owned(),
+        };
+        if let Some(resources) = cached_model_resources(&key) {
+            return Ok((key, resources));
+        }
+
+        let references =
+            model_resource_references(model, signature, model_size_bytes, model_relative_path)?;
+        let resources = Arc::new(self.validate_model_resource_set(&references, model_size_bytes)?);
+        self.ensure_model_version(model, model_size_bytes, model_version)?;
+        self.ensure_root_valid()?;
+        cache_model_resources(key.clone(), resources.clone());
+        Ok((key, resources))
+    }
+
+    fn validate_model_resource_set(
+        &self,
+        references: &[ModelResourceReference],
+        model_size: u64,
+    ) -> Result<Vec<ModelResourceDescriptor>, WorkspaceError> {
+        if references.len() > MAX_MODEL_EXTERNAL_RESOURCES {
+            return Err(WorkspaceError::ContentTooLarge);
+        }
+        let mut total = model_size;
+        let mut opened = HashMap::<PathBuf, (u64, String)>::new();
+        let mut descriptors = Vec::with_capacity(references.len());
+        for reference in references {
+            let (size_bytes, version) =
+                if let Some(descriptor) = opened.get(&reference.relative_path) {
+                    descriptor.clone()
+                } else {
+                    let (resource, size_bytes, version) = self.open_model_resource(reference)?;
+                    drop(resource);
+                    total = total
+                        .checked_add(size_bytes)
+                        .ok_or(WorkspaceError::ContentTooLarge)?;
+                    if total > MAX_MODEL_RESOURCE_AGGREGATE_BYTES {
+                        return Err(WorkspaceError::ContentTooLarge);
+                    }
+                    opened.insert(
+                        reference.relative_path.clone(),
+                        (size_bytes, version.clone()),
+                    );
+                    (size_bytes, version)
+                };
+            if reference
+                .declared_size_bytes
+                .is_some_and(|declared| declared != size_bytes)
+            {
+                return Err(WorkspaceError::NotEditable);
+            }
+            descriptors.push(ModelResourceDescriptor {
+                reference: reference.clone(),
+                size_bytes,
+                version,
+            });
+        }
+        self.ensure_root_valid()?;
+        Ok(descriptors)
+    }
+
+    fn open_model_resource(
+        &self,
+        reference: &ModelResourceReference,
+    ) -> Result<(std::fs::File, u64, String), WorkspaceError> {
+        self.ensure_root_valid()?;
+        let name = reference
+            .relative_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(WorkspaceError::InvalidPath)?;
+        let lower = name.to_ascii_lowercase();
+        let extension = Path::new(&lower)
+            .extension()
+            .and_then(|extension| extension.to_str());
+        if is_sensitive_name(&lower, extension) {
+            return Err(WorkspaceError::AccessDenied);
+        }
+        let parent = reference
+            .relative_path
+            .parent()
+            .unwrap_or_else(|| Path::new(""));
+        let directory = DirectoryCapability::open(self.root_handle(), parent)?;
+        let mut file = open_regular_file_nofollow(directory.handle()?, Path::new(name))?;
+        let initial_metadata = file.metadata().map_err(|error| map_io(&error))?;
+        let initial_size = initial_metadata.len();
+        if initial_size > reference.policy.maximum_size {
+            return Err(WorkspaceError::ContentTooLarge);
+        }
+        let initial_version = media_version(&file, &initial_metadata)?;
+        let mut signature = Vec::with_capacity(MEDIA_SIGNATURE_BYTES);
+        Read::by_ref(&mut file)
+            .take(MEDIA_SIGNATURE_BYTES as u64)
+            .read_to_end(&mut signature)
+            .map_err(|error| map_io(&error))?;
+        let final_metadata = file.metadata().map_err(|error| map_io(&error))?;
+        if final_metadata.len() != initial_size
+            || media_version(&file, &final_metadata)? != initial_version
+        {
+            return Err(WorkspaceError::Conflict);
+        }
+        if !matches_model_resource_signature(reference.policy.signature, &signature) {
+            return Err(WorkspaceError::NotEditable);
+        }
+        self.ensure_root_valid()?;
+        Ok((file, initial_size, initial_version))
+    }
+
+    fn ensure_model_version(
+        &self,
+        model: &std::fs::File,
+        expected_size: u64,
+        expected_version: &str,
+    ) -> Result<(), WorkspaceError> {
+        let metadata = model.metadata().map_err(|error| map_io(&error))?;
+        if metadata.len() != expected_size || media_version(model, &metadata)? != expected_version {
+            return Err(WorkspaceError::Conflict);
+        }
+        Ok(())
+    }
+
     fn native_powerpoint_bundle(
         &self,
         relative_path: &Path,
@@ -488,6 +886,24 @@ impl Workspace {
         }
         if !matches_media_signature(policy.signature, &signature) {
             return Err(WorkspaceError::NotEditable);
+        }
+        if matches!(
+            policy.signature,
+            MediaSignature::GltfJson | MediaSignature::Glb
+        ) {
+            self.model_resource_snapshot(
+                &clean,
+                &mut file,
+                policy.signature,
+                initial_size,
+                &initial_version,
+            )?;
+            let validated_metadata = file.metadata().map_err(|error| map_io(&error))?;
+            if validated_metadata.len() != initial_size
+                || media_version(&file, &validated_metadata)? != initial_version
+            {
+                return Err(WorkspaceError::Conflict);
+            }
         }
         if matches!(
             policy.signature,
@@ -1280,6 +1696,12 @@ fn media_policy(extension: Option<&str>) -> Option<MediaPolicy> {
         maximum_size: MAX_OFFICE_PREVIEW_BYTES,
         signature,
     };
+    let model = |mime_type, signature| MediaPolicy {
+        kind: MediaKind::Model,
+        mime_type,
+        maximum_size: MAX_MODEL_PREVIEW_BYTES,
+        signature,
+    };
 
     match extension? {
         "png" => Some(image("image/png", MediaSignature::Png)),
@@ -1317,6 +1739,8 @@ fn media_policy(extension: Option<&str>) -> Option<MediaPolicy> {
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             MediaSignature::Pptx,
         )),
+        "gltf" => Some(model("model/gltf+json", MediaSignature::GltfJson)),
+        "glb" => Some(model("model/gltf-binary", MediaSignature::Glb)),
         _ => None,
     }
 }
@@ -1354,6 +1778,356 @@ fn matches_media_signature(signature: MediaSignature, bytes: &[u8]) -> bool {
         MediaSignature::Docx | MediaSignature::Xlsx | MediaSignature::Pptx => {
             bytes.starts_with(b"PK\x03\x04")
         }
+        MediaSignature::GltfJson => matches_json_object_signature(bytes),
+        MediaSignature::Glb => {
+            bytes.len() >= 12
+                && bytes.starts_with(b"glTF")
+                && u32::from_le_bytes(bytes[4..8].try_into().unwrap_or_default()) == 2
+        }
+    }
+}
+
+fn matches_json_object_signature(bytes: &[u8]) -> bool {
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
+    bytes
+        .iter()
+        .copied()
+        .find(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+        == Some(b'{')
+}
+
+fn model_resource_references(
+    file: &mut std::fs::File,
+    signature: MediaSignature,
+    size_bytes: u64,
+    model_path: &Path,
+) -> Result<Vec<ModelResourceReference>, WorkspaceError> {
+    let json = read_model_json(file, signature, size_bytes)?;
+    let document: serde_json::Value =
+        serde_json::from_slice(&json).map_err(|_| WorkspaceError::NotEditable)?;
+    let object = document.as_object().ok_or(WorkspaceError::NotEditable)?;
+    let asset = object
+        .get("asset")
+        .and_then(serde_json::Value::as_object)
+        .ok_or(WorkspaceError::NotEditable)?;
+    if asset.get("version").and_then(serde_json::Value::as_str) != Some("2.0") {
+        return Err(WorkspaceError::NotEditable);
+    }
+
+    let mut references = Vec::new();
+    collect_model_resource_references(
+        object,
+        "buffers",
+        ModelResourceKind::Buffer,
+        model_path,
+        &mut references,
+    )?;
+    collect_model_resource_references(
+        object,
+        "images",
+        ModelResourceKind::Image,
+        model_path,
+        &mut references,
+    )?;
+    if references.len() > MAX_MODEL_EXTERNAL_RESOURCES {
+        return Err(WorkspaceError::ContentTooLarge);
+    }
+    Ok(references)
+}
+
+fn read_model_json(
+    file: &mut std::fs::File,
+    signature: MediaSignature,
+    size_bytes: u64,
+) -> Result<Vec<u8>, WorkspaceError> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| map_io(&error))?;
+    match signature {
+        MediaSignature::GltfJson => {
+            if size_bytes > MAX_MODEL_JSON_BYTES {
+                return Err(WorkspaceError::ContentTooLarge);
+            }
+            let capacity =
+                usize::try_from(size_bytes).map_err(|_| WorkspaceError::ContentTooLarge)?;
+            let mut json = Vec::with_capacity(capacity);
+            Read::by_ref(file)
+                .take(size_bytes.saturating_add(1))
+                .read_to_end(&mut json)
+                .map_err(|error| map_io(&error))?;
+            if json.len() as u64 != size_bytes {
+                return Err(WorkspaceError::Conflict);
+            }
+            Ok(json.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&json).to_vec())
+        }
+        MediaSignature::Glb => read_glb_json(file, size_bytes),
+        _ => Err(WorkspaceError::NotEditable),
+    }
+}
+
+fn read_glb_json(file: &mut std::fs::File, size_bytes: u64) -> Result<Vec<u8>, WorkspaceError> {
+    const GLB_HEADER_BYTES: u64 = 12;
+    const GLB_CHUNK_HEADER_BYTES: u64 = 8;
+    const GLB_JSON_CHUNK: u32 = 0x4e4f_534a;
+
+    if size_bytes < GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES {
+        return Err(WorkspaceError::NotEditable);
+    }
+    let mut header = [0_u8; GLB_HEADER_BYTES as usize];
+    read_model_exact(file, &mut header)?;
+    let version = u32::from_le_bytes(header[4..8].try_into().unwrap_or_default());
+    let declared_size = u32::from_le_bytes(header[8..12].try_into().unwrap_or_default()) as u64;
+    if &header[..4] != b"glTF" || version != 2 || declared_size != size_bytes {
+        return Err(WorkspaceError::NotEditable);
+    }
+
+    let mut chunk_header = [0_u8; GLB_CHUNK_HEADER_BYTES as usize];
+    read_model_exact(file, &mut chunk_header)?;
+    let json_size = u32::from_le_bytes(chunk_header[..4].try_into().unwrap_or_default()) as u64;
+    let chunk_type = u32::from_le_bytes(chunk_header[4..8].try_into().unwrap_or_default());
+    if json_size == 0
+        || json_size > MAX_MODEL_JSON_BYTES
+        || json_size % 4 != 0
+        || chunk_type != GLB_JSON_CHUNK
+        || GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + json_size > size_bytes
+    {
+        return Err(WorkspaceError::NotEditable);
+    }
+    let json_capacity = usize::try_from(json_size).map_err(|_| WorkspaceError::ContentTooLarge)?;
+    let mut json = vec![0_u8; json_capacity];
+    read_model_exact(file, &mut json)?;
+
+    let mut position = GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + json_size;
+    while position < size_bytes {
+        if size_bytes - position < GLB_CHUNK_HEADER_BYTES {
+            return Err(WorkspaceError::NotEditable);
+        }
+        read_model_exact(file, &mut chunk_header)?;
+        let chunk_size =
+            u32::from_le_bytes(chunk_header[..4].try_into().unwrap_or_default()) as u64;
+        if chunk_size % 4 != 0
+            || position
+                .checked_add(GLB_CHUNK_HEADER_BYTES)
+                .and_then(|position| position.checked_add(chunk_size))
+                .is_none_or(|end| end > size_bytes)
+        {
+            return Err(WorkspaceError::NotEditable);
+        }
+        file.seek(SeekFrom::Current(i64::from(chunk_size as u32)))
+            .map_err(|error| map_io(&error))?;
+        position += GLB_CHUNK_HEADER_BYTES + chunk_size;
+    }
+    if position != size_bytes {
+        return Err(WorkspaceError::NotEditable);
+    }
+    Ok(json)
+}
+
+fn read_model_exact(file: &mut std::fs::File, bytes: &mut [u8]) -> Result<(), WorkspaceError> {
+    file.read_exact(bytes).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::UnexpectedEof {
+            WorkspaceError::NotEditable
+        } else {
+            map_io(&error)
+        }
+    })
+}
+
+fn collect_model_resource_references(
+    document: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    kind: ModelResourceKind,
+    model_path: &Path,
+    output: &mut Vec<ModelResourceReference>,
+) -> Result<(), WorkspaceError> {
+    let Some(value) = document.get(field) else {
+        return Ok(());
+    };
+    let entries = value.as_array().ok_or(WorkspaceError::NotEditable)?;
+    for entry in entries {
+        let entry = entry.as_object().ok_or(WorkspaceError::NotEditable)?;
+        let declared_size_bytes = match kind {
+            ModelResourceKind::Buffer => Some(
+                entry
+                    .get("byteLength")
+                    .and_then(serde_json::Value::as_u64)
+                    .filter(|length| *length > 0)
+                    .ok_or(WorkspaceError::NotEditable)?,
+            ),
+            ModelResourceKind::Image => None,
+        };
+        let Some(uri_value) = entry.get("uri") else {
+            continue;
+        };
+        let uri = uri_value.as_str().ok_or(WorkspaceError::NotEditable)?;
+        if is_allowed_embedded_model_uri(uri, kind) {
+            continue;
+        }
+        if uri
+            .get(..5)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
+        {
+            return Err(WorkspaceError::NotEditable);
+        }
+        let relative_path = resolve_model_resource_uri(model_path, uri)?;
+        let policy = model_resource_policy(kind, &relative_path)?;
+        output.push(ModelResourceReference {
+            uri: uri.to_owned(),
+            relative_path,
+            policy,
+            declared_size_bytes,
+        });
+        if output.len() > MAX_MODEL_EXTERNAL_RESOURCES {
+            return Err(WorkspaceError::ContentTooLarge);
+        }
+    }
+    Ok(())
+}
+
+fn is_allowed_embedded_model_uri(uri: &str, kind: ModelResourceKind) -> bool {
+    let lower = uri.to_ascii_lowercase();
+    let prefixes: &[&str] = match kind {
+        ModelResourceKind::Buffer => &[
+            "data:application/octet-stream;base64,",
+            "data:application/gltf-buffer;base64,",
+        ],
+        ModelResourceKind::Image => &[
+            "data:image/png;base64,",
+            "data:image/jpeg;base64,",
+            "data:image/webp;base64,",
+            "data:image/avif;base64,",
+            "data:image/ktx2;base64,",
+        ],
+    };
+    prefixes
+        .iter()
+        .any(|prefix| lower.starts_with(prefix) && uri.len() > prefix.len())
+}
+
+fn resolve_model_resource_uri(model_path: &Path, uri: &str) -> Result<PathBuf, WorkspaceError> {
+    if uri.is_empty()
+        || uri.len() > MAX_MODEL_RESOURCE_URI_BYTES
+        || uri.contains(['\0', '\\', '?', '#', ':'])
+        || uri.starts_with('/')
+        || uri.starts_with("//")
+    {
+        return Err(WorkspaceError::InvalidPath);
+    }
+
+    let mut resolved = model_path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_path_buf();
+    for encoded_component in uri.split('/') {
+        if encoded_component.is_empty() {
+            return Err(WorkspaceError::InvalidPath);
+        }
+        let component = percent_decode_model_uri_component(encoded_component)?;
+        match component.as_str() {
+            "." => continue,
+            ".." => {
+                if !resolved.pop() {
+                    return Err(WorkspaceError::OutsideWorkspace);
+                }
+            }
+            _ => {
+                if component.contains(['/', '\\', ':']) || validate_relative(&component).is_err() {
+                    return Err(WorkspaceError::InvalidPath);
+                }
+                resolved.push(component);
+            }
+        }
+    }
+    if resolved.as_os_str().is_empty() {
+        return Err(WorkspaceError::InvalidPath);
+    }
+    Ok(resolved)
+}
+
+fn percent_decode_model_uri_component(value: &str) -> Result<String, WorkspaceError> {
+    fn hex(value: u8) -> Option<u8> {
+        match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            b'A'..=b'F' => Some(value - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    let source = value.as_bytes();
+    let mut decoded = Vec::with_capacity(source.len());
+    let mut index = 0;
+    while index < source.len() {
+        if source[index] == b'%' {
+            let high = source.get(index + 1).and_then(|value| hex(*value));
+            let low = source.get(index + 2).and_then(|value| hex(*value));
+            let (Some(high), Some(low)) = (high, low) else {
+                return Err(WorkspaceError::InvalidPath);
+            };
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(source[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| WorkspaceError::InvalidPath)
+}
+
+fn model_resource_policy(
+    kind: ModelResourceKind,
+    relative_path: &Path,
+) -> Result<ModelResourcePolicy, WorkspaceError> {
+    let extension = relative_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or(WorkspaceError::NotEditable)?;
+    let policy = match (kind, extension.as_str()) {
+        (ModelResourceKind::Buffer, "bin" | "glbin" | "glbuf") => ModelResourcePolicy {
+            mime_type: "application/octet-stream",
+            maximum_size: MAX_MODEL_RESOURCE_BYTES,
+            signature: ModelResourceSignature::Any,
+        },
+        (ModelResourceKind::Image, "png") => ModelResourcePolicy {
+            mime_type: "image/png",
+            maximum_size: MAX_IMAGE_PREVIEW_BYTES,
+            signature: ModelResourceSignature::Png,
+        },
+        (ModelResourceKind::Image, "jpg" | "jpeg") => ModelResourcePolicy {
+            mime_type: "image/jpeg",
+            maximum_size: MAX_IMAGE_PREVIEW_BYTES,
+            signature: ModelResourceSignature::Jpeg,
+        },
+        (ModelResourceKind::Image, "webp") => ModelResourcePolicy {
+            mime_type: "image/webp",
+            maximum_size: MAX_IMAGE_PREVIEW_BYTES,
+            signature: ModelResourceSignature::Webp,
+        },
+        (ModelResourceKind::Image, "avif") => ModelResourcePolicy {
+            mime_type: "image/avif",
+            maximum_size: MAX_IMAGE_PREVIEW_BYTES,
+            signature: ModelResourceSignature::Avif,
+        },
+        (ModelResourceKind::Image, "ktx2") => ModelResourcePolicy {
+            mime_type: "image/ktx2",
+            maximum_size: MAX_IMAGE_PREVIEW_BYTES,
+            signature: ModelResourceSignature::Ktx2,
+        },
+        _ => return Err(WorkspaceError::NotEditable),
+    };
+    Ok(policy)
+}
+
+fn matches_model_resource_signature(signature: ModelResourceSignature, bytes: &[u8]) -> bool {
+    match signature {
+        ModelResourceSignature::Any => !bytes.is_empty(),
+        ModelResourceSignature::Png => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        ModelResourceSignature::Jpeg => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        ModelResourceSignature::Webp => {
+            bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP"
+        }
+        ModelResourceSignature::Avif => ftyp_has_brand(bytes, &[b"avif", b"avis"]),
+        ModelResourceSignature::Ktx2 => bytes.starts_with(b"\xabKTX 20\xbb\r\n\x1a\n"),
     }
 }
 
@@ -2497,6 +3271,36 @@ mod tests {
         bytes
     }
 
+    fn glb(json: &str, binary: &[u8]) -> Vec<u8> {
+        let mut json = json.as_bytes().to_vec();
+        while json.len() % 4 != 0 {
+            json.push(b' ');
+        }
+        let binary_length = binary.len().div_ceil(4) * 4;
+        let total_length = 12
+            + 8
+            + json.len()
+            + if binary.is_empty() {
+                0
+            } else {
+                8 + binary_length
+            };
+        let mut bytes = Vec::with_capacity(total_length);
+        bytes.extend_from_slice(b"glTF");
+        bytes.extend_from_slice(&2_u32.to_le_bytes());
+        bytes.extend_from_slice(&(total_length as u32).to_le_bytes());
+        bytes.extend_from_slice(&(json.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&0x4e4f_534a_u32.to_le_bytes());
+        bytes.extend_from_slice(&json);
+        if !binary.is_empty() {
+            bytes.extend_from_slice(&(binary_length as u32).to_le_bytes());
+            bytes.extend_from_slice(&0x004e_4942_u32.to_le_bytes());
+            bytes.extend_from_slice(binary);
+            bytes.resize(total_length, 0);
+        }
+        bytes
+    }
+
     #[test]
     fn native_powerpoint_bundle_has_a_bounded_ordered_manifest() {
         let directory = TempDir::new().expect("temp dir");
@@ -3311,6 +4115,407 @@ mod tests {
     }
 
     #[test]
+    fn gltf_and_glb_media_are_validated_and_external_resources_are_model_scoped() {
+        let (directory, workspace) = fixture();
+        fs::create_dir(directory.path().join("models")).expect("models");
+        fs::create_dir(directory.path().join("assets")).expect("assets");
+        fs::create_dir(directory.path().join("textures")).expect("textures");
+        let buffer = b"bounded model buffer";
+        let texture = minimal_png(2, 2);
+        fs::write(directory.path().join("assets/model data.bin"), buffer).expect("buffer");
+        fs::write(directory.path().join("textures/albedo.png"), &texture).expect("texture");
+        let manifest = serde_json::json!({
+            "asset": { "version": "2.0" },
+            "buffers": [{ "uri": "../assets/model%20data.bin", "byteLength": buffer.len() }],
+            "images": [{ "uri": "../textures/albedo.png" }],
+        });
+        fs::write(
+            directory.path().join("models/scene.gltf"),
+            serde_json::to_vec(&manifest).expect("model JSON"),
+        )
+        .expect("gltf");
+
+        let model = workspace
+            .media_info("models/scene.gltf")
+            .expect("model info");
+        assert_eq!(model.kind, MediaKind::Model);
+        assert_eq!(model.mime_type, "model/gltf+json");
+        assert_eq!(
+            serde_json::to_value(&model).expect("serialize model")["kind"],
+            "model"
+        );
+
+        let resource = workspace
+            .model_resource_info(
+                "models/scene.gltf",
+                "../assets/model%20data.bin",
+                &model.version,
+            )
+            .expect("buffer info");
+        assert_eq!(resource.mime_type, "application/octet-stream");
+        assert_eq!(resource.size_bytes, buffer.len() as u64);
+        let serialized = serde_json::to_value(&resource).expect("serialize resource");
+        assert_eq!(serialized["mimeType"], "application/octet-stream");
+        assert_eq!(serialized["chunkSize"], MEDIA_CHUNK_BYTES);
+
+        let chunk = workspace
+            .model_resource_chunk(ModelResourceChunkRequest {
+                model_relative_path: "models/scene.gltf",
+                resource_uri: "../assets/model%20data.bin",
+                expected_model_version: &model.version,
+                offset: 0,
+                length: MEDIA_CHUNK_BYTES,
+                expected_size_bytes: resource.size_bytes,
+                expected_version: &resource.version,
+            })
+            .expect("buffer chunk");
+        assert_eq!(chunk.data, buffer);
+        assert!(chunk.eof);
+
+        let image = workspace
+            .model_resource_info(
+                "models/scene.gltf",
+                "../textures/albedo.png",
+                &model.version,
+            )
+            .expect("texture info");
+        assert_eq!(image.mime_type, "image/png");
+        assert_eq!(image.size_bytes, texture.len() as u64);
+
+        assert_eq!(
+            workspace
+                .media_info("assets/model data.bin")
+                .expect_err("bin is not globally allowlisted")
+                .code(),
+            crate::ErrorCode::NotEditable
+        );
+        assert_eq!(
+            workspace
+                .model_resource_info(
+                    "models/scene.gltf",
+                    "../assets/unreferenced.bin",
+                    &model.version,
+                )
+                .expect_err("unreferenced resource")
+                .code(),
+            crate::ErrorCode::InvalidPath
+        );
+
+        let binary_model = glb(r#"{"asset":{"version":"2.0"}}"#, b"embedded");
+        fs::write(directory.path().join("embedded.glb"), &binary_model).expect("glb");
+        let glb_info = workspace.media_info("embedded.glb").expect("GLB info");
+        assert_eq!(glb_info.kind, MediaKind::Model);
+        assert_eq!(glb_info.mime_type, "model/gltf-binary");
+        assert_eq!(glb_info.size_bytes, binary_model.len() as u64);
+
+        for (name, mut invalid) in [
+            ("bad-magic.glb", binary_model.clone()),
+            ("bad-version.glb", binary_model.clone()),
+            ("bad-length.glb", binary_model.clone()),
+        ] {
+            match name {
+                "bad-magic.glb" => invalid[0] = b'X',
+                "bad-version.glb" => invalid[4..8].copy_from_slice(&1_u32.to_le_bytes()),
+                "bad-length.glb" => invalid[8..12].copy_from_slice(&12_u32.to_le_bytes()),
+                _ => unreachable!(),
+            }
+            fs::write(directory.path().join(name), invalid).expect("invalid GLB");
+            assert_eq!(
+                workspace
+                    .media_info(name)
+                    .expect_err("invalid GLB header")
+                    .code(),
+                crate::ErrorCode::NotEditable,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_resource_uris_reject_network_absolute_escape_and_unsafe_types() {
+        let (directory, workspace) = fixture();
+        fs::create_dir(directory.path().join("models")).expect("models");
+        for (name, uri, expected) in [
+            (
+                "network.gltf",
+                "https://example.com/model.bin",
+                crate::ErrorCode::InvalidPath,
+            ),
+            (
+                "network-path.gltf",
+                "//server/share/model.bin",
+                crate::ErrorCode::InvalidPath,
+            ),
+            (
+                "absolute.gltf",
+                "/outside/model.bin",
+                crate::ErrorCode::InvalidPath,
+            ),
+            (
+                "escape.gltf",
+                "../../outside.bin",
+                crate::ErrorCode::OutsideWorkspace,
+            ),
+            (
+                "encoded-escape.gltf",
+                "%2e%2e/%2e%2e/outside.bin",
+                crate::ErrorCode::OutsideWorkspace,
+            ),
+            (
+                "encoded-slash.gltf",
+                "nested%2foutside.bin",
+                crate::ErrorCode::InvalidPath,
+            ),
+            (
+                "encoded-backslash.gltf",
+                "nested%5coutside.bin",
+                crate::ErrorCode::InvalidPath,
+            ),
+            (
+                "encoded-nul.gltf",
+                "nested%00outside.bin",
+                crate::ErrorCode::InvalidPath,
+            ),
+            (
+                "encoded-scheme.gltf",
+                "https%3a/example.bin",
+                crate::ErrorCode::InvalidPath,
+            ),
+            (
+                "malformed-percent.gltf",
+                "nested%2/outside.bin",
+                crate::ErrorCode::InvalidPath,
+            ),
+            (
+                "unsupported.gltf",
+                "model.exe",
+                crate::ErrorCode::NotEditable,
+            ),
+        ] {
+            let manifest = serde_json::json!({
+                "asset": { "version": "2.0" },
+                "buffers": [{ "uri": uri, "byteLength": 1 }],
+            });
+            fs::write(
+                directory.path().join("models").join(name),
+                serde_json::to_vec(&manifest).expect("manifest"),
+            )
+            .expect("model");
+            assert_eq!(
+                workspace
+                    .media_info(&format!("models/{name}"))
+                    .expect_err("unsafe model URI")
+                    .code(),
+                expected,
+                "{uri}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_external_buffers_bind_declared_lengths_and_accept_gltf_buffer_extensions() {
+        let (directory, workspace) = fixture();
+        for extension in ["bin", "glbin", "glbuf"] {
+            let resource_name = format!("mesh.{extension}");
+            let model_name = format!("mesh-{extension}.gltf");
+            fs::write(directory.path().join(&resource_name), b"mesh").expect("model buffer");
+            let manifest = serde_json::json!({
+                "asset": { "version": "2.0" },
+                "buffers": [{ "uri": resource_name, "byteLength": 4 }],
+            });
+            fs::write(
+                directory.path().join(&model_name),
+                serde_json::to_vec(&manifest).expect("manifest"),
+            )
+            .expect("model");
+            let model = workspace.media_info(&model_name).expect("model info");
+            let resource = workspace
+                .model_resource_info(&model_name, &resource_name, &model.version)
+                .expect("buffer info");
+            assert_eq!(
+                resource.mime_type, "application/octet-stream",
+                "{extension}"
+            );
+            assert_eq!(resource.size_bytes, 4, "{extension}");
+        }
+
+        fs::write(directory.path().join("wrong-size.bin"), b"four").expect("buffer");
+        for (name, declared) in [("short-declaration.gltf", 3), ("long-declaration.gltf", 5)] {
+            let manifest = serde_json::json!({
+                "asset": { "version": "2.0" },
+                "buffers": [{ "uri": "wrong-size.bin", "byteLength": declared }],
+            });
+            fs::write(
+                directory.path().join(name),
+                serde_json::to_vec(&manifest).expect("manifest"),
+            )
+            .expect("model");
+            assert_eq!(
+                workspace
+                    .media_info(name)
+                    .expect_err("buffer length mismatch")
+                    .code(),
+                crate::ErrorCode::NotEditable,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_resource_cache_revalidates_only_the_requested_resource_and_is_bounded() {
+        let (directory, workspace) = fixture();
+        fs::write(directory.path().join("first-cache.bin"), b"first").expect("first buffer");
+        fs::write(directory.path().join("second-cache.bin"), b"second").expect("second buffer");
+        let manifest = serde_json::json!({
+            "asset": { "version": "2.0" },
+            "buffers": [
+                { "uri": "first-cache.bin", "byteLength": 5 },
+                { "uri": "second-cache.bin", "byteLength": 6 },
+            ],
+        });
+        fs::write(
+            directory.path().join("cached.gltf"),
+            serde_json::to_vec(&manifest).expect("manifest"),
+        )
+        .expect("model");
+        let model = workspace.media_info("cached.gltf").expect("cached model");
+
+        fs::remove_file(directory.path().join("second-cache.bin")).expect("remove unrequested");
+        let first = workspace
+            .model_resource_info("cached.gltf", "first-cache.bin", &model.version)
+            .expect("cached first resource");
+        let chunk = workspace
+            .model_resource_chunk(ModelResourceChunkRequest {
+                model_relative_path: "cached.gltf",
+                resource_uri: "first-cache.bin",
+                expected_model_version: &model.version,
+                offset: 0,
+                length: MEDIA_CHUNK_BYTES,
+                expected_size_bytes: first.size_bytes,
+                expected_version: &first.version,
+            })
+            .expect("first resource chunk");
+        assert_eq!(chunk.data, b"first");
+        assert!(chunk.eof);
+        assert_eq!(
+            workspace
+                .model_resource_info("cached.gltf", "second-cache.bin", &model.version)
+                .expect_err("missing requested resource")
+                .code(),
+            crate::ErrorCode::NotFound
+        );
+
+        for index in 0..(MAX_MODEL_RESOURCE_CACHE_ENTRIES + 2) {
+            let name = format!("cache-bound-{index}.gltf");
+            fs::write(
+                directory.path().join(&name),
+                br#"{"asset":{"version":"2.0"}}"#,
+            )
+            .expect("cache model");
+            workspace.media_info(&name).expect("cache model info");
+        }
+        assert!(
+            model_resource_cache()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .len()
+                <= MAX_MODEL_RESOURCE_CACHE_ENTRIES
+        );
+    }
+
+    #[test]
+    fn model_resource_reads_bind_model_and_resource_versions_and_total_size() {
+        let (directory, workspace) = fixture();
+        fs::write(directory.path().join("first.bin"), b"first").expect("first buffer");
+        let manifest = serde_json::json!({
+            "asset": { "version": "2.0" },
+            "buffers": [{ "uri": "first.bin", "byteLength": 5 }],
+        });
+        let model_path = directory.path().join("scene.gltf");
+        fs::write(
+            &model_path,
+            serde_json::to_vec(&manifest).expect("manifest"),
+        )
+        .expect("model");
+        let model = workspace.media_info("scene.gltf").expect("model");
+        let resource = workspace
+            .model_resource_info("scene.gltf", "first.bin", &model.version)
+            .expect("resource");
+
+        fs::write(directory.path().join("first.bin"), b"other").expect("changed resource");
+        assert_eq!(
+            workspace
+                .model_resource_chunk(ModelResourceChunkRequest {
+                    model_relative_path: "scene.gltf",
+                    resource_uri: "first.bin",
+                    expected_model_version: &model.version,
+                    offset: 0,
+                    length: 5,
+                    expected_size_bytes: resource.size_bytes,
+                    expected_version: &resource.version,
+                })
+                .expect_err("stale resource")
+                .code(),
+            crate::ErrorCode::Conflict
+        );
+
+        let updated_resource = workspace
+            .model_resource_info("scene.gltf", "first.bin", &model.version)
+            .expect("updated resource");
+        let changed_manifest = serde_json::json!({
+            "asset": { "version": "2.0" },
+            "buffers": [{ "uri": "first.bin", "byteLength": 5 }],
+            "extras": { "revision": 2 },
+        });
+        fs::write(
+            &model_path,
+            serde_json::to_vec(&changed_manifest).expect("changed manifest"),
+        )
+        .expect("change model");
+        assert_eq!(
+            workspace
+                .model_resource_chunk(ModelResourceChunkRequest {
+                    model_relative_path: "scene.gltf",
+                    resource_uri: "first.bin",
+                    expected_model_version: &model.version,
+                    offset: 0,
+                    length: 5,
+                    expected_size_bytes: updated_resource.size_bytes,
+                    expected_version: &updated_resource.version,
+                })
+                .expect_err("stale model")
+                .code(),
+            crate::ErrorCode::Conflict
+        );
+
+        for name in ["large-a.bin", "large-b.bin"] {
+            let mut file = fs::File::create(directory.path().join(name)).expect("large resource");
+            file.write_all(&[1]).expect("resource signature");
+            file.set_len(MAX_MODEL_RESOURCE_BYTES)
+                .expect("sparse resource");
+        }
+        let oversized_manifest = serde_json::json!({
+            "asset": { "version": "2.0" },
+            "buffers": [
+                { "uri": "large-a.bin", "byteLength": MAX_MODEL_RESOURCE_BYTES },
+                { "uri": "large-b.bin", "byteLength": MAX_MODEL_RESOURCE_BYTES },
+            ],
+        });
+        fs::write(
+            directory.path().join("oversized.gltf"),
+            serde_json::to_vec(&oversized_manifest).expect("oversized manifest"),
+        )
+        .expect("oversized model");
+        assert_eq!(
+            workspace
+                .media_info("oversized.gltf")
+                .expect_err("aggregate limit")
+                .code(),
+            crate::ErrorCode::ContentTooLarge
+        );
+    }
+
+    #[test]
     fn notebook_media_transport_validates_a_bounded_json_prefix_and_serializes_contract() {
         let (directory, workspace) = fixture();
         let plain = br#"{"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5}"#;
@@ -3901,6 +5106,7 @@ mod tests {
                 MediaKind::Audio => "audio",
                 MediaKind::Notebook => "notebook",
                 MediaKind::Office => "office",
+                MediaKind::Model => "model",
             };
             assert_eq!(serialized["kind"], expected_kind, "{name}");
         }
@@ -4069,6 +5275,8 @@ mod tests {
             b"\x89PNG\r\n\x1a\noutside",
         )
         .expect("outside image");
+        fs::write(outside.path().join("outside.bin"), b"outside model buffer")
+            .expect("outside model buffer");
         fs::create_dir(outside.path().join("tree")).expect("outside tree");
         fs::write(outside.path().join("tree/nested.rs"), "outside nested").expect("outside nested");
         fs::write(
@@ -4083,6 +5291,9 @@ mod tests {
         ) || !symlink_file(
             &outside.path().join("outside.png"),
             &directory.path().join("linked.png"),
+        ) || !symlink_file(
+            &outside.path().join("outside.bin"),
+            &directory.path().join("linked.bin"),
         ) || !symlink_directory(
             &outside.path().join("tree"),
             &directory.path().join("linked-tree"),
@@ -4129,6 +5340,18 @@ mod tests {
             workspace
                 .media_info("linked-tree/nested.png")
                 .expect_err("media ancestor reparse")
+                .code(),
+            crate::ErrorCode::OutsideWorkspace
+        );
+        fs::write(
+            directory.path().join("linked-resource.gltf"),
+            br#"{"asset":{"version":"2.0"},"buffers":[{"uri":"linked.bin","byteLength":20}]}"#,
+        )
+        .expect("model with linked resource");
+        assert_eq!(
+            workspace
+                .media_info("linked-resource.gltf")
+                .expect_err("model resource reparse")
                 .code(),
             crate::ErrorCode::OutsideWorkspace
         );

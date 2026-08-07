@@ -65,9 +65,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::core::BOOL;
 use workspace_service::{
     CreateEntryKind, ErrorCode, ListOptions, ListPage, MAX_MEDIA_CHUNK_BYTES, MAX_PREVIEW_BYTES,
-    MediaInfo, PreparedSettings, PreviewResult, Settings, SettingsPatch, SettingsStore,
-    WatchSubscription, WatchVisibility, WatchVisibilityHandle, Workspace, WorkspaceError,
-    WorkspaceWatcher,
+    MediaInfo, ModelResourceChunkRequest, ModelResourceInfo, PreparedSettings, PreviewResult,
+    Settings, SettingsPatch, SettingsStore, WatchSubscription, WatchVisibility,
+    WatchVisibilityHandle, Workspace, WorkspaceError, WorkspaceWatcher,
 };
 
 #[derive(Clone)]
@@ -173,6 +173,26 @@ struct MediaChunkResult {
     offset: u64,
     data_base64: String,
     eof: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelResourceInfoParams {
+    model_relative_path: String,
+    resource_uri: String,
+    expected_model_version: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelResourceChunkParams {
+    model_relative_path: String,
+    resource_uri: String,
+    expected_model_version: String,
+    offset: u64,
+    length: usize,
+    expected_size_bytes: u64,
+    expected_version: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -1664,6 +1684,80 @@ impl NativeBridge {
         .map_err(|_| internal_error())
     }
 
+    async fn model_resource_info(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: ModelResourceInfoParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        if !valid_content_version(&params.expected_model_version) {
+            return Err(BridgeError::invalid_request());
+        }
+        let context = {
+            let state = lock_unpoisoned(&self.inner.state);
+            self.ensure_epoch(epoch)?;
+            state.current.clone().ok_or_else(no_context_error)?
+        };
+        if context.lifecycle_epoch != epoch {
+            return Err(no_context_error());
+        }
+        let workspace = context.workspace.clone();
+        let info = tokio::task::spawn_blocking(move || {
+            workspace.model_resource_info(
+                &params.model_relative_path,
+                &params.resource_uri,
+                &params.expected_model_version,
+            )
+        })
+        .await;
+        self.ensure_active_context(&context, epoch)?;
+        let info: ModelResourceInfo = info
+            .map_err(|_| internal_error())?
+            .map_err(map_media_error)?;
+        serde_json::to_value(info).map_err(|_| internal_error())
+    }
+
+    async fn model_resource_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: ModelResourceChunkParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        if params.length == 0
+            || params.length > MAX_MEDIA_CHUNK_BYTES
+            || params.offset >= params.expected_size_bytes
+            || !valid_content_version(&params.expected_model_version)
+            || !valid_content_version(&params.expected_version)
+        {
+            return Err(BridgeError::invalid_request());
+        }
+        let context = {
+            let state = lock_unpoisoned(&self.inner.state);
+            self.ensure_epoch(epoch)?;
+            state.current.clone().ok_or_else(no_context_error)?
+        };
+        if context.lifecycle_epoch != epoch {
+            return Err(no_context_error());
+        }
+        let workspace = context.workspace.clone();
+        let chunk = tokio::task::spawn_blocking(move || {
+            workspace.model_resource_chunk(ModelResourceChunkRequest {
+                model_relative_path: &params.model_relative_path,
+                resource_uri: &params.resource_uri,
+                expected_model_version: &params.expected_model_version,
+                offset: params.offset,
+                length: params.length,
+                expected_size_bytes: params.expected_size_bytes,
+                expected_version: &params.expected_version,
+            })
+        })
+        .await;
+        self.ensure_active_context(&context, epoch)?;
+        let chunk = chunk
+            .map_err(|_| internal_error())?
+            .map_err(map_media_error)?;
+        serde_json::to_value(MediaChunkResult {
+            offset: chunk.offset,
+            data_base64: BASE64_STANDARD.encode(chunk.data),
+            eof: chunk.eof,
+        })
+        .map_err(|_| internal_error())
+    }
+
     async fn entry_create(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         let params: EntryCreateParams =
             serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
@@ -2260,6 +2354,10 @@ impl BridgeHandler for NativeBridge {
             "explorer.preview.save" => self.preview_save(request.params, epoch).await,
             "explorer.media.info" => self.media_info(request.params, epoch).await,
             "explorer.media.chunk" => self.media_chunk(request.params, epoch).await,
+            "explorer.model.resource.info" => self.model_resource_info(request.params, epoch).await,
+            "explorer.model.resource.chunk" => {
+                self.model_resource_chunk(request.params, epoch).await
+            }
             "explorer.entry.create" => self.entry_create(request.params, epoch).await,
             "explorer.entry.rename" => self.entry_rename(request.params, epoch).await,
             "explorer.entry.move" => self.entry_move_batch(request.params, epoch).await,
@@ -3504,6 +3602,153 @@ mod tests {
                 .expect_err("invalid media chunk schema");
             assert_eq!(error.code, "INVALID_REQUEST");
         }
+    }
+
+    #[tokio::test]
+    async fn model_resource_bridge_is_manifest_scoped_bounded_and_version_bound() {
+        let (directory, bridge) = manual_bridge().await;
+        fs::create_dir(directory.path().join("models")).expect("models");
+        fs::create_dir(directory.path().join("assets")).expect("assets");
+        let resource_bytes = b"model buffer";
+        fs::write(directory.path().join("assets/mesh.bin"), resource_bytes).expect("buffer");
+        let manifest = json!({
+            "asset": { "version": "2.0" },
+            "buffers": [{ "uri": "../assets/mesh.bin", "byteLength": resource_bytes.len() }],
+        });
+        fs::write(
+            directory.path().join("models/scene.gltf"),
+            serde_json::to_vec(&manifest).expect("manifest"),
+        )
+        .expect("model");
+
+        let model = bridge
+            .handle(request(
+                "explorer.media.info",
+                json!({ "relativePath": "models/scene.gltf" }),
+            ))
+            .await
+            .expect("model info");
+        assert_eq!(model["kind"], "model");
+        assert_eq!(model["mimeType"], "model/gltf+json");
+
+        let resource = bridge
+            .handle(request(
+                "explorer.model.resource.info",
+                json!({
+                    "modelRelativePath": "models/scene.gltf",
+                    "resourceUri": "../assets/mesh.bin",
+                    "expectedModelVersion": model["version"],
+                }),
+            ))
+            .await
+            .expect("resource info");
+        assert_eq!(resource["mimeType"], "application/octet-stream");
+        assert_eq!(resource["sizeBytes"], resource_bytes.len() as u64);
+        assert_eq!(resource["chunkSize"], MAX_MEDIA_CHUNK_BYTES);
+        assert_eq!(resource["chunkCount"], 1);
+
+        let chunk = bridge
+            .handle(request(
+                "explorer.model.resource.chunk",
+                json!({
+                    "modelRelativePath": "models/scene.gltf",
+                    "resourceUri": "../assets/mesh.bin",
+                    "expectedModelVersion": model["version"],
+                    "offset": 0,
+                    "length": MAX_MEDIA_CHUNK_BYTES,
+                    "expectedSizeBytes": resource["sizeBytes"],
+                    "expectedVersion": resource["version"],
+                }),
+            ))
+            .await
+            .expect("resource chunk");
+        assert_eq!(chunk["offset"], 0);
+        assert_eq!(chunk["eof"], true);
+        assert_eq!(
+            BASE64_STANDARD
+                .decode(chunk["dataBase64"].as_str().expect("resource base64"))
+                .expect("decode resource"),
+            resource_bytes
+        );
+
+        let unreferenced = bridge
+            .handle(request(
+                "explorer.model.resource.info",
+                json!({
+                    "modelRelativePath": "models/scene.gltf",
+                    "resourceUri": "../assets/other.bin",
+                    "expectedModelVersion": model["version"],
+                }),
+            ))
+            .await
+            .expect_err("unreferenced resource");
+        assert_eq!(unreferenced.code, "INVALID_PATH");
+
+        for invalid in [
+            json!({}),
+            json!({
+                "modelRelativePath": "models/scene.gltf",
+                "resourceUri": "../assets/mesh.bin",
+                "expectedModelVersion": "not-a-version",
+            }),
+            json!({
+                "modelRelativePath": "models/scene.gltf",
+                "resourceUri": "../assets/mesh.bin",
+                "expectedModelVersion": model["version"],
+                "extra": true,
+            }),
+        ] {
+            let error = bridge
+                .handle(request("explorer.model.resource.info", invalid))
+                .await
+                .expect_err("invalid model resource info schema");
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
+
+        for invalid in [
+            json!({}),
+            json!({
+                "modelRelativePath": "models/scene.gltf",
+                "resourceUri": "../assets/mesh.bin",
+                "expectedModelVersion": model["version"],
+                "offset": 0,
+                "length": 0,
+                "expectedSizeBytes": resource["sizeBytes"],
+                "expectedVersion": resource["version"],
+            }),
+            json!({
+                "modelRelativePath": "models/scene.gltf",
+                "resourceUri": "../assets/mesh.bin",
+                "expectedModelVersion": model["version"],
+                "offset": 0,
+                "length": 1,
+                "expectedSizeBytes": resource["sizeBytes"],
+                "expectedVersion": "not-a-version",
+            }),
+        ] {
+            let error = bridge
+                .handle(request("explorer.model.resource.chunk", invalid))
+                .await
+                .expect_err("invalid model resource chunk schema");
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
+
+        let stale = bridge
+            .handle(request(
+                "explorer.model.resource.chunk",
+                json!({
+                    "modelRelativePath": "models/scene.gltf",
+                    "resourceUri": "../assets/mesh.bin",
+                    "expectedModelVersion": "0".repeat(64),
+                    "offset": 0,
+                    "length": 1,
+                    "expectedSizeBytes": resource["sizeBytes"],
+                    "expectedVersion": resource["version"],
+                }),
+            ))
+            .await
+            .expect_err("stale model descriptor");
+        assert_eq!(stale.code, "CONFLICT");
     }
 
     #[tokio::test]

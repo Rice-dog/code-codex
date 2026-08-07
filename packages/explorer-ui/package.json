@@ -1,6 +1,6 @@
 {
   "name": "@code-codex/explorer-ui",
-  "version": "0.1.61",
+  "version": "0.1.63",
   "private": true,
   "description": "Dependency-light renderer UI injected into Codex Desktop.",
   "codeCodex": {
@@ -318,6 +318,7 @@
     "@types/node": "^24.0.15",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
+    "@types/three": "0.185.4",
     "@types/turndown": "^5.0.6",
     "esbuild": "^0.25.8",
     "typescript": "^5.8.3"
@@ -336,6 +337,7 @@
     "pdfjs-dist": "5.4.624",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "three": "0.185.1",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   }

@@ -5,6 +5,25 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.63
+
+- `CodeCodex-0.1.63-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.63-x64.msi`: MSI installer.
+- `CodeCodex-0.1.63-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Fixes `.gltf` and `.glb` rendering under Codex's content security policy by loading model buffers from bounded memory and textures through the permitted image path.
+- Keeps model resources local, restores loader state after every preview, and supports external, embedded data-URI, and GLB-embedded resources without weakening Codex security settings.
+
+## v0.1.62
+
+- `CodeCodex-0.1.62-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.62-x64.msi`: MSI installer.
+- `CodeCodex-0.1.62-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds an independently enabled 3D Model Preview extension for `.gltf` and `.glb`.
+- Renders glTF 2.0 models locally with orbit, pan, zoom, fit/reset, a reference grid, and animation playback.
+- Loads only bounded, model-declared workspace buffers and textures; network resources and unsupported Draco, KTX2/Basis, or Meshopt compression fail closed with clear messages.
+
 ## v0.1.61
 
 - `CodeCodex-0.1.61-x64-setup.exe`: recommended installer.
@@ -278,5 +297,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.61
+./scripts/package.ps1 -Version 0.1.63
 ```

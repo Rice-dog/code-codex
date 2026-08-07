@@ -8,17 +8,29 @@ import {
   CSV_PREVIEWER_ID,
   CodeCodexMainPreviewElement,
   DIAGRAM_PREVIEWER_ID,
+  GLTF_BINARY_PREVIEW_MIME,
+  GLTF_JSON_PREVIEW_MIME,
   IMAGE_PREVIEWER_ID,
   MAIN_PREVIEW_TAG,
   MARKDOWN_PREVIEWER_ID,
+  MAX_GLTF_JSON_PREVIEW_BYTES,
+  MAX_MODEL_AGGREGATE_BYTES,
+  MAX_MODEL_PREVIEW_BYTES,
+  MAX_MODEL_RESOURCE_BYTES,
+  MAX_MODEL_RESOURCE_COUNT,
+  MAX_MODEL_TEXTURE_BYTES,
+  MODEL_PREVIEWER_ID,
+  ModelPreviewSourceError,
   NATIVE_POWERPOINT_PREVIEW_MIME,
   NOTEBOOK_PREVIEWER_ID,
   OFFICE_PREVIEWER_ID,
   PDF_PREVIEWER_ID,
   registerMainPreviewElement,
   VIDEO_PREVIEWER_ID,
+  inspectModelPreviewSource,
   type MainPreviewFileView,
   type MainPreviewLineEnding,
+  type MainPreviewModelResource,
 } from "./main-preview";
 import { dismissExplorerForSession } from "./session-state";
 import { styles, TREE_ROW_HEIGHT } from "./styles";
@@ -70,8 +82,16 @@ const MAX_PDF_PREVIEW_BYTES = 64 * 1024 * 1024;
 const MAX_AUDIO_PREVIEW_BYTES = 128 * 1024 * 1024;
 const MAX_OFFICE_PREVIEW_BYTES = 64 * 1024 * 1024;
 const MAX_NOTEBOOK_PREVIEW_BYTES = 16 * 1024 * 1024;
+const MODEL_RESOURCE_MIME_TYPES = new Set([
+  "application/gltf-buffer",
+  "application/octet-stream",
+  "image/avif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
-type MediaPreviewKind = "image" | "video" | "pdf" | "audio" | "office" | "notebook";
+type MediaPreviewKind = "image" | "video" | "pdf" | "audio" | "office" | "notebook" | "model";
 
 interface PreviewerDefinition {
   readonly id: string;
@@ -152,6 +172,13 @@ const PREVIEWER_DEFINITIONS: readonly PreviewerDefinition[] = Object.freeze([
     iconFileName: "preview.ipynb",
     extensions: [".ipynb"],
   },
+  {
+    id: MODEL_PREVIEWER_ID,
+    kind: "model",
+    title: "3D Model Preview",
+    iconFileName: "preview.glb",
+    extensions: [".gltf", ".glb"],
+  },
 ]);
 
 const PREVIEWER_IDS = new Set(PREVIEWER_DEFINITIONS.map((previewer) => previewer.id));
@@ -211,6 +238,18 @@ const MEDIA_PREVIEW_ROUTES: Readonly<Record<string, MediaPreviewRoute>> = Object
     mimeTypes: ["application/x-ipynb+json"],
     maxBytes: MAX_NOTEBOOK_PREVIEW_BYTES,
   },
+  gltf: {
+    previewerId: MODEL_PREVIEWER_ID,
+    kind: "model",
+    mimeTypes: [GLTF_JSON_PREVIEW_MIME],
+    maxBytes: MAX_GLTF_JSON_PREVIEW_BYTES,
+  },
+  glb: {
+    previewerId: MODEL_PREVIEWER_ID,
+    kind: "model",
+    mimeTypes: [GLTF_BINARY_PREVIEW_MIME],
+    maxBytes: MAX_MODEL_PREVIEW_BYTES,
+  },
 });
 
 type StateCopy = { title: string; copy: string; action?: string };
@@ -249,12 +288,22 @@ interface NormalizedMediaPreview {
   mimeType: string;
   sizeBytes: number;
   bytes: Uint8Array;
+  modelVersion?: string;
+  modelResources?: readonly MainPreviewModelResource[];
 }
 
 type NormalizedPreview = NormalizedTextPreview | NormalizedUnsupportedPreview | NormalizedMediaPreview;
 
 interface NormalizedMediaInfo {
   readonly kind: MediaPreviewKind;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+  readonly chunkSize: number;
+  readonly chunkCount: number;
+  readonly version: string;
+}
+
+interface NormalizedModelResourceInfo {
   readonly mimeType: string;
   readonly sizeBytes: number;
   readonly chunkSize: number;
@@ -3463,6 +3512,26 @@ export class CodeCodexElement extends HTMLElement {
         if (offset !== info.sizeBytes) {
           throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview ended before the complete file was received." });
         }
+        if (info.kind === "model") {
+          const inspection = inspectModelPreviewSource(bytes, info.mimeType);
+          const modelResources = await this.#requestModelResources(
+            relativePath,
+            info.version,
+            inspection.externalResourceUris,
+            info.sizeBytes,
+            bridge,
+            canContinue,
+          );
+          if (!modelResources || !canContinue()) return undefined;
+          return {
+            kind: "model",
+            mimeType: info.mimeType,
+            sizeBytes: info.sizeBytes,
+            bytes,
+            modelVersion: info.version,
+            modelResources,
+          };
+        }
         return { kind: info.kind, mimeType: info.mimeType, sizeBytes: info.sizeBytes, bytes };
       } catch (error) {
         if (attempt === 0 && errorCode(error) === "CONFLICT" && canContinue()) continue;
@@ -3470,6 +3539,61 @@ export class CodeCodexElement extends HTMLElement {
       }
     }
     return undefined;
+  }
+
+  async #requestModelResources(
+    modelRelativePath: string,
+    expectedModelVersion: string,
+    resourceUris: readonly string[],
+    modelSizeBytes: number,
+    bridge: ExplorerBridge,
+    canContinue: () => boolean,
+  ): Promise<readonly MainPreviewModelResource[] | undefined> {
+    if (resourceUris.length > MAX_MODEL_RESOURCE_COUNT) {
+      throw new ModelPreviewSourceError(`This model references more than ${MAX_MODEL_RESOURCE_COUNT.toLocaleString()} external resources.`);
+    }
+    const resources: MainPreviewModelResource[] = [];
+    let aggregateBytes = modelSizeBytes;
+    for (const resourceUri of resourceUris) {
+      if (!canContinue()) return undefined;
+      const rawInfo = await bridge.request<unknown>("explorer.model.resource.info", {
+        modelRelativePath,
+        resourceUri,
+        expectedModelVersion,
+      });
+      if (!canContinue()) return undefined;
+      const info = normalizeModelResourceInfo(rawInfo);
+      aggregateBytes += info.sizeBytes;
+      if (aggregateBytes > MAX_MODEL_AGGREGATE_BYTES) {
+        throw new ModelPreviewSourceError(
+          `This model and its resources exceed the ${(MAX_MODEL_AGGREGATE_BYTES / (1024 * 1024)).toLocaleString()} MiB preview limit.`,
+        );
+      }
+      const bytes = new Uint8Array(info.sizeBytes);
+      let offset = 0;
+      for (let chunkIndex = 0; chunkIndex < info.chunkCount; chunkIndex += 1) {
+        if (!canContinue()) return undefined;
+        const length = Math.min(info.chunkSize, info.sizeBytes - offset);
+        const rawChunk = await bridge.request<unknown>("explorer.model.resource.chunk", {
+          modelRelativePath,
+          resourceUri,
+          expectedModelVersion,
+          offset,
+          length,
+          expectedSizeBytes: info.sizeBytes,
+          expectedVersion: info.version,
+        });
+        if (!canContinue()) return undefined;
+        const chunk = normalizeMediaChunk(rawChunk, offset, length, info.sizeBytes);
+        bytes.set(chunk.bytes, offset);
+        offset += chunk.bytes.byteLength;
+      }
+      if (offset !== info.sizeBytes) {
+        throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The model resource ended before the complete file was received." });
+      }
+      resources.push({ uri: resourceUri, mimeType: info.mimeType, sizeBytes: info.sizeBytes, bytes });
+    }
+    return resources;
   }
 
   #previewView(tab: PreviewTab, preview: NormalizedPreview): MainPreviewFileView {
@@ -3483,6 +3607,21 @@ export class CodeCodexElement extends HTMLElement {
       };
     }
     if ("bytes" in preview) {
+      if (preview.kind === "model") {
+        if (!preview.modelVersion || !preview.modelResources) {
+          return { kind: "error", path: tab.path, name: tab.name, code: "INVALID_REQUEST", message: "The model preview response was incomplete." };
+        }
+        return {
+          kind: "model",
+          path: tab.path,
+          name: tab.name,
+          mimeType: preview.mimeType === GLTF_BINARY_PREVIEW_MIME ? GLTF_BINARY_PREVIEW_MIME : GLTF_JSON_PREVIEW_MIME,
+          sizeBytes: preview.sizeBytes,
+          bytes: preview.bytes,
+          version: preview.modelVersion,
+          resources: preview.modelResources,
+        };
+      }
       return {
         kind: preview.kind,
         path: tab.path,
@@ -4344,6 +4483,37 @@ function normalizeMediaInfo(raw: unknown, route: MediaPreviewRoute): NormalizedM
   };
 }
 
+function normalizeModelResourceInfo(raw: unknown): NormalizedModelResourceInfo {
+  const object = asRecord(raw);
+  const resourceLimit = typeof object?.mimeType === "string" && object.mimeType.startsWith("image/")
+    ? MAX_MODEL_TEXTURE_BYTES
+    : MAX_MODEL_RESOURCE_BYTES;
+  if (
+    !object ||
+    typeof object.mimeType !== "string" ||
+    !MODEL_RESOURCE_MIME_TYPES.has(object.mimeType) ||
+    !Number.isSafeInteger(object.sizeBytes) ||
+    (object.sizeBytes as number) <= 0 ||
+    (object.sizeBytes as number) > resourceLimit ||
+    !Number.isSafeInteger(object.chunkSize) ||
+    (object.chunkSize as number) <= 0 ||
+    (object.chunkSize as number) > MAX_MEDIA_CHUNK_BYTES ||
+    !Number.isSafeInteger(object.chunkCount) ||
+    (object.chunkCount as number) <= 0 ||
+    typeof object.version !== "string" ||
+    !/^[0-9a-f]{64}$/.test(object.version)
+  ) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The model resource metadata was not valid." });
+  }
+  const sizeBytes = object.sizeBytes as number;
+  const chunkSize = object.chunkSize as number;
+  const chunkCount = object.chunkCount as number;
+  if (chunkCount !== Math.ceil(sizeBytes / chunkSize)) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The model resource chunk count was not valid." });
+  }
+  return { mimeType: object.mimeType, sizeBytes, chunkSize, chunkCount, version: object.version };
+}
+
 function normalizeMediaChunk(
   raw: unknown,
   expectedOffset: number,
@@ -4435,6 +4605,7 @@ function editSaveError(error: unknown): string {
 }
 
 function mediaPreviewError(error: unknown): string {
+  if (error instanceof ModelPreviewSourceError) return error.message;
   const code = errorCode(error);
   if (code === "CONTENT_TOO_LARGE" || code === "PAYLOAD_TOO_LARGE" || code === "TOO_LARGE") {
     return "This media file is larger than the preview limit.";
