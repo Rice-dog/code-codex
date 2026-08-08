@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use cap_fs_ext::OpenOptionsFollowExt as _;
 use cap_primitives::fs::MetadataExt as _;
@@ -98,6 +98,7 @@ pub struct Workspace {
     root: PathBuf,
     root_handle: Arc<File>,
     display_name: String,
+    active_import_staging_names: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Workspace {
@@ -112,6 +113,7 @@ impl Workspace {
             root,
             root_handle: Arc::new(root_handle),
             display_name,
+            active_import_staging_names: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -134,9 +136,34 @@ impl Workspace {
         self.ensure_root_valid().is_ok()
     }
 
+    pub(crate) fn register_import_staging_name(&self, name: String) {
+        self.active_import_staging_names
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name);
+    }
+
+    pub(crate) fn unregister_import_staging_name(&self, name: &str) {
+        self.active_import_staging_names
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
+    }
+
+    pub(crate) fn active_import_staging_names(&self) -> HashSet<String> {
+        self.active_import_staging_names
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     pub fn list(&self, mut options: ListOptions) -> Result<ListPage, WorkspaceError> {
         self.ensure_root_valid()?;
         let clean_relative = validate_relative(&options.relative_path)?;
+        let active_root_staging_names = clean_relative
+            .as_os_str()
+            .is_empty()
+            .then(|| self.active_import_staging_names());
         options.limit = options.limit.clamp(1, MAX_PAGE_SIZE);
         let offset = decode_cursor(options.cursor.as_deref())?;
         let directory = DirectoryCapability::open(&self.root_handle, &clean_relative)?;
@@ -163,6 +190,12 @@ impl Workspace {
                 Err(error) => return Err(map_io(&error)),
             };
             let name = item.file_name().to_string_lossy().into_owned();
+            if active_root_staging_names
+                .as_ref()
+                .is_some_and(|active| active.contains(&name))
+            {
+                continue;
+            }
             if !options.show_hidden && name.starts_with('.') {
                 continue;
             }
@@ -584,6 +617,59 @@ mod tests {
             .expect("second page");
         assert_eq!(second.entries.len(), 1);
         assert_eq!(second.entries[0].name, "README.md");
+    }
+
+    #[test]
+    fn only_active_root_import_staging_is_hidden() {
+        let (directory, workspace) = fixture();
+        let session = workspace
+            .begin_import(
+                "",
+                "final-folder",
+                crate::CreateEntryKind::Directory,
+                None,
+                "listing-active",
+            )
+            .expect("begin active import");
+        let active_name = workspace
+            .active_import_staging_names()
+            .into_iter()
+            .next()
+            .expect("registered stage");
+        let orphan_name = format!("{}orphan", crate::mutation::IMPORT_STAGING_PREFIX);
+        fs::write(directory.path().join(&orphan_name), "partial").expect("orphan fixture");
+        fs::create_dir(directory.path().join("container")).expect("nested container");
+        let nested_name = format!("{}nested", crate::mutation::IMPORT_STAGING_PREFIX);
+        fs::write(
+            directory.path().join("container").join(&nested_name),
+            "nested",
+        )
+        .expect("nested prefix fixture");
+
+        let page = workspace
+            .list(ListOptions {
+                show_hidden: true,
+                show_ignored: true,
+                limit: 500,
+                ..ListOptions::default()
+            })
+            .expect("list all visible entries");
+        assert!(page.entries.iter().all(|entry| entry.name != active_name));
+        assert!(page.entries.iter().any(|entry| entry.name == orphan_name));
+
+        let nested = workspace
+            .list(ListOptions {
+                relative_path: "container".to_owned(),
+                show_hidden: true,
+                show_ignored: true,
+                limit: 500,
+                ..ListOptions::default()
+            })
+            .expect("list nested prefix entry");
+        assert!(nested.entries.iter().any(|entry| entry.name == nested_name));
+
+        drop(session);
+        assert!(workspace.active_import_staging_names().is_empty());
     }
 
     #[test]

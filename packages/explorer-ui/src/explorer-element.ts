@@ -64,6 +64,13 @@ const CONTEXT_DIALOG_HEIGHT = 164;
 const ACTION_NOTICE_DURATION_MS = 2_800;
 const DROP_EXPAND_DELAY_MS = 650;
 const INTERNAL_DRAG_TYPE = "application/x-code-codex-entry";
+const EXTERNAL_IMPORT_CHUNK_BYTES = 48 * 1024;
+const EXTERNAL_IMPORT_REQUEST_INTERVAL_MS = 10;
+const EXTERNAL_IMPORT_COMMIT_TIMEOUT_MS = 120_000;
+const MAX_EXTERNAL_IMPORT_ENTRIES = 1_024;
+const MAX_EXTERNAL_IMPORT_DEPTH = 64;
+const MAX_EXTERNAL_IMPORT_FILE_BYTES = 512 * 1024 * 1024;
+const MAX_EXTERNAL_IMPORT_TOTAL_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_SETTINGS: ExplorerSettings = { width: 260, collapsed: false, showHidden: true, showIgnored: true };
 const SETTINGS_KEY = "code-codex:ui-settings:v1";
 const PREVIEWER_SETTINGS_KEY = "code-codex:previewers:v1";
@@ -389,6 +396,49 @@ function clearDetachedEditDraft(): void {
   detachedEditDraft = undefined;
 }
 
+interface ExternalDropCandidate {
+  readonly handlePromise?: Promise<FileSystemHandle | null>;
+  readonly entry?: FileSystemEntry;
+  readonly file?: File;
+}
+
+interface ExternalDropMember {
+  readonly relativePath: string;
+  readonly kind: "file" | "directory";
+  readonly file?: File;
+}
+
+interface ExternalDropRoot {
+  readonly name: string;
+  readonly kind: "file" | "directory";
+  readonly file?: File;
+  readonly members: readonly ExternalDropMember[];
+  readonly entryCount: number;
+  readonly sizeBytes: number;
+}
+
+interface ExternalDropBudget {
+  entries: number;
+  sizeBytes: number;
+}
+
+interface ExternalImportProgress {
+  readonly totalEntries: number;
+  readonly totalBytes: number;
+  completedEntries: number;
+  completedBytes: number;
+  lastNoticeAt: number;
+}
+
+interface ExternalDirectoryHandle extends FileSystemDirectoryHandle {
+  entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+}
+
+interface ExternalDataTransferItem extends DataTransferItem {
+  getAsFileSystemHandle?: () => Promise<FileSystemHandle | null>;
+  getAsEntry?: () => FileSystemEntry | null;
+}
+
 function previewerCardMarkup(previewer: PreviewerDefinition): string {
   const extensionTags = previewer.extensions.map((extension) => `<span>${extension}</span>`).join("");
   return `
@@ -490,6 +540,7 @@ export class CodeCodexElement extends HTMLElement {
   #contextActionPending = false;
   #actionNoticeTimer: ReturnType<typeof setTimeout> | undefined;
   #dragSource: DragSource | undefined;
+  #externalDragActive = false;
   #dropTargetPath: string | undefined;
   #dropExpandTimer: ReturnType<typeof setTimeout> | undefined;
   readonly #selectedPaths = new Set<string>();
@@ -934,6 +985,11 @@ export class CodeCodexElement extends HTMLElement {
       this.#masthead.addEventListener("dragover", (event) => this.#onDropZoneDragOver(event, true));
       this.#masthead.addEventListener("dragleave", (event) => this.#onDropZoneDragLeave(event));
       this.#masthead.addEventListener("drop", (event) => this.#onDropZoneDrop(event, true));
+      this.#statePanel.addEventListener("dragover", (event) => this.#onDropZoneDragOver(event, true));
+      this.#statePanel.addEventListener("dragleave", (event) => this.#onDropZoneDragLeave(event));
+      this.#statePanel.addEventListener("drop", (event) => this.#onDropZoneDrop(event, true));
+      this.addEventListener("dragover", (event) => this.#onUnhandledExternalDragOver(event));
+      this.addEventListener("drop", (event) => this.#onUnhandledExternalDrop(event));
       this.#statePanel.addEventListener("contextmenu", (event) => this.#onEmptyStateContextMenu(event));
       this.#statePanel.addEventListener("keydown", (event) => this.#onEmptyStateKeyDown(event));
       this.#contextMenu.addEventListener("click", (event) => this.#onContextMenuClick(event));
@@ -2002,18 +2058,34 @@ export class CodeCodexElement extends HTMLElement {
 
   #onDropZoneDragOver(event: DragEvent, allowRoot: boolean): void {
     const source = this.#dragSource;
-    if (!source) return;
+    if (source) {
+      const destination = this.#dropDestination(event, allowRoot);
+      if (destination === undefined || !this.#canDrop(source, destination)) {
+        this.#setDropTarget(undefined);
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      this.#setDropTarget(destination);
+      return;
+    }
+
+    if (!isExternalFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.#externalDragActive = true;
     const destination = this.#dropDestination(event, allowRoot);
-    if (destination === undefined || !this.#canDrop(source, destination)) {
+    if (destination === undefined || !this.#canAcceptExternalDrop()) {
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
       this.#setDropTarget(undefined);
       return;
     }
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
     this.#setDropTarget(destination);
   }
 
   #onDropZoneDragLeave(event: DragEvent): void {
+    if (isExternalFileDrag(event.dataTransfer)) event.stopPropagation();
     const zone = event.currentTarget as HTMLElement | null;
     const related = event.relatedTarget as Node | null;
     if (zone && related && zone.contains(related)) return;
@@ -2022,14 +2094,54 @@ export class CodeCodexElement extends HTMLElement {
 
   #onDropZoneDrop(event: DragEvent, allowRoot: boolean): void {
     const source = this.#dragSource;
-    const destination = source ? this.#dropDestination(event, allowRoot) : undefined;
-    if (!source || destination === undefined || !this.#canDrop(source, destination)) {
+    if (source) {
+      const destination = this.#dropDestination(event, allowRoot);
+      if (destination === undefined || !this.#canDrop(source, destination)) {
+        this.#clearDragState();
+        return;
+      }
+      event.preventDefault();
+      this.#clearDragState();
+      void this.#moveEntryByDrop(source, destination);
+      return;
+    }
+
+    if (!isExternalFileDrag(event.dataTransfer)) {
       this.#clearDragState();
       return;
     }
+
     event.preventDefault();
+    event.stopPropagation();
+    const destination = this.#dropDestination(event, allowRoot);
+    const candidates = captureExternalDropCandidates(event.dataTransfer);
+    const canImport = destination !== undefined && this.#canAcceptExternalDrop();
     this.#clearDragState();
-    void this.#moveEntryByDrop(source, destination);
+    if (!canImport || destination === undefined) {
+      this.#showActionNotice("Drop files or folders onto a folder or an empty area of the file tree.", "error");
+      return;
+    }
+    if (!candidates.length) {
+      this.#showActionNotice("Windows did not provide any readable files or folders for this drop.", "error");
+      return;
+    }
+    void this.#importExternalDrop(candidates, destination);
+  }
+
+  #onUnhandledExternalDragOver(event: DragEvent): void {
+    if (!isExternalFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+    this.#setDropTarget(undefined);
+  }
+
+  #onUnhandledExternalDrop(event: DragEvent): void {
+    if (!isExternalFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.#clearDragState();
+    this.#showActionNotice("Drop files or folders onto a folder or an empty area of the file tree.", "error");
   }
 
   #dropDestination(event: DragEvent, allowRoot: boolean): string | undefined {
@@ -2056,6 +2168,13 @@ export class CodeCodexElement extends HTMLElement {
     return source.kind !== "directory" || !isPathWithin(source.path, destinationParentPath);
   }
 
+  #canAcceptExternalDrop(): boolean {
+    return !this.#contextActionPending &&
+      (this.#state === "ready" || this.#state === "empty") &&
+      Boolean(this.#context) &&
+      this.#bridge?.available === true;
+  }
+
   #setDropTarget(path: string | undefined): void {
     if (this.#dropTargetPath === path) return;
     if (this.#dropExpandTimer) clearTimeout(this.#dropExpandTimer);
@@ -2063,28 +2182,287 @@ export class CodeCodexElement extends HTMLElement {
     this.#dropTargetPath = path;
     this.#treeShell.dataset.dropTarget = String(path === "");
     this.#masthead.dataset.dropTarget = String(path === "");
+    this.#statePanel.dataset.dropTarget = String(path === "");
     for (const row of this.#treeWindow.querySelectorAll<HTMLElement>(".tree-row")) {
       row.dataset.dropTarget = String(path !== undefined && path !== "" && row.dataset.path === path);
     }
     if (!path) return;
-    const source = this.#dragSource;
-    if (!source || !this.#canDrop(source, path) || this.#model.isExpanded(path)) return;
+    if (!this.#canExpandDropTarget(path) || this.#model.isExpanded(path)) return;
     this.#dropExpandTimer = setTimeout(() => {
       this.#dropExpandTimer = undefined;
-      if (this.#dropTargetPath !== path || !this.#dragSource || !this.#canDrop(this.#dragSource, path)) return;
+      if (this.#dropTargetPath !== path || !this.#canExpandDropTarget(path)) return;
       const row = this.#rows.find((candidate) => candidate.kind === "node" && candidate.path === path);
       if (row?.node?.kind === "directory") this.#toggleDirectory(row, true);
     }, DROP_EXPAND_DELAY_MS);
+  }
+
+  #canExpandDropTarget(path: string): boolean {
+    const source = this.#dragSource;
+    if (source) return this.#canDrop(source, path);
+    return this.#externalDragActive && this.#canAcceptExternalDrop();
   }
 
   #clearDragState(): void {
     if (this.#dropExpandTimer) clearTimeout(this.#dropExpandTimer);
     this.#dropExpandTimer = undefined;
     this.#dragSource = undefined;
+    this.#externalDragActive = false;
     this.#setDropTarget(undefined);
     for (const row of this.#treeWindow.querySelectorAll<HTMLElement>(".tree-row")) {
       row.dataset.dragSource = "false";
     }
+  }
+
+  async #importExternalDrop(candidates: readonly ExternalDropCandidate[], destinationParentPath: string): Promise<void> {
+    if (this.#contextActionPending) return;
+    const bridge = this.#bridge;
+    const context = this.#context;
+    if (!bridge?.available || !context || (this.#state !== "ready" && this.#state !== "empty")) return;
+
+    const generation = this.#generation;
+    let committedCount = 0;
+    this.#contextActionPending = true;
+    this.#closeContextMenu(false);
+    this.#cancelMarquee();
+    this.dataset.busy = "true";
+    this.#treeShell.setAttribute("aria-busy", "true");
+    this.#statePanel.setAttribute("aria-busy", "true");
+    this.#showActionProgress("Preparing dropped files and folders…");
+
+    let nextRequestAt = 0;
+    const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
+      this.#assertExternalImportCurrent(bridge, context, generation);
+      const delay = Math.max(0, nextRequestAt - performance.now());
+      if (delay > 0) await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      this.#assertExternalImportCurrent(bridge, context, generation);
+      nextRequestAt = performance.now() + EXTERNAL_IMPORT_REQUEST_INTERVAL_MS;
+      return bridge.request<unknown>(
+        method,
+        params,
+        method === "explorer.entry.import.commit" ? EXTERNAL_IMPORT_COMMIT_TIMEOUT_MS : undefined,
+      );
+    };
+
+    try {
+      const roots = await resolveExternalDropRoots(candidates, () => {
+        this.#assertExternalImportCurrent(bridge, context, generation);
+      });
+      this.#assertExternalImportCurrent(bridge, context, generation);
+      ensureDistinctExternalRootNames(roots);
+      this.#showActionProgress("Checking the destination folder…");
+      await this.#preflightExternalRoots(roots, destinationParentPath, request);
+
+      const progress: ExternalImportProgress = {
+        totalEntries: roots.reduce((total, root) => total + root.entryCount, 0),
+        totalBytes: roots.reduce((total, root) => total + root.sizeBytes, 0),
+        completedEntries: 0,
+        completedBytes: 0,
+        lastNoticeAt: 0,
+      };
+      this.#updateExternalImportProgress(progress, roots[0]?.name ?? "dropped items", true);
+
+      const imported: TreeNodeInput[] = [];
+      for (const root of roots) {
+        const entry = await this.#importExternalRoot(root, destinationParentPath, request, bridge, progress);
+        imported.push(entry);
+        committedCount += 1;
+      }
+
+      this.#assertExternalImportCurrent(bridge, context, generation);
+      if (destinationParentPath) this.#model.setExpanded(destinationParentPath, true);
+      await this.#loadDirectory(destinationParentPath, false, true);
+      this.#assertExternalImportCurrent(bridge, context, generation);
+      const firstPath = imported[0]?.relativePath;
+      if (firstPath) {
+        const importedIndex = this.#rows.findIndex((row) => row.kind === "node" && row.path === firstPath);
+        if (importedIndex >= 0) this.#focusIndex(importedIndex, false);
+      }
+      this.#showActionNotice(
+        `${imported.length.toLocaleString()} dropped ${imported.length === 1 ? "item" : "items"} copied.`,
+      );
+    } catch (error) {
+      if (this.#canApplyExternalImportResult(bridge, context, generation)) {
+        if (committedCount > 0) await this.#loadDirectory(destinationParentPath, false, true);
+        this.#showActionNotice(externalImportError(error, committedCount), "error");
+      }
+    } finally {
+      this.#contextActionPending = false;
+      const currentState = this.#state as ExplorerViewState;
+      const stateBusy = currentState === "loading" || currentState === "booting";
+      this.dataset.busy = String(stateBusy);
+      this.#treeShell.setAttribute("aria-busy", String(stateBusy));
+      this.#statePanel.setAttribute("aria-busy", String(stateBusy));
+    }
+  }
+
+  async #preflightExternalRoots(
+    roots: readonly ExternalDropRoot[],
+    destinationParentPath: string,
+    request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  ): Promise<void> {
+    for (const root of roots) {
+      let sessionId: string | undefined;
+      try {
+        sessionId = normalizeExternalImportBegin(
+          await request(
+            "explorer.entry.import.begin",
+            externalImportBeginParams(root, destinationParentPath),
+          ),
+        ).sessionId;
+      } finally {
+        if (sessionId) {
+          validateExternalImportFlag(
+            await request("explorer.entry.import.abort", { sessionId }),
+            "aborted",
+          );
+        }
+      }
+    }
+  }
+
+  async #importExternalRoot(
+    root: ExternalDropRoot,
+    destinationParentPath: string,
+    request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+    bridge: ExplorerBridge,
+    progress: ExternalImportProgress,
+  ): Promise<TreeNodeInput> {
+    const begin = normalizeExternalImportBegin(
+      await request("explorer.entry.import.begin", externalImportBeginParams(root, destinationParentPath)),
+    );
+    const sessionId = begin.sessionId;
+    let committed = false;
+
+    try {
+      if (root.kind === "file") {
+        const file = root.file;
+        if (!file) throw invalidExternalImportResponse("The dropped file was unavailable.");
+        await this.#uploadExternalFile(sessionId, file, request, progress, root.name);
+        validateExternalImportFlag(
+          await request("explorer.entry.import.file.finish", { sessionId }),
+          "finished",
+        );
+        progress.completedEntries += 1;
+        this.#updateExternalImportProgress(progress, root.name, true);
+      } else {
+        progress.completedEntries += 1;
+        this.#updateExternalImportProgress(progress, root.name, true);
+        for (const member of root.members) {
+          if (member.kind === "directory") {
+            validateExternalImportFlag(
+              await request("explorer.entry.import.directory", {
+                sessionId,
+                relativePath: member.relativePath,
+              }),
+              "created",
+            );
+            progress.completedEntries += 1;
+            this.#updateExternalImportProgress(progress, member.relativePath, true);
+            continue;
+          }
+
+          const file = member.file;
+          if (!file) throw invalidExternalImportResponse("A dropped file was unavailable.");
+          validateExternalImportFlag(
+            await request("explorer.entry.import.file.begin", {
+              sessionId,
+              relativePath: member.relativePath,
+              sizeBytes: file.size,
+            }),
+            "ready",
+          );
+          await this.#uploadExternalFile(sessionId, file, request, progress, member.relativePath);
+          validateExternalImportFlag(
+            await request("explorer.entry.import.file.finish", { sessionId }),
+            "finished",
+          );
+          progress.completedEntries += 1;
+          this.#updateExternalImportProgress(progress, member.relativePath, true);
+        }
+      }
+
+      const rawCommit = await request("explorer.entry.import.commit", { sessionId });
+      committed = true;
+      return normalizeExternalImportCommit(rawCommit, destinationParentPath, root);
+    } finally {
+      if (!committed) {
+        await bridge.request("explorer.entry.import.abort", { sessionId }).catch(() => undefined);
+      }
+    }
+  }
+
+  async #uploadExternalFile(
+    sessionId: string,
+    file: File,
+    request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+    progress: ExternalImportProgress,
+    displayPath: string,
+  ): Promise<void> {
+    let offset = 0;
+    while (offset < file.size) {
+      const expectedLength = Math.min(EXTERNAL_IMPORT_CHUNK_BYTES, file.size - offset);
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(await file.slice(offset, offset + expectedLength).arrayBuffer());
+      } catch (error) {
+        throw normalizeExternalDropReadError(error);
+      }
+      if (bytes.byteLength !== expectedLength) {
+        throw new ExplorerBridgeError({ code: "NOT_FOUND", message: "A dropped file changed while it was being copied." });
+      }
+      const nextOffset = offset + bytes.byteLength;
+      validateExternalImportChunk(
+        await request("explorer.entry.import.chunk", {
+          sessionId,
+          offset,
+          dataBase64: encodeBase64(bytes),
+        }),
+        nextOffset,
+      );
+      offset = nextOffset;
+      progress.completedBytes += bytes.byteLength;
+      this.#updateExternalImportProgress(progress, displayPath, offset === file.size);
+    }
+  }
+
+  #updateExternalImportProgress(
+    progress: ExternalImportProgress,
+    displayPath: string,
+    force: boolean,
+  ): void {
+    const now = performance.now();
+    if (!force && now - progress.lastNoticeAt < 250) return;
+    progress.lastNoticeAt = now;
+    const byteRatio = progress.totalBytes > 0 ? progress.completedBytes / progress.totalBytes : 0;
+    const entryRatio = progress.totalEntries > 0 ? progress.completedEntries / progress.totalEntries : 0;
+    const percent = Math.min(100, Math.max(0, Math.floor(Math.max(byteRatio, entryRatio) * 100)));
+    const leaf = displayPath.split("/").at(-1) || displayPath;
+    this.#showActionProgress(
+      `Copying dropped items… ${percent}% · ${progress.completedEntries.toLocaleString()}/${progress.totalEntries.toLocaleString()} · ${leaf}`,
+    );
+  }
+
+  #assertExternalImportCurrent(
+    bridge: ExplorerBridge,
+    context: ExplorerContext,
+    generation: number,
+  ): void {
+    if (!this.#canApplyExternalImportResult(bridge, context, generation)) {
+      throw new ExplorerBridgeError({ code: "CANCELLED", message: "The active workspace changed during the import." });
+    }
+  }
+
+  #canApplyExternalImportResult(
+    bridge: ExplorerBridge,
+    context: ExplorerContext,
+    generation: number,
+  ): boolean {
+    return this.#connected &&
+      !this.#dismissed &&
+      this.#generation === generation &&
+      this.#bridge === bridge &&
+      this.#context === context &&
+      bridge.available;
   }
 
   async #moveEntryByDrop(source: DragSource, destinationParentPath: string): Promise<void> {
@@ -4350,6 +4728,18 @@ export class CodeCodexElement extends HTMLElement {
     this.#actionNoticeTimer = setTimeout(() => this.#hideActionNotice(), ACTION_NOTICE_DURATION_MS);
   }
 
+  #showActionProgress(message: string): void {
+    if (!this.#actionNotice.hidden && this.#actionNotice.dataset.tone === "progress") {
+      this.#actionNotice.textContent = message;
+      return;
+    }
+    this.#hideActionNotice();
+    this.#actionNotice.textContent = message;
+    this.#actionNotice.dataset.tone = "progress";
+    this.#actionNotice.hidden = false;
+    this.#announce(message);
+  }
+
   #hideActionNotice(): void {
     if (this.#actionNoticeTimer) clearTimeout(this.#actionNoticeTimer);
     this.#actionNoticeTimer = undefined;
@@ -4378,6 +4768,364 @@ export class CodeCodexElement extends HTMLElement {
     this.#refreshTimers.clear();
     this.#pendingMarks.clear();
   }
+}
+
+function isExternalFileDrag(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer) return false;
+  const types = Array.from(dataTransfer.types);
+  if (types.includes(INTERNAL_DRAG_TYPE)) return false;
+  return types.includes("Files") || Array.from(dataTransfer.items).some((item) => item.kind === "file");
+}
+
+function captureExternalDropCandidates(dataTransfer: DataTransfer | null): readonly ExternalDropCandidate[] {
+  if (!dataTransfer) return [];
+  const candidates: ExternalDropCandidate[] = [];
+  for (const rawItem of Array.from(dataTransfer.items)) {
+    if (rawItem.kind !== "file") continue;
+    const item = rawItem as ExternalDataTransferItem;
+    let handlePromise: Promise<FileSystemHandle | null> | undefined;
+    try {
+      if (typeof item.getAsFileSystemHandle === "function") {
+        handlePromise = item.getAsFileSystemHandle.call(item);
+      }
+    } catch {
+      handlePromise = undefined;
+    }
+
+    let entry: FileSystemEntry | undefined;
+    try {
+      entry = item.webkitGetAsEntry?.() ?? item.getAsEntry?.() ?? undefined;
+    } catch {
+      entry = undefined;
+    }
+
+    let file: File | undefined;
+    try {
+      file = item.getAsFile() ?? undefined;
+    } catch {
+      file = undefined;
+    }
+    if (handlePromise || entry || file) {
+      candidates.push({
+        ...(handlePromise ? { handlePromise } : {}),
+        ...(entry ? { entry } : {}),
+        ...(file ? { file } : {}),
+      });
+    }
+  }
+
+  if (candidates.length) return candidates;
+  return Array.from(dataTransfer.files, (file) => ({ file }));
+}
+
+async function resolveExternalDropRoots(
+  candidates: readonly ExternalDropCandidate[],
+  assertCurrent: () => void,
+): Promise<readonly ExternalDropRoot[]> {
+  const roots: ExternalDropRoot[] = [];
+  const budget: ExternalDropBudget = { entries: 0, sizeBytes: 0 };
+  try {
+    for (const candidate of candidates) {
+      assertCurrent();
+      const handle = candidate.handlePromise ? await candidate.handlePromise.catch(() => null) : null;
+      assertCurrent();
+      if (handle && (handle.kind !== "directory" || typeof (handle as ExternalDirectoryHandle).entries === "function")) {
+        roots.push(await externalDropRootFromHandle(handle, budget, assertCurrent));
+        continue;
+      }
+      if (candidate.entry) {
+        roots.push(await externalDropRootFromEntry(candidate.entry, budget, assertCurrent));
+        continue;
+      }
+      if (candidate.file) {
+        chargeExternalDropFile(candidate.file.name, candidate.file.size, 1, budget);
+        roots.push({
+          name: candidate.file.name,
+          kind: "file",
+          file: candidate.file,
+          members: [],
+          entryCount: 1,
+          sizeBytes: candidate.file.size,
+        });
+      }
+    }
+  } catch (error) {
+    throw normalizeExternalDropReadError(error);
+  }
+  if (!roots.length) {
+    throw new ExplorerBridgeError({ code: "NOT_FOUND", message: "No readable files or folders were dropped." });
+  }
+  return roots;
+}
+
+async function externalDropRootFromHandle(
+  handle: FileSystemHandle,
+  budget: ExternalDropBudget,
+  assertCurrent: () => void,
+): Promise<ExternalDropRoot> {
+  const startEntries = budget.entries;
+  const startBytes = budget.sizeBytes;
+  if (handle.kind === "file") {
+    const file = await (handle as FileSystemFileHandle).getFile();
+    assertCurrent();
+    chargeExternalDropFile(handle.name, file.size, 1, budget);
+    return { name: handle.name, kind: "file", file, members: [], entryCount: 1, sizeBytes: file.size };
+  }
+
+  chargeExternalDropEntry(handle.name, 1, budget);
+  const members: ExternalDropMember[] = [];
+  await appendExternalHandleMembers(
+    handle as ExternalDirectoryHandle,
+    "",
+    1,
+    members,
+    budget,
+    assertCurrent,
+  );
+  return {
+    name: handle.name,
+    kind: "directory",
+    members,
+    entryCount: budget.entries - startEntries,
+    sizeBytes: budget.sizeBytes - startBytes,
+  };
+}
+
+async function appendExternalHandleMembers(
+  directory: ExternalDirectoryHandle,
+  parentRelativePath: string,
+  parentDepth: number,
+  members: ExternalDropMember[],
+  budget: ExternalDropBudget,
+  assertCurrent: () => void,
+): Promise<void> {
+  for await (const [listedName, child] of directory.entries()) {
+    assertCurrent();
+    const name = child.name || listedName;
+    const depth = parentDepth + 1;
+    const relativePath = joinExternalDropPath(parentRelativePath, name);
+    if (child.kind === "directory") {
+      chargeExternalDropEntry(name, depth, budget);
+      members.push({ relativePath, kind: "directory" });
+      const childDirectory = child as ExternalDirectoryHandle;
+      if (typeof childDirectory.entries !== "function") {
+        throw new ExplorerBridgeError({ code: "ACCESS_DENIED", message: "A dropped folder could not be read." });
+      }
+      await appendExternalHandleMembers(childDirectory, relativePath, depth, members, budget, assertCurrent);
+      continue;
+    }
+    if (child.kind !== "file") {
+      throw new ExplorerBridgeError({ code: "INVALID_PATH", message: "The drop contained an unsupported entry." });
+    }
+    const file = await (child as FileSystemFileHandle).getFile();
+    assertCurrent();
+    chargeExternalDropFile(name, file.size, depth, budget);
+    members.push({ relativePath, kind: "file", file });
+  }
+}
+
+async function externalDropRootFromEntry(
+  entry: FileSystemEntry,
+  budget: ExternalDropBudget,
+  assertCurrent: () => void,
+): Promise<ExternalDropRoot> {
+  const startEntries = budget.entries;
+  const startBytes = budget.sizeBytes;
+  if (entry.isFile) {
+    const file = await readExternalFileEntry(entry as FileSystemFileEntry);
+    assertCurrent();
+    chargeExternalDropFile(entry.name, file.size, 1, budget);
+    return { name: entry.name, kind: "file", file, members: [], entryCount: 1, sizeBytes: file.size };
+  }
+  if (!entry.isDirectory) {
+    throw new ExplorerBridgeError({ code: "INVALID_PATH", message: "The drop contained an unsupported entry." });
+  }
+
+  chargeExternalDropEntry(entry.name, 1, budget);
+  const members: ExternalDropMember[] = [];
+  await appendExternalEntryMembers(
+    entry as FileSystemDirectoryEntry,
+    "",
+    1,
+    members,
+    budget,
+    assertCurrent,
+  );
+  return {
+    name: entry.name,
+    kind: "directory",
+    members,
+    entryCount: budget.entries - startEntries,
+    sizeBytes: budget.sizeBytes - startBytes,
+  };
+}
+
+async function appendExternalEntryMembers(
+  directory: FileSystemDirectoryEntry,
+  parentRelativePath: string,
+  parentDepth: number,
+  members: ExternalDropMember[],
+  budget: ExternalDropBudget,
+  assertCurrent: () => void,
+): Promise<void> {
+  const reader = directory.createReader();
+  while (true) {
+    const entries = await readExternalDirectoryBatch(reader);
+    assertCurrent();
+    if (!entries.length) return;
+    for (const child of entries) {
+      assertCurrent();
+      const depth = parentDepth + 1;
+      const relativePath = joinExternalDropPath(parentRelativePath, child.name);
+      if (child.isDirectory) {
+        chargeExternalDropEntry(child.name, depth, budget);
+        members.push({ relativePath, kind: "directory" });
+        await appendExternalEntryMembers(
+          child as FileSystemDirectoryEntry,
+          relativePath,
+          depth,
+          members,
+          budget,
+          assertCurrent,
+        );
+        continue;
+      }
+      if (!child.isFile) {
+        throw new ExplorerBridgeError({ code: "INVALID_PATH", message: "The drop contained an unsupported entry." });
+      }
+      const file = await readExternalFileEntry(child as FileSystemFileEntry);
+      assertCurrent();
+      chargeExternalDropFile(child.name, file.size, depth, budget);
+      members.push({ relativePath, kind: "file", file });
+    }
+  }
+}
+
+function readExternalDirectoryBatch(reader: FileSystemDirectoryReader): Promise<readonly FileSystemEntry[]> {
+  return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+}
+
+function readExternalFileEntry(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+function chargeExternalDropEntry(name: string, depth: number, budget: ExternalDropBudget): void {
+  if (entryNameValidationError(name)) {
+    throw new ExplorerBridgeError({ code: "INVALID_PATH", message: "A dropped item has a name Windows cannot copy." });
+  }
+  if (depth > MAX_EXTERNAL_IMPORT_DEPTH || budget.entries >= MAX_EXTERNAL_IMPORT_ENTRIES) {
+    throw new ExplorerBridgeError({ code: "TOO_MANY_ENTRIES", message: "The dropped folder exceeds the import limits." });
+  }
+  budget.entries += 1;
+}
+
+function chargeExternalDropFile(name: string, sizeBytes: number, depth: number, budget: ExternalDropBudget): void {
+  chargeExternalDropEntry(name, depth, budget);
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0 || sizeBytes > MAX_EXTERNAL_IMPORT_FILE_BYTES) {
+    throw new ExplorerBridgeError({ code: "CONTENT_TOO_LARGE", message: "A dropped file exceeds the import limit." });
+  }
+  if (budget.sizeBytes + sizeBytes > MAX_EXTERNAL_IMPORT_TOTAL_BYTES) {
+    throw new ExplorerBridgeError({ code: "CONTENT_TOO_LARGE", message: "The dropped items exceed the import limit." });
+  }
+  budget.sizeBytes += sizeBytes;
+}
+
+function joinExternalDropPath(parent: string, name: string): string {
+  return parent ? `${parent}/${name}` : name;
+}
+
+function ensureDistinctExternalRootNames(roots: readonly ExternalDropRoot[]): void {
+  const names = new Set<string>();
+  for (const root of roots) {
+    const folded = root.name.normalize("NFC").toLocaleLowerCase();
+    if (names.has(folded)) {
+      throw new ExplorerBridgeError({ code: "CONFLICT", message: "Two dropped items have the same name." });
+    }
+    names.add(folded);
+  }
+}
+
+function normalizeExternalDropReadError(error: unknown): ExplorerBridgeError {
+  if (error instanceof ExplorerBridgeError) return error;
+  const name = error instanceof DOMException ? error.name : "";
+  const code = name === "NotAllowedError" || name === "SecurityError" ? "ACCESS_DENIED" : "NOT_FOUND";
+  return new ExplorerBridgeError({ code, message: "Windows could not read one of the dropped items." });
+}
+
+function invalidExternalImportResponse(message = "The file import response was not valid."): ExplorerBridgeError {
+  return new ExplorerBridgeError({ code: "INVALID_REQUEST", message });
+}
+
+function externalImportBeginParams(
+  root: ExternalDropRoot,
+  destinationParentPath: string,
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    destinationParentRelativePath: destinationParentPath,
+    name: root.name,
+    kind: root.kind,
+  };
+  if (root.kind === "file") params.sizeBytes = root.file?.size ?? 0;
+  return params;
+}
+
+function normalizeExternalImportBegin(raw: unknown): { readonly sessionId: string } {
+  const object = asRecord(raw);
+  if (
+    !object ||
+    typeof object.sessionId !== "string" ||
+    !object.sessionId ||
+    object.sessionId.length > 128 ||
+    object.chunkSize !== EXTERNAL_IMPORT_CHUNK_BYTES
+  ) {
+    throw invalidExternalImportResponse();
+  }
+  return { sessionId: object.sessionId };
+}
+
+function validateExternalImportFlag(raw: unknown, field: "created" | "ready" | "finished" | "aborted"): void {
+  const object = asRecord(raw);
+  if (!object || object[field] !== true) throw invalidExternalImportResponse();
+}
+
+function validateExternalImportChunk(raw: unknown, expectedNextOffset: number): void {
+  const object = asRecord(raw);
+  if (!object || object.nextOffset !== expectedNextOffset) throw invalidExternalImportResponse();
+}
+
+function normalizeExternalImportCommit(
+  raw: unknown,
+  destinationParentPath: string,
+  root: ExternalDropRoot,
+): TreeNodeInput {
+  const object = asRecord(raw);
+  const entry = normalizeNode(object?.entry);
+  const expectedPath = destinationParentPath ? `${destinationParentPath}/${root.name}` : root.name;
+  if (!entry || entry.kind !== root.kind || entry.name !== root.name || entry.relativePath !== expectedPath || entry.inaccessible) {
+    throw invalidExternalImportResponse();
+  }
+  return entry;
+}
+
+function externalImportError(error: unknown, committedCount: number): string {
+  const prefix = committedCount > 0
+    ? `${committedCount.toLocaleString()} ${committedCount === 1 ? "item was" : "items were"} copied, but `
+    : "";
+  const code = errorCode(error);
+  if (code === "CONFLICT" || code === "ALREADY_EXISTS") return `${prefix}an item with that name already exists in this folder.`;
+  if (code === "TOO_MANY_ENTRIES") return `${prefix}the dropped folders contain more than 1,024 items or are nested too deeply.`;
+  if (code === "CONTENT_TOO_LARGE" || code === "PAYLOAD_TOO_LARGE" || code === "TOO_LARGE") {
+    return `${prefix}the dropped files exceed the 512 MB per-file or 1 GB total limit.`;
+  }
+  if (code === "INVALID_PATH" || code === "INVALID_NAME" || code === "INVALID_REQUEST") {
+    return `${prefix}one of the dropped items has a name or path that cannot be copied.`;
+  }
+  if (code === "ACCESS_DENIED") return `${prefix}Windows denied access to one of the dropped items.`;
+  if (code === "NOT_FOUND") return `${prefix}one of the dropped items changed or became unavailable.`;
+  if (code === "CANCELLED") return `${prefix}the copy was cancelled because the active workspace changed.`;
+  if (code === "TIMEOUT") return `${prefix}copying the dropped items timed out.`;
+  if (code === "NO_BRIDGE") return `${prefix}Code-Codex disconnected before the copy finished.`;
+  return `${prefix}the dropped items could not be copied.`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

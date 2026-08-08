@@ -127,7 +127,7 @@ export class ExplorerBridge extends EventTarget {
     return Boolean(this.#binding());
   }
 
-  request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  request<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = this.#timeoutMs): Promise<T> {
     if (this.#disposed) return Promise.reject(new BridgeUnavailableError());
     const binding = this.#binding();
     if (!binding) return Promise.reject(new BridgeUnavailableError());
@@ -144,7 +144,7 @@ export class ExplorerBridge extends EventTarget {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(new ExplorerBridgeError({ code: "TIMEOUT", message: `Timed out while requesting ${method}.` }));
-      }, this.#timeoutMs);
+      }, timeoutMs);
       this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
 
       try {

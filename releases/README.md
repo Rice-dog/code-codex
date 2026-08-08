@@ -5,6 +5,16 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.64
+
+- `CodeCodex-0.1.64-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.64-x64.msi`: MSI installer.
+- `CodeCodex-0.1.64-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds copy-style drag and drop from Windows File Explorer into the workspace root or any file-tree folder, including nested folders, empty entries, Unicode names, and hidden files.
+- Preflights destination conflicts, shows copy progress, refreshes the destination, and preserves the existing in-tree move behavior.
+- Streams bounded file data through native staged imports with no overwrite, atomic final placement, context/lifecycle cleanup, and no renderer-supplied absolute source paths.
+
 ## v0.1.63
 
 - `CodeCodex-0.1.63-x64-setup.exe`: recommended installer.
@@ -297,5 +307,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.63
+./scripts/package.ps1 -Version 0.1.64
 ```

@@ -16,7 +16,6 @@ use std::time::Instant;
 use async_trait::async_trait;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-#[cfg(windows)]
 use cdp_client::CapabilityToken;
 use cdp_client::{BindingRequest, BridgeError, BridgeHandler, BridgeNotification};
 use context_resolver::{AppServerClient, ResolverError};
@@ -64,10 +63,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 #[cfg(windows)]
 use windows_sys::core::BOOL;
 use workspace_service::{
-    CreateEntryKind, ErrorCode, ListOptions, ListPage, MAX_MEDIA_CHUNK_BYTES, MAX_PREVIEW_BYTES,
-    MediaInfo, ModelResourceChunkRequest, ModelResourceInfo, PreparedSettings, PreviewResult,
-    Settings, SettingsPatch, SettingsStore, WatchSubscription, WatchVisibility,
-    WatchVisibilityHandle, Workspace, WorkspaceError, WorkspaceWatcher,
+    CreateEntryKind, ErrorCode, ImportSession, ListOptions, ListPage, MAX_IMPORT_CHUNK_BYTES,
+    MAX_MEDIA_CHUNK_BYTES, MAX_PREVIEW_BYTES, MediaInfo, ModelResourceChunkRequest,
+    ModelResourceInfo, PreparedSettings, PreviewResult, Settings, SettingsPatch, SettingsStore,
+    WatchSubscription, WatchVisibility, WatchVisibilityHandle, Workspace, WorkspaceError,
+    WorkspaceWatcher,
 };
 
 #[derive(Clone)]
@@ -92,9 +92,17 @@ struct BridgeInner {
 
 struct BridgeState {
     current: Option<ActiveContext>,
+    import_session: Option<ActiveImportSession>,
     watch_enabled: bool,
     watch_task: Option<JoinHandle<()>>,
     watch_visibility: Option<WatchVisibilityHandle>,
+}
+
+struct ActiveImportSession {
+    id: String,
+    lifecycle_epoch: u64,
+    context_revision: u64,
+    session: ImportSession,
 }
 
 #[derive(Clone)]
@@ -251,6 +259,52 @@ struct BatchMoveParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EntryPathParams {
     relative_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ImportBeginParams {
+    destination_parent_relative_path: String,
+    name: String,
+    kind: EntryCreateKind,
+    #[serde(default, deserialize_with = "deserialize_optional_import_size")]
+    size_bytes: Option<u64>,
+}
+
+fn deserialize_optional_import_size<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    u64::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ImportDirectoryParams {
+    session_id: String,
+    relative_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ImportFileBeginParams {
+    session_id: String,
+    relative_path: String,
+    size_bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ImportChunkParams {
+    session_id: String,
+    offset: u64,
+    data_base64: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ImportSessionParams {
+    session_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1464,6 +1518,7 @@ impl NativeBridge {
                 manual_workspace,
                 state: StdMutex::new(BridgeState {
                     current: None,
+                    import_session: None,
                     watch_enabled: false,
                     watch_task: None,
                     watch_visibility: None,
@@ -1596,6 +1651,7 @@ impl NativeBridge {
             if let Some(task) = state.watch_task.take() {
                 task.abort();
             }
+            abort_import_locked(&mut state);
             state.watch_visibility = None;
             state.current = Some(ActiveContext {
                 thread_id,
@@ -1877,6 +1933,191 @@ impl NativeBridge {
         })
         .await?;
         Ok(json!({ "revealed": true }))
+    }
+
+    async fn entry_import_begin(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: ImportBeginParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        match (params.kind, params.size_bytes) {
+            (EntryCreateKind::File, Some(_)) | (EntryCreateKind::Directory, None) => {}
+            _ => return Err(BridgeError::invalid_request()),
+        }
+
+        let session_id = CapabilityToken::generate().expose().to_owned();
+        let staging_nonce = CapabilityToken::generate().expose().to_owned();
+        let bridge = self.clone();
+        let response_session_id = session_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut state = lock_unpoisoned(&bridge.inner.state);
+            bridge.ensure_epoch(epoch)?;
+            if state.import_session.is_some() {
+                return Err(import_busy_error());
+            }
+            let context = state.current.as_ref().ok_or_else(no_context_error)?;
+            if context.lifecycle_epoch != epoch {
+                return Err(cancelled_error());
+            }
+            let session = context
+                .workspace
+                .begin_import(
+                    &params.destination_parent_relative_path,
+                    &params.name,
+                    params.kind.into(),
+                    params.size_bytes,
+                    &staging_nonce,
+                )
+                .map_err(map_import_error)?;
+            if bridge.ensure_epoch(epoch).is_err() {
+                let _ = session.abort();
+                return Err(cancelled_error());
+            }
+            state.import_session = Some(ActiveImportSession {
+                id: session_id,
+                lifecycle_epoch: epoch,
+                context_revision: context.revision,
+                session,
+            });
+            Ok(())
+        })
+        .await
+        .map_err(|_| internal_error())??;
+
+        Ok(json!({
+            "sessionId": response_session_id,
+            "chunkSize": MAX_IMPORT_CHUNK_BYTES,
+        }))
+    }
+
+    async fn entry_import_directory(
+        &self,
+        params: Value,
+        epoch: u64,
+    ) -> Result<Value, BridgeError> {
+        let params: ImportDirectoryParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        self.active_import_operation(epoch, params.session_id, move |session| {
+            session.create_directory(&params.relative_path)
+        })
+        .await?;
+        Ok(json!({ "created": true }))
+    }
+
+    async fn entry_import_file_begin(
+        &self,
+        params: Value,
+        epoch: u64,
+    ) -> Result<Value, BridgeError> {
+        let params: ImportFileBeginParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        self.active_import_operation(epoch, params.session_id, move |session| {
+            session.begin_file(&params.relative_path, params.size_bytes)
+        })
+        .await?;
+        Ok(json!({ "ready": true }))
+    }
+
+    async fn entry_import_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: ImportChunkParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let bytes = BASE64_STANDARD
+            .decode(params.data_base64)
+            .map_err(|_| BridgeError::invalid_request())?;
+        if bytes.is_empty() || bytes.len() > MAX_IMPORT_CHUNK_BYTES {
+            return Err(BridgeError::invalid_request());
+        }
+        let next_offset = self
+            .active_import_operation(epoch, params.session_id, move |session| {
+                session.append_chunk(params.offset, &bytes)
+            })
+            .await?;
+        Ok(json!({ "nextOffset": next_offset }))
+    }
+
+    async fn entry_import_file_finish(
+        &self,
+        params: Value,
+        epoch: u64,
+    ) -> Result<Value, BridgeError> {
+        let params: ImportSessionParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        self.active_import_operation(epoch, params.session_id, |session| session.finish_file())
+            .await?;
+        Ok(json!({ "finished": true }))
+    }
+
+    async fn entry_import_commit(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: ImportSessionParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        validate_import_session_id(&params.session_id)?;
+        let bridge = self.clone();
+        let entry = tokio::task::spawn_blocking(move || {
+            let mut state = lock_unpoisoned(&bridge.inner.state);
+            bridge.ensure_epoch(epoch)?;
+            validate_active_import(&state, epoch, &params.session_id)?;
+            let active = state
+                .import_session
+                .take()
+                .ok_or_else(invalid_import_session_error)?;
+            // `ImportSession::commit` has no fallible work after its atomic
+            // rename, so consuming it here cannot strand an untracked stage.
+            active.session.commit().map_err(map_import_error)
+        })
+        .await
+        .map_err(|_| internal_error())??;
+        Ok(json!({ "entry": entry }))
+    }
+
+    async fn entry_import_abort(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: ImportSessionParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        validate_import_session_id(&params.session_id)?;
+        let bridge = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut state = lock_unpoisoned(&bridge.inner.state);
+            bridge.ensure_epoch(epoch)?;
+            validate_active_import(&state, epoch, &params.session_id)?;
+            let active = state
+                .import_session
+                .take()
+                .ok_or_else(invalid_import_session_error)?;
+            active.session.abort().map_err(map_import_error)
+        })
+        .await
+        .map_err(|_| internal_error())??;
+        Ok(json!({ "aborted": true }))
+    }
+
+    async fn active_import_operation<T, F>(
+        &self,
+        epoch: u64,
+        session_id: String,
+        operation: F,
+    ) -> Result<T, BridgeError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut ImportSession) -> Result<T, WorkspaceError> + Send + 'static,
+    {
+        validate_import_session_id(&session_id)?;
+        let bridge = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut state = lock_unpoisoned(&bridge.inner.state);
+            bridge.ensure_epoch(epoch)?;
+            validate_active_import(&state, epoch, &session_id)?;
+            let result = state
+                .import_session
+                .as_mut()
+                .ok_or_else(invalid_import_session_error)
+                .and_then(|active| operation(&mut active.session).map_err(map_import_error));
+            if bridge.ensure_epoch(epoch).is_err() {
+                if let Some(active) = state.import_session.take() {
+                    let _ = active.session.abort();
+                }
+                return Err(cancelled_error());
+            }
+            result
+        })
+        .await
+        .map_err(|_| internal_error())?
     }
 
     async fn active_workspace_operation<T, F>(
@@ -2168,6 +2409,7 @@ impl NativeBridge {
         let request_generation = self.bump_context_request_generation();
         self.ensure_context_request(epoch, request_generation)?;
         self.stop_watcher_locked(&mut state);
+        abort_import_locked(&mut state);
         state.current = None;
         self.inner.context_revision.fetch_add(1, Ordering::AcqRel);
         Ok(json!({ "cleared": true }))
@@ -2364,6 +2606,19 @@ impl BridgeHandler for NativeBridge {
             "explorer.entry.copy" => self.entry_copy(request.params, epoch).await,
             "explorer.entry.delete" => self.entry_delete(request.params, epoch).await,
             "explorer.entry.reveal" => self.entry_reveal(request.params, epoch).await,
+            "explorer.entry.import.begin" => self.entry_import_begin(request.params, epoch).await,
+            "explorer.entry.import.directory" => {
+                self.entry_import_directory(request.params, epoch).await
+            }
+            "explorer.entry.import.file.begin" => {
+                self.entry_import_file_begin(request.params, epoch).await
+            }
+            "explorer.entry.import.chunk" => self.entry_import_chunk(request.params, epoch).await,
+            "explorer.entry.import.file.finish" => {
+                self.entry_import_file_finish(request.params, epoch).await
+            }
+            "explorer.entry.import.commit" => self.entry_import_commit(request.params, epoch).await,
+            "explorer.entry.import.abort" => self.entry_import_abort(request.params, epoch).await,
             "explorer.watch.start" => self.watch_start(request.params, epoch).await,
             "explorer.watch.stop" => self.watch_stop(request.params, epoch),
             "explorer.settings.get" => self.settings_get(request.params).await,
@@ -2390,6 +2645,7 @@ impl BridgeHandler for NativeBridge {
         let mut state = lock_unpoisoned(&self.inner.state);
         self.bump_context_request_generation();
         self.stop_watcher_locked(&mut state);
+        abort_import_locked(&mut state);
         state.current = None;
         self.inner.context_revision.fetch_add(1, Ordering::AcqRel);
     }
@@ -2399,6 +2655,56 @@ fn lock_unpoisoned<T>(mutex: &StdMutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn abort_import_locked(state: &mut BridgeState) {
+    if let Some(active) = state.import_session.take()
+        && active.session.abort().is_err()
+    {
+        tracing::warn!(event = "workspace_import_cleanup_failed");
+    }
+}
+
+fn validate_import_session_id(session_id: &str) -> Result<(), BridgeError> {
+    if session_id.len() == 43
+        && session_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        Ok(())
+    } else {
+        Err(BridgeError::invalid_request())
+    }
+}
+
+fn validate_active_import(
+    state: &BridgeState,
+    epoch: u64,
+    session_id: &str,
+) -> Result<(), BridgeError> {
+    let context = state.current.as_ref().ok_or_else(no_context_error)?;
+    let active = state
+        .import_session
+        .as_ref()
+        .ok_or_else(invalid_import_session_error)?;
+    if active.id != session_id {
+        return Err(invalid_import_session_error());
+    }
+    if active.lifecycle_epoch != epoch
+        || context.lifecycle_epoch != epoch
+        || active.context_revision != context.revision
+    {
+        return Err(cancelled_error());
+    }
+    Ok(())
+}
+
+fn invalid_import_session_error() -> BridgeError {
+    BridgeError::new("INVALID_REQUEST", "The file import session is invalid.")
+}
+
+fn import_busy_error() -> BridgeError {
+    BridgeError::new("CONFLICT", "Another file import is already active.")
 }
 
 fn read_unpoisoned<T>(lock: &std::sync::RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -2719,6 +3025,20 @@ fn map_workspace_error(error: WorkspaceError) -> BridgeError {
         ErrorCode::Internal => "INTERNAL",
     };
     BridgeError::new(code, error.public_message())
+}
+
+fn map_import_error(error: WorkspaceError) -> BridgeError {
+    match error.code() {
+        ErrorCode::ContentTooLarge => BridgeError::new(
+            "CONTENT_TOO_LARGE",
+            "The dropped file or folder exceeds the import size limit.",
+        ),
+        ErrorCode::TooManyEntries => BridgeError::new(
+            "TOO_MANY_ENTRIES",
+            "The dropped folder contains too many nested entries.",
+        ),
+        _ => map_workspace_error(error),
+    }
 }
 
 fn map_media_error(error: WorkspaceError) -> BridgeError {
@@ -3947,6 +4267,339 @@ mod tests {
                 .expect_err("invalid mutation path");
             assert_eq!(error.code, "INVALID_PATH", "method: {method}");
         }
+    }
+
+    #[tokio::test]
+    async fn dropped_file_and_folder_imports_stream_through_strict_sessions() {
+        let (directory, bridge) = manual_bridge().await;
+        fs::create_dir(directory.path().join("imports")).expect("imports directory");
+
+        let file_begin = bridge
+            .handle(request(
+                "explorer.entry.import.begin",
+                json!({
+                    "destinationParentRelativePath": "imports",
+                    "name": "single.bin",
+                    "kind": "file",
+                    "sizeBytes": 6,
+                }),
+            ))
+            .await
+            .expect("begin file import");
+        assert_eq!(file_begin["chunkSize"], MAX_IMPORT_CHUNK_BYTES);
+        let file_session = file_begin["sessionId"]
+            .as_str()
+            .expect("file session")
+            .to_owned();
+        let first = bridge
+            .handle(request(
+                "explorer.entry.import.chunk",
+                json!({
+                    "sessionId": file_session,
+                    "offset": 0,
+                    "dataBase64": BASE64_STANDARD.encode("abc"),
+                }),
+            ))
+            .await
+            .expect("first chunk");
+        assert_eq!(first, json!({ "nextOffset": 3 }));
+        bridge
+            .handle(request(
+                "explorer.entry.import.chunk",
+                json!({
+                    "sessionId": file_session,
+                    "offset": 3,
+                    "dataBase64": BASE64_STANDARD.encode("def"),
+                }),
+            ))
+            .await
+            .expect("second chunk");
+        bridge
+            .handle(request(
+                "explorer.entry.import.file.finish",
+                json!({ "sessionId": file_session }),
+            ))
+            .await
+            .expect("finish file");
+        let committed = bridge
+            .handle(request(
+                "explorer.entry.import.commit",
+                json!({ "sessionId": file_session }),
+            ))
+            .await
+            .expect("commit file");
+        assert_eq!(committed["entry"]["relativePath"], "imports/single.bin");
+        assert_eq!(
+            fs::read(directory.path().join("imports/single.bin")).expect("file bytes"),
+            b"abcdef"
+        );
+
+        let folder_begin = bridge
+            .handle(request(
+                "explorer.entry.import.begin",
+                json!({
+                    "destinationParentRelativePath": "imports",
+                    "name": "folder",
+                    "kind": "directory",
+                }),
+            ))
+            .await
+            .expect("begin folder import");
+        let folder_session = folder_begin["sessionId"]
+            .as_str()
+            .expect("folder session")
+            .to_owned();
+        bridge
+            .handle(request(
+                "explorer.entry.import.directory",
+                json!({ "sessionId": folder_session, "relativePath": "nested" }),
+            ))
+            .await
+            .expect("nested directory");
+        bridge
+            .handle(request(
+                "explorer.entry.import.file.begin",
+                json!({
+                    "sessionId": folder_session,
+                    "relativePath": "nested/value.txt",
+                    "sizeBytes": 5,
+                }),
+            ))
+            .await
+            .expect("begin nested file");
+        bridge
+            .handle(request(
+                "explorer.entry.import.chunk",
+                json!({
+                    "sessionId": folder_session,
+                    "offset": 0,
+                    "dataBase64": BASE64_STANDARD.encode("value"),
+                }),
+            ))
+            .await
+            .expect("nested chunk");
+        bridge
+            .handle(request(
+                "explorer.entry.import.file.finish",
+                json!({ "sessionId": folder_session }),
+            ))
+            .await
+            .expect("finish nested file");
+        bridge
+            .handle(request(
+                "explorer.entry.import.commit",
+                json!({ "sessionId": folder_session }),
+            ))
+            .await
+            .expect("commit folder");
+        assert_eq!(
+            fs::read_to_string(directory.path().join("imports/folder/nested/value.txt"))
+                .expect("nested content"),
+            "value"
+        );
+    }
+
+    #[tokio::test]
+    async fn import_rpc_rejects_untrusted_paths_invalid_chunks_and_unknown_fields() {
+        let (directory, bridge) = manual_bridge().await;
+
+        for params in [
+            json!({
+                "destinationParentRelativePath": "",
+                "name": "unsafe.bin",
+                "kind": "file",
+                "sizeBytes": 1,
+                "sourcePath": "C:\\Windows\\win.ini",
+            }),
+            json!({
+                "destinationParentRelativePath": "",
+                "name": "missing-size.bin",
+                "kind": "file",
+            }),
+            json!({
+                "destinationParentRelativePath": "",
+                "name": "folder",
+                "kind": "directory",
+                "sizeBytes": 0,
+            }),
+            json!({
+                "destinationParentRelativePath": "",
+                "name": "folder-null",
+                "kind": "directory",
+                "sizeBytes": null,
+            }),
+        ] {
+            let error = bridge
+                .handle(request("explorer.entry.import.begin", params))
+                .await
+                .expect_err("invalid begin schema");
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
+        assert!(!directory.path().join("unsafe.bin").exists());
+
+        let begin = bridge
+            .handle(request(
+                "explorer.entry.import.begin",
+                json!({
+                    "destinationParentRelativePath": "",
+                    "name": "bounded.bin",
+                    "kind": "file",
+                    "sizeBytes": 2,
+                }),
+            ))
+            .await
+            .expect("begin bounded import");
+        let session_id = begin["sessionId"].as_str().expect("session").to_owned();
+        let wrong_session = CapabilityToken::generate().expose().to_owned();
+        let error = bridge
+            .handle(request(
+                "explorer.entry.import.chunk",
+                json!({
+                    "sessionId": wrong_session,
+                    "offset": 0,
+                    "dataBase64": BASE64_STANDARD.encode("x"),
+                }),
+            ))
+            .await
+            .expect_err("wrong session");
+        assert_eq!(error.code, "INVALID_REQUEST");
+
+        for data in ["not base64".to_owned(), BASE64_STANDARD.encode([])] {
+            let error = bridge
+                .handle(request(
+                    "explorer.entry.import.chunk",
+                    json!({ "sessionId": session_id, "offset": 0, "dataBase64": data }),
+                ))
+                .await
+                .expect_err("invalid chunk");
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
+        let oversized = vec![0_u8; MAX_IMPORT_CHUNK_BYTES + 1];
+        let error = bridge
+            .handle(request(
+                "explorer.entry.import.chunk",
+                json!({
+                    "sessionId": session_id,
+                    "offset": 0,
+                    "dataBase64": BASE64_STANDARD.encode(oversized),
+                }),
+            ))
+            .await
+            .expect_err("oversized chunk");
+        assert_eq!(error.code, "INVALID_REQUEST");
+
+        bridge
+            .handle(request(
+                "explorer.entry.import.abort",
+                json!({ "sessionId": session_id }),
+            ))
+            .await
+            .expect("abort import");
+        assert!(!directory.path().join("bounded.bin").exists());
+        assert!(
+            fs::read_dir(directory.path())
+                .expect("workspace root")
+                .all(|entry| !entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".__code_codex_import_"))
+        );
+    }
+
+    #[tokio::test]
+    async fn context_clear_aborts_and_cleans_an_active_import() {
+        let (directory, bridge) = manual_bridge().await;
+        let begin = bridge
+            .handle(request(
+                "explorer.entry.import.begin",
+                json!({
+                    "destinationParentRelativePath": "",
+                    "name": "partial.bin",
+                    "kind": "file",
+                    "sizeBytes": 3,
+                }),
+            ))
+            .await
+            .expect("begin import");
+        let session_id = begin["sessionId"].as_str().expect("session").to_owned();
+        bridge
+            .handle(request(
+                "explorer.entry.import.chunk",
+                json!({
+                    "sessionId": session_id,
+                    "offset": 0,
+                    "dataBase64": BASE64_STANDARD.encode("a"),
+                }),
+            ))
+            .await
+            .expect("partial chunk");
+        bridge
+            .handle(request("explorer.context.clear", json!({})))
+            .await
+            .expect("clear context");
+
+        assert!(!directory.path().join("partial.bin").exists());
+        assert!(
+            lock_unpoisoned(&bridge.inner.state)
+                .import_session
+                .is_none()
+        );
+        assert!(
+            fs::read_dir(directory.path())
+                .expect("workspace root")
+                .all(|entry| !entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".__code_codex_import_"))
+        );
+    }
+
+    #[tokio::test]
+    async fn lifecycle_invalidation_aborts_and_cleans_an_active_import() {
+        let (directory, bridge) = manual_bridge().await;
+        let begin = bridge
+            .handle(request(
+                "explorer.entry.import.begin",
+                json!({
+                    "destinationParentRelativePath": "",
+                    "name": "stale.bin",
+                    "kind": "file",
+                    "sizeBytes": 2,
+                }),
+            ))
+            .await
+            .expect("begin import");
+        let session_id = begin["sessionId"].as_str().expect("session").to_owned();
+        bridge
+            .handle(request(
+                "explorer.entry.import.chunk",
+                json!({
+                    "sessionId": session_id,
+                    "offset": 0,
+                    "dataBase64": BASE64_STANDARD.encode("x"),
+                }),
+            ))
+            .await
+            .expect("partial chunk");
+
+        bridge.invalidate_lifecycle();
+
+        assert!(!directory.path().join("stale.bin").exists());
+        let state = lock_unpoisoned(&bridge.inner.state);
+        assert!(state.import_session.is_none());
+        assert!(state.current.is_none());
+        drop(state);
+        assert!(
+            fs::read_dir(directory.path())
+                .expect("workspace root")
+                .all(|entry| !entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".__code_codex_import_"))
+        );
     }
 
     #[tokio::test]

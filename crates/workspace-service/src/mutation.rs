@@ -1,5 +1,7 @@
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use cap_fs_ext::OpenOptionsFollowExt as _;
@@ -12,7 +14,6 @@ use cap_primitives::fs::{
 
 use crate::error::{WorkspaceError, map_io};
 use crate::listing::{EntryKind, TreeEntry, Workspace};
-#[cfg(windows)]
 use crate::path_guard::open_regular_file_nofollow;
 use crate::path_guard::{
     DirectoryCapability, is_contained, is_link_or_reparse, open_directory_nofollow,
@@ -23,6 +24,17 @@ use crate::path_guard::{
 pub const MAX_DELETE_DEPTH: usize = 64;
 /// Maximum number of descendants inspected by one delete operation.
 pub const MAX_DELETE_ENTRIES: usize = 4_096;
+/// Maximum decoded payload accepted by one renderer-to-native import request.
+pub const MAX_IMPORT_CHUNK_BYTES: usize = 48 * 1024;
+/// Maximum number of files and directories in one dropped top-level item.
+pub const MAX_IMPORT_ENTRIES: usize = 1_024;
+/// Maximum nesting depth, including the dropped top-level item.
+pub const MAX_IMPORT_DEPTH: usize = 64;
+/// Maximum size of one imported file.
+pub const MAX_IMPORT_FILE_BYTES: u64 = 512 * 1024 * 1024;
+/// Maximum aggregate file size of one imported top-level item.
+pub const MAX_IMPORT_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
+pub(crate) const IMPORT_STAGING_PREFIX: &str = ".__code_codex_import_";
 const MAX_LEAF_UTF16_UNITS: usize = 255;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +43,165 @@ pub enum CreateEntryKind {
     Directory,
 }
 
+/// A bounded, root-capability-backed import of one dropped top-level item.
+///
+/// Bytes are written beneath a native-generated staging name at the workspace
+/// root. The completed item is moved to its requested directory only after all
+/// declared sizes and entries have been verified. No ambient source path from
+/// the renderer is ever accepted.
+pub struct ImportSession {
+    workspace: Workspace,
+    destination_parent: PathBuf,
+    destination_handle: File,
+    final_name: String,
+    kind: CreateEntryKind,
+    staging_name: String,
+    staging_handle: File,
+    current_file: Option<ImportFile>,
+    expected_files: HashMap<PathBuf, u64>,
+    expected_directories: HashSet<PathBuf>,
+    entry_count: usize,
+    total_size_bytes: u64,
+    finalized: bool,
+    staging_registered: bool,
+}
+
+struct ImportFile {
+    file: File,
+    expected_size_bytes: u64,
+    received_bytes: u64,
+}
+
+struct ImportStagingRegistration {
+    workspace: Workspace,
+    name: String,
+    armed: bool,
+}
+
+impl ImportStagingRegistration {
+    fn new(workspace: Workspace, name: String) -> Self {
+        workspace.register_import_staging_name(name.clone());
+        Self {
+            workspace,
+            name,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ImportStagingRegistration {
+    fn drop(&mut self) {
+        if self.armed {
+            self.workspace.unregister_import_staging_name(&self.name);
+        }
+    }
+}
+
 impl Workspace {
+    pub fn begin_import(
+        &self,
+        destination_parent_relative_path: &str,
+        name: &str,
+        kind: CreateEntryKind,
+        size_bytes: Option<u64>,
+        staging_nonce: &str,
+    ) -> Result<ImportSession, WorkspaceError> {
+        self.ensure_root_valid()?;
+        let result = (|| {
+            let destination_parent = validate_relative(destination_parent_relative_path)?;
+            let final_name = validate_leaf(name)?.to_owned();
+            let destination_directory =
+                DirectoryCapability::open(self.root_handle(), &destination_parent)?;
+            ensure_absent(destination_directory.handle()?, Path::new(&final_name))?;
+            let destination_handle = destination_directory
+                .handle()?
+                .try_clone()
+                .map_err(|error| map_io(&error))?;
+
+            if staging_nonce.is_empty()
+                || staging_nonce.len() > 96
+                || !staging_nonce
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            {
+                return Err(WorkspaceError::InvalidPath);
+            }
+            let staging_name = format!("{IMPORT_STAGING_PREFIX}{staging_nonce}");
+            validate_leaf(&staging_name)?;
+            ensure_absent(self.root_handle(), Path::new(&staging_name))?;
+            let mut registration =
+                ImportStagingRegistration::new(self.clone(), staging_name.clone());
+
+            let (staging_handle, current_file, total_size_bytes) = match (kind, size_bytes) {
+                (CreateEntryKind::File, Some(size_bytes)) => {
+                    validate_import_file_size(size_bytes, 0)?;
+                    let created = create_import_file(self.root_handle(), Path::new(&staging_name))?;
+                    let retained = match created.try_clone() {
+                        Ok(retained) => retained,
+                        Err(error) => {
+                            drop(created);
+                            let _ = remove_file(self.root_handle(), Path::new(&staging_name));
+                            return Err(map_io(&error));
+                        }
+                    };
+                    (
+                        retained,
+                        Some(ImportFile {
+                            file: created,
+                            expected_size_bytes: size_bytes,
+                            received_bytes: 0,
+                        }),
+                        size_bytes,
+                    )
+                }
+                (CreateEntryKind::Directory, None) => {
+                    create_dir(
+                        self.root_handle(),
+                        Path::new(&staging_name),
+                        &DirOptions::new(),
+                    )
+                    .map_err(|error| map_mutation_io(&error))?;
+                    let retained =
+                        match open_directory_nofollow(self.root_handle(), Path::new(&staging_name))
+                        {
+                            Ok(retained) => retained,
+                            Err(error) => {
+                                let _ = remove_dir(self.root_handle(), Path::new(&staging_name));
+                                return Err(error);
+                            }
+                        };
+                    (retained, None, 0)
+                }
+                _ => return Err(WorkspaceError::InvalidPath),
+            };
+
+            let session = ImportSession {
+                workspace: self.clone(),
+                destination_parent,
+                destination_handle,
+                final_name,
+                kind,
+                staging_name,
+                staging_handle,
+                current_file,
+                expected_files: HashMap::new(),
+                expected_directories: HashSet::new(),
+                entry_count: 1,
+                total_size_bytes,
+                finalized: false,
+                staging_registered: true,
+            };
+            registration.disarm();
+            Ok(session)
+        })();
+        self.ensure_root_valid()?;
+        result
+    }
+
     pub fn create_entry(
         &self,
         parent_relative_path: &str,
@@ -281,6 +451,290 @@ impl Workspace {
     }
 }
 
+impl ImportSession {
+    pub fn create_directory(&mut self, relative_path: &str) -> Result<(), WorkspaceError> {
+        self.ensure_writable()?;
+        self.ensure_no_active_file()?;
+        let clean = validate_import_relative(relative_path)?;
+        self.ensure_entry_capacity()?;
+        let stage_root = self.directory_root()?;
+        let name = clean.file_name().ok_or(WorkspaceError::InvalidPath)?;
+        let parent = clean.parent().unwrap_or_else(|| Path::new(""));
+        let parent_directory = DirectoryCapability::open(stage_root, parent)?;
+        let parent_handle = parent_directory.handle()?;
+        ensure_absent(parent_handle, Path::new(name))?;
+        create_dir(parent_handle, Path::new(name), &DirOptions::new())
+            .map_err(|error| map_mutation_io(&error))?;
+        let created = open_directory_nofollow(parent_handle, Path::new(name))?;
+        drop(created);
+        self.expected_directories.insert(clean);
+        self.entry_count += 1;
+        self.workspace.ensure_root_valid()
+    }
+
+    pub fn begin_file(
+        &mut self,
+        relative_path: &str,
+        size_bytes: u64,
+    ) -> Result<(), WorkspaceError> {
+        self.ensure_writable()?;
+        self.ensure_no_active_file()?;
+        let clean = validate_import_relative(relative_path)?;
+        self.ensure_entry_capacity()?;
+        validate_import_file_size(size_bytes, self.total_size_bytes)?;
+        let stage_root = self.directory_root()?;
+        let name = clean.file_name().ok_or(WorkspaceError::InvalidPath)?;
+        let parent = clean.parent().unwrap_or_else(|| Path::new(""));
+        let parent_directory = DirectoryCapability::open(stage_root, parent)?;
+        let parent_handle = parent_directory.handle()?;
+        ensure_absent(parent_handle, Path::new(name))?;
+        let created = create_import_file(parent_handle, Path::new(name))?;
+
+        self.total_size_bytes = self
+            .total_size_bytes
+            .checked_add(size_bytes)
+            .ok_or(WorkspaceError::ContentTooLarge)?;
+        self.expected_files.insert(clean, size_bytes);
+        self.current_file = Some(ImportFile {
+            file: created,
+            expected_size_bytes: size_bytes,
+            received_bytes: 0,
+        });
+        self.entry_count += 1;
+        self.workspace.ensure_root_valid()
+    }
+
+    pub fn append_chunk(&mut self, offset: u64, bytes: &[u8]) -> Result<u64, WorkspaceError> {
+        self.ensure_writable()?;
+        if bytes.is_empty() || bytes.len() > MAX_IMPORT_CHUNK_BYTES {
+            return Err(WorkspaceError::InvalidPath);
+        }
+        let current = self
+            .current_file
+            .as_mut()
+            .ok_or(WorkspaceError::InvalidPath)?;
+        if offset != current.received_bytes {
+            return Err(WorkspaceError::Conflict);
+        }
+        let next_offset = current
+            .received_bytes
+            .checked_add(bytes.len() as u64)
+            .ok_or(WorkspaceError::ContentTooLarge)?;
+        if next_offset > current.expected_size_bytes {
+            return Err(WorkspaceError::ContentTooLarge);
+        }
+        current
+            .file
+            .write_all(bytes)
+            .map_err(|error| map_mutation_io(&error))?;
+        current.received_bytes = next_offset;
+        self.workspace.ensure_root_valid()?;
+        Ok(next_offset)
+    }
+
+    pub fn finish_file(&mut self) -> Result<(), WorkspaceError> {
+        self.ensure_writable()?;
+        let mut current = self
+            .current_file
+            .take()
+            .ok_or(WorkspaceError::InvalidPath)?;
+        if current.received_bytes != current.expected_size_bytes {
+            self.current_file = Some(current);
+            return Err(WorkspaceError::Conflict);
+        }
+        if let Err(error) = current.file.flush() {
+            self.current_file = Some(current);
+            return Err(map_mutation_io(&error));
+        }
+        let metadata = match current.file.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                self.current_file = Some(current);
+                return Err(map_io(&error));
+            }
+        };
+        if is_link_or_reparse(&metadata)
+            || !metadata.is_file()
+            || metadata.len() != current.expected_size_bytes
+        {
+            self.current_file = Some(current);
+            return Err(WorkspaceError::Conflict);
+        }
+        drop(current);
+        self.workspace.ensure_root_valid()
+    }
+
+    pub fn commit(mut self) -> Result<TreeEntry, WorkspaceError> {
+        self.ensure_writable()?;
+        self.ensure_no_active_file()?;
+        self.verify_staging_identity()?;
+
+        match self.kind {
+            CreateEntryKind::File => {
+                let metadata = validated_entry_metadata(
+                    self.workspace.root_handle(),
+                    Path::new(&self.staging_name),
+                )?;
+                if !metadata.is_file() || metadata.len() != self.total_size_bytes {
+                    return Err(WorkspaceError::Conflict);
+                }
+            }
+            CreateEntryKind::Directory => {
+                let mut observed_entries = 1_usize;
+                let mut observed_bytes = 0_u64;
+                let mut observed_files = HashSet::new();
+                let mut observed_directories = HashSet::new();
+                inspect_import_tree(
+                    &self.staging_handle,
+                    Path::new(""),
+                    1,
+                    &mut observed_entries,
+                    &mut observed_bytes,
+                    &self.expected_files,
+                    &self.expected_directories,
+                    &mut observed_files,
+                    &mut observed_directories,
+                )?;
+                if observed_entries != self.entry_count
+                    || observed_bytes != self.total_size_bytes
+                    || observed_files.len() != self.expected_files.len()
+                    || observed_directories.len() != self.expected_directories.len()
+                {
+                    return Err(WorkspaceError::Conflict);
+                }
+            }
+        }
+
+        let destination_directory =
+            DirectoryCapability::open(self.workspace.root_handle(), &self.destination_parent)?;
+        let destination_handle = destination_directory.handle()?;
+        if !same_file_identity(&self.destination_handle, destination_handle)? {
+            return Err(WorkspaceError::OutsideWorkspace);
+        }
+        ensure_absent(destination_handle, Path::new(&self.final_name))?;
+        let staging_metadata =
+            validated_entry_metadata(self.workspace.root_handle(), Path::new(&self.staging_name))?;
+        let destination = checked_join(&self.destination_parent, &self.final_name)?;
+        let expected_kind: EntryKind = self.kind.into();
+        rename_entry_no_replace(
+            self.workspace.root_handle(),
+            Path::new(&self.staging_name),
+            destination_handle,
+            Path::new(&self.final_name),
+            &staging_metadata,
+        )?;
+        // A successful no-replace rename is the import's commit point. Every
+        // fallible identity, shape, and destination check is deliberately
+        // complete before it so a committed item is never reported as an
+        // error that Drop cannot roll back.
+        self.finalized = true;
+        self.unregister_staging();
+        Ok(make_tree_entry(
+            &destination,
+            &self.final_name,
+            expected_kind,
+        ))
+    }
+
+    pub fn abort(mut self) -> Result<(), WorkspaceError> {
+        let result = self.cleanup_staging();
+        self.unregister_staging();
+        // If cleanup failed, leave the session unfinalized so Drop makes one
+        // last best-effort cleanup attempt. The staging name is unregistered
+        // either way, so a persistent orphan remains visible to the user.
+        self.finalized = result.is_ok();
+        result
+    }
+
+    fn ensure_writable(&self) -> Result<(), WorkspaceError> {
+        if self.finalized {
+            return Err(WorkspaceError::Conflict);
+        }
+        self.workspace.ensure_root_valid()
+    }
+
+    fn ensure_no_active_file(&self) -> Result<(), WorkspaceError> {
+        if self.current_file.is_some() {
+            Err(WorkspaceError::Conflict)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn directory_root(&self) -> Result<&File, WorkspaceError> {
+        if self.kind != CreateEntryKind::Directory {
+            return Err(WorkspaceError::InvalidPath);
+        }
+        Ok(&self.staging_handle)
+    }
+
+    fn ensure_entry_capacity(&self) -> Result<(), WorkspaceError> {
+        if self.entry_count >= MAX_IMPORT_ENTRIES {
+            return Err(WorkspaceError::TooManyEntries);
+        }
+        Ok(())
+    }
+
+    fn verify_staging_identity(&self) -> Result<(), WorkspaceError> {
+        let metadata =
+            validated_entry_metadata(self.workspace.root_handle(), Path::new(&self.staging_name))?;
+        let current = if metadata.is_dir() {
+            open_directory_nofollow(self.workspace.root_handle(), Path::new(&self.staging_name))?
+        } else if metadata.is_file() {
+            open_regular_file_nofollow(self.workspace.root_handle(), Path::new(&self.staging_name))?
+        } else {
+            return Err(WorkspaceError::OutsideWorkspace);
+        };
+        if same_file_identity(&self.staging_handle, &current)? {
+            Ok(())
+        } else {
+            Err(WorkspaceError::OutsideWorkspace)
+        }
+    }
+
+    fn cleanup_staging(&mut self) -> Result<(), WorkspaceError> {
+        self.current_file = None;
+        self.workspace.ensure_root_valid()?;
+        self.verify_staging_identity()?;
+        let metadata =
+            validated_entry_metadata(self.workspace.root_handle(), Path::new(&self.staging_name))?;
+        if metadata.is_dir() {
+            let target = open_directory_nofollow(
+                self.workspace.root_handle(),
+                Path::new(&self.staging_name),
+            )?;
+            let mut inspected = 0;
+            inspect_delete_tree(&target, 0, &mut inspected)?;
+            let mut deleted = 0;
+            delete_directory_contents(&target, 0, &mut deleted)?;
+            drop(target);
+            remove_dir(self.workspace.root_handle(), Path::new(&self.staging_name))
+                .map_err(|error| map_mutation_io(&error))?;
+        } else {
+            remove_file(self.workspace.root_handle(), Path::new(&self.staging_name))
+                .map_err(|error| map_mutation_io(&error))?;
+        }
+        self.workspace.ensure_root_valid()
+    }
+
+    fn unregister_staging(&mut self) {
+        if self.staging_registered {
+            self.workspace
+                .unregister_import_staging_name(&self.staging_name);
+            self.staging_registered = false;
+        }
+    }
+}
+
+impl Drop for ImportSession {
+    fn drop(&mut self) {
+        if !self.finalized {
+            let _ = self.cleanup_staging();
+        }
+        self.unregister_staging();
+    }
+}
+
 impl From<CreateEntryKind> for EntryKind {
     fn from(value: CreateEntryKind) -> Self {
         match value {
@@ -314,6 +768,115 @@ fn checked_join(parent: &Path, leaf: &str) -> Result<PathBuf, WorkspaceError> {
     let joined = parent.join(leaf);
     let normalized = joined.to_string_lossy().replace('\\', "/");
     validate_relative(&normalized)
+}
+
+fn validate_import_relative(relative_path: &str) -> Result<PathBuf, WorkspaceError> {
+    let clean = validate_non_root(relative_path)?;
+    if clean.components().count().saturating_add(1) > MAX_IMPORT_DEPTH {
+        return Err(WorkspaceError::TooManyEntries);
+    }
+    Ok(clean)
+}
+
+fn validate_import_file_size(
+    size_bytes: u64,
+    current_total_bytes: u64,
+) -> Result<(), WorkspaceError> {
+    if size_bytes > MAX_IMPORT_FILE_BYTES
+        || current_total_bytes
+            .checked_add(size_bytes)
+            .is_none_or(|total| total > MAX_IMPORT_TOTAL_BYTES)
+    {
+        return Err(WorkspaceError::ContentTooLarge);
+    }
+    Ok(())
+}
+
+fn create_import_file(parent: &File, name: &Path) -> Result<File, WorkspaceError> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .follow(FollowSymlinks::No);
+    #[cfg(windows)]
+    {
+        use cap_primitives::fs::OpenOptionsExt as _;
+
+        const FILE_SHARE_READ: u32 = 0x1;
+        const FILE_SHARE_WRITE: u32 = 0x2;
+        const FILE_SHARE_DELETE: u32 = 0x4;
+        options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    }
+    let created = open(parent, name, &options).map_err(|error| map_mutation_io(&error))?;
+    let metadata = created.metadata().map_err(|error| map_io(&error))?;
+    if is_link_or_reparse(&metadata) || !metadata.is_file() {
+        return Err(WorkspaceError::OutsideWorkspace);
+    }
+    Ok(created)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn inspect_import_tree(
+    directory: &File,
+    relative_parent: &Path,
+    depth: usize,
+    observed_entries: &mut usize,
+    observed_bytes: &mut u64,
+    expected_files: &HashMap<PathBuf, u64>,
+    expected_directories: &HashSet<PathBuf>,
+    observed_files: &mut HashSet<PathBuf>,
+    observed_directories: &mut HashSet<PathBuf>,
+) -> Result<(), WorkspaceError> {
+    for item in read_base_dir(directory).map_err(|error| map_io(&error))? {
+        let item = item.map_err(|error| map_io(&error))?;
+        *observed_entries = observed_entries.saturating_add(1);
+        if *observed_entries > MAX_IMPORT_ENTRIES {
+            return Err(WorkspaceError::TooManyEntries);
+        }
+        let name = item.file_name();
+        let metadata = stat(directory, Path::new(&name), FollowSymlinks::No)
+            .map_err(|error| map_mutation_io(&error))?;
+        if is_capability_link_or_reparse(&metadata) {
+            return Err(WorkspaceError::OutsideWorkspace);
+        }
+        let relative = relative_parent.join(&name);
+        if metadata.is_dir() {
+            if depth >= MAX_IMPORT_DEPTH || !expected_directories.contains(&relative) {
+                return Err(WorkspaceError::Conflict);
+            }
+            observed_directories.insert(relative.clone());
+            let child = open_directory_nofollow(directory, Path::new(&name))?;
+            inspect_import_tree(
+                &child,
+                &relative,
+                depth + 1,
+                observed_entries,
+                observed_bytes,
+                expected_files,
+                expected_directories,
+                observed_files,
+                observed_directories,
+            )?;
+        } else if metadata.is_file() {
+            let expected_size = expected_files
+                .get(&relative)
+                .ok_or(WorkspaceError::Conflict)?;
+            if metadata.len() != *expected_size {
+                return Err(WorkspaceError::Conflict);
+            }
+            *observed_bytes = observed_bytes
+                .checked_add(metadata.len())
+                .ok_or(WorkspaceError::ContentTooLarge)?;
+            if *observed_bytes > MAX_IMPORT_TOTAL_BYTES {
+                return Err(WorkspaceError::ContentTooLarge);
+            }
+            observed_files.insert(relative);
+        } else {
+            return Err(WorkspaceError::OutsideWorkspace);
+        }
+    }
+    Ok(())
 }
 
 fn validated_entry_metadata(
@@ -722,6 +1285,384 @@ mod tests {
         assert_eq!(file.kind, EntryKind::File);
         assert_eq!(file.relative_path, "src/main.rs");
         assert!(directory.path().join("src/main.rs").is_file());
+    }
+
+    #[test]
+    fn imports_files_and_nested_directories_with_exact_content() {
+        let (directory, workspace) = fixture();
+        fs::create_dir(directory.path().join("destination")).expect("destination");
+
+        let mut folder = workspace
+            .begin_import(
+                "destination",
+                "dropped",
+                CreateEntryKind::Directory,
+                None,
+                "nested-test",
+            )
+            .expect("begin folder import");
+        folder
+            .create_directory("empty")
+            .expect("create empty directory");
+        folder
+            .create_directory("nested")
+            .expect("create nested directory");
+        folder
+            .begin_file("nested/value.bin", 6)
+            .expect("begin nested file");
+        assert_eq!(folder.append_chunk(0, b"abc").expect("first chunk"), 3);
+        assert_eq!(folder.append_chunk(3, b"def").expect("second chunk"), 6);
+        folder.finish_file().expect("finish nested file");
+        folder.begin_file("empty.txt", 0).expect("begin empty file");
+        folder.finish_file().expect("finish empty file");
+        let entry = folder.commit().expect("commit folder");
+        assert!(workspace.active_import_staging_names().is_empty());
+
+        assert_eq!(entry.relative_path, "destination/dropped");
+        assert_eq!(entry.kind, EntryKind::Directory);
+        assert!(directory.path().join("destination/dropped/empty").is_dir());
+        assert_eq!(
+            fs::read(
+                directory
+                    .path()
+                    .join("destination/dropped/nested/value.bin")
+            )
+            .expect("nested bytes"),
+            b"abcdef"
+        );
+        assert_eq!(
+            fs::read(directory.path().join("destination/dropped/empty.txt")).expect("empty bytes"),
+            b""
+        );
+
+        let mut file = workspace
+            .begin_import(
+                "",
+                "single.dat",
+                CreateEntryKind::File,
+                Some(4),
+                "file-test",
+            )
+            .expect("begin file import");
+        file.append_chunk(0, b"data").expect("file chunk");
+        file.finish_file().expect("finish file");
+        let entry = file.commit().expect("commit file");
+        assert_eq!(entry.relative_path, "single.dat");
+        assert_eq!(
+            fs::read(directory.path().join("single.dat")).expect("single bytes"),
+            b"data"
+        );
+    }
+
+    #[test]
+    fn import_rejects_collisions_invalid_shapes_and_inexact_streams() {
+        let (directory, workspace) = fixture();
+        fs::write(directory.path().join("occupied.txt"), "keep").expect("occupied");
+        assert_eq!(
+            workspace
+                .begin_import(
+                    "",
+                    "occupied.txt",
+                    CreateEntryKind::File,
+                    Some(1),
+                    "collision-test",
+                )
+                .err()
+                .expect("collision")
+                .code(),
+            crate::ErrorCode::Conflict
+        );
+        assert_eq!(
+            fs::read_to_string(directory.path().join("occupied.txt")).expect("preserved"),
+            "keep"
+        );
+        let prefix_named = workspace
+            .begin_import(
+                "",
+                ".__code_codex_import_visible",
+                CreateEntryKind::Directory,
+                None,
+                "prefix-name-test",
+            )
+            .expect("begin prefix-like final name");
+        let prefix_named_entry = prefix_named.commit().expect("commit prefix-like name");
+        assert_eq!(
+            prefix_named_entry.relative_path,
+            ".__code_codex_import_visible"
+        );
+        assert!(
+            directory
+                .path()
+                .join(".__code_codex_import_visible")
+                .is_dir()
+        );
+        assert_eq!(
+            workspace
+                .begin_import(
+                    "",
+                    "too-large.bin",
+                    CreateEntryKind::File,
+                    Some(MAX_IMPORT_FILE_BYTES + 1),
+                    "large-test",
+                )
+                .err()
+                .expect("oversized file")
+                .code(),
+            crate::ErrorCode::ContentTooLarge
+        );
+
+        let mut file = workspace
+            .begin_import(
+                "",
+                "exact.bin",
+                CreateEntryKind::File,
+                Some(4),
+                "exact-test",
+            )
+            .expect("begin exact file");
+        assert_eq!(
+            file.append_chunk(1, b"x").expect_err("wrong offset").code(),
+            crate::ErrorCode::Conflict
+        );
+        file.append_chunk(0, b"ab").expect("partial chunk");
+        assert_eq!(
+            file.finish_file().expect_err("premature finish").code(),
+            crate::ErrorCode::Conflict
+        );
+        file.append_chunk(2, b"cd").expect("remaining chunk");
+        assert_eq!(
+            file.append_chunk(4, b"x")
+                .expect_err("declared overflow")
+                .code(),
+            crate::ErrorCode::ContentTooLarge
+        );
+        file.finish_file().expect("exact finish");
+        file.commit().expect("exact commit");
+    }
+
+    #[test]
+    fn import_abort_and_drop_remove_native_staging_entries() {
+        let (directory, workspace) = fixture();
+        let mut aborted = workspace
+            .begin_import(
+                "",
+                "aborted.bin",
+                CreateEntryKind::File,
+                Some(3),
+                "abort-test",
+            )
+            .expect("begin abort import");
+        assert_eq!(workspace.active_import_staging_names().len(), 1);
+        aborted.append_chunk(0, b"a").expect("partial import");
+        aborted.abort().expect("abort");
+        assert!(workspace.active_import_staging_names().is_empty());
+
+        let dropped = workspace
+            .begin_import("", "dropped", CreateEntryKind::Directory, None, "drop-test")
+            .expect("begin dropped import");
+        assert_eq!(workspace.active_import_staging_names().len(), 1);
+        drop(dropped);
+        assert!(workspace.active_import_staging_names().is_empty());
+
+        let names: Vec<_> = fs::read_dir(directory.path())
+            .expect("root")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .all(|name| { !name.to_string_lossy().starts_with(IMPORT_STAGING_PREFIX) })
+        );
+        assert!(!directory.path().join("aborted.bin").exists());
+        assert!(!directory.path().join("dropped").exists());
+    }
+
+    #[test]
+    fn failed_cleanup_unregisters_and_lists_the_orphan() {
+        let (directory, workspace) = fixture();
+        let mut session = workspace
+            .begin_import(
+                "",
+                "final",
+                CreateEntryKind::Directory,
+                None,
+                "orphan-visible",
+            )
+            .expect("begin import");
+        let staging_name = workspace
+            .active_import_staging_names()
+            .into_iter()
+            .next()
+            .expect("registered staging name");
+
+        fs::create_dir(directory.path().join("different-entry")).expect("different entry");
+        session.staging_handle =
+            open_directory_nofollow(workspace.root_handle(), Path::new("different-entry"))
+                .expect("different entry handle");
+        assert_eq!(
+            session.abort().expect_err("identity mismatch").code(),
+            crate::ErrorCode::OutsideWorkspace
+        );
+        assert!(workspace.active_import_staging_names().is_empty());
+
+        let page = workspace
+            .list(crate::ListOptions {
+                show_hidden: true,
+                show_ignored: true,
+                limit: 500,
+                ..crate::ListOptions::default()
+            })
+            .expect("list orphaned staging entry");
+        assert!(page.entries.iter().any(|entry| entry.name == staging_name));
+    }
+
+    #[test]
+    fn import_commit_rejects_a_replaced_destination_directory() {
+        let (directory, workspace) = fixture();
+        fs::create_dir(directory.path().join("destination")).expect("destination");
+        let session = workspace
+            .begin_import(
+                "destination",
+                "dropped",
+                CreateEntryKind::Directory,
+                None,
+                "destination-test",
+            )
+            .expect("begin import");
+        fs::rename(
+            directory.path().join("destination"),
+            directory.path().join("moved-destination"),
+        )
+        .expect("move destination");
+        fs::create_dir(directory.path().join("destination")).expect("replacement destination");
+
+        assert_eq!(
+            session.commit().expect_err("replaced destination").code(),
+            crate::ErrorCode::OutsideWorkspace
+        );
+        assert!(!directory.path().join("destination/dropped").exists());
+        assert!(!directory.path().join("moved-destination/dropped").exists());
+    }
+
+    #[test]
+    fn import_enforces_depth_entry_and_aggregate_budgets() {
+        let (_directory, workspace) = fixture();
+        let mut depth = workspace
+            .begin_import(
+                "",
+                "depth",
+                CreateEntryKind::Directory,
+                None,
+                "depth-budget",
+            )
+            .expect("begin depth import");
+        let mut relative = PathBuf::new();
+        for index in 0..(MAX_IMPORT_DEPTH - 1) {
+            relative.push(format!("d{index}"));
+            depth
+                .create_directory(&relative.to_string_lossy())
+                .expect("allowed import depth");
+        }
+        relative.push("too-deep");
+        assert_eq!(
+            depth
+                .create_directory(&relative.to_string_lossy())
+                .expect_err("depth budget")
+                .code(),
+            crate::ErrorCode::TooManyEntries
+        );
+        depth.abort().expect("abort depth import");
+
+        let mut entries = workspace
+            .begin_import(
+                "",
+                "entries",
+                CreateEntryKind::Directory,
+                None,
+                "entry-budget",
+            )
+            .expect("begin entry import");
+        for index in 1..MAX_IMPORT_ENTRIES {
+            entries
+                .create_directory(&format!("d{index}"))
+                .expect("allowed entry");
+        }
+        assert_eq!(
+            entries
+                .create_directory("one-too-many")
+                .expect_err("entry budget")
+                .code(),
+            crate::ErrorCode::TooManyEntries
+        );
+        entries.abort().expect("abort entry import");
+
+        let mut aggregate = workspace
+            .begin_import(
+                "",
+                "aggregate",
+                CreateEntryKind::Directory,
+                None,
+                "aggregate-budget",
+            )
+            .expect("begin aggregate import");
+        for name in ["first.bin", "second.bin"] {
+            aggregate
+                .begin_file(name, MAX_IMPORT_FILE_BYTES)
+                .expect("begin sparse maximum file");
+            let current = aggregate.current_file.as_mut().expect("active sparse file");
+            current
+                .file
+                .set_len(MAX_IMPORT_FILE_BYTES)
+                .expect("sparse file length");
+            current.received_bytes = MAX_IMPORT_FILE_BYTES;
+            aggregate.finish_file().expect("finish sparse file");
+        }
+        assert_eq!(aggregate.total_size_bytes, MAX_IMPORT_TOTAL_BYTES);
+        assert_eq!(
+            aggregate
+                .begin_file("overflow.bin", 1)
+                .expect_err("aggregate budget")
+                .code(),
+            crate::ErrorCode::ContentTooLarge
+        );
+        aggregate.abort().expect("abort aggregate import");
+    }
+
+    #[test]
+    fn import_rejects_traversal_but_preserves_unicode_and_hidden_names() {
+        let (directory, workspace) = fixture();
+        let mut session = workspace
+            .begin_import(
+                "",
+                ".导入",
+                CreateEntryKind::Directory,
+                None,
+                "unicode-hidden",
+            )
+            .expect("begin hidden Unicode import");
+        for invalid in ["../escape", "nested/../../escape", "C:/Windows"] {
+            assert_eq!(
+                session
+                    .create_directory(invalid)
+                    .expect_err("traversal")
+                    .code(),
+                crate::ErrorCode::InvalidPath
+            );
+        }
+        session
+            .create_directory("子目录")
+            .expect("Unicode directory");
+        session
+            .begin_file("子目录/.秘密.txt", 3)
+            .expect("hidden Unicode file");
+        session.append_chunk(0, b"yes").expect("Unicode file bytes");
+        session.finish_file().expect("finish Unicode file");
+        session.commit().expect("commit Unicode import");
+        assert_eq!(
+            fs::read_to_string(directory.path().join(".导入/子目录/.秘密.txt"))
+                .expect("read hidden Unicode file"),
+            "yes"
+        );
     }
 
     #[test]

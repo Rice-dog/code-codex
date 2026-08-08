@@ -23,15 +23,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.1.63-x64-setup.exe`
-- Alternative: `CodeCodex-0.1.63-x64.msi`
-- Portable package: `CodeCodex-0.1.63-x64.zip`
+- Recommended: `CodeCodex-0.1.64-x64-setup.exe`
+- Alternative: `CodeCodex-0.1.64-x64.msi`
+- Portable package: `CodeCodex-0.1.64-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.1.63-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.1.64-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -71,7 +71,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.63
+./scripts/package.ps1 -Version 0.1.64
 ```
 
 The generated packages are written to `releases/`.
@@ -93,6 +93,7 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 ## Features
 
 - File tree in the Codex sidebar for local workspaces.
+- Drag files and folders from Windows File Explorer into the workspace root or a file-tree folder.
 - Main-window file tabs beside the conversation.
 - Text preview and editing, including multilingual Markdown content.
 - Independently enabled Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews from Preview Market.

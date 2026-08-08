@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -175,6 +175,7 @@ impl WorkspaceWatcher {
         let visibility_bits = Arc::new(AtomicU8::new(visibility.bits()));
         let callback_visibility = visibility_bits.clone();
         let callback_root = workspace.root_path().to_path_buf();
+        let callback_workspace = workspace.clone();
         let visibility = WatchVisibilityHandle {
             bits: visibility_bits,
             raw_sender: raw_sender.clone(),
@@ -184,10 +185,11 @@ impl WorkspaceWatcher {
             // A full channel means an event storm. Sending a rescan marker is
             // preferable to blocking notify's platform callback thread.
             let input = match result {
-                Ok(event) => match filter_event(
+                Ok(event) => match filter_event_with_active_staging(
                     &callback_root,
                     &event,
                     WatchVisibility::from_bits(callback_visibility.load(Ordering::Acquire)),
+                    &callback_workspace.active_import_staging_names(),
                 ) {
                     FilteredEvent::Drop => return,
                     FilteredEvent::Resync => RawWatchInput::Resync,
@@ -314,7 +316,17 @@ enum FilteredEvent {
     Event(Event),
 }
 
+#[cfg(test)]
 fn filter_event(root: &Path, event: &Event, visibility: WatchVisibility) -> FilteredEvent {
+    filter_event_with_active_staging(root, event, visibility, &HashSet::new())
+}
+
+fn filter_event_with_active_staging(
+    root: &Path,
+    event: &Event,
+    visibility: WatchVisibility,
+    active_staging_names: &HashSet<String>,
+) -> FilteredEvent {
     if event.paths.len() > MAX_CHANGES_PER_BATCH || matches!(event.kind, EventKind::Other) {
         return FilteredEvent::Resync;
     }
@@ -340,11 +352,11 @@ fn filter_event(root: &Path, event: &Event, visibility: WatchVisibility) -> Filt
         let old_visible = relative_paths
             .first()
             .and_then(Option::as_deref)
-            .is_some_and(|path| path_is_visible(path, visibility));
+            .is_some_and(|path| path_is_visible(path, visibility, active_staging_names));
         let new_visible = relative_paths
             .get(1)
             .and_then(Option::as_deref)
-            .is_some_and(|path| path_is_visible(path, visibility));
+            .is_some_and(|path| path_is_visible(path, visibility, active_staging_names));
         let mut filtered = event.clone();
         match (old_visible, new_visible) {
             (true, true) => {
@@ -371,7 +383,9 @@ fn filter_event(root: &Path, event: &Event, visibility: WatchVisibility) -> Filt
         .zip(relative_paths)
         .filter_map(|(path, relative)| {
             relative
-                .is_some_and(|relative| path_is_visible(&relative, visibility))
+                .is_some_and(|relative| {
+                    path_is_visible(&relative, visibility, active_staging_names)
+                })
                 .then(|| path.clone())
         })
         .collect();
@@ -384,11 +398,19 @@ fn filter_event(root: &Path, event: &Event, visibility: WatchVisibility) -> Filt
     }
 }
 
-fn path_is_visible(relative_path: &str, visibility: WatchVisibility) -> bool {
-    (visibility.show_hidden
-        || !relative_path
-            .split('/')
-            .any(|component| component.starts_with('.')))
+fn path_is_visible(
+    relative_path: &str,
+    visibility: WatchVisibility,
+    active_staging_names: &HashSet<String>,
+) -> bool {
+    !relative_path
+        .split('/')
+        .next()
+        .is_some_and(|component| active_staging_names.contains(component))
+        && (visibility.show_hidden
+            || !relative_path
+                .split('/')
+                .any(|component| component.starts_with('.')))
         && (visibility.show_ignored || !is_default_ignored_path(relative_path))
 }
 
@@ -629,6 +651,55 @@ mod tests {
             normalize_event(directory.path(), &visible)[0].kind,
             ChangeKind::Renamed
         );
+    }
+
+    #[test]
+    fn watcher_hides_only_registered_root_import_staging() {
+        let directory = TempDir::new().expect("temp dir");
+        let active_name = format!("{}active", crate::mutation::IMPORT_STAGING_PREFIX);
+        let event = Event::new(EventKind::Create(CreateKind::File))
+            .add_path(directory.path().join(&active_name));
+        let active = HashSet::from([active_name.clone()]);
+        assert!(matches!(
+            filter_event_with_active_staging(
+                directory.path(),
+                &event,
+                WatchVisibility {
+                    show_hidden: true,
+                    show_ignored: true,
+                },
+                &active,
+            ),
+            FilteredEvent::Drop
+        ));
+
+        assert!(matches!(
+            filter_event_with_active_staging(
+                directory.path(),
+                &event,
+                WatchVisibility {
+                    show_hidden: true,
+                    show_ignored: true,
+                },
+                &HashSet::new(),
+            ),
+            FilteredEvent::Event(_)
+        ));
+
+        let nested = Event::new(EventKind::Create(CreateKind::File))
+            .add_path(directory.path().join("container").join(&active_name));
+        assert!(matches!(
+            filter_event_with_active_staging(
+                directory.path(),
+                &nested,
+                WatchVisibility {
+                    show_hidden: true,
+                    show_ignored: true,
+                },
+                &active,
+            ),
+            FilteredEvent::Event(_)
+        ));
     }
 
     #[test]

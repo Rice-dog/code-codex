@@ -22,7 +22,10 @@ mod watcher;
 
 pub use error::{ErrorCode, WorkspaceError};
 pub use listing::{EntryKind, ListOptions, ListPage, TreeEntry, Workspace};
-pub use mutation::CreateEntryKind;
+pub use mutation::{
+    CreateEntryKind, ImportSession, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DEPTH, MAX_IMPORT_ENTRIES,
+    MAX_IMPORT_FILE_BYTES, MAX_IMPORT_TOTAL_BYTES,
+};
 pub use preview::{
     MAX_AUDIO_PREVIEW_BYTES, MAX_IMAGE_PREVIEW_BYTES, MAX_MEDIA_CHUNK_BYTES,
     MAX_MODEL_PREVIEW_BYTES, MAX_MODEL_RESOURCE_AGGREGATE_BYTES, MAX_MODEL_RESOURCE_BYTES,

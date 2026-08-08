@@ -458,6 +458,9 @@ export const styles = String.raw`
   .tree-shell[data-drop-target="true"] {
     box-shadow: inset 0 0 0 2px var(--cle-focus);
   }
+  .state[data-drop-target="true"] {
+    box-shadow: inset 0 0 0 2px var(--cle-focus);
+  }
   .tree-shell:focus-visible[data-filter-empty="true"] {
     outline: 2px solid var(--cle-focus);
     outline-offset: -2px;
