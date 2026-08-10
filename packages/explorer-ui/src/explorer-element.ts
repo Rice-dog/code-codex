@@ -25,6 +25,7 @@ import {
   NOTEBOOK_PREVIEWER_ID,
   OFFICE_PREVIEWER_ID,
   PDF_PREVIEWER_ID,
+  POWERPOINT_FULL_FIDELITY_NOTICE,
   registerMainPreviewElement,
   VIDEO_PREVIEWER_ID,
   inspectModelPreviewSource,
@@ -46,6 +47,8 @@ import type {
   ListResult,
   TreeNodeInput,
 } from "./types";
+
+declare const __CODE_CODEX_VERSION__: string;
 
 const OVERSCAN = 8;
 const PAGE_SIZE = 500;
@@ -295,6 +298,7 @@ interface NormalizedMediaPreview {
   mimeType: string;
   sizeBytes: number;
   bytes: Uint8Array;
+  previewNotice?: typeof POWERPOINT_FULL_FIDELITY_NOTICE;
   modelVersion?: string;
   modelResources?: readonly MainPreviewModelResource[];
 }
@@ -308,6 +312,7 @@ interface NormalizedMediaInfo {
   readonly chunkSize: number;
   readonly chunkCount: number;
   readonly version: string;
+  readonly previewNotice?: typeof POWERPOINT_FULL_FIDELITY_NOTICE;
 }
 
 interface NormalizedModelResourceInfo {
@@ -3910,7 +3915,13 @@ export class CodeCodexElement extends HTMLElement {
             modelResources,
           };
         }
-        return { kind: info.kind, mimeType: info.mimeType, sizeBytes: info.sizeBytes, bytes };
+        return {
+          kind: info.kind,
+          mimeType: info.mimeType,
+          sizeBytes: info.sizeBytes,
+          bytes,
+          ...(info.previewNotice === undefined ? {} : { previewNotice: info.previewNotice }),
+        };
       } catch (error) {
         if (attempt === 0 && errorCode(error) === "CONFLICT" && canContinue()) continue;
         throw error;
@@ -4007,6 +4018,7 @@ export class CodeCodexElement extends HTMLElement {
         mimeType: preview.mimeType,
         sizeBytes: preview.sizeBytes,
         bytes: preview.bytes,
+        ...(preview.previewNotice === undefined ? {} : { previewNotice: preview.previewNotice }),
       };
     }
     const editability = {
@@ -4707,7 +4719,9 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderStatus(): void {
-    this.#statusCode.textContent = this.#state === "ready" || this.#state === "empty" ? `${this.#rows.filter((row) => row.kind === "node").length} VIS` : this.#state.toUpperCase().slice(0, 8);
+    this.#statusCode.textContent = this.#state === "ready" || this.#state === "empty" || this.#state === "no-project"
+      ? `v${__CODE_CODEX_VERSION__}`
+      : this.#state.toUpperCase().slice(0, 8);
   }
 
   #announce(message: string): void {
@@ -5202,6 +5216,10 @@ function normalizeMediaInfo(raw: unknown, route: MediaPreviewRoute): NormalizedM
     object.kind !== route.kind ||
     typeof object.mimeType !== "string" ||
     !route.mimeTypes.includes(object.mimeType) ||
+    (object.previewNotice !== undefined &&
+      (object.previewNotice !== POWERPOINT_FULL_FIDELITY_NOTICE ||
+        route.kind !== "office" ||
+        object.mimeType !== "application/vnd.ms-powerpoint")) ||
     !Number.isSafeInteger(object.sizeBytes) ||
     (object.sizeBytes as number) <= 0 ||
     (object.sizeBytes as number) > route.maxBytes ||
@@ -5228,6 +5246,9 @@ function normalizeMediaInfo(raw: unknown, route: MediaPreviewRoute): NormalizedM
     chunkSize,
     chunkCount,
     version: object.version,
+    ...(object.previewNotice === POWERPOINT_FULL_FIDELITY_NOTICE
+      ? { previewNotice: POWERPOINT_FULL_FIDELITY_NOTICE }
+      : {}),
   };
 }
 

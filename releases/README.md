@@ -5,6 +5,80 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.71
+
+- `CodeCodex-0.1.71-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.71-x64.msi`: MSI installer.
+- `CodeCodex-0.1.71-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Displays the Code-Codex version when no local project is selected.
+- Prompts for Microsoft PowerPoint only when legacy `.ppt` preview detects
+  that PowerPoint is unavailable and uses the built-in renderer.
+
+## v0.1.70
+
+- `CodeCodex-0.1.70-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.70-x64.msi`: MSI installer.
+- `CodeCodex-0.1.70-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Displays the active Code-Codex version in the file-tree footer.
+- Supports native legacy `.ppt` rendering through both 64-bit and 32-bit
+  PowerPoint automation registrations on x64 Windows.
+- Recovers from an unavailable running PowerPoint automation object without
+  modifying or closing the user's existing PowerPoint session.
+
+## v0.1.69
+
+- `CodeCodex-0.1.69-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.69-x64.msi`: MSI installer.
+- `CodeCodex-0.1.69-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Uses installed Microsoft PowerPoint for full-fidelity legacy `.ppt` preview
+  even when a PowerPoint session is already open.
+- Preserves borrowed PowerPoint sessions and falls back to the embedded
+  renderer when PowerPoint automation is unavailable or cannot render safely.
+
+## v0.1.68
+
+- `CodeCodex-0.1.68-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.68-x64.msi`: MSI installer.
+- `CodeCodex-0.1.68-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Keeps Direct Composition enabled for the Windows 10 transparent window so
+  VMware can use Chromium's safe hardware alpha surface.
+- Prevents Codex's backdrop updates from repainting the Windows 10 window
+  opaque while preserving the existing click-through safety checks.
+
+## v0.1.67
+
+- `CodeCodex-0.1.67-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.67-x64.msi`: MSI installer.
+- `CodeCodex-0.1.67-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Fixes the Windows 10 startup error by installing the transparent
+  `BrowserWindow` hook at Electron's first valid paused call frame.
+- Uses the Windows 10 per-pixel alpha path without enabling unsupported
+  Windows 11 system-backdrop materials.
+
+## v0.1.66
+
+- `CodeCodex-0.1.66-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.66-x64.msi`: MSI installer.
+- `CodeCodex-0.1.66-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Initializes the official Codex Electron window with a transparent backing
+  surface on Windows 10 before the window is shown.
+- Keeps the existing Windows 11 startup and compositor paths unchanged.
+
+## v0.1.65
+
+- `CodeCodex-0.1.65-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.65-x64.msi`: MSI installer.
+- `CodeCodex-0.1.65-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds the legacy full-client DWM glass path used by the later Windows 10 transparency fix.
+- Keeps the existing Windows 11 compositor path unchanged.
+
 ## v0.1.64
 
 - `CodeCodex-0.1.64-x64-setup.exe`: recommended installer.
@@ -307,5 +381,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.64
+./scripts/package.ps1 -Version 0.1.71
 ```

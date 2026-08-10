@@ -23,16 +23,22 @@ use discovery::{
     AppServerSourceKind, ChannelPreference, CodexInstallation, DiscoveryError, DiscoverySource,
     discover_app_server_source, discover_codex, is_supported_version, prepare_app_server_launch,
 };
+use futures_util::{SinkExt, StreamExt};
 use process_guard::{
     CodexProcessGuard, PortReservation, ProcessGuardError, is_executable_running,
     verify_listener_executable, verify_listener_owner, verify_process_identity,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
+use tokio::net::TcpStream;
 use tokio::process::Command;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_with_config};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
+use url::Url;
 use workspace_service::{SettingsStore, Workspace, WorkspaceError};
 
 #[derive(Debug, Parser)]
@@ -253,6 +259,16 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     let reservation = PortReservation::reserve()?;
     let port = reservation.port()?;
     let endpoint = CdpEndpoint::loopback(port);
+    let main_inspector_reservation = if needs_windows_10_surface_patch() {
+        Some(PortReservation::reserve()?)
+    } else {
+        None
+    };
+    let main_inspector_port = main_inspector_reservation
+        .as_ref()
+        .map(PortReservation::port)
+        .transpose()?;
+    let main_inspector_endpoint = main_inspector_port.map(CdpEndpoint::loopback);
     let (bridge, injection) = prepare_runtime(
         &args.common,
         Some(&installation),
@@ -262,8 +278,11 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     )
     .await?;
 
-    let launch_arguments = build_launch_arguments(port, &args.codex_args);
+    let launch_arguments = build_launch_arguments(port, main_inspector_port, &args.codex_args);
     reservation.release();
+    if let Some(reservation) = main_inspector_reservation {
+        reservation.release();
+    }
     let launched_after = SystemTime::now();
     let mut child = if installation.source == DiscoverySource::WindowsPackageManager {
         let package_full_name = installation
@@ -310,6 +329,11 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     tracing::info!(event = "codex_launched", channel = %installation.channel);
 
     let result = async {
+        if let Some(main_inspector_endpoint) = main_inspector_endpoint {
+            initialize_electron_main_process(main_inspector_endpoint, launched_pid, launched_after)
+                .await?;
+            tracing::info!(event = "electron_main_transparency_initialized");
+        }
         wait_for_endpoint(endpoint, Duration::from_secs(30)).await?;
         tokio::task::spawn_blocking(move || {
             verify_listener_owner(port, launched_pid, launched_after)
@@ -555,7 +579,10 @@ async fn wait_for_endpoint(endpoint: CdpEndpoint, timeout: Duration) -> Result<(
 fn validate_extra_arguments(arguments: &[String]) -> Result<(), AppError> {
     if arguments.iter().any(|argument| {
         let lower = argument.to_ascii_lowercase();
-        lower.starts_with("--remote-debugging") || lower.starts_with("--remote-allow-origins")
+        lower.starts_with("--remote-debugging")
+            || lower.starts_with("--remote-allow-origins")
+            || lower.starts_with("--inspect")
+            || lower.starts_with("--debug")
     }) {
         return Err(AppError::InvalidLaunchArgument);
     }
@@ -563,13 +590,432 @@ fn validate_extra_arguments(arguments: &[String]) -> Result<(), AppError> {
 }
 
 const DISABLE_DIRECT_COMPOSITION_ARGUMENT: &str = "--disable-direct-composition";
+const MAIN_INSPECTOR_MESSAGE_BYTES: usize = 256 * 1024;
+const MAIN_INSPECTOR_MESSAGE_LIMIT: usize = 4_096;
+const MAIN_INSPECTOR_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+const MAIN_INSPECTOR_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const MAIN_INSPECTOR_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+const ELECTRON_MAIN_TRANSPARENCY_PATCH: &str = r#"(() => {
+    const localRequire = typeof require === 'function'
+        ? require
+        : typeof process.mainModule?.require === 'function'
+            ? process.mainModule.require.bind(process.mainModule)
+            : process.getBuiltinModule('node:module').createRequire(process.execPath);
+    const inspector = localRequire('node:inspector');
+    const Module = localRequire('node:module');
+    const hookMarker = Symbol.for('code-codex.win10-transparent-surface.v1');
+    const hookStateMarker = Symbol.for('code-codex.win10-transparent-surface-state.v1');
+    const transparentColor = '#00000000';
+    let surfaceHookEnabled = false;
+    let hookState = Module._load?.[hookStateMarker];
+    try {
+        const electron = localRequire('electron');
+        const OriginalBrowserWindow = electron.BrowserWindow;
+        if (Module._load?.[hookMarker] === true) {
+            surfaceHookEnabled = true;
+        } else if (typeof OriginalBrowserWindow === 'function') {
+            hookState = { constructorHookCount: 0 };
+            const TransparentBrowserWindow = new Proxy(OriginalBrowserWindow, {
+                construct(target, argumentsList) {
+                    const options = argumentsList[0];
+                    const transparentOptions = options && typeof options === 'object'
+                        ? {
+                            ...options,
+                            transparent: true,
+                            backgroundColor: transparentColor,
+                            backgroundMaterial: undefined
+                        }
+                        : options;
+                    const window = Reflect.construct(
+                        target,
+                        [transparentOptions, ...argumentsList.slice(1)],
+                        target
+                    );
+                    const originalSetBackgroundColor = window.setBackgroundColor;
+                    if (typeof originalSetBackgroundColor !== 'function') {
+                        throw new TypeError('BrowserWindow.setBackgroundColor is unavailable');
+                    }
+                    Object.defineProperties(window, {
+                        setBackgroundColor: {
+                            configurable: false,
+                            writable: false,
+                            value() {
+                                return Reflect.apply(originalSetBackgroundColor, window, [transparentColor]);
+                            }
+                        },
+                        setBackgroundMaterial: {
+                            configurable: false,
+                            writable: false,
+                            value() {
+                                return Reflect.apply(originalSetBackgroundColor, window, [transparentColor]);
+                            }
+                        }
+                    });
+                    Reflect.apply(originalSetBackgroundColor, window, [transparentColor]);
+                    hookState.constructorHookCount += 1;
+                    return window;
+                }
+            });
+            const electronProxy = new Proxy(electron, {
+                get(target, property) {
+                    if (property === 'BrowserWindow') return TransparentBrowserWindow;
+                    return Reflect.get(target, property, target);
+                }
+            });
+            const originalLoad = Module._load;
+            function patchedLoad(request, parent, isMain) {
+                const loaded = Reflect.apply(originalLoad, this, [request, parent, isMain]);
+                return request === 'electron' ? electronProxy : loaded;
+            }
+            Object.defineProperty(patchedLoad, hookMarker, { value: true });
+            Object.defineProperty(patchedLoad, hookStateMarker, { value: hookState });
+            Module._load = patchedLoad;
+            surfaceHookEnabled = Module._load?.[hookMarker] === true;
+        }
+        for (const argumentsList of [process.argv, process.execArgv]) {
+            for (let index = argumentsList.length - 1; index >= 0; index -= 1) {
+                if (argumentsList[index].toLowerCase().startsWith('--inspect-brk')) {
+                    argumentsList.splice(index, 1);
+                }
+            }
+        }
+        try { electron.app.commandLine.removeSwitch('inspect-brk'); } catch {}
+    } finally {
+        setTimeout(() => {
+            try { inspector.close(); } catch {}
+        }, 500);
+    }
+    return {
+        surfaceHookEnabled,
+        constructorHookCount: hookState?.constructorHookCount ?? 0
+    };
+})()"#;
 
-fn build_launch_arguments(port: u16, extra_arguments: &[String]) -> Vec<String> {
+type MainInspectorSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+struct MainInspectorSession {
+    socket: MainInspectorSocket,
+    pending_paused_event: Option<Value>,
+}
+
+impl MainInspectorSession {
+    fn new(socket: MainInspectorSocket) -> Self {
+        Self {
+            socket,
+            pending_paused_event: None,
+        }
+    }
+
+    async fn command(&mut self, id: u64, method: &str, params: Value) -> Result<Value, CdpError> {
+        let command = serde_json::to_string(&json!({
+            "id": id,
+            "method": method,
+            "params": params
+        }))
+        .map_err(|_| CdpError::Protocol)?;
+        self.socket
+            .send(Message::Text(command.into()))
+            .await
+            .map_err(|_| CdpError::WebSocket)?;
+
+        tokio::time::timeout(MAIN_INSPECTOR_COMMAND_TIMEOUT, async {
+            for _ in 0..MAIN_INSPECTOR_MESSAGE_LIMIT {
+                let message = receive_main_inspector_json(&mut self.socket).await?;
+                if message.get("id").and_then(Value::as_u64) == Some(id) {
+                    if message.get("error").is_some()
+                        || message
+                            .get("result")
+                            .and_then(|result| result.get("exceptionDetails"))
+                            .is_some()
+                    {
+                        return Err(CdpError::Protocol);
+                    }
+                    return message.get("result").cloned().ok_or(CdpError::Protocol);
+                }
+                if message.get("method").and_then(Value::as_str).is_some() {
+                    if is_debugger_paused_event(&message) {
+                        if self.pending_paused_event.replace(message).is_some() {
+                            return Err(CdpError::Protocol);
+                        }
+                    }
+                    continue;
+                }
+                return Err(CdpError::Protocol);
+            }
+            Err(CdpError::Protocol)
+        })
+        .await
+        .map_err(|_| CdpError::Protocol)?
+    }
+
+    async fn wait_for_paused_call_frame(&mut self) -> Result<String, CdpError> {
+        if let Some(event) = self.pending_paused_event.take() {
+            return paused_call_frame_id(&event);
+        }
+
+        tokio::time::timeout(MAIN_INSPECTOR_STARTUP_TIMEOUT, async {
+            for _ in 0..MAIN_INSPECTOR_MESSAGE_LIMIT {
+                let message = receive_main_inspector_json(&mut self.socket).await?;
+                if is_debugger_paused_event(&message) {
+                    return paused_call_frame_id(&message);
+                }
+                if message.get("method").and_then(Value::as_str).is_none() {
+                    return Err(CdpError::Protocol);
+                }
+            }
+            Err(CdpError::Protocol)
+        })
+        .await
+        .map_err(|_| CdpError::Protocol)?
+    }
+}
+
+#[cfg(windows)]
+fn needs_windows_10_surface_patch() -> bool {
+    use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
+    use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
+
+    let mut version = OSVERSIONINFOW {
+        dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
+        ..OSVERSIONINFOW::default()
+    };
+    // RtlGetVersion is unaffected by application-manifest compatibility
+    // declarations and is the authoritative source for the NT build number.
+    let status = unsafe { RtlGetVersion(&mut version) };
+    status >= 0
+        && nt_build_needs_windows_10_surface_patch(version.dwMajorVersion, version.dwBuildNumber)
+}
+
+#[cfg(not(windows))]
+const fn needs_windows_10_surface_patch() -> bool {
+    false
+}
+
+const fn nt_build_needs_windows_10_surface_patch(major: u32, build: u32) -> bool {
+    major == 10 && build < 22_000
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ElectronMainPatchResult {
+    surface_hook_enabled: bool,
+    constructor_hook_count: u64,
+}
+
+async fn initialize_electron_main_process(
+    endpoint: CdpEndpoint,
+    launched_pid: u32,
+    launched_after: SystemTime,
+) -> Result<(), AppError> {
+    wait_for_tcp_listener(endpoint, MAIN_INSPECTOR_STARTUP_TIMEOUT).await?;
+    verify_owned_listener(endpoint, launched_pid, launched_after).await?;
+
+    let target = wait_for_main_inspector_target(endpoint, MAIN_INSPECTOR_STARTUP_TIMEOUT).await?;
+    let websocket_url = validate_main_inspector_target(endpoint, &target)?;
+    let websocket_config = WebSocketConfig::default()
+        .max_message_size(Some(MAIN_INSPECTOR_MESSAGE_BYTES))
+        .max_frame_size(Some(MAIN_INSPECTOR_MESSAGE_BYTES));
+    let (mut socket, _) =
+        connect_async_with_config(websocket_url.as_str(), Some(websocket_config), false)
+            .await
+            .map_err(|_| CdpError::WebSocket)?;
+
+    // Pin the connected inspector to the launched official process immediately
+    // before evaluating the fixed, non-user-controlled initializer.
+    if let Err(error) = verify_owned_listener(endpoint, launched_pid, launched_after).await {
+        let _ = socket.close(None).await;
+        return Err(error);
+    }
+
+    // `--inspect-brk` begins in a pre-execution context where `process` and
+    // CommonJS `require` are unavailable. Advance to the first paused call
+    // frame, then install the hook before Codex's main module executes.
+    let mut session = MainInspectorSession::new(socket);
+    session.command(1, "Runtime.enable", json!({})).await?;
+    session.command(2, "Debugger.enable", json!({})).await?;
+    session
+        .command(3, "Runtime.runIfWaitingForDebugger", json!({}))
+        .await?;
+    let call_frame_id = session.wait_for_paused_call_frame().await?;
+
+    let evaluation = session
+        .command(
+            4,
+            "Debugger.evaluateOnCallFrame",
+            json!({
+                "callFrameId": call_frame_id,
+                "expression": ELECTRON_MAIN_TRANSPARENCY_PATCH,
+                "returnByValue": true,
+                "silent": false
+            }),
+        )
+        .await;
+    let resume = session.command(5, "Debugger.resume", json!({})).await;
+    let _ = session.socket.send(Message::Close(None)).await;
+    drop(session);
+
+    let evaluation = evaluation?;
+    resume?;
+    let patch: ElectronMainPatchResult = serde_json::from_value(
+        evaluation
+            .pointer("/result/value")
+            .cloned()
+            .ok_or(CdpError::Protocol)?,
+    )
+    .map_err(|_| CdpError::Protocol)?;
+    if !patch.surface_hook_enabled {
+        return Err(CdpError::Protocol.into());
+    }
+    tracing::debug!(
+        event = "electron_main_transparency_patch_applied",
+        constructor_hook_count = patch.constructor_hook_count
+    );
+    wait_for_tcp_listener_closed(endpoint, MAIN_INSPECTOR_SHUTDOWN_TIMEOUT).await?;
+    Ok(())
+}
+
+async fn receive_main_inspector_json(socket: &mut MainInspectorSocket) -> Result<Value, CdpError> {
+    loop {
+        match socket.next().await {
+            Some(Ok(Message::Text(text))) => {
+                let message: Value =
+                    serde_json::from_str(text.as_ref()).map_err(|_| CdpError::Protocol)?;
+                if !message.is_object() {
+                    return Err(CdpError::Protocol);
+                }
+                return Ok(message);
+            }
+            Some(Ok(Message::Ping(payload))) => socket
+                .send(Message::Pong(payload))
+                .await
+                .map_err(|_| CdpError::WebSocket)?,
+            Some(Ok(Message::Pong(_))) => {}
+            Some(Ok(Message::Close(_))) | None => return Err(CdpError::WebSocket),
+            Some(Ok(_)) => return Err(CdpError::Protocol),
+            Some(Err(_)) => return Err(CdpError::WebSocket),
+        }
+    }
+}
+
+fn is_debugger_paused_event(message: &Value) -> bool {
+    message.get("method").and_then(Value::as_str) == Some("Debugger.paused")
+}
+
+fn paused_call_frame_id(message: &Value) -> Result<String, CdpError> {
+    let call_frame_id = message
+        .pointer("/params/callFrames/0/callFrameId")
+        .and_then(Value::as_str)
+        .filter(|call_frame_id| !call_frame_id.is_empty() && call_frame_id.len() <= 1_024)
+        .ok_or(CdpError::Protocol)?;
+    Ok(call_frame_id.to_owned())
+}
+
+async fn verify_owned_listener(
+    endpoint: CdpEndpoint,
+    launched_pid: u32,
+    launched_after: SystemTime,
+) -> Result<(), AppError> {
+    let port = endpoint.port();
+    tokio::task::spawn_blocking(move || verify_listener_owner(port, launched_pid, launched_after))
+        .await
+        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+    Ok(())
+}
+
+async fn wait_for_tcp_listener(endpoint: CdpEndpoint, timeout: Duration) -> Result<(), CdpError> {
+    let started = Instant::now();
+    loop {
+        if TcpStream::connect(("127.0.0.1", endpoint.port()))
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+        if started.elapsed() >= timeout {
+            return Err(CdpError::EndpointUnavailable);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_for_tcp_listener_closed(
+    endpoint: CdpEndpoint,
+    timeout: Duration,
+) -> Result<(), CdpError> {
+    let started = Instant::now();
+    loop {
+        if TcpStream::connect(("127.0.0.1", endpoint.port()))
+            .await
+            .is_err()
+        {
+            return Ok(());
+        }
+        if started.elapsed() >= timeout {
+            return Err(CdpError::Protocol);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_for_main_inspector_target(
+    endpoint: CdpEndpoint,
+    timeout: Duration,
+) -> Result<cdp_client::CdpTarget, CdpError> {
+    let discovery = TargetDiscovery::new()?;
+    let started = Instant::now();
+    loop {
+        if let Ok(targets) = discovery.targets(endpoint).await {
+            if targets.len() == 1 {
+                return targets.into_iter().next().ok_or(CdpError::InvalidEndpoint);
+            }
+            if targets.len() > 1 {
+                return Err(CdpError::InvalidEndpoint);
+            }
+        }
+        if started.elapsed() >= timeout {
+            return Err(CdpError::EndpointUnavailable);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn validate_main_inspector_target(
+    endpoint: CdpEndpoint,
+    target: &cdp_client::CdpTarget,
+) -> Result<Url, CdpError> {
+    if target.target_type != "node" || target.id.is_empty() {
+        return Err(CdpError::InvalidEndpoint);
+    }
+    let url = Url::parse(&target.web_socket_debugger_url)
+        .map_err(|_| CdpError::InvalidWebSocketEndpoint)?;
+    let valid = url.scheme() == "ws"
+        && url.host_str() == Some("127.0.0.1")
+        && url.port_or_known_default() == Some(endpoint.port())
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.path().len() > 1;
+    if !valid {
+        return Err(CdpError::InvalidWebSocketEndpoint);
+    }
+    Ok(url)
+}
+
+fn build_launch_arguments(
+    port: u16,
+    main_inspector_port: Option<u16>,
+    extra_arguments: &[String],
+) -> Vec<String> {
     let mut arguments = vec![
         "--remote-debugging-address=127.0.0.1".to_owned(),
         format!("--remote-debugging-port={port}"),
-        DISABLE_DIRECT_COMPOSITION_ARGUMENT.to_owned(),
     ];
+    if let Some(main_inspector_port) = main_inspector_port {
+        arguments.push(format!("--inspect-brk=127.0.0.1:{main_inspector_port}"));
+    } else {
+        arguments.push(DISABLE_DIRECT_COMPOSITION_ARGUMENT.to_owned());
+    }
     arguments.extend(
         extra_arguments
             .iter()
@@ -688,21 +1134,50 @@ mod tests {
             validate_extra_arguments(&["--remote-debugging-address=0.0.0.0".to_owned()]).is_err()
         );
         assert!(validate_extra_arguments(&["--REMOTE-DEBUGGING-PORT=80".to_owned()]).is_err());
+        assert!(validate_extra_arguments(&["--inspect=0.0.0.0:9229".to_owned()]).is_err());
+        assert!(validate_extra_arguments(&["--INSPECT-BRK=5858".to_owned()]).is_err());
+        assert!(validate_extra_arguments(&["--debug-port=5858".to_owned()]).is_err());
     }
 
     #[test]
-    fn codex_launch_disables_direct_composition_once() {
-        let arguments = build_launch_arguments(
+    fn codex_launch_preserves_the_alpha_compositor_only_for_the_win10_surface_patch() {
+        let win10_arguments = build_launch_arguments(
             4321,
+            Some(4322),
             &[
                 "--disable-gpu".to_owned(),
                 "--DISABLE-DIRECT-COMPOSITION".to_owned(),
             ],
         );
-        assert!(arguments.contains(&"--remote-debugging-port=4321".to_owned()));
-        assert!(arguments.contains(&"--disable-gpu".to_owned()));
+        assert!(win10_arguments.contains(&"--remote-debugging-port=4321".to_owned()));
+        assert!(win10_arguments.contains(&"--inspect-brk=127.0.0.1:4322".to_owned()));
+        assert!(win10_arguments.contains(&"--disable-gpu".to_owned()));
         assert_eq!(
-            arguments
+            win10_arguments
+                .iter()
+                .filter(|argument| {
+                    argument.eq_ignore_ascii_case(DISABLE_DIRECT_COMPOSITION_ARGUMENT)
+                })
+                .count(),
+            0
+        );
+
+        let ordinary_arguments = build_launch_arguments(
+            4321,
+            None,
+            &[
+                "--disable-gpu".to_owned(),
+                "--DISABLE-DIRECT-COMPOSITION".to_owned(),
+            ],
+        );
+        assert!(
+            ordinary_arguments
+                .iter()
+                .all(|argument| !argument.starts_with("--inspect"))
+        );
+        assert!(ordinary_arguments.contains(&"--disable-gpu".to_owned()));
+        assert_eq!(
+            ordinary_arguments
                 .iter()
                 .filter(|argument| {
                     argument.eq_ignore_ascii_case(DISABLE_DIRECT_COMPOSITION_ARGUMENT)
@@ -710,6 +1185,185 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn main_inspector_target_requires_one_exact_ipv4_loopback_node_endpoint() {
+        let endpoint = CdpEndpoint::loopback(4322);
+        let target = cdp_client::CdpTarget {
+            id: "2c6b16cc-bf2c-4f24-9172-e84832a31e52".to_owned(),
+            target_type: "node".to_owned(),
+            title: "Codex".to_owned(),
+            url: "file:///Codex/resources/app.asar/main.js".to_owned(),
+            web_socket_debugger_url: "ws://127.0.0.1:4322/2c6b16cc-bf2c-4f24-9172-e84832a31e52"
+                .to_owned(),
+        };
+        assert!(validate_main_inspector_target(endpoint, &target).is_ok());
+
+        for invalid_url in [
+            "ws://localhost:4322/2c6b16cc-bf2c-4f24-9172-e84832a31e52",
+            "ws://127.0.0.1:4323/2c6b16cc-bf2c-4f24-9172-e84832a31e52",
+            "ws://127.0.0.1:4322/2c6b16cc-bf2c-4f24-9172-e84832a31e52?token=value",
+            "wss://127.0.0.1:4322/2c6b16cc-bf2c-4f24-9172-e84832a31e52",
+        ] {
+            let mut invalid = target.clone();
+            invalid.web_socket_debugger_url = invalid_url.to_owned();
+            assert!(validate_main_inspector_target(endpoint, &invalid).is_err());
+        }
+
+        let mut renderer = target;
+        renderer.target_type = "page".to_owned();
+        assert!(validate_main_inspector_target(endpoint, &renderer).is_err());
+    }
+
+    #[test]
+    fn main_process_patch_is_constant_and_closes_its_inspector() {
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("transparent: true"));
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("const transparentColor = '#00000000'"));
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("backgroundColor: transparentColor"));
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("backgroundMaterial: undefined"));
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("Module._load = patchedLoad"));
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("setBackgroundColor: {"));
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("setBackgroundMaterial: {"));
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("constructorHookCount += 1"));
+        assert!(ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("inspector.close()"));
+        assert!(!ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("isSystemBackdropSupported"));
+        assert!(!ELECTRON_MAIN_TRANSPARENCY_PATCH.contains("WS_EX_TRANSPARENT"));
+    }
+
+    #[test]
+    fn electron_main_surface_patch_is_scoped_to_windows_10_builds() {
+        assert!(nt_build_needs_windows_10_surface_patch(10, 19_041));
+        assert!(nt_build_needs_windows_10_surface_patch(10, 19_045));
+        assert!(!nt_build_needs_windows_10_surface_patch(10, 22_000));
+        assert!(!nt_build_needs_windows_10_surface_patch(10, 26_100));
+        assert!(!nt_build_needs_windows_10_surface_patch(6, 3));
+    }
+
+    #[tokio::test]
+    async fn main_inspector_session_preserves_pause_event_while_correlating_response() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind mock inspector");
+        let port = listener
+            .local_addr()
+            .expect("mock inspector address")
+            .port();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept inspector client");
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("accept inspector websocket");
+            let message = socket
+                .next()
+                .await
+                .expect("inspector request")
+                .expect("valid inspector request");
+            let Message::Text(text) = message else {
+                panic!("inspector request must be text");
+            };
+            let request: Value = serde_json::from_str(text.as_ref()).expect("request JSON");
+            assert_eq!(request.get("id").and_then(Value::as_u64), Some(7));
+            assert_eq!(
+                request.get("method").and_then(Value::as_str),
+                Some("Runtime.runIfWaitingForDebugger")
+            );
+            socket
+                .send(Message::Text(
+                    json!({
+                        "method": "Debugger.paused",
+                        "params": {
+                            "reason": "Break on start",
+                            "callFrames": [{"callFrameId": "4721008079512459587.1.0"}]
+                        }
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .expect("send paused event");
+            socket
+                .send(Message::Text(
+                    json!({"method": "Runtime.executionContextCreated", "params": {}})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .expect("send unrelated event");
+            socket
+                .send(Message::Text(
+                    json!({"id": 7, "result": {}}).to_string().into(),
+                ))
+                .await
+                .expect("send inspector response");
+        });
+
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(MAIN_INSPECTOR_MESSAGE_BYTES))
+            .max_frame_size(Some(MAIN_INSPECTOR_MESSAGE_BYTES));
+        let (socket, _) =
+            connect_async_with_config(format!("ws://127.0.0.1:{port}/mock"), Some(config), false)
+                .await
+                .expect("connect mock inspector");
+        let mut session = MainInspectorSession::new(socket);
+        let response = session
+            .command(7, "Runtime.runIfWaitingForDebugger", json!({}))
+            .await
+            .expect("correlated inspector response");
+        assert_eq!(response, json!({}));
+        assert_eq!(
+            session
+                .wait_for_paused_call_frame()
+                .await
+                .expect("preserved paused call frame"),
+            "4721008079512459587.1.0"
+        );
+        drop(session);
+        server.await.expect("mock inspector task");
+    }
+
+    #[test]
+    fn paused_call_frame_requires_one_bounded_nonempty_identifier() {
+        assert!(
+            paused_call_frame_id(&json!({
+                "method": "Debugger.paused",
+                "params": {"callFrames": [{"callFrameId": "frame-1"}]}
+            }))
+            .is_ok()
+        );
+        for invalid in [
+            json!({"method": "Debugger.paused", "params": {"callFrames": []}}),
+            json!({
+                "method": "Debugger.paused",
+                "params": {"callFrames": [{"callFrameId": ""}]}
+            }),
+            json!({
+                "method": "Debugger.paused",
+                "params": {"callFrames": [{"callFrameId": "x".repeat(1_025)}]}
+            }),
+        ] {
+            assert!(paused_call_frame_id(&invalid).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn main_inspector_listener_shutdown_is_proved_by_connection_refusal() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind lifecycle listener");
+        let endpoint = CdpEndpoint::loopback(
+            listener
+                .local_addr()
+                .expect("lifecycle listener address")
+                .port(),
+        );
+        wait_for_tcp_listener(endpoint, Duration::from_secs(1))
+            .await
+            .expect("listener opens");
+        drop(listener);
+        wait_for_tcp_listener_closed(endpoint, Duration::from_secs(1))
+            .await
+            .expect("listener closes");
     }
 
     #[test]

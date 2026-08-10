@@ -76,6 +76,7 @@ export const DIAGRAM_PREVIEWER_ID = "code-codex.diagram-preview";
 export const MODEL_PREVIEWER_ID = "code-codex.model-preview";
 export const NOTEBOOK_PREVIEW_MIME = "application/x-ipynb+json";
 export const NATIVE_POWERPOINT_PREVIEW_MIME = "application/vnd.code-codex.powerpoint-slides+zip";
+export const POWERPOINT_FULL_FIDELITY_NOTICE = "powerpoint-required-for-full-fidelity" as const;
 export const GLTF_JSON_PREVIEW_MIME = "model/gltf+json";
 export const GLTF_BINARY_PREVIEW_MIME = "model/gltf-binary";
 
@@ -853,6 +854,7 @@ export interface MainPreviewMediaView extends MainPreviewFileBase {
   readonly mimeType: string;
   readonly sizeBytes: number;
   readonly bytes: Uint8Array;
+  readonly previewNotice?: typeof POWERPOINT_FULL_FIDELITY_NOTICE;
 }
 
 export interface MainPreviewModelResource {
@@ -3705,6 +3707,15 @@ const mainPreviewStyles = String.raw`
     min-height: 0;
   }
 
+  .office-preview[data-has-notice="true"] {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .office-preview[data-has-notice="true"] .office-preview-stage {
+    height: auto;
+  }
+
   .office-preview-loading {
     display: grid;
     min-height: 100%;
@@ -5134,6 +5145,7 @@ function cloneView(view: MainPreviewFileView): MainPreviewFileView {
         mimeType: view.mimeType,
         sizeBytes: view.sizeBytes,
         bytes: view.bytes,
+        ...(view.previewNotice === undefined ? {} : { previewNotice: view.previewNotice }),
       };
     case "model":
       return {
@@ -7135,6 +7147,15 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     loading.setAttribute("role", "status");
     stage.append(loading);
     container.append(stage);
+    if (view.previewNotice === POWERPOINT_FULL_FIDELITY_NOTICE) {
+      const notice = this.#textSpan(
+        "Install Microsoft PowerPoint for a full-fidelity preview. The built-in renderer is being used.",
+        "office-preview-notice",
+      );
+      notice.setAttribute("role", "status");
+      container.dataset.hasNotice = "true";
+      container.append(notice);
+    }
 
     const job: OfficePreviewJob = {
       generation: ++this.#officeGeneration,

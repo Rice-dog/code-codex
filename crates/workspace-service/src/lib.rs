@@ -31,8 +31,8 @@ pub use preview::{
     MAX_MODEL_PREVIEW_BYTES, MAX_MODEL_RESOURCE_AGGREGATE_BYTES, MAX_MODEL_RESOURCE_BYTES,
     MAX_NOTEBOOK_PREVIEW_BYTES, MAX_OFFICE_PREVIEW_BYTES, MAX_PDF_PREVIEW_BYTES, MAX_PREVIEW_BYTES,
     MAX_VIDEO_PREVIEW_BYTES, MEDIA_CHUNK_BYTES, MediaChunk, MediaInfo, MediaKind,
-    ModelResourceChunkRequest, ModelResourceInfo, PreviewKind, PreviewLineEnding, PreviewResult,
-    PreviewUnsupportedReason,
+    MediaPreviewNotice, ModelResourceChunkRequest, ModelResourceInfo, PreviewKind,
+    PreviewLineEnding, PreviewResult, PreviewUnsupportedReason,
 };
 pub use settings::{
     PreparedSettings, SETTINGS_CANDIDATE_PREFIX, SETTINGS_CANDIDATE_SUFFIX,

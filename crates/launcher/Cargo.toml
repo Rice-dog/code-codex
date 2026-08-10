@@ -39,6 +39,7 @@ cdp-client = { path = "../cdp-client" }
 clap.workspace = true
 context-resolver = { path = "../context-resolver" }
 dunce.workspace = true
+futures-util.workspace = true
 process-wrap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -47,16 +48,18 @@ sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+url.workspace = true
 workspace-service = { path = "../workspace-service" }
 
 [target.'cfg(windows)'.dependencies]
 known-folders = "1.4.2"
 win32job = "2.0.3"
 windows-permissions = "0.2.4"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 junction = "2.0.0"

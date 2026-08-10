@@ -411,6 +411,13 @@ enum WindowCornerPreferenceSnapshot {
 }
 
 #[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransparencyClientFrame {
+    Full,
+    None,
+}
+
+#[cfg(windows)]
 struct WindowTransparencyMarker {
     property_name: Vec<u16>,
     cookie: usize,
@@ -978,6 +985,14 @@ where
 }
 
 #[cfg(windows)]
+fn transparency_client_frame(system_backdrop: SystemBackdropSnapshot) -> TransparencyClientFrame {
+    match system_backdrop {
+        SystemBackdropSnapshot::Unsupported => TransparencyClientFrame::Full,
+        SystemBackdropSnapshot::Value(_) => TransparencyClientFrame::None,
+    }
+}
+
+#[cfg(windows)]
 fn clear_extended_client_frame_with<F, E>(
     window: HWND,
     mut still_owned: F,
@@ -1258,11 +1273,20 @@ where
     if !still_owned() {
         return Err(WindowTransparencyError::Unavailable);
     }
-    // Electron extends the DWM frame across the restored client area. That
-    // path flattens Chromium's transparent pixels to white even though the
-    // renderer still supplies alpha. Zero margins retain normal input while
-    // allowing the transparent accent surface to reach the desktop.
-    clear_extended_client_frame(window, &mut still_owned)?;
+    match transparency_client_frame(original_system_backdrop) {
+        TransparencyClientFrame::Full => {
+            // Windows 10 has no system-backdrop surface. Its legacy DWM path
+            // needs glass extended through the client area so Chromium's
+            // transparent pixels can reach the desktop compositor.
+            restore_extended_client_frame(window, &mut still_owned)?;
+        }
+        TransparencyClientFrame::None => {
+            // Windows 11 already supplies a system-backdrop surface. Electron's
+            // full client frame flattens transparent pixels in restored windows,
+            // so remove only that frame while transparency is active.
+            clear_extended_client_frame(window, &mut still_owned)?;
+        }
+    }
     let applied_style = read_extended_style(window)?;
     if applied_style != original_style {
         return Err(WindowTransparencyError::Unavailable);
@@ -3285,6 +3309,19 @@ mod tests {
                 Ok(WindowCornerPreferenceSnapshot::Value(preference))
             );
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transparency_client_frame_uses_the_legacy_windows_10_glass_path() {
+        assert_eq!(
+            transparency_client_frame(SystemBackdropSnapshot::Unsupported),
+            TransparencyClientFrame::Full
+        );
+        assert_eq!(
+            transparency_client_frame(SystemBackdropSnapshot::Value(DWMSBT_NONE)),
+            TransparencyClientFrame::None
+        );
     }
 
     #[cfg(windows)]

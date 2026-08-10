@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "cdp-client"
-version = "0.1.64"
+version = "0.1.71"
 dependencies = [
  "async-trait",
  "base64",
@@ -275,7 +275,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "code-codex"
-version = "0.1.64"
+version = "0.1.71"
 dependencies = [
  "async-trait",
  "base64",
@@ -284,6 +284,7 @@ dependencies = [
  "context-resolver",
  "dunce",
  "embed-resource",
+ "futures-util",
  "junction",
  "known-folders",
  "process-wrap",
@@ -294,9 +295,11 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "url",
  "win32job",
  "windows-permissions",
  "windows-sys 0.61.2",
@@ -317,7 +320,7 @@ checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "context-resolver"
-version = "0.1.64"
+version = "0.1.71"
 dependencies = [
  "process-wrap",
  "serde",
@@ -2695,7 +2698,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workspace-service"
-version = "0.1.64"
+version = "0.1.71"
 dependencies = [
  "cap-fs-ext",
  "cap-primitives",

@@ -8,6 +8,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const watch = process.argv.includes("--watch");
 const legacyPowerPointAssets = resolve(root, "node_modules", "@extend-ai", "react-pptx", "dist");
 const uiManifest = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+if (typeof uiManifest.version !== "string" || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(uiManifest.version)) {
+  throw new Error("The Code-Codex UI version is invalid");
+}
 const legacyPowerPointManifest = JSON.parse(await readFile(resolve(legacyPowerPointAssets, "..", "package.json"), "utf8"));
 const embeddedWasm = uiManifest.codeCodex?.embeddedWasm;
 if (!embeddedWasm || legacyPowerPointManifest.version !== "0.1.2" ||
@@ -58,6 +61,7 @@ const options = {
   logLevel: "info",
   plugins: [browserStreamShim],
   define: {
+    __CODE_CODEX_VERSION__: JSON.stringify(uiManifest.version),
     __CODE_CODEX_PPT_WORKER_SOURCE__: JSON.stringify(legacyPowerPointWorker),
     __CODE_CODEX_PPT_WASM_BASE64__: JSON.stringify(legacyPowerPointWasm.toString("base64")),
     __CODE_CODEX_PPT_VIEWER_STYLES__: JSON.stringify(legacyPowerPointStyles),

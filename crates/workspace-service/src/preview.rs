@@ -52,6 +52,8 @@ const MAX_NATIVE_POWERPOINT_SLIDES: usize = 256;
 const MAX_NATIVE_POWERPOINT_SLIDE_BYTES: u64 = 16 * 1024 * 1024;
 const NATIVE_POWERPOINT_WIDTH: u32 = 1_440;
 const NATIVE_POWERPOINT_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(windows)]
+const NATIVE_POWERPOINT_COM_UNAVAILABLE_EXIT_CODE: i32 = 41;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -65,6 +67,12 @@ pub enum MediaKind {
     Model,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MediaPreviewNotice {
+    #[serde(rename = "powerpoint-required-for-full-fidelity")]
+    PowerpointRequiredForFullFidelity,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaInfo {
@@ -74,6 +82,8 @@ pub struct MediaInfo {
     pub version: String,
     pub chunk_size: usize,
     pub chunk_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_notice: Option<MediaPreviewNotice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,6 +314,12 @@ struct NativePowerPointBundle {
     version: String,
 }
 
+enum NativePowerPointPreview {
+    Rendered(NativePowerPointBundle),
+    PowerpointUnavailable,
+    Embedded,
+}
+
 fn model_resource_cache() -> &'static Mutex<VecDeque<ModelResourceCacheEntry>> {
     static CACHE: OnceLock<Mutex<VecDeque<ModelResourceCacheEntry>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(VecDeque::new()))
@@ -410,24 +426,30 @@ impl Workspace {
     /// workspace capability and is limited by native policy.
     pub fn media_info(&self, relative_path: &str) -> Result<MediaInfo, WorkspaceError> {
         let (mut file, policy, size_bytes, version) = self.open_media(relative_path)?;
+        let mut preview_notice = None;
         if policy.signature == MediaSignature::Ppt
             && size_bytes >= MIN_NATIVE_POWERPOINT_SOURCE_BYTES
         {
             let clean = validate_relative(relative_path)?;
-            if let Some(bundle) =
-                self.native_powerpoint_bundle(&clean, &mut file, size_bytes, &version)
-            {
-                self.ensure_root_valid()?;
-                let rendered_size = bundle.bytes.len() as u64;
-                let chunk_size = MEDIA_CHUNK_BYTES;
-                return Ok(MediaInfo {
-                    kind: MediaKind::Office,
-                    mime_type: NATIVE_POWERPOINT_PREVIEW_MIME.to_owned(),
-                    size_bytes: rendered_size,
-                    version: bundle.version,
-                    chunk_size,
-                    chunk_count: rendered_size.div_ceil(chunk_size as u64),
-                });
+            match self.native_powerpoint_bundle(&clean, &mut file, size_bytes, &version) {
+                NativePowerPointPreview::Rendered(bundle) => {
+                    self.ensure_root_valid()?;
+                    let rendered_size = bundle.bytes.len() as u64;
+                    let chunk_size = MEDIA_CHUNK_BYTES;
+                    return Ok(MediaInfo {
+                        kind: MediaKind::Office,
+                        mime_type: NATIVE_POWERPOINT_PREVIEW_MIME.to_owned(),
+                        size_bytes: rendered_size,
+                        version: bundle.version,
+                        chunk_size,
+                        chunk_count: rendered_size.div_ceil(chunk_size as u64),
+                        preview_notice: None,
+                    });
+                }
+                NativePowerPointPreview::PowerpointUnavailable => {
+                    preview_notice = Some(MediaPreviewNotice::PowerpointRequiredForFullFidelity);
+                }
+                NativePowerPointPreview::Embedded => {}
             }
         }
         drop(file);
@@ -441,6 +463,7 @@ impl Workspace {
             version,
             chunk_size,
             chunk_count,
+            preview_notice,
         })
     }
 
@@ -808,21 +831,21 @@ impl Workspace {
         source: &mut std::fs::File,
         source_size: u64,
         source_version: &str,
-    ) -> Option<NativePowerPointBundle> {
+    ) -> NativePowerPointPreview {
         let key = NativePowerPointCacheKey {
             root: self.root_path().to_path_buf(),
             relative_path: relative_path.to_path_buf(),
             source_version: source_version.to_owned(),
         };
         if let Some(bundle) = cached_native_powerpoint_bundle(&key) {
-            return Some(bundle);
+            return NativePowerPointPreview::Rendered(bundle);
         }
 
         let _render_guard = native_powerpoint_render_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(bundle) = cached_native_powerpoint_bundle(&key) {
-            return Some(bundle);
+            return NativePowerPointPreview::Rendered(bundle);
         }
 
         match render_native_powerpoint_bundle(source, source_size, source_version) {
@@ -832,11 +855,15 @@ impl Workspace {
                     bytes: Arc::new(bundle),
                 };
                 cache_native_powerpoint_bundle(key, bundle.clone());
-                Some(bundle)
+                NativePowerPointPreview::Rendered(bundle)
             }
-            Err(error) => {
+            Err(NativePowerPointRenderError::PowerpointUnavailable) => {
+                tracing::debug!("Microsoft PowerPoint is unavailable; using the embedded renderer");
+                NativePowerPointPreview::PowerpointUnavailable
+            }
+            Err(NativePowerPointRenderError::Failed(error)) => {
                 tracing::debug!(%error, "native PowerPoint preview is unavailable; using the embedded renderer");
-                None
+                NativePowerPointPreview::Embedded
             }
         }
     }
@@ -1174,24 +1201,79 @@ $renderWidth = [int]$env:CLE_POWERPOINT_RENDER_WIDTH
 if (-not $source -or -not $output -or -not $pidState -or $maximumSlides -lt 1 -or $renderWidth -lt 320) {
     throw 'The native PowerPoint preview arguments are invalid.'
 }
-if (@(Get-Process -Name POWERPNT -ErrorAction SilentlyContinue).Count -ne 0) {
-    throw 'PowerPoint is already running; the embedded renderer will be used.'
+$powerPointType = [Type]::GetTypeFromProgID('PowerPoint.Application', $false)
+if ($null -eq $powerPointType) {
+    exit 41
 }
 
 $application = $null
 $presentation = $null
+$ownsApplication = $false
+$restoreBorrowedState = $false
+$previousAutomationSecurity = $null
+$previousDisplayAlerts = $null
 try {
-    $application = New-Object -ComObject PowerPoint.Application
+    $runningPowerPoint = @(Get-Process -Name POWERPNT -ErrorAction SilentlyContinue)
+    $runningPowerPointIds = @{}
+    foreach ($runningProcess in $runningPowerPoint) {
+        $runningPowerPointIds[[int]$runningProcess.Id] = $true
+    }
+    try {
+        if ($runningPowerPoint.Count -eq 0) {
+            $application = [Activator]::CreateInstance($powerPointType)
+        }
+        else {
+            try {
+                $application = [Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')
+            }
+            catch {
+                $application = [Activator]::CreateInstance($powerPointType)
+            }
+        }
+    }
+    catch {
+        throw
+    }
+
+    $createdProcesses = @(
+        Get-Process -Name POWERPNT -ErrorAction SilentlyContinue |
+            Where-Object { -not $runningPowerPointIds.ContainsKey([int]$_.Id) }
+    )
+    if ($createdProcesses.Count -eq 1) {
+        $createdProcess = $createdProcesses[0]
+        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($createdProcess.Id)" -ErrorAction SilentlyContinue
+        $commandLine = [string]$processInfo.CommandLine
+        $isAutomationProcess =
+            $commandLine -match '(?i)(?:^|\s)/AUTOMATION(?:\s|$)' -and
+            $commandLine -match '(?i)(?:^|\s)-Embedding(?:\s|$)'
+        if ($isAutomationProcess) {
+            $ownedState = '{0}|{1}' -f $createdProcess.Id, $createdProcess.StartTime.ToUniversalTime().Ticks
+            try {
+                [IO.File]::WriteAllText($pidState, $ownedState, [Text.UTF8Encoding]::new($false))
+                $ownsApplication = $true
+            }
+            catch {}
+        }
+    }
+
+    if (-not $ownsApplication) {
+        $previousAutomationSecurity = $application.AutomationSecurity
+        $previousDisplayAlerts = $application.DisplayAlerts
+        $restoreBorrowedState = $true
+    }
+
     $application.AutomationSecurity = 3
     $application.DisplayAlerts = 1
-    $ownedProcesses = @(Get-Process -Name POWERPNT -ErrorAction Stop)
-    if ($ownedProcesses.Count -ne 1) {
-        throw 'The native PowerPoint process could not be isolated.'
+    try {
+        $presentation = $application.Presentations.Open($source, -1, 0, 0)
     }
-    $ownedProcess = $ownedProcesses[0]
-    $ownedState = '{0}|{1}' -f $ownedProcess.Id, $ownedProcess.StartTime.ToUniversalTime().Ticks
-    [IO.File]::WriteAllText($pidState, $ownedState, [Text.UTF8Encoding]::new($false))
-    $presentation = $application.Presentations.Open($source, -1, 0, 0)
+    finally {
+        if ($restoreBorrowedState) {
+            try { $application.AutomationSecurity = $previousAutomationSecurity } catch {}
+            try { $application.DisplayAlerts = $previousDisplayAlerts } catch {}
+            $restoreBorrowedState = $false
+        }
+    }
     $slideCount = [int]$presentation.Slides.Count
     if ($slideCount -lt 1 -or $slideCount -gt $maximumSlides) {
         throw 'The presentation slide count exceeds the native preview limit.'
@@ -1220,12 +1302,18 @@ try {
     }
 }
 finally {
+    if ($restoreBorrowedState -and $null -ne $application) {
+        try { $application.AutomationSecurity = $previousAutomationSecurity } catch {}
+        try { $application.DisplayAlerts = $previousDisplayAlerts } catch {}
+    }
     if ($null -ne $presentation) {
         try { $presentation.Close() } catch {}
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($presentation)
     }
     if ($null -ne $application) {
-        try { $application.Quit() } catch {}
+        if ($ownsApplication) {
+            try { $application.Quit() } catch {}
+        }
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($application)
     }
     [GC]::Collect()
@@ -1259,25 +1347,44 @@ if ($null -ne $ownedProcess -and
 "#;
 
 #[cfg(windows)]
-fn trusted_windows_powershell() -> Result<PathBuf, String> {
+fn trusted_windows_powershells() -> Result<Vec<PathBuf>, String> {
     let system_root = std::env::var_os("SystemRoot")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .ok_or_else(|| "the Windows directory is unavailable".to_owned())?;
     let system_root = dunce::canonicalize(system_root)
         .map_err(|error| format!("the Windows directory could not be verified: {error}"))?;
-    let powershell =
-        dunce::canonicalize(system_root.join("System32/WindowsPowerShell/v1.0/powershell.exe"))
-            .map_err(|error| format!("Windows PowerShell could not be located: {error}"))?;
-    if !powershell.starts_with(&system_root)
-        || !powershell
-            .file_name()
-            .is_some_and(|name| name.eq_ignore_ascii_case("powershell.exe"))
-        || !powershell.is_file()
-    {
+
+    let mut powershells = Vec::with_capacity(2);
+    for relative in [
+        "System32/WindowsPowerShell/v1.0/powershell.exe",
+        "SysWOW64/WindowsPowerShell/v1.0/powershell.exe",
+    ] {
+        let Ok(powershell) = dunce::canonicalize(system_root.join(relative)) else {
+            continue;
+        };
+        if powershell.starts_with(&system_root)
+            && powershell
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("powershell.exe"))
+            && powershell.is_file()
+            && !powershells.contains(&powershell)
+        {
+            powershells.push(powershell);
+        }
+    }
+    if powershells.is_empty() {
         return Err("Windows PowerShell could not be verified".to_owned());
     }
-    Ok(powershell)
+    Ok(powershells)
+}
+
+#[cfg(windows)]
+fn trusted_windows_powershell() -> Result<PathBuf, String> {
+    trusted_windows_powershells()?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Windows PowerShell could not be verified".to_owned())
 }
 
 #[cfg(windows)]
@@ -1308,16 +1415,35 @@ fn cleanup_owned_powerpoint(pid_state: &Path) {
 }
 
 #[cfg(windows)]
-fn run_native_powerpoint_export(
+enum NativePowerPointExportAttemptError {
+    ComUnavailable,
+    Failed(String),
+}
+
+#[derive(Debug)]
+enum NativePowerPointRenderError {
+    PowerpointUnavailable,
+    Failed(String),
+}
+
+impl From<String> for NativePowerPointRenderError {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
+}
+
+#[cfg(windows)]
+fn run_native_powerpoint_export_with_shell(
+    powershell: &Path,
     source: &Path,
     output: &Path,
     pid_state: &Path,
-) -> Result<(), String> {
+) -> Result<(), NativePowerPointExportAttemptError> {
     use std::os::windows::process::CommandExt as _;
     use std::process::{Command, Stdio};
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut command = Command::new(trusted_windows_powershell()?);
+    let mut command = Command::new(powershell);
     command
         .args([
             "-NoLogo",
@@ -1344,19 +1470,26 @@ fn run_native_powerpoint_export(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW);
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("PowerPoint preview could not start: {error}"))?;
+    let mut child = command.spawn().map_err(|error| {
+        NativePowerPointExportAttemptError::Failed(format!(
+            "PowerPoint preview could not start: {error}"
+        ))
+    })?;
     let deadline = Instant::now() + NATIVE_POWERPOINT_TIMEOUT;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status))
+                if status.code() == Some(NATIVE_POWERPOINT_COM_UNAVAILABLE_EXIT_CODE) =>
+            {
+                return Err(NativePowerPointExportAttemptError::ComUnavailable);
+            }
             Ok(Some(status)) => {
                 cleanup_owned_powerpoint(pid_state);
-                return Err(format!(
+                return Err(NativePowerPointExportAttemptError::Failed(format!(
                     "PowerPoint preview exited with status {}",
                     status.code().unwrap_or(-1)
-                ));
+                )));
             }
             Ok(None) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(50));
@@ -1365,18 +1498,38 @@ fn run_native_powerpoint_export(
                 let _ = child.kill();
                 let _ = child.wait();
                 cleanup_owned_powerpoint(pid_state);
-                return Err("PowerPoint preview timed out".to_owned());
+                return Err(NativePowerPointExportAttemptError::Failed(
+                    "PowerPoint preview timed out".to_owned(),
+                ));
             }
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
                 cleanup_owned_powerpoint(pid_state);
-                return Err(format!(
+                return Err(NativePowerPointExportAttemptError::Failed(format!(
                     "PowerPoint preview could not be monitored: {error}"
-                ));
+                )));
             }
         }
     }
+}
+
+#[cfg(windows)]
+fn run_native_powerpoint_export(
+    source: &Path,
+    output: &Path,
+    pid_state: &Path,
+) -> Result<(), NativePowerPointRenderError> {
+    for powershell in trusted_windows_powershells()? {
+        match run_native_powerpoint_export_with_shell(&powershell, source, output, pid_state) {
+            Ok(()) => return Ok(()),
+            Err(NativePowerPointExportAttemptError::ComUnavailable) => continue,
+            Err(NativePowerPointExportAttemptError::Failed(error)) => {
+                return Err(NativePowerPointRenderError::Failed(error));
+            }
+        }
+    }
+    Err(NativePowerPointRenderError::PowerpointUnavailable)
 }
 
 #[cfg(not(windows))]
@@ -1384,8 +1537,8 @@ fn run_native_powerpoint_export(
     _source: &Path,
     _output: &Path,
     _pid_state: &Path,
-) -> Result<(), String> {
-    Err("native PowerPoint preview is available only on Windows".to_owned())
+) -> Result<(), NativePowerPointRenderError> {
+    Err(NativePowerPointRenderError::PowerpointUnavailable)
 }
 
 fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
@@ -1486,9 +1639,11 @@ fn render_native_powerpoint_bundle(
     source: &mut std::fs::File,
     source_size: u64,
     source_version: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, NativePowerPointRenderError> {
     if source_size < MIN_NATIVE_POWERPOINT_SOURCE_BYTES || source_size > MAX_OFFICE_PREVIEW_BYTES {
-        return Err("the PowerPoint source size is outside the native preview limits".to_owned());
+        return Err(NativePowerPointRenderError::Failed(
+            "the PowerPoint source size is outside the native preview limits".to_owned(),
+        ));
     }
     let temporary = tempfile::Builder::new()
         .prefix("CodeCodex-PowerPoint-")
@@ -1510,7 +1665,9 @@ fn render_native_powerpoint_bundle(
     )
     .map_err(|error| format!("the PowerPoint source could not be copied: {error}"))?;
     if copied != source_size {
-        return Err("the PowerPoint source changed while it was being copied".to_owned());
+        return Err(NativePowerPointRenderError::Failed(
+            "the PowerPoint source changed while it was being copied".to_owned(),
+        ));
     }
     copied_source.sync_all().map_err(|error| {
         format!("the PowerPoint source copy could not be synchronized: {error}")
@@ -1522,7 +1679,9 @@ fn render_native_powerpoint_bundle(
     let final_version = media_version(source, &metadata)
         .map_err(|error| format!("the PowerPoint source could not be revalidated: {error}"))?;
     if metadata.len() != source_size || final_version != source_version {
-        return Err("the PowerPoint source changed during preview".to_owned());
+        return Err(NativePowerPointRenderError::Failed(
+            "the PowerPoint source changed during preview".to_owned(),
+        ));
     }
 
     run_native_powerpoint_export(&source_path, &output_path, &pid_state_path)?;
@@ -3342,6 +3501,94 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn native_powerpoint_export_script_protects_borrowed_application() {
+        let unavailable_exit = format!("exit {NATIVE_POWERPOINT_COM_UNAVAILABLE_EXIT_CODE}");
+        assert!(
+            NATIVE_POWERPOINT_EXPORT_SCRIPT
+                .contains("GetTypeFromProgID('PowerPoint.Application', $false)")
+        );
+        assert!(NATIVE_POWERPOINT_EXPORT_SCRIPT.contains(&unavailable_exit));
+        assert_eq!(
+            NATIVE_POWERPOINT_EXPORT_SCRIPT
+                .matches(&unavailable_exit)
+                .count(),
+            1
+        );
+        assert!(
+            NATIVE_POWERPOINT_EXPORT_SCRIPT
+                .find(&unavailable_exit)
+                .zip(NATIVE_POWERPOINT_EXPORT_SCRIPT.find("$application = $null"))
+                .is_some_and(|(exit, application)| exit < application)
+        );
+        assert!(NATIVE_POWERPOINT_EXPORT_SCRIPT.contains(
+            "[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')"
+        ));
+        assert!(
+            NATIVE_POWERPOINT_EXPORT_SCRIPT
+                .contains("$application = [Activator]::CreateInstance($powerPointType)")
+        );
+        assert!(NATIVE_POWERPOINT_EXPORT_SCRIPT.contains("$isAutomationProcess"));
+        assert!(NATIVE_POWERPOINT_EXPORT_SCRIPT.contains("if ($ownsApplication)"));
+        assert!(!NATIVE_POWERPOINT_EXPORT_SCRIPT.contains("PowerPoint is already running"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_powerpoint_uses_every_verified_powershell_architecture() {
+        let powershells = trusted_windows_powershells().expect("trusted Windows PowerShell");
+        assert!(!powershells.is_empty());
+        assert!(powershells.iter().all(|powershell| {
+            powershell.is_file()
+                && powershell
+                    .file_name()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("powershell.exe"))
+        }));
+
+        let system_root = PathBuf::from(std::env::var_os("SystemRoot").expect("Windows root"));
+        if let Ok(wow64) =
+            dunce::canonicalize(system_root.join("SysWOW64/WindowsPowerShell/v1.0/powershell.exe"))
+        {
+            assert!(powershells.contains(&wow64));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires Microsoft PowerPoint and CODE_CODEX_NATIVE_POWERPOINT_FIXTURE"]
+    fn native_powerpoint_external_fixture_renders_with_each_powershell_architecture() {
+        let source = std::env::var_os("CODE_CODEX_NATIVE_POWERPOINT_FIXTURE")
+            .map(PathBuf::from)
+            .expect("CODE_CODEX_NATIVE_POWERPOINT_FIXTURE");
+
+        for powershell in trusted_windows_powershells().expect("trusted Windows PowerShell") {
+            let directory = TempDir::new().expect("temp dir");
+            let output = directory.path().join("slides");
+            fs::create_dir(&output).expect("slide output");
+            let pid_state = directory.path().join("powerpoint.pid");
+            match run_native_powerpoint_export_with_shell(&powershell, &source, &output, &pid_state)
+            {
+                Ok(()) => {}
+                Err(NativePowerPointExportAttemptError::ComUnavailable) => {
+                    panic!(
+                        "PowerPoint COM is unavailable through {}",
+                        powershell.display()
+                    )
+                }
+                Err(NativePowerPointExportAttemptError::Failed(error)) => {
+                    panic!(
+                        "PowerPoint export failed through {}: {error}",
+                        powershell.display()
+                    )
+                }
+            }
+            let bundle = bundle_native_powerpoint_slides(&output).expect("native slide bundle");
+            assert!(!bundle.is_empty());
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
     #[ignore = "requires Microsoft PowerPoint and CODE_CODEX_NATIVE_POWERPOINT_FIXTURE"]
     fn native_powerpoint_external_fixture_renders_through_media_transport() {
         let source = std::env::var_os("CODE_CODEX_NATIVE_POWERPOINT_FIXTURE")
@@ -4052,6 +4299,7 @@ mod tests {
         assert_eq!(serialized["sizeBytes"], contents.len() as u64);
         assert_eq!(serialized["chunkSize"], MEDIA_CHUNK_BYTES);
         assert_eq!(serialized["chunkCount"], 2);
+        assert!(serialized.get("previewNotice").is_none());
 
         let first = workspace
             .media_chunk(
@@ -4111,6 +4359,25 @@ mod tests {
                 .expect_err("changed version")
                 .code(),
             crate::ErrorCode::Conflict
+        );
+    }
+
+    #[test]
+    fn media_info_serializes_the_powerpoint_full_fidelity_notice() {
+        let info = MediaInfo {
+            kind: MediaKind::Office,
+            mime_type: "application/vnd.ms-powerpoint".to_owned(),
+            size_bytes: 1,
+            version: "0".repeat(64),
+            chunk_size: 1,
+            chunk_count: 1,
+            preview_notice: Some(MediaPreviewNotice::PowerpointRequiredForFullFidelity),
+        };
+
+        let serialized = serde_json::to_value(info).expect("serialize PowerPoint notice");
+        assert_eq!(
+            serialized["previewNotice"],
+            "powerpoint-required-for-full-fidelity"
         );
     }
 

@@ -20,15 +20,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.1.64-x64-setup.exe`
-- 备选：`CodeCodex-0.1.64-x64.msi`
-- 便携包：`CodeCodex-0.1.64-x64.zip`
+- 推荐：`CodeCodex-0.1.71-x64-setup.exe`
+- 备选：`CodeCodex-0.1.71-x64.msi`
+- 便携包：`CodeCodex-0.1.71-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.1.64-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.1.71-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -67,7 +67,7 @@ Get-FileHash .\CodeCodex-0.1.64-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.64
+./scripts/package.ps1 -Version 0.1.71
 ```
 
 生成结果会写入 `releases/`。
