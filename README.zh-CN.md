@@ -1,8 +1,23 @@
 # Code-Codex
 
-![支持 Windows 10 x64](https://img.shields.io/badge/Windows%2010%20x64-supported-0078D4?logo=windows&logoColor=white)
-
 [English](README.md) | 简体中文
+
+<p align="center">
+  <img src="crates/launcher/resources/code-codex.ico" alt="Code-Codex 图标" width="96">
+</p>
+
+<p align="center">
+  <em>为 Codex Desktop 添加本地项目文件树、预览标签页和受限编辑能力。</em>
+</p>
+
+<p align="center">
+  <a href="releases/"><img alt="版本" src="https://img.shields.io/badge/version-0.1.71-blue"></a>
+  <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
+  <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
+  <img alt="状态" src="https://img.shields.io/badge/status-preview-yellow">
+</p>
 
 Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地项目文件树。它展示了一个 Windows 本地辅助程序、受限工作区 bridge，以及注入式 TypeScript explorer UI，用于文件预览、编辑、导航和文件操作。
 
@@ -108,8 +123,9 @@ Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创
 
 ![Code-Codex 交互式 glTF 和 GLB 3D 模型预览](docs/screenshots/gltf-preview.png)
 
-预览市场提供可独立启用的 Markdown、CSV、图表、图片、视频、PDF、音频、
-Jupyter Notebook、Office 文档和 glTF 3D 模型预览插件。预览处理在用户电脑本地完成。
+“预览市场”入口位于 Code-Codex 文件树底部。点击该入口即可打开插件面板，并按需独立启用
+Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 文档和 glTF 3D
+模型预览插件。预览处理在用户电脑本地完成。
 
 3D 模型预览插件为 `.gltf` 和 `.glb` 文件提供交互式视图，支持旋转、平移、缩放、
 适配/重置视图、参考网格和动画控制。“透明背景”作为独立的外观插件提供。

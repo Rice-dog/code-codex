@@ -1,8 +1,23 @@
 # Code-Codex
 
-![Windows 10 x64 supported](https://img.shields.io/badge/Windows%2010%20x64-supported-0078D4?logo=windows&logoColor=white)
-
 English | [简体中文](README.zh-CN.md)
+
+<p align="center">
+  <img src="crates/launcher/resources/code-codex.ico" alt="Code-Codex icon" width="96">
+</p>
+
+<p align="center">
+  <em>Add a local project file tree, preview tabs, and bounded editing to Codex Desktop.</em>
+</p>
+
+<p align="center">
+  <a href="releases/"><img alt="Version" src="https://img.shields.io/badge/version-0.1.71-blue"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
+  <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
+  <img alt="Status" src="https://img.shields.io/badge/status-preview-yellow">
+</p>
 
 Code-Codex is an unofficial community project that adds a local project file tree
 to Codex Desktop. It demonstrates a local Windows companion app, a bounded
@@ -112,7 +127,8 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 
 ![Code-Codex interactive glTF and GLB 3D model preview](docs/screenshots/gltf-preview.png)
 
-Preview Market provides independently enabled plugins for Markdown, CSV,
+Preview Market is located at the bottom of the Code-Codex file tree. Click it
+to open the plugin panel and independently enable previews for Markdown, CSV,
 diagrams, images, video, PDF, audio, Jupyter Notebook, Office documents, and
 glTF 3D models. Preview processing runs locally on the user's computer.
 
