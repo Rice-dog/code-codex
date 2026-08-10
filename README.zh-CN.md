@@ -104,6 +104,16 @@ Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创
 - 文件和文件夹拖拽移动。
 - 用于受限工作区操作的本地 bridge 代码。
 
+## 预览插件
+
+![Code-Codex 交互式 glTF 和 GLB 3D 模型预览](docs/screenshots/gltf-preview.png)
+
+预览市场提供可独立启用的 Markdown、CSV、图表、图片、视频、PDF、音频、
+Jupyter Notebook、Office 文档和 glTF 3D 模型预览插件。预览处理在用户电脑本地完成。
+
+3D 模型预览插件为 `.gltf` 和 `.glb` 文件提供交互式视图，支持旋转、平移、缩放、
+适配/重置视图、参考网格和动画控制。“透明背景”作为独立的外观插件提供。
+
 ## 仓库结构
 
 ```text

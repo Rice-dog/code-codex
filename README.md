@@ -108,6 +108,18 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 - Drag and drop file movement.
 - Local bridge code for bounded workspace operations.
 
+## Preview Plugins
+
+![Code-Codex interactive glTF and GLB 3D model preview](docs/screenshots/gltf-preview.png)
+
+Preview Market provides independently enabled plugins for Markdown, CSV,
+diagrams, images, video, PDF, audio, Jupyter Notebook, Office documents, and
+glTF 3D models. Preview processing runs locally on the user's computer.
+
+The 3D Model Preview plugin provides an interactive view for `.gltf` and `.glb`
+files with orbit, pan, zoom, fit/reset, reference-grid, and animation controls.
+Transparent Background is available separately as an appearance plugin.
+
 ## Repository Layout
 
 ```text
