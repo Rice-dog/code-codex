@@ -11,7 +11,7 @@ English | [简体中文](README.zh-CN.md)
 </p>
 
 <p align="center">
-  <a href="releases/"><img alt="Version" src="https://img.shields.io/badge/version-0.1.71-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.1.71"><img alt="Version" src="https://img.shields.io/badge/version-0.1.71-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
