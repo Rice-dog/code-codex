@@ -4,7 +4,12 @@ import {
   TRANSPARENT_BACKGROUND_ATTRIBUTE,
   TRANSPARENT_BACKGROUND_COLOR_PROPERTY,
 } from "./explorer-element";
-import { codex26715Adapter, MAIN_SURFACE_SELECTOR, plausibleThreadId } from "./adapters/codex-26.715";
+import {
+  codex26715Adapter,
+  isTemporaryLocalThreadAlias,
+  MAIN_SURFACE_SELECTOR,
+  plausibleThreadId,
+} from "./adapters/codex-26.715";
 import {
   clearExplorerDismissalForSession,
   dismissExplorerForSession,
@@ -255,7 +260,7 @@ function isValidatedLocalSidebarClick(event: MouseEvent): boolean {
   ) {
     return false;
   }
-  return plausibleThreadId(encoded.slice("local:".length));
+  return plausibleThreadId(encoded.slice("local:".length)) || isTemporaryLocalThreadAlias(encoded);
 }
 
 function restoreAfterConversationReselection(event: MouseEvent): void {

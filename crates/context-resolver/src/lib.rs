@@ -740,7 +740,14 @@ mod tests {
 
     #[test]
     fn rejects_untrusted_thread_identifiers() {
-        for invalid in ["", "../thread", "thread/id", "a thread", "💥"] {
+        for invalid in [
+            "",
+            "../thread",
+            "thread/id",
+            "a thread",
+            "client-new-thread:cf82454b-fadc-48b0-9ce0-e5e3221a00d2",
+            "💥",
+        ] {
             assert!(validate_thread_id(invalid).is_err());
         }
     }

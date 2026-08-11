@@ -1,6 +1,7 @@
 import type { RendererAdapter } from "./contract";
 
 const THREAD_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/;
+const TEMPORARY_LOCAL_THREAD_PREFIX = "local:client-new-thread:";
 export const ACTIVE_THREAD_MARKER_SELECTOR = '[data-app-action-sidebar-thread-active="true"]';
 export const ACTIVE_LOCAL_THREAD_SELECTOR = '[data-app-action-sidebar-thread-id][data-app-action-sidebar-thread-active="true"]';
 export const COMPOSER_THREAD_SELECTOR = "[data-above-composer-conversation-id]";
@@ -11,7 +12,13 @@ export function plausibleThreadId(value: unknown): value is string {
   return typeof value === "string" && THREAD_PATTERN.test(value);
 }
 
-export function activeLocalThreadId(root: ParentNode = document): string | null {
+export function isTemporaryLocalThreadAlias(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.startsWith(TEMPORARY_LOCAL_THREAD_PREFIX) &&
+    plausibleThreadId(value.slice(TEMPORARY_LOCAL_THREAD_PREFIX.length));
+}
+
+function verifiedActiveLocalThreadIds(root: ParentNode): string[] | null {
   const activeElements = [...root.querySelectorAll(ACTIVE_THREAD_MARKER_SELECTOR)];
   if (!activeElements.length) return null;
   const values = activeElements.map((element) => {
@@ -19,10 +26,20 @@ export function activeLocalThreadId(root: ParentNode = document): string | null 
     if (
       element.getAttribute("data-app-action-sidebar-thread-host-id") !== "local" ||
       element.getAttribute("data-app-action-sidebar-thread-kind") !== "local" ||
-      !encoded?.startsWith("local:")
+      !encoded
     ) {
       return null;
     }
+    return encoded;
+  });
+  return values.some((value) => value === null) ? null : values as string[];
+}
+
+export function activeLocalThreadId(root: ParentNode = document): string | null {
+  const encodedIds = verifiedActiveLocalThreadIds(root);
+  if (!encodedIds) return null;
+  const values = encodedIds.map((encoded) => {
+    if (!encoded.startsWith("local:")) return null;
     const stripped = encoded.slice("local:".length);
     return plausibleThreadId(stripped) ? stripped : null;
   });
@@ -31,15 +48,27 @@ export function activeLocalThreadId(root: ParentNode = document): string | null 
   return distinct.length === 1 ? distinct[0] ?? null : null;
 }
 
-export function annotationConsensusThreadId(root: ParentNode = document): string | null {
+export function activeLocalThreadUsesTemporaryAlias(root: ParentNode = document): boolean {
+  const encodedIds = verifiedActiveLocalThreadIds(root);
+  if (!encodedIds || encodedIds.some((value) => !isTemporaryLocalThreadAlias(value))) return false;
+  return new Set(encodedIds).size === 1;
+}
+
+export function annotationConsensusThreadId(
+  root: ParentNode = document,
+  allowMissingResponses = false,
+): string | null {
   const composer = [...root.querySelectorAll(COMPOSER_THREAD_SELECTOR)]
     .map((element) => element.getAttribute("data-above-composer-conversation-id"));
   const responses = [...root.querySelectorAll(RESPONSE_THREAD_SELECTOR)]
     .map((element) => element.getAttribute("data-response-annotation-conversation"));
   if (composer.some((value) => !plausibleThreadId(value)) || responses.some((value) => !plausibleThreadId(value))) return null;
+  if (composer.length !== 1 || (!allowMissingResponses && responses.length === 0)) return null;
   const composerIds = [...new Set(composer as string[])];
   const responseIds = [...new Set(responses as string[])];
-  return composerIds.length === 1 && responseIds.length === 1 && composerIds[0] === responseIds[0] ? composerIds[0] ?? null : null;
+  if (responseIds.length > 1) return null;
+  if (responseIds.length === 1 && composerIds[0] !== responseIds[0]) return null;
+  return composerIds[0] ?? null;
 }
 
 export const codex26715Adapter: RendererAdapter = Object.freeze({
@@ -51,7 +80,10 @@ export const codex26715Adapter: RendererAdapter = Object.freeze({
     return Boolean(parent?.querySelector(":scope > aside.app-shell-left-panel") && root.querySelector("[data-app-shell-sidebar-trigger]"));
   },
   activeThreadId: (root: ParentNode = document) => {
-    if (root.querySelector(ACTIVE_THREAD_MARKER_SELECTOR)) return activeLocalThreadId(root);
+    if (root.querySelector(ACTIVE_THREAD_MARKER_SELECTOR)) {
+      return activeLocalThreadId(root) ??
+        (activeLocalThreadUsesTemporaryAlias(root) ? annotationConsensusThreadId(root, true) : null);
+    }
     return annotationConsensusThreadId(root);
   },
 });

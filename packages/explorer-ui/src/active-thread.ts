@@ -3,6 +3,7 @@ import {
   COMPOSER_THREAD_SELECTOR,
   RESPONSE_THREAD_SELECTOR,
   activeLocalThreadId,
+  activeLocalThreadUsesTemporaryAlias,
   annotationConsensusThreadId,
   plausibleThreadId,
 } from "./adapters/codex-26.715";
@@ -82,7 +83,12 @@ function idFromElement(element: Element): string | null {
 
 function documentThreadSignal(root: ParentNode = document): DocumentThreadSignal {
   if (root.querySelector(ACTIVE_THREAD_MARKER_SELECTOR)) {
-    return { markerPresent: true, threadId: activeLocalThreadId(root) };
+    const canonical = activeLocalThreadId(root);
+    if (canonical) return { markerPresent: true, threadId: canonical };
+    return {
+      markerPresent: true,
+      threadId: activeLocalThreadUsesTemporaryAlias(root) ? annotationConsensusThreadId(root, true) : null,
+    };
   }
 
   if (root.querySelector(`${COMPOSER_THREAD_SELECTOR},${RESPONSE_THREAD_SELECTOR}`)) {
