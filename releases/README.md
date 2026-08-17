@@ -5,6 +5,34 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.87
+
+- `CodeCodex-0.1.87-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.87-x64.msi`: MSI installer.
+- `CodeCodex-0.1.87-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Supports the callable RPC namespaces used by current stable Codex so Particle
+  Image Background can switch to Dark mode automatically.
+
+## v0.1.86
+
+- `CodeCodex-0.1.86-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.86-x64.msi`: MSI installer.
+- `CodeCodex-0.1.86-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Keeps authoritative Codex Appearance monitoring active across particle image
+  changes and automatic image rotation.
+
+## v0.1.85
+
+- `CodeCodex-0.1.85-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.85-x64.msi`: MSI installer.
+- `CodeCodex-0.1.85-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Switches Particle Image Background to Codex Dark mode automatically through
+  the stable desktop settings bridge and restores the previous Light or System
+  preference when the plugin is disabled.
+
 ## v0.1.81
 
 - `CodeCodex-0.1.81-x64-setup.exe`: recommended installer.
@@ -487,5 +515,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.81
+./scripts/package.ps1 -Version 0.1.87
 ```

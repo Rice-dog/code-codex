@@ -90,10 +90,8 @@ const FORCED_COLORS_QUERY = "(forced-colors: active)";
 const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
 const PARTICLE_BACKGROUND_SETTINGS_KEY = "code-codex:particle-image-background:v1";
 const PARTICLE_BACKGROUND_THEME_LEASE_KEY = "code-codex:particle-theme-lease:v1";
-const CODEX_APPEARANCE_THEME_KEY = "appearanceTheme";
-const CODEX_GET_SETTING_URL = "vscode://codex/get-setting";
-const CODEX_APPEARANCE_REQUEST_TIMEOUT_MS = 5_000;
 const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
+const CODEX_APPEARANCE_POLL_INTERVAL_MS = 1_500;
 const PARTICLE_BACKGROUND_DB_NAME = "code-codex-particle-image-background";
 const PARTICLE_BACKGROUND_DB_VERSION = 1;
 const PARTICLE_BACKGROUND_STORE = "images";
@@ -506,13 +504,17 @@ interface ParticleBackgroundSettings {
 
 type CodexAppearanceTheme = "system" | "light" | "dark";
 
+type CodexAppearanceAction =
+  | { readonly type: "app.appearance.get" }
+  | {
+      readonly type: "app.appearance.set_mode";
+      readonly mode: CodexAppearanceTheme;
+    };
+
 interface CodexAppearanceAdapter {
   readonly appActions: {
     readonly runInPrimaryWindow: (request: {
-      readonly action: {
-        readonly type: "app.appearance.set_mode";
-        readonly mode: CodexAppearanceTheme;
-      };
+      readonly action: CodexAppearanceAction;
     }) => Promise<unknown>;
   };
   readonly clientCoordination: {
@@ -725,75 +727,13 @@ function isCodexAppearanceTheme(value: unknown): value is CodexAppearanceTheme {
   return value === "system" || value === "light" || value === "dark";
 }
 
-function codexAppearanceRequest<T>(url: string, body: Record<string, unknown>): Promise<T> {
-  const bridge = window.electronBridge;
-  const sendMessageFromView = bridge?.sendMessageFromView;
-  if (!bridge || typeof sendMessageFromView !== "function") {
-    return Promise.reject(new Error("Codex Appearance settings are unavailable"));
-  }
-  const requestId = crypto.randomUUID();
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    let timer = 0;
-    const cleanup = (): void => {
-      window.clearTimeout(timer);
-      window.removeEventListener("message", onMessage);
-    };
-    const fail = (error: unknown): void => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(error instanceof Error ? error : new Error("Codex Appearance settings could not be changed"));
-    };
-    const onMessage = (event: MessageEvent): void => {
-      const data = event.data;
-      if (!data || typeof data !== "object") return;
-      const response = data as Record<string, unknown>;
-      if (response.type !== "fetch-response" || response.requestId !== requestId) return;
-      if (settled) return;
-      settled = true;
-      cleanup();
-      const status = Number(response.status);
-      if (response.responseType !== "success" || !Number.isFinite(status) || status < 200 || status >= 300) {
-        reject(new Error(typeof response.error === "string" ? response.error : "Codex rejected the Appearance setting"));
-        return;
-      }
-      if (typeof response.bodyJsonString !== "string") {
-        reject(new Error("Codex returned an invalid Appearance setting response"));
-        return;
-      }
-      try {
-        resolve(JSON.parse(response.bodyJsonString) as T);
-      } catch {
-        reject(new Error("Codex returned an invalid Appearance setting response"));
-      }
-    };
-    window.addEventListener("message", onMessage);
-    timer = window.setTimeout(() => fail(new Error("Codex Appearance settings timed out")), CODEX_APPEARANCE_REQUEST_TIMEOUT_MS);
-    try {
-      const sent = sendMessageFromView.call(bridge, {
-        type: "fetch",
-        requestId,
-        method: "POST",
-        url,
-        body: JSON.stringify(body),
-      });
-      void Promise.resolve(sent).catch(fail);
-    } catch (error) {
-      fail(error);
-    }
-  });
-}
-
-async function readCodexAppearanceTheme(): Promise<CodexAppearanceTheme> {
-  const result = await codexAppearanceRequest<unknown>(CODEX_GET_SETTING_URL, { key: CODEX_APPEARANCE_THEME_KEY });
-  const value = result && typeof result === "object" ? (result as Record<string, unknown>).value : undefined;
-  if (!isCodexAppearanceTheme(value)) throw new Error("Codex returned an unsupported Appearance setting");
-  return value;
-}
-
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
+}
+
+function isCodexRpcNamespace(value: unknown): value is Record<string, unknown> {
+  // Stable Codex exposes RPC namespaces as callable proxies; older builds used objects.
+  return value !== null && (typeof value === "object" || typeof value === "function");
 }
 
 function findCodexAppInitialModule(): string | undefined {
@@ -816,7 +756,7 @@ async function discoverCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter>
   if (!moduleUrl) throw new Error("Codex Appearance module is unavailable");
   const moduleExports = await import(moduleUrl) as unknown as Record<string, unknown>;
   const adapters = Object.values(moduleExports).filter((value): value is CodexAppearanceAdapter => {
-    if (!isObjectRecord(value) || !isObjectRecord(value.appActions) || !isObjectRecord(value.clientCoordination)) {
+    if (!isObjectRecord(value) || !isCodexRpcNamespace(value.appActions) || !isCodexRpcNamespace(value.clientCoordination)) {
       return false;
     }
     return typeof value.appActions.runInPrimaryWindow === "function"
@@ -839,12 +779,24 @@ function getCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter> {
   return codexAppearanceAdapterPromise;
 }
 
-async function writeCodexAppearanceTheme(value: CodexAppearanceTheme): Promise<void> {
+async function runCodexAppearanceAction(action: CodexAppearanceAction): Promise<Record<string, unknown>> {
   const adapter = await getCodexAppearanceAdapter();
-  const result = await adapter.appActions.runInPrimaryWindow({
-    action: { type: "app.appearance.set_mode", mode: value },
-  });
-  if (!isObjectRecord(result) || result.mode !== value) {
+  const result = await adapter.appActions.runInPrimaryWindow({ action });
+  if (!isObjectRecord(result)) throw new Error("Codex returned an invalid Appearance response");
+  return result;
+}
+
+async function readCodexAppearanceTheme(): Promise<CodexAppearanceTheme> {
+  const result = await runCodexAppearanceAction({ type: "app.appearance.get" });
+  if (!isCodexAppearanceTheme(result.mode)) {
+    throw new Error("Codex returned an unsupported Appearance setting");
+  }
+  return result.mode;
+}
+
+async function writeCodexAppearanceTheme(value: CodexAppearanceTheme): Promise<void> {
+  const result = await runCodexAppearanceAction({ type: "app.appearance.set_mode", mode: value });
+  if (result.mode !== value) {
     throw new Error("Codex did not confirm the Appearance change");
   }
 }
@@ -2422,7 +2374,10 @@ class ParticleBackgroundController {
   #sourceReleaseTimer = 0;
   #generation = 0;
   #disposed = false;
+  #enableOperation: Promise<void> | undefined;
   #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
   #stoppedForExternalThemeChange = false;
 
   constructor() {
@@ -2471,8 +2426,25 @@ class ParticleBackgroundController {
   }
 
   async enable(): Promise<void> {
+    const generation = this.#generation;
     await this.initialize();
-    if (this.#disposed || this.#enabled || this.#pending) return;
+    if (
+      this.#disposed
+      || this.#enabled
+      || this.#pending
+      || this.#enableOperation
+      || generation !== this.#generation
+    ) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.#enableOperation === operation) this.#enableOperation = undefined;
+    }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
     this.#stoppedForExternalThemeChange = false;
     this.#pending = true;
     this.#error = undefined;
@@ -2480,7 +2452,7 @@ class ParticleBackgroundController {
     try {
       if (!document.body) throw new Error("The Codex window is not ready");
       await this.#ensureCodexDarkTheme();
-      if (this.#disposed) return;
+      if (this.#disposed || generation !== this.#generation) return;
       const layer = document.createElement("div");
       layer.dataset.codeCodexParticleLayer = "v1";
       layer.setAttribute("aria-hidden", "true");
@@ -2511,6 +2483,7 @@ class ParticleBackgroundController {
       document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, this.#settings.backgroundColor);
       this.#enabled = true;
       this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
       this.#applySourcePresentation();
       const initialId = this.#validActiveImageId() ?? this.#settings.selectedImageIds[0] ?? null;
       if (initialId) await this.#activateImage(initialId, false);
@@ -2534,12 +2507,14 @@ class ParticleBackgroundController {
   }
 
   async disable(): Promise<void> {
+    const pendingEnable = this.#enableOperation;
     this.#stoppedForExternalThemeChange = false;
     const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
     this.#enabled = false;
     this.#pending = false;
     this.#generation += 1;
     if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
     try {
       await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
@@ -2898,6 +2873,9 @@ class ParticleBackgroundController {
   #teardownPresentation(): void {
     this.#codexThemeObserver?.disconnect();
     this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
     this.#stopRotation();
     window.clearTimeout(this.#sourceReleaseTimer);
     this.#sourceReleaseTimer = 0;
@@ -2925,7 +2903,7 @@ class ParticleBackgroundController {
       current = await readCodexAppearanceTheme();
     } catch (error) {
       if (codexDarkThemeApplied()) return;
-      throw new Error("Set Codex Settings > Appearance > Base theme to Dark, then try again.", { cause: error });
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
 
     const lease = readParticleThemeLease();
@@ -2936,6 +2914,7 @@ class ParticleBackgroundController {
     }
     if (lease) {
       clearParticleThemeLease();
+      this.#stoppedForExternalThemeChange = true;
       throw new Error("Particle Image Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
     }
 
@@ -2950,7 +2929,7 @@ class ParticleBackgroundController {
       } catch {
         // Retain the lease so a later disable/startup can retry restoration.
       }
-      throw new Error("Codex could not switch to Dark. Set Settings > Appearance > Base theme to Dark, then try again.", { cause: error });
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
 
@@ -2970,19 +2949,50 @@ class ParticleBackgroundController {
     this.#codexThemeObserver?.disconnect();
     this.#codexThemeObserver = new MutationObserver(() => {
       if (!this.#enabled || codexDarkThemeApplied()) return;
-      this.#enabled = false;
-      this.#pending = false;
-      this.#generation += 1;
-      this.#error = "Particle Image Background stopped because Codex Appearance is no longer Dark.";
-      this.#stoppedForExternalThemeChange = true;
-      this.#teardownPresentation();
-      clearParticleThemeLease();
-      this.#notify();
+      this.#stopForExternalThemeChange();
     });
     this.#codexThemeObserver.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["class", "data-theme"],
     });
+  }
+
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") {
+        this.#stopForExternalThemeChange();
+        return;
+      }
+    } catch {
+      // A transient read failure must not tear down an active presentation.
+    }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Particle Image Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease();
+    this.#notify();
   }
 
   #notify(): void {
