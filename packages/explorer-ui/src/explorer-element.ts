@@ -79,12 +79,50 @@ const SETTINGS_KEY = "code-codex:ui-settings:v1";
 const PREVIEWER_SETTINGS_KEY = "code-codex:previewers:v1";
 const APPEARANCE_PLUGIN_SETTINGS_KEY = "code-codex:appearance-plugins:v1";
 const TRANSPARENT_BACKGROUND_PLUGIN_ID = "code-codex.transparent-background";
-const APPEARANCE_PLUGIN_IDS = new Set([TRANSPARENT_BACKGROUND_PLUGIN_ID]);
+const PARTICLE_BACKGROUND_PLUGIN_ID = "code-codex.particle-image-background";
+const APPEARANCE_PLUGIN_IDS = new Set([TRANSPARENT_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
+export const PARTICLE_BACKGROUND_ATTRIBUTE = "data-code-codex-particle-image-background";
+export const PARTICLE_BACKGROUND_COLOR_PROPERTY = "--code-codex-particle-background";
 const TRANSPARENT_BACKGROUND_HEALTH_INTERVAL_MS = 1_500;
 const FORCED_COLORS_QUERY = "(forced-colors: active)";
 const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
+const PARTICLE_BACKGROUND_SETTINGS_KEY = "code-codex:particle-image-background:v1";
+const PARTICLE_BACKGROUND_THEME_LEASE_KEY = "code-codex:particle-theme-lease:v1";
+const CODEX_APPEARANCE_THEME_KEY = "appearanceTheme";
+const CODEX_GET_SETTING_URL = "vscode://codex/get-setting";
+const CODEX_APPEARANCE_REQUEST_TIMEOUT_MS = 5_000;
+const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
+const PARTICLE_BACKGROUND_DB_NAME = "code-codex-particle-image-background";
+const PARTICLE_BACKGROUND_DB_VERSION = 1;
+const PARTICLE_BACKGROUND_STORE = "images";
+const PARTICLE_BACKGROUND_MAX_IMAGES = 32;
+const PARTICLE_BACKGROUND_MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+const PARTICLE_BACKGROUND_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const PARTICLE_BACKGROUND_SAMPLE_MAX_DIMENSION = 900;
+const PARTICLE_BACKGROUND_PREPARE_TIMEOUT_MS = 30_000;
+const PARTICLE_BACKGROUND_MASS_BUCKETS = 4_096;
+const PARTICLE_BACKGROUND_POINTER_SEGMENTS = 40;
+const PARTICLE_BACKGROUND_PARTICLE_LIFETIME_SECONDS = 1;
+const PARTICLE_BACKGROUND_PARTICLE_LIFETIME_JITTER_SECONDS = 0.12;
+const PARTICLE_BACKGROUND_MAX_LIFETIME_SECONDS = PARTICLE_BACKGROUND_PARTICLE_LIFETIME_SECONDS
+  + PARTICLE_BACKGROUND_PARTICLE_LIFETIME_JITTER_SECONDS;
+const PARTICLE_BACKGROUND_POINTER_SAMPLE_SECONDS = PARTICLE_BACKGROUND_MAX_LIFETIME_SECONDS
+  / PARTICLE_BACKGROUND_POINTER_SEGMENTS;
+const PARTICLE_BACKGROUND_FLOW_STEP_SECONDS = 1 / 64;
+const PARTICLE_BACKGROUND_POINTER_IDLE_SECONDS = 0.18;
+const PARTICLE_BACKGROUND_MAX_FRAME_DELTA_SECONDS = 0.1;
+const PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH = 40;
+const PARTICLE_BACKGROUND_CURSOR_MAX_STRENGTH = 400;
+const PARTICLE_BACKGROUND_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/avif";
+const PARTICLE_BACKGROUND_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/avif",
+]);
 const MAX_MEDIA_CHUNK_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_PREVIEW_BYTES = 32 * 1024 * 1024;
 const MAX_VIDEO_PREVIEW_BYTES = 128 * 1024 * 1024;
@@ -444,6 +482,2550 @@ interface ExternalDataTransferItem extends DataTransferItem {
   getAsEntry?: () => FileSystemEntry | null;
 }
 
+interface ParticleBackgroundSettings {
+  readonly particleCount: number;
+  readonly particleSize: number;
+  readonly particleOpacity: number;
+  readonly speed: number;
+  readonly noiseScale: number;
+  readonly noiseStrength: number;
+  readonly damping: number;
+  readonly ambientCycle: number;
+  readonly selectedImageIds: readonly string[];
+  readonly activeImageId: string | null;
+  readonly autoSwitch: boolean;
+  readonly imageDurationSeconds: number;
+  readonly morphIntervalSeconds: number;
+  readonly imageOpacity: number;
+  readonly showSourceImage: boolean;
+  readonly backgroundColor: string;
+  readonly cursorStrength: number;
+  readonly cursorInteraction: boolean;
+  readonly dprCap: number;
+}
+
+type CodexAppearanceTheme = "system" | "light" | "dark";
+
+interface CodexAppearanceAdapter {
+  readonly appActions: {
+    readonly runInPrimaryWindow: (request: {
+      readonly action: {
+        readonly type: "app.appearance.set_mode";
+        readonly mode: CodexAppearanceTheme;
+      };
+    }) => Promise<unknown>;
+  };
+  readonly clientCoordination: {
+    readonly invalidateQueryCache: (request: { readonly queryKey: readonly string[] }) => Promise<unknown>;
+  };
+}
+
+interface ParticleThemeLease {
+  readonly previousPreference: Exclude<CodexAppearanceTheme, "dark">;
+  readonly forcedPreference: "dark";
+}
+
+type ParticleNumericSettingKey =
+  | "particleCount"
+  | "particleSize"
+  | "particleOpacity"
+  | "speed"
+  | "noiseScale"
+  | "noiseStrength"
+  | "damping"
+  | "ambientCycle"
+  | "imageDurationSeconds"
+  | "morphIntervalSeconds"
+  | "imageOpacity"
+  | "cursorStrength"
+  | "dprCap";
+
+type ParticleControlGroup = "particles" | "flow" | "source" | "pointer" | "render";
+
+interface ParticleNumericControlDefinition {
+  readonly key: ParticleNumericSettingKey;
+  readonly group: ParticleControlGroup;
+  readonly id: string;
+  readonly label: string;
+  readonly minimum: number;
+  readonly maximum: number;
+  readonly step: number;
+  readonly live: boolean;
+  readonly format: (value: number) => string;
+}
+
+interface ParticleImageRecord {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+  readonly size: number;
+  readonly createdAt: number;
+  readonly blob: Blob;
+  readonly thumbnail: Blob;
+}
+
+interface PreparedParticleImage {
+  readonly imageId: string;
+  readonly targetCount: number;
+  readonly width: number;
+  readonly height: number;
+  readonly naturalWidth: number;
+  readonly naturalHeight: number;
+  readonly processedBlob: Blob;
+  readonly normalizedHomes: Float32Array<ArrayBuffer>;
+  readonly colors: Uint8Array<ArrayBuffer>;
+  readonly seeds: Float32Array<ArrayBuffer>;
+}
+
+interface ParticlePointerSegment {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  velocityX: number;
+  velocityY: number;
+  startedAt: number;
+  createdAt: number;
+  duration: number;
+  sealed: boolean;
+}
+
+const DEFAULT_PARTICLE_BACKGROUND_SETTINGS: ParticleBackgroundSettings = Object.freeze({
+  particleCount: 560_000,
+  particleSize: 1.8,
+  particleOpacity: 0.96,
+  speed: 0.70,
+  noiseScale: 0.0001,
+  noiseStrength: 0.005,
+  damping: 0.9919,
+  ambientCycle: 80,
+  selectedImageIds: Object.freeze([]),
+  activeImageId: null,
+  autoSwitch: true,
+  imageDurationSeconds: 2,
+  morphIntervalSeconds: 2.5,
+  imageOpacity: 1,
+  showSourceImage: true,
+  backgroundColor: "#000000",
+  cursorStrength: PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH,
+  cursorInteraction: true,
+  dprCap: 1.5,
+});
+
+const PARTICLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
+  { key: "particleCount", group: "particles", id: "cle-particle-count", label: "Particle count", minimum: 10_000, maximum: 2_000_000, step: 10_000, live: false, format: (value: number) => Math.round(value).toLocaleString() },
+  { key: "particleSize", group: "particles", id: "cle-particle-size", label: "Particle size", minimum: 0.5, maximum: 4, step: 0.1, live: true, format: (value: number) => value.toFixed(1) },
+  { key: "particleOpacity", group: "particles", id: "cle-particle-opacity", label: "Particle opacity", minimum: 0.1, maximum: 1, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "speed", group: "flow", id: "cle-particle-speed", label: "Speed", minimum: 0, maximum: 2, step: 0.05, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "noiseScale", group: "flow", id: "cle-particle-noise-scale", label: "Noise scale", minimum: 0.0001, maximum: 0.002, step: 0.0001, live: true, format: (value: number) => value.toFixed(4) },
+  { key: "noiseStrength", group: "flow", id: "cle-particle-noise-strength", label: "Noise strength", minimum: 0, maximum: 0.15, step: 0.005, live: true, format: (value: number) => value.toFixed(3) },
+  { key: "damping", group: "flow", id: "cle-particle-damping", label: "Damping", minimum: 0.8, maximum: 0.9999, step: 0.0001, live: true, format: (value: number) => value.toFixed(4) },
+  { key: "ambientCycle", group: "flow", id: "cle-particle-ambient-cycle", label: "Ambient cycle", minimum: 40, maximum: 500, step: 10, live: true, format: (value: number) => String(Math.round(value)) },
+  { key: "imageDurationSeconds", group: "source", id: "cle-particle-image-duration", label: "Image duration", minimum: 1, maximum: 60, step: 1, live: true, format: (value: number) => `${Math.round(value)}s` },
+  { key: "morphIntervalSeconds", group: "source", id: "cle-particle-morph-interval", label: "Morph interval", minimum: 1, maximum: 12, step: 0.1, live: true, format: (value: number) => `${value.toFixed(1)}s` },
+  { key: "imageOpacity", group: "source", id: "cle-particle-image-opacity", label: "Image opacity", minimum: 0, maximum: 1, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "cursorStrength", group: "pointer", id: "cle-particle-cursor-strength", label: "Cursor strength", minimum: 0, maximum: PARTICLE_BACKGROUND_CURSOR_MAX_STRENGTH, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "dprCap", group: "render", id: "cle-particle-dpr-cap", label: "DPR cap", minimum: 1, maximum: 2, step: 0.25, live: true, format: (value: number) => value.toFixed(2) },
+] satisfies readonly ParticleNumericControlDefinition[]);
+
+function clampParticleNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback;
+}
+
+function normalizeParticleCount(value: unknown): number {
+  return Math.round(clampParticleNumber(value, 10_000, 2_000_000, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.particleCount) / 10_000) * 10_000;
+}
+
+function normalizeSteppedParticleNumber(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  step: number,
+  fallback: number,
+  precision: number,
+): number {
+  const clamped = clampParticleNumber(value, minimum, maximum, fallback);
+  const stepped = minimum + Math.round((clamped - minimum) / step) * step;
+  return Number(Math.min(maximum, Math.max(minimum, stepped)).toFixed(precision));
+}
+
+function normalizeParticleColor(value: unknown): string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+    ? value.toLocaleLowerCase()
+    : DEFAULT_PARTICLE_BACKGROUND_SETTINGS.backgroundColor;
+}
+
+function normalizeParticleSettings(value: unknown): ParticleBackgroundSettings {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const selectedImageIds = Array.isArray(record.selectedImageIds)
+    ? [...new Set(record.selectedImageIds.filter((entry): entry is string => typeof entry === "string" && entry.length <= 128))]
+    : [];
+  return {
+    particleCount: normalizeParticleCount(record.particleCount),
+    particleSize: normalizeSteppedParticleNumber(record.particleSize, 0.5, 4, 0.1, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.particleSize, 1),
+    particleOpacity: normalizeSteppedParticleNumber(record.particleOpacity, 0.1, 1, 0.01, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.particleOpacity, 2),
+    speed: normalizeSteppedParticleNumber(record.speed, 0, 2, 0.05, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.speed, 2),
+    noiseScale: normalizeSteppedParticleNumber(record.noiseScale, 0.0001, 0.002, 0.0001, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.noiseScale, 4),
+    noiseStrength: normalizeSteppedParticleNumber(record.noiseStrength, 0, 0.15, 0.005, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.noiseStrength, 3),
+    damping: normalizeSteppedParticleNumber(record.damping, 0.8, 0.9999, 0.0001, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.damping, 4),
+    ambientCycle: normalizeSteppedParticleNumber(record.ambientCycle, 40, 500, 10, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.ambientCycle, 0),
+    selectedImageIds,
+    activeImageId: typeof record.activeImageId === "string" && record.activeImageId.length <= 128
+      ? record.activeImageId
+      : null,
+    autoSwitch: typeof record.autoSwitch === "boolean" ? record.autoSwitch : DEFAULT_PARTICLE_BACKGROUND_SETTINGS.autoSwitch,
+    imageDurationSeconds: Math.round(clampParticleNumber(
+      record.imageDurationSeconds,
+      1,
+      60,
+      DEFAULT_PARTICLE_BACKGROUND_SETTINGS.imageDurationSeconds,
+    )),
+    morphIntervalSeconds: Math.round(clampParticleNumber(
+      record.morphIntervalSeconds,
+      1,
+      12,
+      DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds,
+    ) * 10) / 10,
+    imageOpacity: Math.round(clampParticleNumber(
+      record.imageOpacity,
+      0,
+      1,
+      DEFAULT_PARTICLE_BACKGROUND_SETTINGS.imageOpacity,
+    ) * 100) / 100,
+    showSourceImage: typeof record.showSourceImage === "boolean"
+      ? record.showSourceImage
+      : DEFAULT_PARTICLE_BACKGROUND_SETTINGS.showSourceImage,
+    backgroundColor: normalizeParticleColor(record.backgroundColor),
+    cursorStrength: normalizeSteppedParticleNumber(record.cursorStrength, 0, PARTICLE_BACKGROUND_CURSOR_MAX_STRENGTH, 0.01, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.cursorStrength, 2),
+    cursorInteraction: typeof record.cursorInteraction === "boolean"
+      ? record.cursorInteraction
+      : DEFAULT_PARTICLE_BACKGROUND_SETTINGS.cursorInteraction,
+    dprCap: normalizeSteppedParticleNumber(record.dprCap, 1, 2, 0.25, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.dprCap, 2),
+  };
+}
+
+function readParticleBackgroundSettings(): ParticleBackgroundSettings {
+  try {
+    return normalizeParticleSettings(JSON.parse(localStorage.getItem(PARTICLE_BACKGROUND_SETTINGS_KEY) || "{}"));
+  } catch {
+    return { ...DEFAULT_PARTICLE_BACKGROUND_SETTINGS };
+  }
+}
+
+function writeParticleBackgroundSettings(settings: ParticleBackgroundSettings): void {
+  try {
+    localStorage.setItem(PARTICLE_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // The current session keeps working when DOM storage is unavailable.
+  }
+}
+
+function isCodexAppearanceTheme(value: unknown): value is CodexAppearanceTheme {
+  return value === "system" || value === "light" || value === "dark";
+}
+
+function codexAppearanceRequest<T>(url: string, body: Record<string, unknown>): Promise<T> {
+  const bridge = window.electronBridge;
+  const sendMessageFromView = bridge?.sendMessageFromView;
+  if (!bridge || typeof sendMessageFromView !== "function") {
+    return Promise.reject(new Error("Codex Appearance settings are unavailable"));
+  }
+  const requestId = crypto.randomUUID();
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let timer = 0;
+    const cleanup = (): void => {
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+    };
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error instanceof Error ? error : new Error("Codex Appearance settings could not be changed"));
+    };
+    const onMessage = (event: MessageEvent): void => {
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+      const response = data as Record<string, unknown>;
+      if (response.type !== "fetch-response" || response.requestId !== requestId) return;
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const status = Number(response.status);
+      if (response.responseType !== "success" || !Number.isFinite(status) || status < 200 || status >= 300) {
+        reject(new Error(typeof response.error === "string" ? response.error : "Codex rejected the Appearance setting"));
+        return;
+      }
+      if (typeof response.bodyJsonString !== "string") {
+        reject(new Error("Codex returned an invalid Appearance setting response"));
+        return;
+      }
+      try {
+        resolve(JSON.parse(response.bodyJsonString) as T);
+      } catch {
+        reject(new Error("Codex returned an invalid Appearance setting response"));
+      }
+    };
+    window.addEventListener("message", onMessage);
+    timer = window.setTimeout(() => fail(new Error("Codex Appearance settings timed out")), CODEX_APPEARANCE_REQUEST_TIMEOUT_MS);
+    try {
+      const sent = sendMessageFromView.call(bridge, {
+        type: "fetch",
+        requestId,
+        method: "POST",
+        url,
+        body: JSON.stringify(body),
+      });
+      void Promise.resolve(sent).catch(fail);
+    } catch (error) {
+      fail(error);
+    }
+  });
+}
+
+async function readCodexAppearanceTheme(): Promise<CodexAppearanceTheme> {
+  const result = await codexAppearanceRequest<unknown>(CODEX_GET_SETTING_URL, { key: CODEX_APPEARANCE_THEME_KEY });
+  const value = result && typeof result === "object" ? (result as Record<string, unknown>).value : undefined;
+  if (!isCodexAppearanceTheme(value)) throw new Error("Codex returned an unsupported Appearance setting");
+  return value;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function findCodexAppInitialModule(): string | undefined {
+  const candidates = [
+    ...Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="modulepreload"][href]'), (link) => link.href),
+    ...Array.from(document.querySelectorAll<HTMLScriptElement>("script[type=module][src]"), (script) => script.src),
+    ...performance.getEntriesByType("resource").map((entry) => entry.name),
+  ];
+  return candidates.find((candidate) => {
+    try {
+      return /\/app-initial-[^/]+\.js$/.test(new URL(candidate, location.href).pathname);
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function discoverCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter> {
+  const moduleUrl = findCodexAppInitialModule();
+  if (!moduleUrl) throw new Error("Codex Appearance module is unavailable");
+  const moduleExports = await import(moduleUrl) as unknown as Record<string, unknown>;
+  const adapters = Object.values(moduleExports).filter((value): value is CodexAppearanceAdapter => {
+    if (!isObjectRecord(value) || !isObjectRecord(value.appActions) || !isObjectRecord(value.clientCoordination)) {
+      return false;
+    }
+    return typeof value.appActions.runInPrimaryWindow === "function"
+      && typeof value.clientCoordination.invalidateQueryCache === "function";
+  });
+  const adapter = adapters[0];
+  if (adapters.length !== 1 || !adapter) throw new Error("Codex Appearance controls could not be identified safely");
+  return adapter;
+}
+
+let codexAppearanceAdapterPromise: Promise<CodexAppearanceAdapter> | undefined;
+
+function getCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter> {
+  if (!codexAppearanceAdapterPromise) {
+    codexAppearanceAdapterPromise = discoverCodexAppearanceAdapter().catch((error: unknown) => {
+      codexAppearanceAdapterPromise = undefined;
+      throw error;
+    });
+  }
+  return codexAppearanceAdapterPromise;
+}
+
+async function writeCodexAppearanceTheme(value: CodexAppearanceTheme): Promise<void> {
+  const adapter = await getCodexAppearanceAdapter();
+  const result = await adapter.appActions.runInPrimaryWindow({
+    action: { type: "app.appearance.set_mode", mode: value },
+  });
+  if (!isObjectRecord(result) || result.mode !== value) {
+    throw new Error("Codex did not confirm the Appearance change");
+  }
+}
+
+function readParticleThemeLease(): ParticleThemeLease | undefined {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(PARTICLE_BACKGROUND_THEME_LEASE_KEY) || "null");
+    if (!value || typeof value !== "object") return undefined;
+    const lease = value as Partial<ParticleThemeLease>;
+    if ((lease.previousPreference === "system" || lease.previousPreference === "light") && lease.forcedPreference === "dark") {
+      return { previousPreference: lease.previousPreference, forcedPreference: "dark" };
+    }
+  } catch {
+    // Invalid or inaccessible storage is handled as an absent lease.
+  }
+  return undefined;
+}
+
+function writeParticleThemeLease(lease: ParticleThemeLease): void {
+  try {
+    localStorage.setItem(PARTICLE_BACKGROUND_THEME_LEASE_KEY, JSON.stringify(lease));
+  } catch {
+    throw new Error("Code-Codex could not remember the current Appearance setting");
+  }
+}
+
+function clearParticleThemeLease(): void {
+  try {
+    localStorage.removeItem(PARTICLE_BACKGROUND_THEME_LEASE_KEY);
+  } catch {
+    // The setting bridge still owns the authoritative theme preference.
+  }
+}
+
+function codexDarkThemeApplied(): boolean {
+  const root = document.documentElement;
+  return root.classList.contains("electron-dark") && !root.classList.contains("electron-light");
+}
+
+function waitForCodexDarkTheme(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = 0;
+    let observer: MutationObserver | undefined;
+    const cleanup = (): void => {
+      window.clearTimeout(timer);
+      observer?.disconnect();
+    };
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    };
+    const check = (): void => {
+      if (codexDarkThemeApplied()) finish();
+    };
+    if (codexDarkThemeApplied()) {
+      finish();
+      return;
+    }
+    observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+    timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Codex did not finish applying Dark appearance"));
+    }, CODEX_DARK_APPLY_TIMEOUT_MS);
+    check();
+  });
+}
+
+function particleHash01(value: number): number {
+  const number = Math.sin(value * 91.317) * 47_453.5453;
+  return number - Math.floor(number);
+}
+
+function particleHashUint32(value: number): number {
+  let hash = value >>> 0;
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x7feb352d);
+  hash ^= hash >>> 15;
+  hash = Math.imul(hash, 0x846ca68b);
+  hash ^= hash >>> 16;
+  return hash >>> 0;
+}
+
+function particleImagePreparationWorkerMain(): void {
+  const workerScope = globalThis as unknown as {
+    addEventListener(type: "message", listener: (event: MessageEvent<Record<string, unknown>>) => void): void;
+    postMessage(message: unknown, transfer: Transferable[]): void;
+  };
+  const hash01 = (value: number): number => {
+    const number = Math.sin(value * 91.317) * 47_453.5453;
+    return number - Math.floor(number);
+  };
+  const hashUint32 = (value: number): number => {
+    let hash = value >>> 0;
+    hash ^= hash >>> 16;
+    hash = Math.imul(hash, 0x7feb352d);
+    hash ^= hash >>> 15;
+    hash = Math.imul(hash, 0x846ca68b);
+    hash ^= hash >>> 16;
+    return hash >>> 0;
+  };
+  workerScope.addEventListener("message", (event) => {
+    void (async () => {
+      const data = event.data;
+      const jobId = Number(data.jobId);
+      const imageId = String(data.imageId || "");
+      const source = data.source;
+      const requestedCount = Number(data.targetCount);
+      let bitmap: ImageBitmap | undefined;
+      try {
+        if (!(source instanceof Blob)) throw new Error("The image source is invalid");
+        if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas !== "function") {
+          throw new Error("Background image preparation is unavailable");
+        }
+        bitmap = await createImageBitmap(source);
+        const naturalWidth = bitmap.width;
+        const naturalHeight = bitmap.height;
+        if (!naturalWidth || !naturalHeight || naturalWidth > 16_384 || naturalHeight > 16_384) {
+          throw new Error("The image dimensions are unsupported");
+        }
+        const maximumDimension = 900;
+        const scale = Math.min(1, maximumDimension / Math.max(naturalWidth, naturalHeight));
+        const width = Math.max(1, Math.round(naturalWidth * scale));
+        const height = Math.max(1, Math.round(naturalHeight * scale));
+        const canvas = new OffscreenCanvas(width, height);
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context || typeof canvas.convertToBlob !== "function") throw new Error("The image preparation canvas is unavailable");
+        context.clearRect(0, 0, width, height);
+        context.drawImage(bitmap, 0, 0, width, height);
+        const imageData = context.getImageData(0, 0, width, height);
+        const pixels = imageData.data;
+        let samplingSeed = hashUint32(width ^ (height << 16));
+        let visiblePixels = 0;
+        for (let offset = 0; offset < pixels.length; offset += 4) {
+          const red = pixels[offset] ?? 0;
+          const green = pixels[offset + 1] ?? 0;
+          const blue = pixels[offset + 2] ?? 0;
+          const alpha = pixels[offset + 3] ?? 0;
+          const luminance = Math.round(red * 0.2126 + green * 0.7152 + blue * 0.0722);
+          pixels[offset] = luminance;
+          pixels[offset + 1] = luminance;
+          pixels[offset + 2] = luminance;
+          const pixelIndex = offset >>> 2;
+          if ((pixelIndex & 3) === 0) {
+            samplingSeed = hashUint32(samplingSeed ^ luminance ^ (alpha << 8) ^ Math.imul(pixelIndex + 1, 0x9e3779b1));
+          }
+          if (alpha >= 24) visiblePixels += 1;
+        }
+        if (!visiblePixels) throw new Error("The image contains no visible pixels");
+        context.putImageData(imageData, 0, 0);
+        const processedBlob = await canvas.convertToBlob({ type: "image/png" });
+
+        const pixelCount = width * height;
+        const cumulativeMass = new Uint32Array(pixelCount);
+        const particleLuminance = new Uint8Array(pixelCount);
+        let totalMass = 0;
+        for (let y = 0; y < height; y += 1) {
+          const row = y * width;
+          const up = Math.max(0, y - 1) * width;
+          const down = Math.min(height - 1, y + 1) * width;
+          for (let x = 0; x < width; x += 1) {
+            const pixelIndex = row + x;
+            const offset = pixelIndex * 4;
+            const alpha = pixels[offset + 3] ?? 0;
+            if (alpha >= 24) {
+              const leftValue = pixels[(row + Math.max(0, x - 1)) * 4] ?? 0;
+              const rightValue = pixels[(row + Math.min(width - 1, x + 1)) * 4] ?? 0;
+              const upValue = pixels[(up + x) * 4] ?? 0;
+              const downValue = pixels[(down + x) * 4] ?? 0;
+              const luminance = (pixels[offset] ?? 0) / 255;
+              const edge = Math.min(1, (Math.abs(rightValue - leftValue) + Math.abs(downValue - upValue)) / 510);
+              totalMass += Math.round((alpha / 255) * (Math.pow(luminance, 0.9) * 144 + edge * 112));
+              particleLuminance[pixelIndex] = Math.max(pixels[offset] ?? 0, Math.round(edge * 96));
+            }
+            cumulativeMass[pixelIndex] = totalMass;
+          }
+        }
+        if (!totalMass) {
+          for (let index = 0; index < pixelCount; index += 1) {
+            if ((pixels[index * 4 + 3] ?? 0) >= 24) {
+              totalMass += 1;
+              particleLuminance[index] = Math.max(pixels[index * 4] ?? 0, 96);
+            }
+            cumulativeMass[index] = totalMass;
+          }
+        }
+        if (!totalMass) throw new Error("The image contains no visible pixels");
+
+        const bucketCount = 4_096;
+        const massLookup = new Uint32Array(bucketCount + 1);
+        let pixelCursor = 0;
+        const finalPixel = cumulativeMass.length - 1;
+        for (let bucket = 0; bucket <= bucketCount; bucket += 1) {
+          const threshold = totalMass * bucket / bucketCount;
+          while (pixelCursor < finalPixel && (cumulativeMass[pixelCursor] ?? 0) <= threshold) pixelCursor += 1;
+          massLookup[bucket] = pixelCursor;
+        }
+
+        const targetCount = Math.min(2_000_000, Math.max(10_000, Math.round(requestedCount / 10_000) * 10_000));
+        const normalizedHomes = new Float32Array(targetCount * 2);
+        const colors = new Uint8Array(targetCount * 4);
+        const seeds = new Float32Array(targetCount);
+        for (let index = 0; index < targetCount; index += 1) {
+          const quantile = (hashUint32(index ^ samplingSeed) + 0.5) / 4_294_967_296;
+          const targetMass = quantile * totalMass;
+          const massBucket = Math.min(bucketCount - 1, Math.floor(quantile * bucketCount));
+          let low = massLookup[massBucket] ?? 0;
+          let high = massLookup[massBucket + 1] ?? low;
+          while (low < high) {
+            const middle = (low + high) >>> 1;
+            if ((cumulativeMass[middle] ?? 0) <= targetMass) low = middle + 1;
+            else high = middle;
+          }
+          const pixelIndex = low;
+          const pixelX = pixelIndex % width;
+          const pixelY = Math.floor(pixelIndex / width);
+          const homeOffset = index * 2;
+          const colorOffset = index * 4;
+          normalizedHomes[homeOffset] = Math.max(0, Math.min(1, (pixelX + 0.5 + (hash01(index + 0.17) - 0.5) * 0.82) / width));
+          normalizedHomes[homeOffset + 1] = Math.max(0, Math.min(1, (pixelY + 0.5 + (hash01(index + 7.31) - 0.5) * 0.82) / height));
+          const luminance = particleLuminance[pixelIndex] ?? 0;
+          colors[colorOffset] = luminance;
+          colors[colorOffset + 1] = luminance;
+          colors[colorOffset + 2] = luminance;
+          colors[colorOffset + 3] = pixels[pixelIndex * 4 + 3] ?? 0;
+          seeds[index] = hash01(index + 19.73);
+        }
+        workerScope.postMessage({
+          type: "prepared",
+          jobId,
+          prepared: {
+            imageId,
+            targetCount,
+            width,
+            height,
+            naturalWidth,
+            naturalHeight,
+            processedBlob,
+            normalizedHomes,
+            colors,
+            seeds,
+          },
+        }, [normalizedHomes.buffer, colors.buffer, seeds.buffer]);
+      } catch (error) {
+        workerScope.postMessage({
+          type: "error",
+          jobId,
+          message: error instanceof Error ? error.message : String(error),
+        }, []);
+      } finally {
+        bitmap?.close();
+      }
+    })();
+  });
+}
+
+async function prepareParticleImageOnMainThread(
+  imageId: string,
+  source: Blob,
+  requestedCount: number,
+  signal: AbortSignal,
+): Promise<PreparedParticleImage> {
+  const throwIfAborted = (): void => {
+    if (signal.aborted) throw new DOMException("Image preparation was cancelled", "AbortError");
+  };
+  const yieldToBrowser = async (): Promise<void> => {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    throwIfAborted();
+  };
+  throwIfAborted();
+  const bitmap = await createImageBitmap(source);
+  try {
+    throwIfAborted();
+    const naturalWidth = bitmap.width;
+    const naturalHeight = bitmap.height;
+    if (!naturalWidth || !naturalHeight || naturalWidth > 16_384 || naturalHeight > 16_384) {
+      throw new Error("The image dimensions are unsupported");
+    }
+    const scale = Math.min(1, PARTICLE_BACKGROUND_SAMPLE_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
+    const width = Math.max(1, Math.round(naturalWidth * scale));
+    const height = Math.max(1, Math.round(naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("The image preparation canvas is unavailable");
+    context.drawImage(bitmap, 0, 0, width, height);
+    const imageData = context.getImageData(0, 0, width, height);
+    const pixels = imageData.data;
+    let samplingSeed = particleHashUint32(width ^ (height << 16));
+    let visiblePixels = 0;
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      const alpha = pixels[offset + 3] ?? 0;
+      const luminance = Math.round(
+        (pixels[offset] ?? 0) * 0.2126 + (pixels[offset + 1] ?? 0) * 0.7152 + (pixels[offset + 2] ?? 0) * 0.0722,
+      );
+      pixels[offset] = luminance;
+      pixels[offset + 1] = luminance;
+      pixels[offset + 2] = luminance;
+      const pixelIndex = offset >>> 2;
+      if ((pixelIndex & 3) === 0) {
+        samplingSeed = particleHashUint32(samplingSeed ^ luminance ^ (alpha << 8) ^ Math.imul(pixelIndex + 1, 0x9e3779b1));
+      }
+      if (alpha >= 24) visiblePixels += 1;
+      if ((offset & 0x7ffff) === 0x7fffc) await yieldToBrowser();
+    }
+    if (!visiblePixels) throw new Error("The image contains no visible pixels");
+    context.putImageData(imageData, 0, 0);
+    const processedBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The processed image could not be created")), "image/png");
+    });
+    throwIfAborted();
+    const pixelCount = width * height;
+    const cumulativeMass = new Uint32Array(pixelCount);
+    const particleLuminance = new Uint8Array(pixelCount);
+    let totalMass = 0;
+    for (let y = 0; y < height; y += 1) {
+      const row = y * width;
+      const up = Math.max(0, y - 1) * width;
+      const down = Math.min(height - 1, y + 1) * width;
+      for (let x = 0; x < width; x += 1) {
+        const pixelIndex = row + x;
+        const offset = pixelIndex * 4;
+        const alpha = pixels[offset + 3] ?? 0;
+        if (alpha >= 24) {
+          const edge = Math.min(1, (
+            Math.abs((pixels[(row + Math.min(width - 1, x + 1)) * 4] ?? 0) - (pixels[(row + Math.max(0, x - 1)) * 4] ?? 0))
+            + Math.abs((pixels[(down + x) * 4] ?? 0) - (pixels[(up + x) * 4] ?? 0))
+          ) / 510);
+          const luminance = (pixels[offset] ?? 0) / 255;
+          totalMass += Math.round((alpha / 255) * (Math.pow(luminance, 0.9) * 144 + edge * 112));
+          particleLuminance[pixelIndex] = Math.max(pixels[offset] ?? 0, Math.round(edge * 96));
+        }
+        cumulativeMass[pixelIndex] = totalMass;
+      }
+      if ((y & 63) === 63) await yieldToBrowser();
+    }
+    if (!totalMass) {
+      for (let index = 0; index < pixelCount; index += 1) {
+        if ((pixels[index * 4 + 3] ?? 0) >= 24) {
+          totalMass += 1;
+          particleLuminance[index] = Math.max(pixels[index * 4] ?? 0, 96);
+        }
+        cumulativeMass[index] = totalMass;
+        if ((index & 0x1ffff) === 0x1ffff) await yieldToBrowser();
+      }
+    }
+    if (!totalMass) throw new Error("The image contains no visible pixels");
+    const massLookup = new Uint32Array(PARTICLE_BACKGROUND_MASS_BUCKETS + 1);
+    let pixelCursor = 0;
+    const finalPixel = cumulativeMass.length - 1;
+    for (let bucket = 0; bucket <= PARTICLE_BACKGROUND_MASS_BUCKETS; bucket += 1) {
+      const threshold = totalMass * bucket / PARTICLE_BACKGROUND_MASS_BUCKETS;
+      while (pixelCursor < finalPixel && (cumulativeMass[pixelCursor] ?? 0) <= threshold) pixelCursor += 1;
+      massLookup[bucket] = pixelCursor;
+    }
+    const targetCount = normalizeParticleCount(requestedCount);
+    const normalizedHomes = new Float32Array(targetCount * 2);
+    const colors = new Uint8Array(targetCount * 4);
+    const seeds = new Float32Array(targetCount);
+    for (let index = 0; index < targetCount; index += 1) {
+      const quantile = (particleHashUint32(index ^ samplingSeed) + 0.5) / 4_294_967_296;
+      const targetMass = quantile * totalMass;
+      const massBucket = Math.min(PARTICLE_BACKGROUND_MASS_BUCKETS - 1, Math.floor(quantile * PARTICLE_BACKGROUND_MASS_BUCKETS));
+      let low = massLookup[massBucket] ?? 0;
+      let high = massLookup[massBucket + 1] ?? low;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if ((cumulativeMass[middle] ?? 0) <= targetMass) low = middle + 1;
+        else high = middle;
+      }
+      const pixelX = low % width;
+      const pixelY = Math.floor(low / width);
+      const homeOffset = index * 2;
+      const colorOffset = index * 4;
+      normalizedHomes[homeOffset] = Math.max(0, Math.min(1, (pixelX + 0.5 + (particleHash01(index + 0.17) - 0.5) * 0.82) / width));
+      normalizedHomes[homeOffset + 1] = Math.max(0, Math.min(1, (pixelY + 0.5 + (particleHash01(index + 7.31) - 0.5) * 0.82) / height));
+      const luminance = particleLuminance[low] ?? 0;
+      colors[colorOffset] = luminance;
+      colors[colorOffset + 1] = luminance;
+      colors[colorOffset + 2] = luminance;
+      colors[colorOffset + 3] = pixels[low * 4 + 3] ?? 0;
+      seeds[index] = particleHash01(index + 19.73);
+      if ((index & 0x7fff) === 0x7fff) await yieldToBrowser();
+    }
+    throwIfAborted();
+    return { imageId, targetCount, width, height, naturalWidth, naturalHeight, processedBlob, normalizedHomes, colors, seeds };
+  } finally {
+    bitmap.close();
+  }
+}
+
+interface ParticlePreparationCacheEntry {
+  readonly key: string;
+  readonly imageId: string;
+  readonly promise: Promise<PreparedParticleImage>;
+  readonly cancel: () => void;
+}
+
+class ParticleImagePreparationCache {
+  #workerUrl: string | null;
+  #entry: ParticlePreparationCacheEntry | undefined;
+  #nextJobId = 1;
+
+  constructor() {
+    this.#workerUrl = this.#createWorkerUrl();
+  }
+
+  prepare(record: ParticleImageRecord, targetCount: number): Promise<PreparedParticleImage> {
+    const count = normalizeParticleCount(targetCount);
+    const key = [record.id, record.createdAt, record.size, record.type, count].join(":");
+    if (this.#entry?.key === key) return this.#entry.promise;
+    this.invalidate();
+
+    const abortController = new AbortController();
+    let cancelWorker = (): void => undefined;
+    const workerAttempt = this.#workerUrl
+      ? this.#prepareWithWorker(record, count, (nextCancel) => { cancelWorker = nextCancel; })
+      : Promise.reject(new Error("Worker preprocessing is unavailable"));
+    const promise = workerAttempt.catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      if (abortController.signal.aborted) {
+        throw new DOMException("Image preparation was cancelled", "AbortError");
+      }
+      return prepareParticleImageOnMainThread(record.id, record.blob, count, abortController.signal);
+    });
+    const entry: ParticlePreparationCacheEntry = {
+      key,
+      imageId: record.id,
+      promise,
+      cancel: () => {
+        abortController.abort();
+        cancelWorker();
+      },
+    };
+    this.#entry = entry;
+    void promise.catch(() => {
+      if (this.#entry === entry) this.#entry = undefined;
+    });
+    return promise;
+  }
+
+  prewarm(record: ParticleImageRecord, targetCount: number): void {
+    void this.prepare(record, targetCount).catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        console.warn("Code-Codex could not pre-process the next particle image", error);
+      }
+    });
+  }
+
+  invalidate(imageId?: string): void {
+    const entry = this.#entry;
+    if (!entry || (imageId && entry.imageId !== imageId)) return;
+    this.#entry = undefined;
+    entry.cancel();
+  }
+
+  dispose(): void {
+    this.invalidate();
+    if (this.#workerUrl) URL.revokeObjectURL(this.#workerUrl);
+    this.#workerUrl = null;
+  }
+
+  #createWorkerUrl(): string | null {
+    if (
+      typeof Worker !== "function"
+      || typeof OffscreenCanvas !== "function"
+      || typeof createImageBitmap !== "function"
+      || typeof URL.createObjectURL !== "function"
+    ) return null;
+    try {
+      return URL.createObjectURL(new Blob([`(${particleImagePreparationWorkerMain.toString()})();`], { type: "text/javascript" }));
+    } catch {
+      return null;
+    }
+  }
+
+  #prepareWithWorker(
+    record: ParticleImageRecord,
+    targetCount: number,
+    setCancel: (cancel: () => void) => void,
+  ): Promise<PreparedParticleImage> {
+    const workerUrl = this.#workerUrl;
+    if (!workerUrl) return Promise.reject(new Error("Worker preprocessing is unavailable"));
+    const jobId = this.#nextJobId++;
+    return new Promise<PreparedParticleImage>((resolve, reject) => {
+      let settled = false;
+      let worker: Worker;
+      let timeout = 0;
+      const finish = (result: { readonly value: PreparedParticleImage } | { readonly error: unknown }): void => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        worker.terminate();
+        if ("value" in result) resolve(result.value);
+        else reject(result.error);
+      };
+      try {
+        worker = new Worker(workerUrl, { name: "code-codex-particle-image" });
+      } catch (error) {
+        this.#disableWorker();
+        reject(error);
+        return;
+      }
+      setCancel(() => finish({ error: new DOMException("Image preparation was cancelled", "AbortError") }));
+      worker.addEventListener("message", (event: MessageEvent<unknown>) => {
+        const message = event.data && typeof event.data === "object" ? event.data as Record<string, unknown> : {};
+        if (Number(message.jobId) !== jobId) return;
+        if (message.type === "prepared") {
+          const prepared = message.prepared;
+          if (this.#isPreparedImage(prepared, record.id, targetCount)) finish({ value: prepared });
+          else finish({ error: new Error("The prepared particle image is invalid") });
+          return;
+        }
+        finish({ error: new Error(typeof message.message === "string" ? message.message : "Image preparation failed") });
+      });
+      worker.addEventListener("error", (event) => {
+        event.preventDefault();
+        this.#disableWorker();
+        finish({ error: new Error(event.message || "Image preparation worker failed") });
+      }, { once: true });
+      worker.addEventListener("messageerror", () => {
+        this.#disableWorker();
+        finish({ error: new Error("Image preparation worker returned unreadable data") });
+      }, { once: true });
+      timeout = window.setTimeout(() => {
+        this.#disableWorker();
+        finish({ error: new DOMException("Image preparation timed out", "TimeoutError") });
+      }, PARTICLE_BACKGROUND_PREPARE_TIMEOUT_MS);
+      worker.postMessage({
+        jobId,
+        imageId: record.id,
+        source: record.blob,
+        targetCount,
+      });
+    });
+  }
+
+  #disableWorker(): void {
+    if (this.#workerUrl) URL.revokeObjectURL(this.#workerUrl);
+    this.#workerUrl = null;
+  }
+
+  #isPreparedImage(value: unknown, imageId: string, targetCount: number): value is PreparedParticleImage {
+    if (!value || typeof value !== "object") return false;
+    const prepared = value as Partial<PreparedParticleImage>;
+    return prepared.imageId === imageId
+      && prepared.targetCount === targetCount
+      && Number.isInteger(prepared.width) && Number(prepared.width) > 0
+      && Number.isInteger(prepared.height) && Number(prepared.height) > 0
+      && Number(prepared.naturalWidth) > 0
+      && Number(prepared.naturalHeight) > 0
+      && prepared.processedBlob instanceof Blob
+      && prepared.normalizedHomes instanceof Float32Array
+      && prepared.normalizedHomes.length === targetCount * 2
+      && prepared.colors instanceof Uint8Array
+      && prepared.colors.length === targetCount * 4
+      && prepared.seeds instanceof Float32Array
+      && prepared.seeds.length === targetCount;
+  }
+}
+
+const PARTICLE_BACKGROUND_VERTEX_SHADER = `
+  precision highp float;
+  attribute vec2 a_previousHome;
+  attribute vec2 a_home;
+  attribute vec4 a_previousColor;
+  attribute vec4 a_color;
+  attribute float a_seed;
+
+  uniform vec2 u_resolution;
+  uniform vec4 u_previousLayout;
+  uniform vec4 u_layout;
+  uniform vec4 u_pointerSegments[${PARTICLE_BACKGROUND_POINTER_SEGMENTS}];
+  uniform vec4 u_pointerMotion[${PARTICLE_BACKGROUND_POINTER_SEGMENTS}];
+  uniform float u_pointerCount;
+  uniform float u_time;
+  uniform float u_transitionStart;
+  uniform float u_transitionDuration;
+  uniform float u_transitionActive;
+  uniform float u_dpr;
+  uniform float u_particleSize;
+  uniform float u_particleOpacity;
+  uniform float u_speed;
+  uniform float u_noiseScale;
+  uniform float u_noiseStrength;
+  uniform float u_damping;
+  uniform float u_ambientCycle;
+  uniform float u_cursorStrength;
+
+  varying vec4 v_color;
+
+  float hash(float value) {
+    return fract(sin(value * 91.317) * 47453.5453);
+  }
+
+  float smoother01(float value) {
+    float t = clamp(value, 0.0, 1.0);
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+  }
+
+  vec2 softLimit(vec2 value, float maximum) {
+    float maximumSquared = max(maximum * maximum, 0.0001);
+    return value * inversesqrt(1.0 + dot(value, value) / maximumSquared);
+  }
+
+  vec2 ambientFlow(float sampleTime, vec2 homePosition) {
+    float seedAngle = a_seed * 6.2831853;
+    float flowTime = sampleTime * u_speed * 200.0 / max(u_ambientCycle, 1.0);
+    float spatial = max(u_noiseScale, 0.00001) * 6.2831853;
+    float waveA = sin(homePosition.y * spatial + flowTime * 0.63 + seedAngle);
+    float waveB = cos(homePosition.x * spatial * 1.37 - flowTime * 0.48 + seedAngle * 0.71);
+    float angle = waveA * 2.3 + waveB * 1.7 + seedAngle;
+    float breathing = 0.58 + 0.42 * sin(flowTime * 0.82 + seedAngle * 2.0);
+    return vec2(cos(angle), sin(angle)) * u_noiseStrength * 520.0 * breathing;
+  }
+
+  float directionalWakeGain(vec2 position, vec2 cursorStart, vec2 cursorEnd, float radius) {
+    vec2 cursorStep = cursorEnd - cursorStart;
+    float cursorDistance = length(cursorStep);
+    if (cursorDistance < 0.001) return 0.0;
+    vec2 tangent = cursorStep / cursorDistance;
+    vec2 normal = vec2(-tangent.y, tangent.x);
+    vec2 fromCursor = position - cursorEnd;
+    float trailDistance = -dot(fromCursor, tangent);
+    float lateralOffset = dot(fromCursor, normal);
+    float wakeLength = radius * 4.5;
+    float wakeProgress = clamp(trailDistance / max(wakeLength, 1.0), 0.0, 1.0);
+    float wakeEndWidth = radius * 2.35 * sqrt(1.0 / 0.40);
+    float wakeWidthSquared = mix(radius * radius, wakeEndWidth * wakeEndWidth, wakeProgress);
+    float wakeMetric = lateralOffset * lateralOffset / max(wakeWidthSquared, 1.0) + pow(wakeProgress, 4.0);
+    float rearSupport = pow(max(0.0, 1.0 - wakeMetric), 3.0);
+    float frontDistance = max(-trailDistance, 0.0);
+    float frontLength = radius * 0.72;
+    float frontMetric = frontDistance * frontDistance / max(frontLength * frontLength, 1.0)
+      + lateralOffset * lateralOffset / max(radius * radius, 1.0);
+    float frontSupport = pow(max(0.0, 1.0 - frontMetric), 3.0);
+    float support = mix(frontSupport, rearSupport, step(0.0, trailDistance));
+    float coreAxial = 1.0 - smoother01(abs(trailDistance) / max(radius * 0.82, 1.0));
+    float coreLateral = 1.0 - smoother01(abs(lateralOffset) / max(radius * 0.28, 1.0));
+    return support * (1.10 + 2.90 * coreAxial * coreLateral);
+  }
+
+  void coastGas(
+    inout vec2 position,
+    inout vec2 gasVelocity,
+    float elapsed,
+    float maximumVelocity,
+    float maximumStep
+  ) {
+    float dt = max(elapsed, 0.0);
+    if (dt <= 0.00001) return;
+    float damping = clamp(u_damping, 0.80, 0.9999);
+    float decayRate = log(damping) / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)};
+    float decay = exp(decayRate * dt);
+    float travelTime = abs(decayRate) > 0.00001
+      ? (decay - 1.0) / decayRate
+      : dt;
+    float stepBudget = maximumStep * max(dt / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)}, 0.25);
+    position += softLimit(gasVelocity * travelTime, stepBudget);
+    gasVelocity = softLimit(gasVelocity * decay, maximumVelocity);
+  }
+
+  void stirGas(
+    inout vec2 position,
+    inout vec2 gasVelocity,
+    inout vec2 previousTangent,
+    inout float hasTangent,
+    vec2 cursorStart,
+    vec2 cursorEnd,
+    vec2 filteredVelocity,
+    float elapsed,
+    float segmentPhase,
+    float maximumVelocity,
+    float maximumStep,
+    float strength,
+    float influenceRadius,
+    float strengthRatio,
+    float extendedStrength,
+    float extremeStrength
+  ) {
+    float dt = clamp(elapsed, 0.0, ${PARTICLE_BACKGROUND_POINTER_IDLE_SECONDS.toFixed(2)});
+    if (dt <= 0.00001) return;
+    vec2 cursorStep = cursorEnd - cursorStart;
+    float cursorDistance = length(cursorStep);
+    float moving = step(0.001, cursorDistance) * step(0.0001, u_cursorStrength);
+    if (moving < 0.5) {
+      coastGas(position, gasVelocity, dt, maximumVelocity, maximumStep);
+      return;
+    }
+
+    vec2 tangent = cursorStep / max(cursorDistance, 0.001);
+    vec2 normal = vec2(-tangent.y, tangent.x);
+    float influence = clamp(
+      directionalWakeGain(position, cursorStart, cursorEnd, influenceRadius) * 0.25,
+      0.0,
+      1.0
+    );
+    vec2 cursorVelocity = cursorStep / dt;
+    vec2 driverVelocity = mix(cursorVelocity, filteredVelocity, 0.28);
+    driverVelocity = softLimit(driverVelocity, 2200.0 * max(maximumVelocity / 340.0, 1.0));
+    float driverSpeed = length(driverVelocity);
+
+    float cursorLengthSquared = dot(cursorStep, cursorStep);
+    float along = clamp(
+      dot(position - cursorStart, cursorStep) / max(cursorLengthSquared, 0.0001),
+      0.0,
+      1.0
+    );
+    vec2 closestCursor = cursorStart + cursorStep * along;
+    vec2 radial = position - closestCursor;
+    float radialLength = length(radial);
+    vec2 radialDirection = radial / max(radialLength, 0.001);
+    vec2 swirlDirection = vec2(-radialDirection.y, radialDirection.x);
+
+    float turn = hasTangent
+      * (previousTangent.x * tangent.y - previousTangent.y * tangent.x);
+    float directionAlignment = dot(previousTangent, tangent);
+    float reversal = hasTangent * step(directionAlignment, -0.4);
+    float seededVariation = hash(a_seed * 71.17 + segmentPhase * 13.31) * 2.0 - 1.0;
+    float curlEnvelope = influence * (1.0 - influence);
+
+    vec2 oldVelocity = gasVelocity;
+    float decay = pow(
+      clamp(u_damping, 0.80, 0.9999),
+      dt / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)}
+    );
+    vec2 nextVelocity = oldVelocity * decay;
+    float flowResponse = 1.0 - exp(-5.2 * influence * strength * dt);
+    nextVelocity = mix(nextVelocity, driverVelocity, flowResponse);
+    nextVelocity *= mix(1.0, 0.76, reversal * influence);
+    nextVelocity += normal * driverSpeed
+      * (0.85 * turn * curlEnvelope * strength) * dt;
+    nextVelocity += swirlDirection * driverSpeed
+      * (0.48 * turn * curlEnvelope * strength) * dt;
+    nextVelocity += normal * driverSpeed
+      * (0.025 * seededVariation * curlEnvelope * strength) * dt;
+
+    float segmentEnergy = smoother01(
+      cursorDistance / max(influenceRadius * 0.55, 1.0)
+    );
+    vec2 fromCursorEnd = position - cursorEnd;
+    float signedTrailDistance = -dot(fromCursorEnd, tangent);
+    float downstream = max(signedTrailDistance, 0.0);
+    float upstream = max(-signedTrailDistance, 0.0);
+    float lateralOffset = dot(fromCursorEnd, normal);
+    float speedEnergy = smoother01(driverSpeed / 1500.0);
+    float wakeLength = influenceRadius
+      * mix(4.5, 10.0, speedEnergy)
+      * pow(max(strengthRatio, 1.0), 0.12)
+      * pow(extendedStrength, 0.16)
+      * pow(extremeStrength, 0.20);
+    float wakeProgress = clamp(downstream / max(wakeLength, 1.0), 0.0, 1.0);
+    float originalEndScale = mix(2.15, 2.65, speedEnergy);
+    float wakeStartSquared = influenceRadius * influenceRadius;
+    float wakeEndSquared = wakeStartSquared
+      + wakeStartSquared * (originalEndScale * originalEndScale - 1.0) / 0.40;
+    float wakeWidthSquared = mix(
+      wakeStartSquared,
+      wakeEndSquared,
+      wakeProgress
+    );
+    float wakeWidth = sqrt(max(wakeWidthSquared, 1.0));
+    float wakeMetric = lateralOffset * lateralOffset / max(wakeWidthSquared, 1.0)
+      + pow(wakeProgress, 4.0);
+    float rearSupport = pow(max(0.0, 1.0 - wakeMetric), 3.0);
+    float frontLength = influenceRadius * 0.75;
+    float frontMetric = upstream * upstream / max(frontLength * frontLength, 1.0)
+      + lateralOffset * lateralOffset / max(influenceRadius * influenceRadius, 1.0);
+    float frontSupport = pow(max(0.0, 1.0 - frontMetric), 3.0);
+    float wakeGain = segmentEnergy * mix(frontSupport, rearSupport, step(0.0, signedTrailDistance));
+    float side = sign(lateralOffset);
+    vec2 entrainmentDirection = -normal * side;
+    float entrainmentGain = smoother01(abs(lateralOffset) / max(wakeWidth, 1.0));
+    vec2 wakeVelocity = driverVelocity * (0.24 * wakeGain);
+    wakeVelocity += entrainmentDirection * driverSpeed
+      * (0.11 * wakeGain * entrainmentGain);
+    wakeVelocity += normal * driverSpeed * (0.18 * turn * wakeGain);
+
+    vec2 segmentCenter = 0.5 * (cursorStart + cursorEnd);
+    vec2 farOffset = position - segmentCenter;
+    float farDistance = length(farOffset);
+    vec2 farDirection = farOffset / max(farDistance, 0.001);
+    float alignment = dot(tangent, farDirection);
+    vec2 dipoleDirection = 2.0 * alignment * farDirection - tangent;
+    float pressureStart = smoother01(
+      (farDistance / max(influenceRadius, 1.0) - 1.15) / 0.85
+    );
+    float pressureDistance = farDistance / max(influenceRadius * 4.5, 1.0);
+    float pressureGain = segmentEnergy * pressureStart
+      / (1.0 + pressureDistance * pressureDistance);
+    vec2 pressureVelocity = dipoleDirection * driverSpeed * (0.018 * pressureGain);
+    float inducedResponse = 1.0 - exp(-1.15 * sqrt(max(strength, 0.0)) * dt);
+    nextVelocity += (wakeVelocity + pressureVelocity) * inducedResponse;
+    nextVelocity = softLimit(nextVelocity, maximumVelocity);
+
+    vec2 particleStep = 0.5 * (oldVelocity + nextVelocity) * dt;
+    float stepBudget = maximumStep
+      * max(dt / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)}, 0.25);
+    position += softLimit(particleStep, stepBudget);
+    gasVelocity = nextVelocity;
+    previousTangent = tangent;
+    hasTangent = 1.0;
+  }
+
+  void main() {
+    vec2 previousHome = u_previousLayout.xy + a_previousHome * u_previousLayout.zw;
+    vec2 targetHome = u_layout.xy + a_home * u_layout.zw;
+    float morph = 1.0;
+    if (u_transitionActive > 0.5) {
+      float elapsed = max(u_time - u_transitionStart - a_seed * u_transitionDuration * 0.12, 0.0);
+      float response = max(0.1, u_transitionDuration * mix(0.88, 1.08, a_seed));
+      float omegaTime = 4.7438645 * elapsed / response;
+      morph = clamp(1.0 - (1.0 + omegaTime) * exp(-omegaTime), 0.0, 1.0);
+    }
+    vec2 home = mix(previousHome, targetHome, morph);
+    vec4 imageColor = mix(a_previousColor, a_color, smoother01((morph - 0.12) / 0.88));
+
+    float lifetime = ${PARTICLE_BACKGROUND_PARTICLE_LIFETIME_SECONDS.toFixed(2)}
+      + (hash(a_seed * 53.17 + 7.9) * 2.0 - 1.0)
+        * ${PARTICLE_BACKGROUND_PARTICLE_LIFETIME_JITTER_SECONDS.toFixed(2)};
+    float age = mod(u_time + a_seed * lifetime, lifetime);
+    float fadeIn = smoother01(age / 0.18);
+    float fadeOut = 1.0 - smoother01((age - (lifetime - 0.18)) / 0.18);
+    float lifeAlpha = fadeIn * fadeOut;
+    float birthTime = u_time - age;
+    vec2 ambientAtBirth = ambientFlow(birthTime, home);
+    vec2 position = home + ambientAtBirth;
+    vec2 gasVelocity = vec2(0.0);
+    vec2 previousTangent = vec2(1.0, 0.0);
+    float hasTangent = 0.0;
+    float integratedAge = 0.0;
+
+    if (u_pointerCount > 0.5 && u_cursorStrength > 0.0001) {
+    float baseCursorStrength = min(
+      max(u_cursorStrength, 0.0),
+      ${PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH.toFixed(1)}
+    );
+    float strengthRatio = max(baseCursorStrength / 0.64, 0.0);
+    float extendedStrength = max(strengthRatio / 15.625, 1.0);
+    float extremeStrength = max(strengthRatio / 31.25, 1.0);
+    float overdrive = max(
+      u_cursorStrength / ${PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH.toFixed(1)},
+      1.0
+    );
+    float highStrengthScale = pow(max(strengthRatio, 1.0), 0.45)
+      * pow(extendedStrength, 0.28)
+      * pow(extremeStrength, 0.32)
+      * pow(overdrive, 0.45);
+    float stepStrengthScale = pow(max(strengthRatio, 1.0), 0.35)
+      * pow(extendedStrength, 0.18)
+      * pow(extremeStrength, 0.22)
+      * pow(overdrive, 0.35);
+    float strength = 4.0 * mix(
+      strengthRatio,
+      pow(max(strengthRatio, 1.0), 0.55),
+      step(1.0, strengthRatio)
+    ) * pow(extendedStrength, 0.30)
+      * pow(extremeStrength, 0.34)
+      * overdrive;
+    float radiusVariation = mix(0.90, 1.10, hash(a_seed * 43.71 + 2.19));
+    float influenceRadius = clamp(
+      min(u_resolution.x, u_resolution.y) * 0.16,
+      95.0,
+      175.0
+    ) * radiusVariation * 0.50;
+    float motionReferenceRadius = influenceRadius / 1.5;
+    float maximumVelocity = clamp(
+      motionReferenceRadius * 0.42 / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)},
+      180.0,
+      340.0
+    ) * highStrengthScale;
+    float maximumStep = clamp(motionReferenceRadius * 0.42, 8.0, 20.0)
+      * stepStrengthScale;
+
+    for (int index = 0; index < ${PARTICLE_BACKGROUND_POINTER_SEGMENTS}; index += 1) {
+      if (float(index) >= u_pointerCount) break;
+      vec4 motion = u_pointerMotion[index];
+      float segmentAge = motion.z;
+      if (segmentAge > age) continue;
+      vec4 segment = u_pointerSegments[index];
+      float segmentDuration = max(motion.w, 0.0001);
+      float segmentEndAge = clamp(age - segmentAge, 0.0, age);
+      float segmentStartAge = max(0.0, segmentEndAge - segmentDuration);
+      coastGas(
+        position,
+        gasVelocity,
+        max(segmentStartAge - integratedAge, 0.0),
+        maximumVelocity,
+        maximumStep
+      );
+      float activeStartAge = max(integratedAge, segmentStartAge);
+      float activeDuration = max(segmentEndAge - activeStartAge, 0.0);
+      if (activeDuration > 0.00001) {
+        float activeFraction = clamp(activeDuration / segmentDuration, 0.0, 1.0);
+        vec2 activeCursorStart = mix(segment.zw, segment.xy, activeFraction);
+        stirGas(
+          position,
+          gasVelocity,
+          previousTangent,
+          hasTangent,
+          activeCursorStart,
+          segment.zw,
+          motion.xy,
+          activeDuration,
+          float(index),
+          maximumVelocity,
+          maximumStep,
+          strength,
+          influenceRadius,
+          strengthRatio,
+          extendedStrength,
+          extremeStrength
+        );
+      }
+      integratedAge = max(integratedAge, segmentEndAge);
+    }
+
+    coastGas(
+      position,
+      gasVelocity,
+      max(age - integratedAge, 0.0),
+      maximumVelocity,
+      maximumStep
+    );
+    }
+    vec2 ambientNow = ambientFlow(u_time, home);
+    position += ambientNow - ambientAtBirth;
+    vec2 restingPosition = home + ambientNow;
+    float disturbed = smoothstep(0.75, 3.0, length(position - restingPosition));
+    float lifecycleAlpha = mix(1.0, lifeAlpha, disturbed);
+    lifecycleAlpha = mix(lifecycleAlpha, 1.0, u_transitionActive);
+    vec2 clip = vec2(position.x / u_resolution.x * 2.0 - 1.0, 1.0 - position.y / u_resolution.y * 2.0);
+    gl_Position = vec4(clip, 0.0, 1.0);
+    gl_PointSize = max(1.0, u_particleSize * u_dpr);
+    v_color = vec4(imageColor.rgb, imageColor.a * u_particleOpacity * lifecycleAlpha);
+  }
+`;
+
+const PARTICLE_BACKGROUND_FRAGMENT_SHADER = `
+  precision mediump float;
+  varying vec4 v_color;
+  void main() {
+    vec2 centred = gl_PointCoord - vec2(0.5);
+    float distanceFromCentre = length(centred);
+    float coverage = 1.0 - smoothstep(0.28, 0.5, distanceFromCentre);
+    if (coverage <= 0.001) discard;
+    gl_FragColor = vec4(v_color.rgb, v_color.a * coverage);
+  }
+`;
+
+function compileParticleShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader {
+  const shader = gl.createShader(type);
+  if (!shader) throw new Error("WebGL could not create a particle shader");
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const message = gl.getShaderInfoLog(shader) || "Particle shader compilation failed";
+    gl.deleteShader(shader);
+    throw new Error(message);
+  }
+  return shader;
+}
+
+function createParticleProgram(gl: WebGLRenderingContext): {
+  readonly program: WebGLProgram;
+  readonly vertexShader: WebGLShader;
+  readonly fragmentShader: WebGLShader;
+} {
+  const vertexShader = compileParticleShader(gl, gl.VERTEX_SHADER, PARTICLE_BACKGROUND_VERTEX_SHADER);
+  const fragmentShader = compileParticleShader(gl, gl.FRAGMENT_SHADER, PARTICLE_BACKGROUND_FRAGMENT_SHADER);
+  const program = gl.createProgram();
+  if (!program) throw new Error("WebGL could not create the particle program");
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const message = gl.getProgramInfoLog(program) || "Particle shader linking failed";
+    gl.deleteProgram(program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    throw new Error(message);
+  }
+  return { program, vertexShader, fragmentShader };
+}
+
+class ParticleImageRenderer {
+  readonly #canvas: HTMLCanvasElement;
+  readonly #gl: WebGLRenderingContext;
+  readonly #program: WebGLProgram;
+  readonly #vertexShader: WebGLShader;
+  readonly #fragmentShader: WebGLShader;
+  readonly #attributes: Readonly<Record<"previousHome" | "home" | "previousColor" | "color" | "seed", number>>;
+  readonly #uniforms: Readonly<Record<
+    "resolution" | "previousLayout" | "layout" | "pointerSegments" | "pointerMotion"
+    | "pointerCount" | "time" | "transitionStart" | "transitionDuration" | "transitionActive" | "dpr"
+    | "particleSize" | "particleOpacity" | "speed" | "noiseScale" | "noiseStrength" | "damping"
+    | "ambientCycle" | "cursorStrength",
+    WebGLUniformLocation
+  >>;
+  readonly #buffers: Readonly<Record<"previousHome" | "home" | "previousColor" | "color" | "seed", WebGLBuffer>>;
+  readonly #pointerSegments: ParticlePointerSegment[] = [];
+  readonly #pointerSegmentValues = new Float32Array(PARTICLE_BACKGROUND_POINTER_SEGMENTS * 4);
+  readonly #pointerMotionValues = new Float32Array(PARTICLE_BACKGROUND_POINTER_SEGMENTS * 4);
+  readonly #reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  readonly #onError: (message: string) => void;
+  #previousHomes: Float32Array<ArrayBuffer> = new Float32Array(0);
+  #homes: Float32Array<ArrayBuffer> = new Float32Array(0);
+  #previousColors: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+  #colors: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+  #seeds: Float32Array<ArrayBuffer> = new Float32Array(0);
+  #previousNaturalWidth = 1;
+  #previousNaturalHeight = 1;
+  #naturalWidth = 1;
+  #naturalHeight = 1;
+  #count = 0;
+  #cssWidth = 1;
+  #cssHeight = 1;
+  #dpr = 1;
+  #simulationTime = 12.4;
+  #lastFrame = performance.now();
+  #transitionStart = 0;
+  #transitionDuration = DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds;
+  #transitionActive = false;
+  #settings: ParticleBackgroundSettings;
+  #animationFrame = 0;
+  #disposed = false;
+  #paused = false;
+  #lastPointer: { readonly x: number; readonly y: number; readonly at: number } | undefined;
+
+  constructor(canvas: HTMLCanvasElement, onError: (message: string) => void, settings: ParticleBackgroundSettings) {
+    this.#canvas = canvas;
+    this.#onError = onError;
+    this.#settings = settings;
+    const gl = canvas.getContext("webgl", {
+      alpha: true,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      premultipliedAlpha: false,
+      powerPreference: "high-performance",
+    });
+    if (!gl) throw new Error("WebGL is unavailable");
+    this.#gl = gl;
+    const compiled = createParticleProgram(gl);
+    this.#program = compiled.program;
+    this.#vertexShader = compiled.vertexShader;
+    this.#fragmentShader = compiled.fragmentShader;
+    this.#attributes = {
+      previousHome: this.#requiredAttribute("a_previousHome"),
+      home: this.#requiredAttribute("a_home"),
+      previousColor: this.#requiredAttribute("a_previousColor"),
+      color: this.#requiredAttribute("a_color"),
+      seed: this.#requiredAttribute("a_seed"),
+    };
+    this.#uniforms = {
+      resolution: this.#requiredUniform("u_resolution"),
+      previousLayout: this.#requiredUniform("u_previousLayout"),
+      layout: this.#requiredUniform("u_layout"),
+      pointerSegments: this.#requiredUniform("u_pointerSegments[0]"),
+      pointerMotion: this.#requiredUniform("u_pointerMotion[0]"),
+      pointerCount: this.#requiredUniform("u_pointerCount"),
+      time: this.#requiredUniform("u_time"),
+      transitionStart: this.#requiredUniform("u_transitionStart"),
+      transitionDuration: this.#requiredUniform("u_transitionDuration"),
+      transitionActive: this.#requiredUniform("u_transitionActive"),
+      dpr: this.#requiredUniform("u_dpr"),
+      particleSize: this.#requiredUniform("u_particleSize"),
+      particleOpacity: this.#requiredUniform("u_particleOpacity"),
+      speed: this.#requiredUniform("u_speed"),
+      noiseScale: this.#requiredUniform("u_noiseScale"),
+      noiseStrength: this.#requiredUniform("u_noiseStrength"),
+      damping: this.#requiredUniform("u_damping"),
+      ambientCycle: this.#requiredUniform("u_ambientCycle"),
+      cursorStrength: this.#requiredUniform("u_cursorStrength"),
+    };
+    this.#buffers = {
+      previousHome: this.#requiredBuffer(),
+      home: this.#requiredBuffer(),
+      previousColor: this.#requiredBuffer(),
+      color: this.#requiredBuffer(),
+      seed: this.#requiredBuffer(),
+    };
+    gl.useProgram(this.#program);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.DEPTH_TEST);
+    gl.clearColor(0, 0, 0, 0);
+    this.#bindAttributes();
+    this.resize();
+    window.addEventListener("resize", this.resize, { passive: true });
+    window.addEventListener("pointermove", this.#onPointerMove, { capture: true, passive: true });
+    window.addEventListener("blur", this.#resetPointer, { passive: true });
+    document.addEventListener("visibilitychange", this.#onVisibilityChange);
+    this.#reducedMotion.addEventListener("change", this.#onReducedMotionChange);
+    canvas.addEventListener("webglcontextlost", this.#onContextLost);
+    this.#paused = document.hidden || this.#reducedMotion.matches;
+    this.#scheduleFrame();
+  }
+
+  get count(): number {
+    return this.#count;
+  }
+
+  setRenderSettings(settings: ParticleBackgroundSettings): void {
+    if (this.#disposed) return;
+    const dprChanged = settings.dprCap !== this.#settings.dprCap;
+    const cursorDisabled = this.#settings.cursorInteraction && !settings.cursorInteraction;
+    this.#settings = settings;
+    this.#transitionDuration = settings.morphIntervalSeconds;
+    if (cursorDisabled) {
+      this.#lastPointer = undefined;
+      const tail = this.#pointerSegments.at(-1);
+      if (tail) tail.sealed = true;
+    }
+    if (dprChanged) this.resize();
+    else if (this.#paused) this.#draw(performance.now(), false);
+  }
+
+  setPreparedImage(image: PreparedParticleImage): void {
+    if (this.#disposed) return;
+    const canMorph = this.#count === image.targetCount && this.#count > 0 && !this.#reducedMotion.matches;
+    if (canMorph) {
+      this.#previousHomes = this.#homes;
+      this.#previousColors = this.#colors;
+      this.#previousNaturalWidth = this.#naturalWidth;
+      this.#previousNaturalHeight = this.#naturalHeight;
+    } else {
+      this.#previousHomes = image.normalizedHomes;
+      this.#previousColors = image.colors;
+      this.#previousNaturalWidth = image.naturalWidth;
+      this.#previousNaturalHeight = image.naturalHeight;
+    }
+    this.#homes = image.normalizedHomes;
+    this.#colors = image.colors;
+    this.#seeds = image.seeds;
+    this.#naturalWidth = image.naturalWidth;
+    this.#naturalHeight = image.naturalHeight;
+    this.#count = image.targetCount;
+    this.#transitionDuration = this.#settings.morphIntervalSeconds;
+    this.#transitionStart = this.#clockSeconds();
+    this.#transitionActive = canMorph;
+    this.#uploadBuffer(this.#buffers.previousHome, this.#previousHomes);
+    this.#uploadBuffer(this.#buffers.home, this.#homes);
+    this.#uploadBuffer(this.#buffers.previousColor, this.#previousColors);
+    this.#uploadBuffer(this.#buffers.color, this.#colors);
+    this.#uploadBuffer(this.#buffers.seed, this.#seeds);
+    this.#bindAttributes();
+    if (this.#paused) this.#draw(performance.now(), false);
+  }
+
+  setPaused(paused: boolean): void {
+    this.#paused = paused || document.hidden || this.#reducedMotion.matches;
+    this.#lastFrame = performance.now();
+    if (!this.#paused) this.#scheduleFrame();
+    else this.#draw(performance.now(), false);
+  }
+
+  readonly resize = (): void => {
+    if (this.#disposed) return;
+    this.#cssWidth = Math.max(1, window.innerWidth);
+    this.#cssHeight = Math.max(1, window.innerHeight);
+    this.#dpr = Math.min(this.#settings.dprCap, Math.max(1, window.devicePixelRatio || 1));
+    const width = Math.max(1, Math.round(this.#cssWidth * this.#dpr));
+    const height = Math.max(1, Math.round(this.#cssHeight * this.#dpr));
+    if (this.#canvas.width !== width) this.#canvas.width = width;
+    if (this.#canvas.height !== height) this.#canvas.height = height;
+    this.#gl.viewport(0, 0, width, height);
+    if (this.#paused) this.#draw(performance.now(), false);
+  };
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    cancelAnimationFrame(this.#animationFrame);
+    this.#animationFrame = 0;
+    window.removeEventListener("resize", this.resize);
+    window.removeEventListener("pointermove", this.#onPointerMove, true);
+    window.removeEventListener("blur", this.#resetPointer);
+    document.removeEventListener("visibilitychange", this.#onVisibilityChange);
+    this.#reducedMotion.removeEventListener("change", this.#onReducedMotionChange);
+    this.#canvas.removeEventListener("webglcontextlost", this.#onContextLost);
+    for (const buffer of Object.values(this.#buffers)) this.#gl.deleteBuffer(buffer);
+    this.#gl.deleteProgram(this.#program);
+    this.#gl.deleteShader(this.#vertexShader);
+    this.#gl.deleteShader(this.#fragmentShader);
+    this.#gl.getExtension("WEBGL_lose_context")?.loseContext();
+    this.#pointerSegments.length = 0;
+  }
+
+  #requiredAttribute(name: string): number {
+    const location = this.#gl.getAttribLocation(this.#program, name);
+    if (location < 0) throw new Error(`Particle shader attribute ${name} is unavailable`);
+    return location;
+  }
+
+  #requiredUniform(name: string): WebGLUniformLocation {
+    const location = this.#gl.getUniformLocation(this.#program, name);
+    if (!location) throw new Error(`Particle shader uniform ${name} is unavailable`);
+    return location;
+  }
+
+  #requiredBuffer(): WebGLBuffer {
+    const buffer = this.#gl.createBuffer();
+    if (!buffer) throw new Error("WebGL could not create a particle buffer");
+    return buffer;
+  }
+
+  #uploadBuffer(buffer: WebGLBuffer, values: BufferSource): void {
+    this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, buffer);
+    this.#gl.bufferData(this.#gl.ARRAY_BUFFER, values, this.#gl.STATIC_DRAW);
+  }
+
+  #bindAttributes(): void {
+    const gl = this.#gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffers.previousHome);
+    gl.enableVertexAttribArray(this.#attributes.previousHome);
+    gl.vertexAttribPointer(this.#attributes.previousHome, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffers.home);
+    gl.enableVertexAttribArray(this.#attributes.home);
+    gl.vertexAttribPointer(this.#attributes.home, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffers.previousColor);
+    gl.enableVertexAttribArray(this.#attributes.previousColor);
+    gl.vertexAttribPointer(this.#attributes.previousColor, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffers.color);
+    gl.enableVertexAttribArray(this.#attributes.color);
+    gl.vertexAttribPointer(this.#attributes.color, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffers.seed);
+    gl.enableVertexAttribArray(this.#attributes.seed);
+    gl.vertexAttribPointer(this.#attributes.seed, 1, gl.FLOAT, false, 0, 0);
+  }
+
+  #layout(naturalWidth: number, naturalHeight: number): readonly [number, number, number, number] {
+    const scale = Math.min(this.#cssWidth / Math.max(1, naturalWidth), this.#cssHeight / Math.max(1, naturalHeight));
+    const width = naturalWidth * scale;
+    const height = naturalHeight * scale;
+    return [(this.#cssWidth - width) * 0.5, (this.#cssHeight - height) * 0.5, width, height];
+  }
+
+  #clockSeconds(timestamp = performance.now()): number {
+    if (this.#paused) return this.#simulationTime;
+    const pending = Math.min(
+      PARTICLE_BACKGROUND_MAX_FRAME_DELTA_SECONDS,
+      Math.max(0, (timestamp - this.#lastFrame) / 1_000),
+    );
+    return this.#simulationTime + pending;
+  }
+
+  #onPointerMove = (event: PointerEvent): void => {
+    if (this.#disposed || this.#paused || !this.#settings.cursorInteraction || !event.isPrimary) return;
+    const now = this.#clockSeconds();
+    const previous = this.#lastPointer;
+    this.#lastPointer = { x: event.clientX, y: event.clientY, at: now };
+    if (!previous) return;
+    const tail = this.#pointerSegments.at(-1);
+    const elapsed = now - previous.at;
+    const deltaX = event.clientX - previous.x;
+    const deltaY = event.clientY - previous.y;
+    if (elapsed <= 0.001 || elapsed > PARTICLE_BACKGROUND_POINTER_IDLE_SECONDS) {
+      if (tail) tail.sealed = true;
+      return;
+    }
+    const speed = Math.hypot(deltaX, deltaY) / elapsed;
+    if (speed < 1.5) {
+      if (tail && now - tail.startedAt >= PARTICLE_BACKGROUND_POINTER_SAMPLE_SECONDS) {
+        tail.sealed = true;
+      }
+      return;
+    }
+    if (
+      tail
+      && !tail.sealed
+      && now - tail.startedAt > PARTICLE_BACKGROUND_POINTER_SAMPLE_SECONDS * 1.5
+    ) {
+      tail.sealed = true;
+    }
+    const rawVelocityX = deltaX / elapsed;
+    const rawVelocityY = deltaY / elapsed;
+    const baseStrength = Math.min(
+      Math.max(this.#settings.cursorStrength, 0),
+      PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH,
+    );
+    const cursorScale = baseStrength * 6.25;
+    const strengthRatio = Math.max(0, baseStrength / 0.64);
+    const extendedStrength = Math.max(1, strengthRatio / 15.625);
+    const extremeStrength = Math.max(1, strengthRatio / 31.25);
+    const overdrive = Math.max(
+      1,
+      this.#settings.cursorStrength / PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH,
+    );
+    const targetSpeedLimit = 5_200
+      * Math.pow(Math.max(strengthRatio, 1), 0.45)
+      * Math.pow(extendedStrength, 0.28)
+      * Math.pow(extremeStrength, 0.32)
+      * Math.pow(overdrive, 0.45);
+    const targetSpeed = cursorScale > 0
+      ? Math.min(targetSpeedLimit, speed * (1.04 + 0.14 * cursorScale) * Math.sqrt(overdrive))
+      : 0;
+    const targetVelocityX = rawVelocityX / speed * targetSpeed;
+    const targetVelocityY = rawVelocityY / speed * targetSpeed;
+    const prior = tail && now - tail.createdAt <= PARTICLE_BACKGROUND_POINTER_IDLE_SECONDS
+      ? tail
+      : undefined;
+    const velocityX = prior ? prior.velocityX * 0.28 + targetVelocityX * 0.72 : targetVelocityX;
+    const velocityY = prior ? prior.velocityY * 0.28 + targetVelocityY * 0.72 : targetVelocityY;
+    if (tail && !tail.sealed) {
+      tail.endX = event.clientX;
+      tail.endY = event.clientY;
+      tail.velocityX = velocityX;
+      tail.velocityY = velocityY;
+      tail.createdAt = now;
+      tail.duration = Math.max(0.001, now - tail.startedAt);
+      tail.sealed = tail.duration >= PARTICLE_BACKGROUND_POINTER_SAMPLE_SECONDS;
+    } else {
+      this.#pointerSegments.push({
+        startX: previous.x,
+        startY: previous.y,
+        endX: event.clientX,
+        endY: event.clientY,
+        velocityX,
+        velocityY,
+        startedAt: previous.at,
+        createdAt: now,
+        duration: elapsed,
+        sealed: elapsed >= PARTICLE_BACKGROUND_POINTER_SAMPLE_SECONDS,
+      });
+    }
+    if (this.#pointerSegments.length > PARTICLE_BACKGROUND_POINTER_SEGMENTS) {
+      this.#pointerSegments.shift();
+    }
+  };
+
+  #resetPointer = (): void => {
+    this.#lastPointer = undefined;
+    const tail = this.#pointerSegments.at(-1);
+    if (tail) tail.sealed = true;
+  };
+
+  #onVisibilityChange = (): void => {
+    if (document.hidden) {
+      cancelAnimationFrame(this.#animationFrame);
+      this.#animationFrame = 0;
+      this.#resetPointer();
+      this.#lastFrame = performance.now();
+      return;
+    }
+    this.#lastFrame = performance.now();
+    if (!this.#paused && !this.#reducedMotion.matches) this.#scheduleFrame();
+  };
+
+  #onReducedMotionChange = (): void => {
+    this.setPaused(this.#reducedMotion.matches);
+  };
+
+  #onContextLost = (event: Event): void => {
+    event.preventDefault();
+    cancelAnimationFrame(this.#animationFrame);
+    this.#animationFrame = 0;
+    this.#onError("The particle renderer lost its WebGL context. Disable and re-enable the plugin.");
+  };
+
+  #scheduleFrame(): void {
+    if (this.#disposed || this.#paused || document.hidden || this.#animationFrame) return;
+    this.#animationFrame = requestAnimationFrame((timestamp) => {
+      this.#animationFrame = 0;
+      this.#draw(timestamp, true);
+    });
+  }
+
+  #draw(timestamp: number, scheduleNext: boolean): void {
+    if (this.#disposed) return;
+    if (!this.#paused) {
+      this.#simulationTime = this.#clockSeconds(timestamp);
+    }
+    this.#lastFrame = timestamp;
+    const gl = this.#gl;
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (this.#count > 0) {
+      const time = this.#simulationTime;
+      while (
+        this.#pointerSegments.length
+        && time - (this.#pointerSegments[0]?.createdAt ?? time) > PARTICLE_BACKGROUND_MAX_LIFETIME_SECONDS
+      ) {
+        this.#pointerSegments.shift();
+      }
+      this.#pointerSegmentValues.fill(0);
+      this.#pointerMotionValues.fill(0);
+      for (let index = 0; index < this.#pointerSegments.length; index += 1) {
+        const segment = this.#pointerSegments[index];
+        if (!segment) continue;
+        const segmentOffset = index * 4;
+        this.#pointerSegmentValues[segmentOffset] = segment.startX;
+        this.#pointerSegmentValues[segmentOffset + 1] = segment.startY;
+        this.#pointerSegmentValues[segmentOffset + 2] = segment.endX;
+        this.#pointerSegmentValues[segmentOffset + 3] = segment.endY;
+        this.#pointerMotionValues[segmentOffset] = segment.velocityX;
+        this.#pointerMotionValues[segmentOffset + 1] = segment.velocityY;
+        this.#pointerMotionValues[segmentOffset + 2] = Math.max(0, time - segment.createdAt);
+        this.#pointerMotionValues[segmentOffset + 3] = Math.max(0.001, segment.duration);
+      }
+      const previousLayout = this.#layout(this.#previousNaturalWidth, this.#previousNaturalHeight);
+      const layout = this.#layout(this.#naturalWidth, this.#naturalHeight);
+      gl.useProgram(this.#program);
+      gl.uniform2f(this.#uniforms.resolution, this.#cssWidth, this.#cssHeight);
+      gl.uniform4f(this.#uniforms.previousLayout, previousLayout[0], previousLayout[1], previousLayout[2], previousLayout[3]);
+      gl.uniform4f(this.#uniforms.layout, layout[0], layout[1], layout[2], layout[3]);
+      gl.uniform4fv(this.#uniforms.pointerSegments, this.#pointerSegmentValues);
+      gl.uniform4fv(this.#uniforms.pointerMotion, this.#pointerMotionValues);
+      gl.uniform1f(this.#uniforms.pointerCount, this.#pointerSegments.length);
+      gl.uniform1f(this.#uniforms.time, time);
+      gl.uniform1f(this.#uniforms.transitionStart, this.#transitionStart);
+      gl.uniform1f(this.#uniforms.transitionDuration, this.#transitionDuration);
+      gl.uniform1f(this.#uniforms.transitionActive, this.#transitionActive ? 1 : 0);
+      gl.uniform1f(this.#uniforms.dpr, this.#dpr);
+      gl.uniform1f(this.#uniforms.particleSize, this.#settings.particleSize);
+      gl.uniform1f(this.#uniforms.particleOpacity, this.#settings.particleOpacity);
+      gl.uniform1f(this.#uniforms.speed, this.#settings.speed);
+      gl.uniform1f(this.#uniforms.noiseScale, this.#settings.noiseScale);
+      gl.uniform1f(this.#uniforms.noiseStrength, this.#settings.noiseStrength);
+      gl.uniform1f(this.#uniforms.damping, this.#settings.damping);
+      gl.uniform1f(this.#uniforms.ambientCycle, this.#settings.ambientCycle);
+      gl.uniform1f(this.#uniforms.cursorStrength, this.#settings.cursorStrength);
+      this.#bindAttributes();
+      gl.drawArrays(gl.POINTS, 0, this.#count);
+      if (this.#transitionActive && time - this.#transitionStart > this.#transitionDuration * 2.25) {
+        this.#transitionActive = false;
+      }
+    }
+    if (scheduleNext) this.#scheduleFrame();
+  }
+}
+
+function openParticleImageDatabase(onVersionChange: () => void): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB is unavailable"));
+      return;
+    }
+    const request = indexedDB.open(PARTICLE_BACKGROUND_DB_NAME, PARTICLE_BACKGROUND_DB_VERSION);
+    let settled = false;
+    request.addEventListener("upgradeneeded", () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(PARTICLE_BACKGROUND_STORE)) {
+        database.createObjectStore(PARTICLE_BACKGROUND_STORE, { keyPath: "id" });
+      }
+    });
+    request.addEventListener("success", () => {
+      const database = request.result;
+      if (settled) {
+        database.close();
+        return;
+      }
+      settled = true;
+      database.addEventListener("versionchange", () => {
+        database.close();
+        onVersionChange();
+      }, { once: true });
+      resolve(database);
+    });
+    request.addEventListener("blocked", () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("The image library database is blocked"));
+    }, { once: true });
+    request.addEventListener("error", () => {
+      if (settled) return;
+      settled = true;
+      reject(request.error ?? new Error("The image library database could not be opened"));
+    }, { once: true });
+  });
+}
+
+function readParticleImageRecords(database: IDBDatabase): Promise<ParticleImageRecord[]> {
+  return new Promise((resolve, reject) => {
+    const request = database.transaction(PARTICLE_BACKGROUND_STORE, "readonly")
+      .objectStore(PARTICLE_BACKGROUND_STORE)
+      .getAll();
+    request.addEventListener("success", () => {
+      const records = Array.isArray(request.result)
+        ? request.result.filter((value): value is ParticleImageRecord => {
+          if (!value || typeof value !== "object") return false;
+          const record = value as Partial<ParticleImageRecord>;
+          return typeof record.id === "string"
+            && typeof record.name === "string"
+            && typeof record.type === "string"
+            && typeof record.size === "number"
+            && typeof record.createdAt === "number"
+            && record.blob instanceof Blob
+            && record.thumbnail instanceof Blob;
+        })
+        : [];
+      resolve(records);
+    });
+    request.addEventListener("error", () => reject(request.error ?? new Error("Saved particle images could not be read")), { once: true });
+  });
+}
+
+function saveParticleImageRecord(database: IDBDatabase, record: ParticleImageRecord): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(PARTICLE_BACKGROUND_STORE, "readwrite");
+    transaction.objectStore(PARTICLE_BACKGROUND_STORE).put(record);
+    transaction.addEventListener("complete", () => resolve(), { once: true });
+    transaction.addEventListener("abort", () => reject(transaction.error ?? new Error("The image could not be saved")), { once: true });
+    transaction.addEventListener("error", () => reject(transaction.error ?? new Error("The image could not be saved")), { once: true });
+  });
+}
+
+function deleteParticleImageRecord(database: IDBDatabase, id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(PARTICLE_BACKGROUND_STORE, "readwrite");
+    transaction.objectStore(PARTICLE_BACKGROUND_STORE).delete(id);
+    transaction.addEventListener("complete", () => resolve(), { once: true });
+    transaction.addEventListener("abort", () => reject(transaction.error ?? new Error("The image could not be deleted")), { once: true });
+    transaction.addEventListener("error", () => reject(transaction.error ?? new Error("The image could not be deleted")), { once: true });
+  });
+}
+
+async function createParticleThumbnail(source: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(source);
+  try {
+    const scale = Math.min(1, 180 / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("The thumbnail canvas is unavailable");
+    context.drawImage(bitmap, 0, 0, width, height);
+    const imageData = context.getImageData(0, 0, width, height);
+    const pixels = imageData.data;
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      const luminance = Math.round(
+        (pixels[offset] ?? 0) * 0.2126 + (pixels[offset + 1] ?? 0) * 0.7152 + (pixels[offset + 2] ?? 0) * 0.0722,
+      );
+      pixels[offset] = luminance;
+      pixels[offset + 1] = luminance;
+      pixels[offset + 2] = luminance;
+    }
+    context.putImageData(imageData, 0, 0);
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The thumbnail could not be created")), "image/png", 0.82);
+    });
+  } finally {
+    bitmap.close();
+  }
+}
+
+class ParticleBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  readonly #thumbnailUrls = new Map<string, string>();
+  readonly #reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  #settings = readParticleBackgroundSettings();
+  #records: ParticleImageRecord[] = [];
+  #database: IDBDatabase | null = null;
+  #initialization: Promise<void> | undefined;
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #previousImage: HTMLImageElement | undefined;
+  #image: HTMLImageElement | undefined;
+  #canvas: HTMLCanvasElement | undefined;
+  #renderer: ParticleImageRenderer | undefined;
+  #preparationCache: ParticleImagePreparationCache | undefined;
+  #currentSourceUrl: string | undefined;
+  #previousSourceUrl: string | undefined;
+  #sourceTransitioning = false;
+  #rotationTimer = 0;
+  #sourceReleaseTimer = 0;
+  #generation = 0;
+  #disposed = false;
+  #codexThemeObserver: MutationObserver | undefined;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() {
+    window.addEventListener("pagehide", this.#onPageHide, { once: true });
+    document.addEventListener("visibilitychange", this.#onVisibilityChange);
+    this.#reducedMotion.addEventListener("change", this.#onReducedMotionChange);
+  }
+
+  get settings(): ParticleBackgroundSettings {
+    return this.#settings;
+  }
+
+  get records(): readonly ParticleImageRecord[] {
+    return this.#records;
+  }
+
+  get enabled(): boolean {
+    return this.#enabled;
+  }
+
+  get pending(): boolean {
+    return this.#pending;
+  }
+
+  get error(): string | undefined {
+    return this.#error;
+  }
+
+  get activeImageId(): string | null {
+    return this.#settings.activeImageId;
+  }
+
+  get stoppedForExternalThemeChange(): boolean {
+    return this.#stoppedForExternalThemeChange;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  async initialize(): Promise<void> {
+    if (this.#initialization) return this.#initialization;
+    this.#initialization = this.#initialize();
+    return this.#initialization;
+  }
+
+  async enable(): Promise<void> {
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending) return;
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed) return;
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexParticleLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      const previousImage = document.createElement("img");
+      previousImage.className = "code-codex-particle-source code-codex-particle-source-previous";
+      previousImage.alt = "";
+      const image = document.createElement("img");
+      image.className = "code-codex-particle-source code-codex-particle-source-current";
+      image.alt = "";
+      const canvas = document.createElement("canvas");
+      canvas.className = "code-codex-particle-canvas";
+      layer.append(previousImage, image, canvas);
+      document.body.prepend(layer);
+      this.#layer = layer;
+      this.#previousImage = previousImage;
+      this.#image = image;
+      this.#canvas = canvas;
+      this.#preparationCache = new ParticleImagePreparationCache();
+      try {
+        this.#renderer = new ParticleImageRenderer(canvas, (message) => {
+          this.#error = message;
+          this.#notify();
+        }, this.#settings);
+      } catch (error) {
+        this.#error = error instanceof Error ? `${error.message}; showing the source image only.` : "WebGL is unavailable; showing the source image only.";
+      }
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, this.#settings.backgroundColor);
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#applySourcePresentation();
+      const initialId = this.#validActiveImageId() ?? this.#settings.selectedImageIds[0] ?? null;
+      if (initialId) await this.#activateImage(initialId, false);
+      else {
+        this.#error = "Add an image in Source to start the particle effect.";
+        this.#scheduleRotation();
+      }
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Particle Image Background could not be enabled";
+      this.#teardownPresentation();
+      try {
+        await this.#restoreCodexAppearanceTheme();
+      } catch {
+        // Keep the original activation error. A retained lease retries restoration later.
+      }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    try {
+      await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  async updateSettings(next: ParticleBackgroundSettings): Promise<void> {
+    const previous = this.#settings;
+    this.#settings = normalizeParticleSettings(next);
+    writeParticleBackgroundSettings(this.#settings);
+    if (this.#enabled) {
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, this.#settings.backgroundColor);
+      this.#applySourcePresentation();
+      this.#renderer?.setRenderSettings(this.#settings);
+      if (previous.particleCount !== this.#settings.particleCount) {
+        this.#preparationCache?.invalidate();
+        const activeId = this.#validActiveImageId();
+        if (activeId) await this.#activateImage(activeId, false);
+      } else {
+        this.#scheduleRotation();
+      }
+    }
+    this.#notify();
+  }
+
+  async addImages(files: FileList | readonly File[]): Promise<void> {
+    await this.initialize();
+    const candidates = Array.from(files);
+    if (!candidates.length) return;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    const imported: ParticleImageRecord[] = [];
+    try {
+      let totalBytes = this.#records.reduce((total, record) => total + record.size, 0);
+      for (const file of candidates) {
+        if (this.#records.length + imported.length >= PARTICLE_BACKGROUND_MAX_IMAGES) {
+          this.#error = `The image library can contain up to ${PARTICLE_BACKGROUND_MAX_IMAGES} images.`;
+          break;
+        }
+        if (!PARTICLE_BACKGROUND_IMAGE_TYPES.has(file.type)) {
+          this.#error = `${file.name} is not a supported PNG, JPEG, WebP, GIF, or AVIF image.`;
+          continue;
+        }
+        if (!file.size || file.size > PARTICLE_BACKGROUND_MAX_IMAGE_BYTES) {
+          this.#error = `${file.name} must be smaller than 30 MB.`;
+          continue;
+        }
+        if (totalBytes + file.size > PARTICLE_BACKGROUND_MAX_TOTAL_BYTES) {
+          this.#error = "The image library has reached its 256 MB limit.";
+          break;
+        }
+        try {
+          const thumbnail = await createParticleThumbnail(file);
+          const record: ParticleImageRecord = {
+            id: typeof crypto.randomUUID === "function"
+              ? crypto.randomUUID()
+              : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+            name: file.name.slice(0, 240),
+            type: file.type,
+            size: file.size,
+            createdAt: Date.now() + imported.length,
+            blob: file,
+            thumbnail,
+          };
+          if (this.#database) await saveParticleImageRecord(this.#database, record);
+          imported.push(record);
+          totalBytes += file.size;
+        } catch (error) {
+          this.#error = error instanceof Error ? `${file.name}: ${error.message}` : `${file.name} could not be saved.`;
+        }
+      }
+      if (!imported.length) return;
+      this.#records = [...this.#records, ...imported].sort((first, second) => first.createdAt - second.createdAt);
+      const selectedImageIds = [...this.#settings.selectedImageIds];
+      for (const record of imported) if (!selectedImageIds.includes(record.id)) selectedImageIds.push(record.id);
+      this.#settings = normalizeParticleSettings({
+        ...this.#settings,
+        selectedImageIds,
+        activeImageId: imported[0]?.id ?? this.#settings.activeImageId,
+      });
+      writeParticleBackgroundSettings(this.#settings);
+      if (this.#enabled && imported[0]) await this.#activateImage(imported[0].id, true);
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async toggleImageSelection(id: string): Promise<void> {
+    await this.initialize();
+    if (!this.#records.some((record) => record.id === id)) return;
+    const selectedImageIds = [...this.#settings.selectedImageIds];
+    const index = selectedImageIds.indexOf(id);
+    if (index >= 0) selectedImageIds.splice(index, 1);
+    else selectedImageIds.push(id);
+    this.#settings = normalizeParticleSettings({ ...this.#settings, selectedImageIds });
+    writeParticleBackgroundSettings(this.#settings);
+    this.#preparationCache?.invalidate();
+    this.#notify();
+    if (index < 0 && this.#enabled) await this.#activateImage(id, true);
+    else this.#scheduleRotation();
+  }
+
+  clearOrder(): void {
+    this.#settings = normalizeParticleSettings({ ...this.#settings, selectedImageIds: [] });
+    writeParticleBackgroundSettings(this.#settings);
+    this.#stopRotation();
+    this.#preparationCache?.invalidate();
+    this.#notify();
+  }
+
+  async deleteImage(id: string): Promise<void> {
+    await this.initialize();
+    const record = this.#records.find((candidate) => candidate.id === id);
+    if (!record) return;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (this.#database) await deleteParticleImageRecord(this.#database, id);
+      this.#records = this.#records.filter((candidate) => candidate.id !== id);
+      const wasActive = this.#settings.activeImageId === id;
+      const selectedImageIds = this.#settings.selectedImageIds.filter((candidate) => candidate !== id);
+      const activeImageId = this.#settings.activeImageId === id ? selectedImageIds[0] ?? null : this.#settings.activeImageId;
+      this.#settings = normalizeParticleSettings({ ...this.#settings, selectedImageIds, activeImageId });
+      writeParticleBackgroundSettings(this.#settings);
+      this.#preparationCache?.invalidate(id);
+      const thumbnailUrl = this.#thumbnailUrls.get(id);
+      if (thumbnailUrl) URL.revokeObjectURL(thumbnailUrl);
+      this.#thumbnailUrls.delete(id);
+      if (this.#enabled && wasActive && this.#settings.activeImageId) {
+        await this.#activateImage(this.#settings.activeImageId, true);
+      } else if (this.#enabled && wasActive) {
+        this.#clearActiveImage();
+      } else {
+        this.#scheduleRotation();
+      }
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The image could not be deleted";
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  thumbnailUrl(record: ParticleImageRecord): string {
+    const existing = this.#thumbnailUrls.get(record.id);
+    if (existing) return existing;
+    const url = URL.createObjectURL(record.thumbnail);
+    this.#thumbnailUrls.set(record.id, url);
+    return url;
+  }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#database?.close();
+    this.#database = null;
+    for (const url of this.#thumbnailUrls.values()) URL.revokeObjectURL(url);
+    this.#thumbnailUrls.clear();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+    document.removeEventListener("visibilitychange", this.#onVisibilityChange);
+    this.#reducedMotion.removeEventListener("change", this.#onReducedMotionChange);
+  }
+
+  async #initialize(): Promise<void> {
+    try {
+      this.#database = await openParticleImageDatabase(() => {
+        this.#database = null;
+        this.#error = "The image library changed in another Code-Codex window. Reopen the plugin to reconnect.";
+        this.#notify();
+      });
+      this.#records = (await readParticleImageRecords(this.#database))
+        .filter((record) => PARTICLE_BACKGROUND_IMAGE_TYPES.has(record.type) && record.size <= PARTICLE_BACKGROUND_MAX_IMAGE_BYTES)
+        .sort((first, second) => first.createdAt - second.createdAt)
+        .slice(0, PARTICLE_BACKGROUND_MAX_IMAGES);
+      void navigator.storage?.persist?.().catch(() => false);
+    } catch (error) {
+      this.#database = null;
+      this.#error = "The image library is available for this session only.";
+      console.warn("Code-Codex particle image storage is unavailable", error);
+    }
+    const available = new Set(this.#records.map((record) => record.id));
+    const selectedImageIds = this.#settings.selectedImageIds.filter((id) => available.has(id));
+    const activeImageId = this.#settings.activeImageId && available.has(this.#settings.activeImageId)
+      ? this.#settings.activeImageId
+      : selectedImageIds[0] ?? null;
+    this.#settings = normalizeParticleSettings({ ...this.#settings, selectedImageIds, activeImageId });
+    writeParticleBackgroundSettings(this.#settings);
+    this.#notify();
+  }
+
+  async #activateImage(id: string, restartRotation: boolean): Promise<boolean> {
+    if (!this.#enabled) return false;
+    const record = this.#records.find((candidate) => candidate.id === id);
+    if (!record) return false;
+    this.#stopRotation();
+    const generation = ++this.#generation;
+    this.#pending = true;
+    this.#notify();
+    try {
+      const cache = this.#preparationCache;
+      if (!cache) return false;
+      const prepared = await cache.prepare(record, this.#settings.particleCount);
+      if (!this.#enabled || generation !== this.#generation) return false;
+      this.#renderer?.setPreparedImage(prepared);
+      this.#transitionSourceImage(prepared.processedBlob);
+      this.#settings = normalizeParticleSettings({ ...this.#settings, activeImageId: id });
+      writeParticleBackgroundSettings(this.#settings);
+      this.#error = this.#renderer ? undefined : this.#error;
+      this.#prewarmNext(id);
+      if (restartRotation) this.#scheduleRotation();
+      else this.#scheduleRotation();
+      return true;
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        this.#error = error instanceof Error ? error.message : "The particle image could not be loaded";
+      }
+      return false;
+    } finally {
+      if (generation === this.#generation) {
+        this.#pending = false;
+        this.#notify();
+      }
+    }
+  }
+
+  #transitionSourceImage(processedBlob: Blob): void {
+    const image = this.#image;
+    const previousImage = this.#previousImage;
+    if (!image || !previousImage) return;
+    window.clearTimeout(this.#sourceReleaseTimer);
+    const nextUrl = URL.createObjectURL(processedBlob);
+    if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
+    this.#previousSourceUrl = this.#currentSourceUrl;
+    if (this.#previousSourceUrl) previousImage.src = this.#previousSourceUrl;
+    else previousImage.removeAttribute("src");
+    this.#currentSourceUrl = nextUrl;
+    image.src = nextUrl;
+    const duration = this.#reducedMotion.matches ? 0 : this.#settings.morphIntervalSeconds;
+    const visibleOpacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+    previousImage.style.transition = `opacity ${duration}s cubic-bezier(.2,.75,.2,1)`;
+    image.style.transition = `opacity ${duration}s cubic-bezier(.2,.75,.2,1)`;
+    previousImage.style.opacity = this.#previousSourceUrl ? String(visibleOpacity) : "0";
+    image.style.opacity = "0";
+    if (duration === 0) {
+      previousImage.style.opacity = "0";
+      image.style.opacity = String(visibleOpacity);
+      if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
+      this.#previousSourceUrl = undefined;
+      previousImage.removeAttribute("src");
+      this.#sourceTransitioning = false;
+      return;
+    }
+    this.#sourceTransitioning = true;
+    requestAnimationFrame(() => {
+      if (!this.#enabled || this.#currentSourceUrl !== nextUrl) return;
+      previousImage.style.opacity = "0";
+      image.style.opacity = String(visibleOpacity);
+    });
+    this.#sourceReleaseTimer = window.setTimeout(() => {
+      if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
+      this.#previousSourceUrl = undefined;
+      previousImage.removeAttribute("src");
+      this.#sourceTransitioning = false;
+    }, Math.ceil(duration * 1_000 + 300));
+  }
+
+  #applySourcePresentation(): void {
+    const layer = this.#layer;
+    const image = this.#image;
+    const previousImage = this.#previousImage;
+    if (!layer || !image || !previousImage) return;
+    layer.style.backgroundColor = this.#settings.backgroundColor;
+    const opacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+    image.style.opacity = String(opacity);
+    if (!this.#sourceTransitioning) previousImage.style.opacity = "0";
+    else if (!this.#settings.showSourceImage) previousImage.style.opacity = "0";
+  }
+
+  #clearActiveImage(): void {
+    this.#generation += 1;
+    this.#preparationCache?.invalidate();
+    this.#renderer?.dispose();
+    if (this.#canvas) {
+      try {
+        this.#renderer = new ParticleImageRenderer(this.#canvas, (message) => {
+          this.#error = message;
+          this.#notify();
+        }, this.#settings);
+      } catch {
+        this.#renderer = undefined;
+      }
+    }
+    if (this.#currentSourceUrl) URL.revokeObjectURL(this.#currentSourceUrl);
+    if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
+    this.#currentSourceUrl = undefined;
+    this.#previousSourceUrl = undefined;
+    this.#image?.removeAttribute("src");
+    this.#previousImage?.removeAttribute("src");
+  }
+
+  #validActiveImageId(): string | null {
+    const id = this.#settings.activeImageId;
+    return id && this.#records.some((record) => record.id === id) ? id : null;
+  }
+
+  #nextSelectedImageId(afterId: string | null = this.#settings.activeImageId): string | null {
+    const available = new Set(this.#records.map((record) => record.id));
+    const selected = this.#settings.selectedImageIds.filter((id) => available.has(id));
+    if (!selected.length) return null;
+    const index = afterId ? selected.indexOf(afterId) : -1;
+    return selected[(index + 1 + selected.length) % selected.length] ?? null;
+  }
+
+  #prewarmNext(afterId: string): void {
+    const nextId = this.#nextSelectedImageId(afterId);
+    if (!nextId || nextId === afterId) return;
+    const record = this.#records.find((candidate) => candidate.id === nextId);
+    if (record) this.#preparationCache?.prewarm(record, this.#settings.particleCount);
+  }
+
+  #scheduleRotation(): void {
+    this.#stopRotation();
+    if (
+      !this.#enabled
+      || !this.#settings.autoSwitch
+      || document.hidden
+      || this.#reducedMotion.matches
+      || this.#settings.selectedImageIds.length < 2
+    ) return;
+    const nextId = this.#nextSelectedImageId();
+    if (!nextId || nextId === this.#settings.activeImageId) return;
+    const delay = this.#settings.imageDurationSeconds * 1_000;
+    this.#rotationTimer = window.setTimeout(() => {
+      this.#rotationTimer = 0;
+      if (document.hidden || this.#reducedMotion.matches) return;
+      void this.#activateImage(nextId, true);
+    }, delay);
+  }
+
+  #stopRotation(): void {
+    window.clearTimeout(this.#rotationTimer);
+    this.#rotationTimer = 0;
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#stopRotation();
+    window.clearTimeout(this.#sourceReleaseTimer);
+    this.#sourceReleaseTimer = 0;
+    this.#preparationCache?.dispose();
+    this.#preparationCache = undefined;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    if (this.#currentSourceUrl) URL.revokeObjectURL(this.#currentSourceUrl);
+    if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
+    this.#currentSourceUrl = undefined;
+    this.#previousSourceUrl = undefined;
+    this.#sourceTransitioning = false;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    this.#previousImage = undefined;
+    this.#image = undefined;
+    this.#canvas = undefined;
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    let current: CodexAppearanceTheme;
+    try {
+      current = await readCodexAppearanceTheme();
+    } catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Set Codex Settings > Appearance > Base theme to Dark, then try again.", { cause: error });
+    }
+
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      clearParticleThemeLease();
+      throw new Error("Particle Image Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+
+    writeParticleThemeLease({ previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try {
+        await writeCodexAppearanceTheme(current);
+        clearParticleThemeLease();
+      } catch {
+        // Retain the lease so a later disable/startup can retry restoration.
+      }
+      throw new Error("Codex could not switch to Dark. Set Settings > Appearance > Base theme to Dark, then try again.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const lease = readParticleThemeLease();
+    if (!lease) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) {
+      clearParticleThemeLease();
+      return;
+    }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease();
+  }
+
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#enabled = false;
+      this.#pending = false;
+      this.#generation += 1;
+      this.#error = "Particle Image Background stopped because Codex Appearance is no longer Dark.";
+      this.#stoppedForExternalThemeChange = true;
+      this.#teardownPresentation();
+      clearParticleThemeLease();
+      this.#notify();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    });
+  }
+
+  #notify(): void {
+    for (const listener of this.#listeners) listener();
+  }
+
+  #onVisibilityChange = (): void => {
+    if (document.hidden) this.#stopRotation();
+    else {
+      const activeId = this.#validActiveImageId();
+      if (activeId) this.#prewarmNext(activeId);
+      this.#scheduleRotation();
+    }
+  };
+
+  #onReducedMotionChange = (): void => {
+    if (this.#reducedMotion.matches) this.#stopRotation();
+    else this.#scheduleRotation();
+  };
+
+  #onPageHide = (): void => {
+    this.dispose();
+  };
+}
+
+const PARTICLE_BACKGROUND_CONTROLLER = Symbol.for("code-codex:particle-image-background-controller:v1");
+
+function getParticleBackgroundController(): ParticleBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[PARTICLE_BACKGROUND_CONTROLLER];
+  if (existing instanceof ParticleBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try {
+      existing.dispose();
+    } catch {
+      // Replace a stale controller from an earlier injected bundle.
+    }
+  }
+  const controller = new ParticleBackgroundController();
+  globalState[PARTICLE_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
 function previewerCardMarkup(previewer: PreviewerDefinition): string {
   const extensionTags = previewer.extensions.map((extension) => `<span>${extension}</span>`).join("");
   return `
@@ -473,6 +3055,109 @@ function transparentBackgroundCardMarkup(): string {
       </div>
       <button class="preview-extension-action" type="button" aria-describedby="cle-transparent-background-status" aria-pressed="false">Enable</button>
     </article>
+  `;
+}
+
+function particleNumericControlsMarkup(group: ParticleControlGroup): string {
+  return PARTICLE_NUMERIC_CONTROL_DEFINITIONS
+    .filter((definition) => definition.group === group)
+    .map((definition) => {
+      const value = DEFAULT_PARTICLE_BACKGROUND_SETTINGS[definition.key];
+      return `
+        <label class="particle-control-row" for="${definition.id}">
+          <span>${definition.label}</span>
+          <input id="${definition.id}" data-particle-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}">
+          <output for="${definition.id}">${definition.format(value)}</output>
+        </label>
+      `;
+    })
+    .join("");
+}
+
+function particleBackgroundCardMarkup(): string {
+  return `
+    <article class="preview-extension appearance-extension particle-background-extension" data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}" aria-busy="false">
+      <span class="preview-extension-icon" aria-hidden="true">${icons.preview}</span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>Particle Image Background</h4>
+          <span class="preview-extension-status" id="cle-particle-background-status">Disabled</span>
+        </div>
+      </div>
+      <div class="preview-extension-actions">
+        <button class="preview-extension-action" type="button" aria-describedby="cle-particle-background-status" aria-pressed="false">Enable</button>
+        <button class="particle-settings-trigger" type="button" title="Configure Particle Image Background" aria-label="Configure Particle Image Background" aria-haspopup="dialog" aria-controls="cle-particle-settings" aria-expanded="false">${icons.sliders}</button>
+      </div>
+    </article>
+  `;
+}
+
+function particleSettingsPanelMarkup(): string {
+  return `
+    <section class="particle-settings-panel" id="cle-particle-settings" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-particle-settings-title">
+      <header class="particle-settings-header">
+        <div>
+          <p>Appearance</p>
+          <h3 id="cle-particle-settings-title">Particle settings</h3>
+        </div>
+        <button class="particle-settings-close" type="button" title="Close particle settings" aria-label="Close particle settings">${icons.close}</button>
+      </header>
+      <div class="particle-settings-scroll">
+        <fieldset class="particle-settings-group">
+          <legend>Particles</legend>
+          ${particleNumericControlsMarkup("particles")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>Flow</legend>
+          ${particleNumericControlsMarkup("flow")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>Source</legend>
+        <details class="particle-source-details">
+          <summary class="particle-source-summary">
+            <span>Image library</span>
+            <span class="particle-source-count">0 saved</span>
+          </summary>
+          <div class="particle-library-toolbar">
+            <label class="particle-library-add">
+              <span>Add images</span>
+              <input class="particle-library-upload" type="file" accept="${PARTICLE_BACKGROUND_ACCEPT}" multiple>
+            </label>
+            <button class="particle-library-clear" type="button" disabled>Clear order</button>
+          </div>
+          <div class="particle-library-grid">
+            <p class="particle-library-empty">Add images, then select them in playback order.</p>
+          </div>
+          <label class="particle-toggle-row" for="cle-particle-auto-switch">
+            <span>Auto switch</span>
+            <input id="cle-particle-auto-switch" type="checkbox" checked>
+          </label>
+        </details>
+          ${particleNumericControlsMarkup("source")}
+          <label class="particle-toggle-row" for="cle-particle-show-source">
+            <span>Show source image</span>
+            <input id="cle-particle-show-source" type="checkbox" checked>
+          </label>
+          <label class="particle-color-row" for="cle-particle-background-color">
+            <span>Background</span>
+            <input id="cle-particle-background-color" type="color" value="#000000">
+          </label>
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>Pointer</legend>
+          ${particleNumericControlsMarkup("pointer")}
+          <label class="particle-toggle-row" for="cle-particle-cursor-interaction">
+            <span>Cursor interaction</span>
+            <input id="cle-particle-cursor-interaction" type="checkbox" checked>
+          </label>
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>Render</legend>
+          ${particleNumericControlsMarkup("render")}
+        </fieldset>
+        <p class="particle-plugin-error" role="status" hidden></p>
+      </div>
+    </section>
   `;
 }
 
@@ -559,6 +3244,7 @@ export class CodeCodexElement extends HTMLElement {
   readonly #enabledPreviewers = new Set<string>();
   readonly #enabledAppearancePlugins = new Set<string>();
   #appearancePluginPending = false;
+  #appearanceTransitionPending = false;
   #appearancePluginApplied: boolean | undefined;
   #appearancePluginError: string | undefined;
   #appearanceSyncQueued = false;
@@ -567,6 +3253,7 @@ export class CodeCodexElement extends HTMLElement {
   #appearanceOperation = 0;
   #appearanceRpcTail: Promise<void> = Promise.resolve();
   #previewMarketOpen = false;
+  #particleSettingsOpen = false;
   #forcedColorsQuery: MediaQueryList | undefined;
   #reducedTransparencyQuery: MediaQueryList | undefined;
 
@@ -583,12 +3270,37 @@ export class CodeCodexElement extends HTMLElement {
   readonly #statusCode: HTMLElement;
   readonly #previewMarketButton: HTMLButtonElement;
   readonly #previewMarketPopover: HTMLElement;
+  readonly #previewMarketList: HTMLElement;
   readonly #previewMarketCloseButton: HTMLButtonElement;
   readonly #previewerButtons = new Map<string, HTMLButtonElement>();
   readonly #previewerStatuses = new Map<string, HTMLElement>();
   readonly #transparentBackgroundCard: HTMLElement;
   readonly #transparentBackgroundButton: HTMLButtonElement;
   readonly #transparentBackgroundStatus: HTMLElement;
+  readonly #particleBackgroundController = getParticleBackgroundController();
+  #particleBackgroundUnsubscribe: (() => void) | undefined;
+  #particleBackgroundInitialization: Promise<void> | undefined;
+  readonly #particleBackgroundCard: HTMLElement;
+  readonly #particleBackgroundButton: HTMLButtonElement;
+  readonly #particleBackgroundStatus: HTMLElement;
+  readonly #particleSettingsPanel: HTMLElement;
+  readonly #particleSettingsTrigger: HTMLButtonElement;
+  readonly #particleSettingsCloseButton: HTMLButtonElement;
+  readonly #particleNumericControls = new Map<ParticleNumericSettingKey, Readonly<{
+    definition: ParticleNumericControlDefinition;
+    input: HTMLInputElement;
+    output: HTMLOutputElement;
+  }>>();
+  readonly #particleSourceDetails: HTMLDetailsElement;
+  readonly #particleSourceCount: HTMLElement;
+  readonly #particleLibraryUpload: HTMLInputElement;
+  readonly #particleLibraryClear: HTMLButtonElement;
+  readonly #particleLibraryGrid: HTMLElement;
+  readonly #particleAutoSwitchInput: HTMLInputElement;
+  readonly #particleShowSourceInput: HTMLInputElement;
+  readonly #particleBackgroundColorInput: HTMLInputElement;
+  readonly #particleCursorInteractionInput: HTMLInputElement;
+  readonly #particlePluginError: HTMLElement;
   readonly #liveRegion: HTMLElement;
   readonly #collapseButton: HTMLButtonElement;
   readonly #collapsedTab: HTMLButtonElement;
@@ -646,7 +3358,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -661,6 +3373,7 @@ export class CodeCodexElement extends HTMLElement {
         <div class="context-menu" role="menu" aria-label="Explorer actions" aria-busy="false" hidden></div>
         <div class="resize-handle" role="separator" aria-label="Resize explorer" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="260" tabindex="0"></div>
       </div>
+      ${particleSettingsPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -678,6 +3391,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#statusCode = this.#required<HTMLElement>(".status-code");
     this.#previewMarketButton = this.#required<HTMLButtonElement>(".preview-market-button");
     this.#previewMarketPopover = this.#required<HTMLElement>(".preview-market-popover");
+    this.#previewMarketList = this.#required<HTMLElement>(".preview-market-list");
     this.#previewMarketCloseButton = this.#required<HTMLButtonElement>(".preview-market-close");
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const card = this.#required<HTMLElement>(`[data-preview-extension="${previewer.id}"]`);
@@ -694,6 +3408,31 @@ export class CodeCodexElement extends HTMLElement {
     this.#transparentBackgroundStatus = this.#required<HTMLElement>(
       `[data-appearance-plugin="${TRANSPARENT_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
     );
+    this.#particleBackgroundCard = this.#required<HTMLElement>(`[data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}"]`);
+    this.#particleBackgroundButton = this.#required<HTMLButtonElement>(
+      `[data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}"] .preview-extension-action`,
+    );
+    this.#particleBackgroundStatus = this.#required<HTMLElement>(
+      `[data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
+    );
+    this.#particleSettingsPanel = this.#required<HTMLElement>(".particle-settings-panel");
+    this.#particleSettingsTrigger = this.#required<HTMLButtonElement>(".particle-settings-trigger");
+    this.#particleSettingsCloseButton = this.#required<HTMLButtonElement>(".particle-settings-close");
+    for (const definition of PARTICLE_NUMERIC_CONTROL_DEFINITIONS) {
+      const input = this.#required<HTMLInputElement>(`#${definition.id}`);
+      const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
+      this.#particleNumericControls.set(definition.key, { definition, input, output });
+    }
+    this.#particleSourceDetails = this.#required<HTMLDetailsElement>(".particle-source-details");
+    this.#particleSourceCount = this.#required<HTMLElement>(".particle-source-count");
+    this.#particleLibraryUpload = this.#required<HTMLInputElement>(".particle-library-upload");
+    this.#particleLibraryClear = this.#required<HTMLButtonElement>(".particle-library-clear");
+    this.#particleLibraryGrid = this.#required<HTMLElement>(".particle-library-grid");
+    this.#particleAutoSwitchInput = this.#required<HTMLInputElement>("#cle-particle-auto-switch");
+    this.#particleShowSourceInput = this.#required<HTMLInputElement>("#cle-particle-show-source");
+    this.#particleBackgroundColorInput = this.#required<HTMLInputElement>("#cle-particle-background-color");
+    this.#particleCursorInteractionInput = this.#required<HTMLInputElement>("#cle-particle-cursor-interaction");
+    this.#particlePluginError = this.#required<HTMLElement>(".particle-plugin-error");
     this.#liveRegion = this.#required<HTMLElement>(".live-region");
     this.#collapseButton = this.#required<HTMLButtonElement>(".collapse");
     this.#collapsedTab = this.#required<HTMLButtonElement>(".collapsed-tab");
@@ -717,6 +3456,24 @@ export class CodeCodexElement extends HTMLElement {
     for (const previewer of this.#readEnabledPreviewers()) this.#enabledPreviewers.add(previewer);
     this.#enabledAppearancePlugins.clear();
     for (const plugin of this.#readEnabledAppearancePlugins()) this.#enabledAppearancePlugins.add(plugin);
+    if (
+      this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
+      && this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
+    ) {
+      this.#writeEnabledAppearancePlugins();
+    }
+    this.#particleBackgroundUnsubscribe?.();
+    this.#particleBackgroundUnsubscribe = this.#particleBackgroundController.subscribe(() => {
+      if (!this.#connected) return;
+      if (
+        this.#particleBackgroundController.stoppedForExternalThemeChange
+        && this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
+      ) {
+        this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderParticleBackgroundPlugin();
+    });
+    this.#particleBackgroundInitialization = this.#initializeParticleBackground();
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
@@ -751,7 +3508,11 @@ export class CodeCodexElement extends HTMLElement {
     this.#cancelMarquee();
     this.#preserveDetachedDraft();
     this.#connected = false;
+    this.#particleBackgroundUnsubscribe?.();
+    this.#particleBackgroundUnsubscribe = undefined;
+    this.#particleBackgroundInitialization = undefined;
     this.#appearancePluginPending = false;
+    this.#appearanceTransitionPending = false;
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#appearanceSyncQueued = false;
@@ -814,6 +3575,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#closePreviewMarket(false);
     if (!this.#leaveEditing("Hide Code-Codex and discard your unsaved changes?")) return;
     this.#disableButton.disabled = true;
+    if (this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)) {
+      this.#writeEnabledAppearancePlugins();
+    }
+    await this.#particleBackgroundController.disable();
     this.#dismissed = true;
     this.#purgePreviewTabs(false);
     dismissExplorerForSession();
@@ -910,6 +3675,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#threadId = null;
     this.#context = undefined;
     this.#appearancePluginPending = false;
+    this.#appearanceTransitionPending = false;
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#appearanceSyncQueued = false;
@@ -964,6 +3730,41 @@ export class CodeCodexElement extends HTMLElement {
       this.#previewMarketButton.addEventListener("click", () => this.#togglePreviewMarket());
       this.#previewMarketCloseButton.addEventListener("click", () => this.#closePreviewMarket(true));
       this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
+      this.#particleBackgroundButton.addEventListener("click", () => void this.#toggleParticleBackground());
+      this.#particleSettingsTrigger.addEventListener("click", () => this.#toggleParticleSettings());
+      this.#particleSettingsCloseButton.addEventListener("click", () => this.#closeParticleSettings(true));
+      this.#particleSettingsPanel.addEventListener("toggle", () => {
+        if (this.#particleSettingsPanel.matches(":popover-open") || !this.#particleSettingsOpen) return;
+        this.#particleSettingsOpen = false;
+        this.#particleSettingsTrigger.setAttribute("aria-expanded", "false");
+      });
+      this.#previewMarketList.addEventListener("scroll", () => {
+        if (this.#particleSettingsOpen) this.#positionParticleSettingsPanel();
+      }, { passive: true });
+      for (const { definition, input, output } of this.#particleNumericControls.values()) {
+        input.addEventListener("input", () => {
+          const normalized = normalizeParticleSettings({
+            ...this.#particleBackgroundController.settings,
+            [definition.key]: input.value,
+          })[definition.key];
+          output.value = definition.format(normalized);
+          if (definition.live) void this.#applyParticleSettingsFromControls();
+        });
+        if (!definition.live) {
+          input.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
+        }
+      }
+      this.#particleAutoSwitchInput.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
+      this.#particleShowSourceInput.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
+      this.#particleBackgroundColorInput.addEventListener("input", () => void this.#applyParticleSettingsFromControls());
+      this.#particleCursorInteractionInput.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
+      this.#particleLibraryUpload.addEventListener("change", () => {
+        const files = Array.from(this.#particleLibraryUpload.files ?? []);
+        this.#particleLibraryUpload.value = "";
+        if (files.length) void this.#particleBackgroundController.addImages(files);
+      });
+      this.#particleLibraryClear.addEventListener("click", () => this.#particleBackgroundController.clearOrder());
+      this.#particleLibraryGrid.addEventListener("click", (event) => void this.#onParticleLibraryClick(event));
       for (const previewer of PREVIEWER_DEFINITIONS) {
         this.#previewerButtons.get(previewer.id)?.addEventListener("click", () => this.#togglePreviewer(previewer));
       }
@@ -1088,9 +3889,11 @@ export class CodeCodexElement extends HTMLElement {
   #applyTheme(): void {
     const sources = [document.documentElement, document.body].filter(Boolean) as HTMLElement[];
     const explicit = sources.map((source) => source.dataset.theme).find((theme) => theme === "dark" || theme === "light");
-    const classDark = sources.some((source) => /(^|\s)dark(\s|$)/i.test(source.className));
+    const classDark = sources.some((source) => source.classList.contains("electron-dark") || /(^|\s)dark(\s|$)/i.test(source.className));
+    const classLight = sources.some((source) => source.classList.contains("electron-light") || /(^|\s)light(\s|$)/i.test(source.className));
     if (explicit) this.dataset.theme = explicit;
     else if (classDark) this.dataset.theme = "dark";
+    else if (classLight) this.dataset.theme = "light";
     else delete this.dataset.theme;
     this.#mirrorThemeToMainPreview();
   }
@@ -1120,13 +3923,32 @@ export class CodeCodexElement extends HTMLElement {
   #onWindowPointerDown = (event: PointerEvent): void => {
     const path = event.composedPath();
     if (!this.#contextMenu.hidden && !path.includes(this.#contextMenu)) this.#closeContextMenu(false);
-    if (!this.#previewMarketPopover.hidden && !path.includes(this.#previewMarketPopover) && !path.includes(this.#previewMarketButton)) {
+    if (
+      this.#particleSettingsOpen
+      && !path.includes(this.#particleSettingsPanel)
+      && !path.includes(this.#particleSettingsTrigger)
+    ) {
+      this.#closeParticleSettings(false);
+    }
+    if (
+      !this.#previewMarketPopover.hidden
+      && !path.includes(this.#previewMarketPopover)
+      && !path.includes(this.#previewMarketButton)
+      && !path.includes(this.#particleSettingsPanel)
+    ) {
       this.#closePreviewMarket(false);
     }
   };
 
   #onWindowKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== "Escape" || !this.#previewMarketOpen) return;
+    if (event.key !== "Escape") return;
+    if (this.#particleSettingsOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeParticleSettings(true);
+      return;
+    }
+    if (!this.#previewMarketOpen) return;
     event.preventDefault();
     event.stopPropagation();
     this.#closePreviewMarket(true);
@@ -4339,6 +7161,229 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  async #initializeParticleBackground(): Promise<void> {
+    try {
+      await this.#particleBackgroundController.initialize();
+      if (!this.#connected) return;
+      const enabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
+      if (enabled) {
+        if (this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          this.#writeEnabledAppearancePlugins();
+        }
+        this.#clearTransparentBackgroundPresentation();
+        await this.#particleBackgroundController.enable();
+      } else {
+        await this.#particleBackgroundController.disable();
+      }
+    } catch (error) {
+      console.error("Code-Codex could not initialize Particle Image Background", error);
+    } finally {
+      if (this.#connected) this.#renderPreviewMarket();
+    }
+  }
+
+  async #toggleParticleBackground(): Promise<void> {
+    if (
+      this.#particleBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending
+    ) return;
+    const operation = ++this.#appearanceOperation;
+    this.#appearanceTransitionPending = true;
+    this.#cancelAppearanceHealthCheck();
+    this.#renderPreviewMarket();
+    const bridge = this.#bridge;
+    const transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+    const previousTransparentBackground = this.#transparentBackgroundPresentation();
+    const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
+    let particleStarted = false;
+    try {
+      this.#particleBackgroundInitialization ??= this.#initializeParticleBackground();
+      await this.#particleBackgroundInitialization;
+      if (!this.#connected || operation !== this.#appearanceOperation) return;
+      const enabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
+      const nextEnabled = !enabled;
+      if (nextEnabled) {
+        if ((transparentWasEnabled || transparentPresentationWasApplied) && bridge?.available) {
+          await this.#setWindowTransparency(bridge, false);
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+        }
+        this.#clearTransparentBackgroundPresentation();
+        await this.#particleBackgroundController.enable();
+        particleStarted = true;
+        if (!this.#connected || operation !== this.#appearanceOperation) {
+          await this.#particleBackgroundController.disable();
+          return;
+        }
+        if (transparentWasEnabled) {
+          this.#appearancePluginApplied = false;
+          this.#appearancePluginError = undefined;
+          this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        }
+        this.#enabledAppearancePlugins.add(PARTICLE_BACKGROUND_PLUGIN_ID);
+      } else {
+        await this.#particleBackgroundController.disable();
+        this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+      this.#announce(`Particle Image Background ${nextEnabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      if (particleStarted) await this.#particleBackgroundController.disable();
+      if (transparentWasEnabled && previousTransparentBackground) {
+        this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+      }
+      const message = error instanceof Error ? error.message : "Particle Image Background could not be changed";
+      this.#showActionNotice(message, "error");
+    } finally {
+      if (operation === this.#appearanceOperation) {
+        this.#appearanceTransitionPending = false;
+        this.#renderPreviewMarket();
+        if (bridge?.available) this.#flushQueuedAppearanceSync(bridge);
+        if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          this.#scheduleAppearanceHealthCheck();
+        }
+      }
+    }
+  }
+
+  async #applyParticleSettingsFromControls(): Promise<void> {
+    const current = this.#particleBackgroundController.settings;
+    const values: Record<string, unknown> = { ...current };
+    for (const [key, { input }] of this.#particleNumericControls) values[key] = input.value;
+    values.autoSwitch = this.#particleAutoSwitchInput.checked;
+    values.showSourceImage = this.#particleShowSourceInput.checked;
+    values.backgroundColor = this.#particleBackgroundColorInput.value;
+    values.cursorInteraction = this.#particleCursorInteractionInput.checked;
+    await this.#particleBackgroundController.updateSettings(normalizeParticleSettings(values));
+  }
+
+  async #onParticleLibraryClick(event: Event): Promise<void> {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest<HTMLButtonElement>("button[data-particle-image-id]");
+    if (!button || !this.#particleLibraryGrid.contains(button)) return;
+    const id = button.dataset.particleImageId;
+    if (!id) return;
+    if (button.dataset.particleAction === "delete") await this.#particleBackgroundController.deleteImage(id);
+    else await this.#particleBackgroundController.toggleImageSelection(id);
+  }
+
+  #renderParticleBackgroundPlugin(): void {
+    const controller = this.#particleBackgroundController;
+    const enabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
+    const active = enabled && controller.enabled;
+    let status = enabled ? "Enabled" : "Disabled";
+    if (controller.pending) status = enabled || controller.enabled ? "Enabled · Applying" : "Applying";
+    else if (enabled && !active) status = "Enabled · Not applied";
+    else if (active && controller.error) status = "Enabled · Notice";
+    this.#particleBackgroundStatus.textContent = status;
+    this.#particleBackgroundStatus.dataset.enabled = String(active);
+    this.#particleBackgroundStatus.dataset.pending = String(controller.pending);
+    this.#particleBackgroundCard.setAttribute("aria-busy", String(controller.pending));
+    this.#particleBackgroundButton.textContent = controller.pending ? "Applying…" : enabled ? "Disable" : "Enable";
+    this.#particleBackgroundButton.dataset.enabled = String(enabled);
+    this.#particleBackgroundButton.setAttribute("aria-pressed", String(enabled));
+    this.#particleBackgroundButton.setAttribute(
+      "aria-label",
+      controller.pending
+        ? "Applying Particle Image Background"
+        : `${enabled ? "Disable" : "Enable"} Particle Image Background`,
+    );
+    this.#particleBackgroundButton.disabled = controller.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending;
+
+    const settings = controller.settings;
+    for (const [key, { definition, input, output }] of this.#particleNumericControls) {
+      const value = settings[key];
+      input.value = String(value);
+      input.disabled = controller.pending;
+      output.value = definition.format(value);
+    }
+    this.#particleAutoSwitchInput.checked = settings.autoSwitch;
+    this.#particleShowSourceInput.checked = settings.showSourceImage;
+    this.#particleBackgroundColorInput.value = settings.backgroundColor;
+    this.#particleCursorInteractionInput.checked = settings.cursorInteraction;
+
+    const records = controller.records;
+    const selectedIds = new Set(settings.selectedImageIds);
+    this.#particleSourceCount.textContent = records.length
+      ? `${records.length} saved · ${selectedIds.size} selected`
+      : "0 saved";
+    this.#particleLibraryClear.disabled = controller.pending || selectedIds.size === 0;
+    this.#particleLibraryUpload.disabled = controller.pending;
+    this.#particleAutoSwitchInput.disabled = controller.pending || selectedIds.size < 2;
+    this.#particleShowSourceInput.disabled = controller.pending;
+    this.#particleBackgroundColorInput.disabled = controller.pending;
+    this.#particleCursorInteractionInput.disabled = controller.pending;
+
+    const fragment = document.createDocumentFragment();
+    if (!records.length) {
+      const empty = document.createElement("p");
+      empty.className = "particle-library-empty";
+      empty.textContent = "Add images, then select them in playback order.";
+      fragment.append(empty);
+    }
+    for (const record of records) {
+      const orderIndex = settings.selectedImageIds.indexOf(record.id);
+      const item = document.createElement("article");
+      item.className = "particle-library-item";
+      if (orderIndex >= 0) item.classList.add("is-selected");
+      if (record.id === settings.activeImageId) item.classList.add("is-active");
+
+      const selectButton = document.createElement("button");
+      selectButton.className = "particle-library-select";
+      selectButton.type = "button";
+      selectButton.dataset.particleImageId = record.id;
+      selectButton.dataset.particleAction = "select";
+      selectButton.setAttribute("aria-pressed", String(orderIndex >= 0));
+      selectButton.setAttribute("aria-label", orderIndex >= 0
+        ? `Remove ${record.name} from the switching order`
+        : `Add ${record.name} to the switching order`);
+      selectButton.title = record.name;
+      const thumbnail = document.createElement("img");
+      thumbnail.className = "particle-library-thumb";
+      thumbnail.src = controller.thumbnailUrl(record);
+      thumbnail.alt = "";
+      thumbnail.loading = "lazy";
+      const name = document.createElement("span");
+      name.className = "particle-library-name";
+      name.textContent = record.name;
+      selectButton.append(thumbnail, name);
+      item.append(selectButton);
+
+      if (orderIndex >= 0) {
+        const order = document.createElement("span");
+        order.className = "particle-library-order";
+        order.textContent = String(orderIndex + 1);
+        order.setAttribute("aria-hidden", "true");
+        item.append(order);
+      }
+      if (record.id === settings.activeImageId) {
+        const live = document.createElement("span");
+        live.className = "particle-library-live";
+        live.textContent = "LIVE";
+        live.setAttribute("aria-hidden", "true");
+        item.append(live);
+      }
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "particle-library-delete";
+      deleteButton.type = "button";
+      deleteButton.dataset.particleImageId = record.id;
+      deleteButton.dataset.particleAction = "delete";
+      deleteButton.textContent = "×";
+      deleteButton.setAttribute("aria-label", `Delete ${record.name} from the image library`);
+      deleteButton.title = "Delete image";
+      item.append(deleteButton);
+      fragment.append(item);
+    }
+    this.#particleLibraryGrid.replaceChildren(fragment);
+    const error = controller.error;
+    this.#particlePluginError.hidden = !error;
+    this.#particlePluginError.textContent = error ?? "";
+    if (this.#particleSettingsOpen) requestAnimationFrame(() => this.#positionParticleSettingsPanel());
+  }
+
   #readEnabledAppearancePlugins(): readonly string[] {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(APPEARANCE_PLUGIN_SETTINGS_KEY) || "[]");
@@ -4393,6 +7438,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#appearanceHealthTimer !== undefined ||
       !this.#connected ||
       this.#dismissed ||
+      this.#appearanceTransitionPending ||
       !this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID) ||
       this.#transparencyPreferenceBlocked()
     ) {
@@ -4408,6 +7454,7 @@ export class CodeCodexElement extends HTMLElement {
     if (
       this.#appearanceHealthPending ||
       this.#appearancePluginPending ||
+      this.#appearanceTransitionPending ||
       !this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID) ||
       this.#transparencyPreferenceBlocked()
     ) {
@@ -4442,14 +7489,20 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   async #toggleTransparentBackground(): Promise<void> {
-    if (this.#appearancePluginPending) return;
+    if (
+      this.#appearancePluginPending
+      || this.#appearanceTransitionPending
+      || this.#particleBackgroundController.pending
+    ) return;
     const bridge = this.#bridge;
     const enabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
     const nextEnabled = !enabled;
     const operation = ++this.#appearanceOperation;
+    this.#appearanceTransitionPending = true;
     if (!nextEnabled) this.#cancelAppearanceHealthCheck();
 
     if (!bridge?.available) {
+      this.#appearanceTransitionPending = false;
       this.#appearancePluginApplied = undefined;
       this.#appearancePluginError = "Restart Codex with Code-Codex, then try again.";
       this.#renderAppearancePlugin();
@@ -4457,6 +7510,7 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
     if (nextEnabled && this.#transparencyPreferenceBlocked()) {
+      this.#appearanceTransitionPending = false;
       this.#appearancePluginError = "Turn off high contrast or reduced transparency, then try again.";
       this.#renderAppearancePlugin();
       this.#showActionNotice(`Transparent Background was not enabled. ${this.#appearancePluginError}`, "error");
@@ -4465,7 +7519,7 @@ export class CodeCodexElement extends HTMLElement {
 
     this.#appearancePluginPending = true;
     this.#appearancePluginError = undefined;
-    this.#renderAppearancePlugin();
+    this.#renderPreviewMarket();
     const previousBackground = this.#transparentBackgroundPresentation();
     this.#clearTransparentBackgroundPresentation();
     try {
@@ -4473,9 +7527,16 @@ export class CodeCodexElement extends HTMLElement {
       if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
       if (nextEnabled) this.#applyTransparentBackgroundPresentation(result.background);
       this.#appearancePluginApplied = nextEnabled;
-      if (nextEnabled) this.#enabledAppearancePlugins.add(TRANSPARENT_BACKGROUND_PLUGIN_ID);
-      else this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      if (nextEnabled) {
+        if (this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)) {
+          await this.#particleBackgroundController.disable();
+        }
+        this.#enabledAppearancePlugins.add(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      } else {
+        this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      }
       this.#writeEnabledAppearancePlugins();
+      this.#renderParticleBackgroundPlugin();
       this.#announce(`Transparent Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
       if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
@@ -4486,7 +7547,8 @@ export class CodeCodexElement extends HTMLElement {
     } finally {
       if (this.#isCurrentAppearanceOperation(bridge, operation)) {
         this.#appearancePluginPending = false;
-        this.#renderAppearancePlugin();
+        this.#appearanceTransitionPending = false;
+        this.#renderPreviewMarket();
         this.#flushQueuedAppearanceSync(bridge);
         if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
           this.#scheduleAppearanceHealthCheck();
@@ -4497,7 +7559,7 @@ export class CodeCodexElement extends HTMLElement {
 
   async #syncPersistedAppearance(bridge: ExplorerBridge, reportErrors: boolean): Promise<void> {
     if (!this.#canUseAppearanceBridge(bridge)) return;
-    if (this.#appearancePluginPending) {
+    if (this.#appearancePluginPending || this.#appearanceTransitionPending) {
       this.#appearanceSyncQueued = true;
       return;
     }
@@ -4507,7 +7569,7 @@ export class CodeCodexElement extends HTMLElement {
     if (!requestedEnabled) this.#cancelAppearanceHealthCheck();
     this.#appearancePluginPending = true;
     this.#appearancePluginError = undefined;
-    this.#renderAppearancePlugin();
+    this.#renderPreviewMarket();
     const previousBackground = this.#transparentBackgroundPresentation();
     this.#clearTransparentBackgroundPresentation();
     try {
@@ -4517,14 +7579,20 @@ export class CodeCodexElement extends HTMLElement {
       this.#appearancePluginApplied = requestedEnabled;
     } catch (error) {
       if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
-      if (!requestedEnabled && previousBackground) this.#applyTransparentBackgroundPresentation(previousBackground);
+      if (
+        !requestedEnabled
+        && previousBackground
+        && !this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
+      ) {
+        this.#applyTransparentBackgroundPresentation(previousBackground);
+      }
       if (requestedEnabled) this.#appearancePluginApplied = false;
       this.#appearancePluginError = transparencyActionError(error, requestedEnabled);
       if (reportErrors) this.#showActionNotice(this.#appearancePluginError, "error");
     } finally {
       if (this.#isCurrentAppearanceOperation(bridge, operation)) {
         this.#appearancePluginPending = false;
-        this.#renderAppearancePlugin();
+        this.#renderPreviewMarket();
         this.#flushQueuedAppearanceSync(bridge);
         if (requestedEnabled) this.#scheduleAppearanceHealthCheck();
       }
@@ -4571,7 +7639,64 @@ export class CodeCodexElement extends HTMLElement {
     });
   }
 
+  #toggleParticleSettings(): void {
+    if (this.#particleSettingsOpen) {
+      this.#closeParticleSettings(true);
+      return;
+    }
+    if (!this.#previewMarketOpen) this.#togglePreviewMarket();
+    this.#particleSettingsOpen = true;
+    this.#particleSettingsTrigger.setAttribute("aria-expanded", "true");
+    this.#renderParticleBackgroundPlugin();
+    if (!this.#particleSettingsPanel.matches(":popover-open")) this.#particleSettingsPanel.showPopover();
+    this.#positionParticleSettingsPanel();
+    queueMicrotask(() => {
+      if (!this.#particleSettingsOpen) return;
+      this.#positionParticleSettingsPanel();
+      this.#particleSettingsCloseButton.focus();
+    });
+  }
+
+  #closeParticleSettings(restoreFocus: boolean): void {
+    if (!this.#particleSettingsOpen && !this.#particleSettingsPanel.matches(":popover-open")) return;
+    this.#particleSettingsOpen = false;
+    this.#particleSettingsTrigger.setAttribute("aria-expanded", "false");
+    if (this.#particleSettingsPanel.matches(":popover-open")) this.#particleSettingsPanel.hidePopover();
+    if (restoreFocus && this.#particleSettingsTrigger.isConnected) this.#particleSettingsTrigger.focus();
+  }
+
+  #positionParticleSettingsPanel(): void {
+    if (!this.#particleSettingsOpen || !this.#particleSettingsPanel.matches(":popover-open")) return;
+    const panel = this.#particleSettingsPanel;
+    const cardRect = this.#particleBackgroundCard.getBoundingClientRect();
+    const edge = 12;
+    const gap = 8;
+    const preferredWidth = 344;
+    const panelWidth = Math.min(preferredWidth, Math.max(240, window.innerWidth - edge * 2));
+    let left = cardRect.right + gap;
+    let side = "right";
+    if (left + panelWidth > window.innerWidth - edge) {
+      left = Math.max(edge, window.innerWidth - edge - panelWidth);
+      side = "overlay";
+    }
+    panel.style.width = `${panelWidth}px`;
+    panel.style.maxHeight = `${Math.max(240, window.innerHeight - edge * 2)}px`;
+    const panelHeight = Math.min(panel.scrollHeight, Math.max(240, window.innerHeight - edge * 2));
+    const top = Math.min(
+      Math.max(edge, cardRect.top),
+      Math.max(edge, window.innerHeight - edge - panelHeight),
+    );
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.setProperty(
+      "--cle-particle-settings-anchor-y",
+      `${Math.round(Math.min(panelHeight - 18, Math.max(18, cardRect.top + cardRect.height * 0.5 - top)))}px`,
+    );
+    panel.dataset.side = side;
+  }
+
   #closePreviewMarket(restoreFocus: boolean): void {
+    this.#closeParticleSettings(false);
     if (!this.#previewMarketOpen && this.#previewMarketPopover.hidden) return;
     this.#previewMarketOpen = false;
     this.#previewMarketPopover.hidden = true;
@@ -4595,6 +7720,7 @@ export class CodeCodexElement extends HTMLElement {
 
   #renderPreviewMarket(): void {
     this.#renderAppearancePlugin();
+    this.#renderParticleBackgroundPlugin();
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const enabled = this.#enabledPreviewers.has(previewer.id);
       const status = this.#previewerStatuses.get(previewer.id);
@@ -4634,7 +7760,11 @@ export class CodeCodexElement extends HTMLElement {
         : `${enabled ? "Disable" : "Enable"} Transparent Background`,
     );
     this.#transparentBackgroundButton.disabled =
-      this.#appearancePluginPending || !bridgeAvailable || (!enabled && preferenceBlocked);
+      this.#appearancePluginPending
+      || this.#appearanceTransitionPending
+      || this.#particleBackgroundController.pending
+      || !bridgeAvailable
+      || (!enabled && preferenceBlocked);
 
     let title = "";
     if (!bridgeAvailable) title = "Restart Codex with Code-Codex to change this extension.";

@@ -5,6 +5,101 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.81
+
+- `CodeCodex-0.1.81-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.81-x64.msi`: MSI installer.
+- `CodeCodex-0.1.81-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Reworks Particle Image Background pointer flow as inertial gas advection
+  instead of home-anchored elastic displacement.
+- Keeps disturbed particles moving under damping until lifetime expiry while
+  preserving image morphing, regeneration, and continuous ambient flow.
+
+## v0.1.80
+
+- `CodeCodex-0.1.80-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.80-x64.msi`: MSI installer.
+- `CodeCodex-0.1.80-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Raises Particle Image Background's Cursor strength maximum from `40` to
+  `400`, with proportional shader force and displacement headroom.
+
+## v0.1.79
+
+- `CodeCodex-0.1.79-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.79-x64.msi`: MSI installer.
+- `CodeCodex-0.1.79-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Switches Particle Image Background through Codex's real
+  `Settings > Appearance > Base theme` action instead of simulating Dark mode.
+- Restores the previous Codex theme when the particle plugin is disabled and
+  keeps an explicit user theme change disabled across the next launch.
+
+## v0.1.78
+
+- `CodeCodex-0.1.78-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.78-x64.msi`: MSI installer.
+- `CodeCodex-0.1.78-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Makes the complete Particle Image Background control set available to users,
+  including particles, flow, source, pointer, and render settings.
+- Opens particle controls in a dedicated secondary panel to the right of the
+  plugin card, keeping the Preview Market and file tree compact and visible.
+
+## v0.1.77
+
+- `CodeCodex-0.1.77-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.77-x64.msi`: MSI installer.
+- `CodeCodex-0.1.77-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Extends Particle Image Background across the native Codex sidebar, the
+  Code-Codex file tree, the application chrome, and the conversation surface.
+- Keeps controls, menus, dialogs, and text on stronger dark surfaces while the
+  large structural areas remain translucent and the file tree stays mounted.
+
+## v0.1.76
+
+- `CodeCodex-0.1.76-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.76-x64.msi`: MSI installer.
+- `CodeCodex-0.1.76-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Applies Codex's dark presentation while Particle Image Background is active,
+  leaving the particle map visible beneath a readable conversation surface.
+- Keeps the file tree on an opaque dark surface and removes the particle layer
+  when the explorer is explicitly dismissed, preventing an orphaned background.
+
+## v0.1.75
+
+- `CodeCodex-0.1.75-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.75-x64.msi`: MSI installer.
+- `CodeCodex-0.1.75-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Restores readable, theme-aware Codex surfaces while Particle Image Background
+  is enabled and keeps the Code-Codex file tree visibly above the particle layer.
+- Prevents Particle Image Background and Transparent Background presentation
+  states from overlapping during startup or extension switching.
+
+## v0.1.74
+
+- `CodeCodex-0.1.74-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.74-x64.msi`: MSI installer.
+- `CodeCodex-0.1.74-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Finalizes the Particle Image Background plugin package, including the Source
+  library guidance shown when no image has been added yet.
+
+## v0.1.73
+
+- `CodeCodex-0.1.73-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.73-x64.msi`: MSI installer.
+- `CodeCodex-0.1.73-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds Particle Image Background to the built-in plugin market with a persistent
+  grayscale image library, automatic image switching, and smooth particle morphs.
+- Exposes only Particle count and Source controls; advanced Flow, Pointer, and
+  Render parameters use the fixed effect defaults.
+
 ## v0.1.72
 
 - `CodeCodex-0.1.72-x64-setup.exe`: recommended installer.
@@ -392,5 +487,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.72
+./scripts/package.ps1 -Version 0.1.81
 ```

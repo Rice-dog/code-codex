@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.1.72"><img alt="版本" src="https://img.shields.io/badge/version-0.1.72-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.1.81"><img alt="版本" src="https://img.shields.io/badge/version-0.1.81-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,15 +35,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.1.72-x64-setup.exe`
-- 备选：`CodeCodex-0.1.72-x64.msi`
-- 便携包：`CodeCodex-0.1.72-x64.zip`
+- 推荐：`CodeCodex-0.1.81-x64-setup.exe`
+- 备选：`CodeCodex-0.1.81-x64.msi`
+- 便携包：`CodeCodex-0.1.81-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.1.72-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.1.81-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -82,7 +82,7 @@ Get-FileHash .\CodeCodex-0.1.72-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.72
+./scripts/package.ps1 -Version 0.1.81
 ```
 
 生成结果会写入 `releases/`。
@@ -109,6 +109,7 @@ Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创
 - 文本预览与编辑，包括多语言 Markdown 内容。
 - 可在预览市场中独立启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 和 3D 模型预览。
 - 可选的“透明背景”外观插件，通过可恢复的 Windows 合成器透明表面显示 Codex 后方内容，同时保持整个 Codex 窗口接收输入，避免点击穿透到后方应用。
+- “粒子图像背景”外观插件提供持久化的灰度图片库、按顺序自动切换和流畅的粒子变形；用户界面仅开放粒子数量与 Source 参数。
 - Codex 软件包版本仅作为诊断信息；未来版本不再受固定版本白名单限制，而是通过实时协议和 DOM 结构检查。
 - 在本地以表格形式预览 CSV，支持引号字段、字段内换行、固定表头和受限渲染。
 - 在本地以受限方式预览 `.drawio` 文件和常用 `.plantuml` 活动图语法，不会上传源代码。
@@ -128,7 +129,8 @@ Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Of
 模型预览插件。预览处理在用户电脑本地完成。
 
 3D 模型预览插件为 `.gltf` 和 `.glb` 文件提供交互式视图，支持旋转、平移、缩放、
-适配/重置视图、参考网格和动画控制。“透明背景”作为独立的外观插件提供。
+适配/重置视图、参考网格和动画控制。“透明背景”和“粒子图像背景”作为独立的外观插件提供。
+粒子图片及设置仅保存在用户本机的 Codex 配置中。
 
 ## 仓库结构
 

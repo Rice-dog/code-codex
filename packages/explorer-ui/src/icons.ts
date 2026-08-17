@@ -12,6 +12,7 @@ export const icons = {
   close: `<svg ${common}><path d="m3.25 3.25 9.5 9.5M12.75 3.25l-9.5 9.5"/></svg>`,
   warning: `<svg ${common}><path d="m8 1.6 6.65 12.15H1.35z"/><path d="M8 5.25v4.25M8 11.75v.1"/></svg>`,
   preview: `<svg ${common}><path d="M1.5 8s2.35-4 6.5-4 6.5 4 6.5 4-2.35 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.75"/></svg>`,
+  sliders: `<svg ${common}><path d="M2 4h3M9 4h5M2 8h7M13 8h1M2 12h1M7 12h7"/><circle cx="7" cy="4" r="2"/><circle cx="11" cy="8" r="2"/><circle cx="5" cy="12" r="2"/></svg>`,
   newFile: `<svg ${common}><path d="M3.25 1.75h6l3.5 3.5v9h-9.5z"/><path d="M9.25 1.75v3.5h3.5M8 7.5v4M6 9.5h4"/></svg>`,
   newFolder: `<svg ${common}><path d="M1.75 4.25h4l1.2 1.5h7.3v6.5h-12.5z"/><path d="M8 7.25v3.5M6.25 9h3.5"/></svg>`,
   rename: `<svg ${common}><path d="m3 11.5-.5 2 2-.5 7.75-7.75-1.5-1.5z"/><path d="m9.75 4.75 1.5 1.5M2.5 14h11"/></svg>`,

@@ -1,6 +1,8 @@
 import { getBootstrapConfig } from "./bridge";
 import {
   CodeCodexElement,
+  PARTICLE_BACKGROUND_ATTRIBUTE,
+  PARTICLE_BACKGROUND_COLOR_PROPERTY,
   TRANSPARENT_BACKGROUND_ATTRIBUTE,
   TRANSPARENT_BACKGROUND_COLOR_PROPERTY,
 } from "./explorer-element";
@@ -20,6 +22,7 @@ export const EXPLORER_TAG = "code-codex";
 const DISMISS_EVENT = "code-codex:dismiss";
 const RESELECTION_LISTENER_STATE = Symbol.for("code-codex:reselection-listener:v1");
 const SHELL_LAYOUT_STYLE_SELECTOR = 'style[data-code-codex-shell-layout="codex-26.715"]';
+const PARTICLE_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-particle-background="v1"]';
 const TRANSPARENT_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-transparent-background="v1"]';
 const SHELL_LAYOUT_CSS = `
 code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + ${MAIN_SURFACE_SELECTOR} > header[data-app-shell-header-edge-scroll] {
@@ -72,6 +75,93 @@ html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body :is(
   [class*="MainContentTopFade"]
 ) {
   background-image: none !important;
+}
+`;
+const PARTICLE_BACKGROUND_CSS = `
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] {
+  background-color: var(${PARTICLE_BACKGROUND_COLOR_PROPERTY}, #000) !important;
+  --code-codex-particle-ui-surface: rgba(11, 12, 15, .58);
+  --code-codex-particle-ui-surface-strong: rgba(16, 17, 20, .66);
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body {
+  isolation: isolate;
+  background-color: transparent !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
+  main.main-surface,
+  main[data-app-shell-main-surface="default"]
+) {
+  background-color: var(--code-codex-particle-ui-surface) !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
+  aside.app-shell-left-panel,
+  aside[data-testid="app-shell-floating-left-panel"].bg-surface,
+  aside[data-app-shell-focus-area="right-panel"]
+) {
+  background-color: var(--code-codex-particle-ui-surface-strong) !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
+  aside[data-app-shell-focus-area="right-panel"] .bg-surface,
+  [data-app-shell-header-edge-scroll],
+  .thread-scroll-container[data-app-action-timeline-scroll]
+) {
+  background-color: transparent !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] > [class*="bg-gradient-to-t"],
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [class*="bg-gradient-to-t"] {
+  background-image: none !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body code-codex[data-placement="inline"] {
+  position: relative !important;
+  z-index: 3 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body code-codex[data-placement="drawer"] {
+  z-index: 2147483000 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] [data-code-codex-particle-layer] {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: -1 !important;
+  pointer-events: none !important;
+  background: var(${PARTICLE_BACKGROUND_COLOR_PROPERTY}, #000);
+  contain: strict;
+  overflow: hidden !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] [data-code-codex-particle-layer] > :is(
+  .code-codex-particle-source,
+  .code-codex-particle-canvas
+) {
+  position: absolute !important;
+  inset: 0 !important;
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-particle-source {
+  object-fit: contain !important;
+  filter: grayscale(1) !important;
+  user-select: none !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-particle-canvas {
+  z-index: 2 !important;
 }
 `;
 
@@ -187,8 +277,19 @@ function installTransparentBackgroundStyle(): void {
   if (style.textContent !== TRANSPARENT_BACKGROUND_CSS) style.textContent = TRANSPARENT_BACKGROUND_CSS;
 }
 
+function installParticleBackgroundStyle(): void {
+  let style = document.querySelector<HTMLStyleElement>(PARTICLE_BACKGROUND_STYLE_SELECTOR);
+  if (!style) {
+    style = document.createElement("style");
+    style.dataset.codeCodexParticleBackground = "v1";
+    (document.head ?? document.documentElement).append(style);
+  }
+  if (style.textContent !== PARTICLE_BACKGROUND_CSS) style.textContent = PARTICLE_BACKGROUND_CSS;
+}
+
 export function injectExplorer(): CodeCodexElement | null {
   installTransparentBackgroundStyle();
+  installParticleBackgroundStyle();
   const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
   if (sessionDismissed()) return existing;
   const mount = chooseMount();
@@ -319,6 +420,7 @@ function installRemountObserver(): void {
 export function installInjector(): void {
   window.__codeCodexInject = injectExplorer;
   installTransparentBackgroundStyle();
+  installParticleBackgroundStyle();
   installReselectionListener();
   const start = () => {
     const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);

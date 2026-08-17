@@ -109,6 +109,18 @@ export interface ObjectBridge {
   subscribe?: (listener: (message: BridgeMessage) => void) => (() => void) | void;
 }
 
+export interface CodexViewFetchRequest {
+  type: "fetch";
+  requestId: string;
+  method: "POST";
+  url: string;
+  body: string;
+}
+
+export interface CodexElectronBridge {
+  sendMessageFromView?: (message: CodexViewFetchRequest) => unknown;
+}
+
 declare global {
   interface Window {
     __CODE_CODEX_BOOTSTRAP__?: BootstrapConfig;
@@ -116,5 +128,6 @@ declare global {
     __codeCodexNative?: ((payload: string) => unknown) | ObjectBridge;
     __codeCodexReceive?: (message: BridgeMessage | string) => void;
     __codeCodexInject?: () => HTMLElement | null;
+    electronBridge?: CodexElectronBridge;
   }
 }
