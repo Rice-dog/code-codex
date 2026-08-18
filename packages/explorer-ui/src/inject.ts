@@ -158,6 +158,7 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-particle-source {
   object-fit: contain !important;
   filter: grayscale(1) !important;
   user-select: none !important;
+  will-change: opacity, transform;
 }
 
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-particle-canvas {

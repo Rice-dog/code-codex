@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.88"
+    [string]$Version = "0.1.90"
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +34,23 @@ function Assert-RegularFile([string]$Path, [string]$Description) {
         throw "$Description must be a regular file: $Path"
     }
     return $item
+}
+
+function Get-Sha256Hash([string]$Path) {
+    [void](Assert-RegularFile $Path "Hash input")
+    $stream = [IO.File]::Open(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "")
+    }
+    finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
 }
 
 function Assert-SafeFileCopy([string]$Source, [string]$Destination) {
@@ -303,8 +320,7 @@ if (Test-Path -LiteralPath $VersionRoot) {
         @($SourceRuntimeLauncher, (Join-Path $VersionRoot "CodeCodex.exe"))
     )) {
         if (-not (Test-Path -LiteralPath $pair[1] -PathType Leaf) -or
-            (Get-FileHash -LiteralPath $pair[0] -Algorithm SHA256).Hash -ne
-                (Get-FileHash -LiteralPath $pair[1] -Algorithm SHA256).Hash) {
+            (Get-Sha256Hash $pair[0]) -ne (Get-Sha256Hash $pair[1])) {
             throw "Version $Version is already installed with a different payload. Use a new release version."
         }
     }

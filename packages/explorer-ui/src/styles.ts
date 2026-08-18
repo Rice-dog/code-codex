@@ -1331,6 +1331,7 @@ export const styles = String.raw`
   .particle-settings-trigger:focus-visible,
   .particle-settings-close:focus-visible,
   .particle-settings-panel :is(button, summary, input):focus-visible,
+  .particle-settings-panel .particle-image-transform-editor:focus-visible,
   .particle-settings-panel .particle-library-add:focus-within {
     outline: 2px solid var(--cle-focus);
     outline-offset: 1px;
@@ -1455,6 +1456,102 @@ export const styles = String.raw`
     cursor: default;
     opacity: .5;
   }
+  .particle-image-transform-editor {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    margin: 0 8px 7px;
+    padding: 7px;
+    background: var(--cle-paper-raised);
+    border: 1px solid var(--cle-rule);
+    border-radius: 6px;
+  }
+  .particle-image-transform-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+  .particle-image-transform-identity {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+  .particle-image-transform-identity > div {
+    display: grid;
+    min-width: 0;
+  }
+  .particle-image-transform-identity span {
+    color: var(--cle-muted);
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 11px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .particle-image-transform-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--cle-ink);
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .particle-image-transform-thumb {
+    display: block;
+    width: 28px;
+    height: 28px;
+    object-fit: cover;
+    background: var(--cle-subtle);
+    border: 1px solid var(--cle-rule);
+    border-radius: 4px;
+    filter: grayscale(1);
+  }
+  .particle-image-transform-thumb[hidden] { display: none; }
+  .particle-image-transform-editor[data-empty="true"] .particle-image-transform-identity {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .particle-image-transform-reset {
+    flex: 0 0 auto;
+    min-height: 22px;
+    padding: 2px 7px;
+    color: var(--cle-muted);
+    background: transparent;
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 9px;
+  }
+  .particle-image-transform-reset:hover:not(:disabled) {
+    color: var(--cle-ink);
+    background: var(--cle-hover);
+  }
+  .particle-image-transform-reset:disabled {
+    cursor: default;
+    opacity: .45;
+  }
+  .particle-image-transform-controls {
+    display: grid;
+    gap: 1px;
+  }
+  .particle-image-transform-controls .particle-control-row {
+    grid-template-columns: 66px minmax(72px, 1fr) 42px;
+    min-height: 23px;
+  }
+  .particle-image-transform-empty {
+    display: none;
+    margin: 0;
+    color: var(--cle-muted);
+    font-size: 9px;
+    line-height: 14px;
+  }
+  .particle-image-transform-editor[data-empty="true"] .particle-image-transform-controls { display: none; }
+  .particle-image-transform-editor[data-empty="true"] .particle-image-transform-empty { display: block; }
   .particle-library-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1493,6 +1590,7 @@ export const styles = String.raw`
     text-align: left;
   }
   .particle-library-select:hover { border-color: var(--cle-rule-strong); }
+  .particle-library-select:disabled { cursor: default; }
   .particle-library-item.is-selected .particle-library-select,
   .particle-library-item:has(.particle-library-select[aria-pressed="true"]) .particle-library-select {
     border-color: var(--cle-signal);
@@ -1569,6 +1667,47 @@ export const styles = String.raw`
     line-height: 1;
     opacity: 0;
   }
+  .particle-library-adjust {
+    position: absolute;
+    z-index: 3;
+    bottom: 21px;
+    left: 3px;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    color: var(--cle-ink);
+    background: color-mix(in srgb, var(--cle-paper-raised) 88%, transparent);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 5px;
+    cursor: pointer;
+    opacity: .82;
+    touch-action: manipulation;
+  }
+  .particle-library-adjust[aria-pressed="true"] {
+    color: var(--cle-paper);
+    background: var(--cle-ink);
+    border-color: var(--cle-ink);
+    opacity: 1;
+  }
+  .particle-library-adjust:hover:not(:disabled):not([aria-pressed="true"]) {
+    background: var(--cle-hover);
+    opacity: 1;
+  }
+  .particle-library-adjust:disabled {
+    cursor: default;
+    opacity: .45;
+  }
+  .particle-library-adjust svg {
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.3;
+  }
   .particle-library-item:hover .particle-library-delete,
   .particle-library-delete:focus-visible { opacity: 1; }
   .particle-library-delete:hover {
@@ -1576,6 +1715,11 @@ export const styles = String.raw`
     background: var(--cle-deleted);
     border-color: var(--cle-deleted);
   }
+  .particle-library-delete:disabled {
+    cursor: default;
+    opacity: 0;
+  }
+  .particle-library-item:hover .particle-library-delete:disabled { opacity: 0; }
   .particle-toggle-row,
   .particle-color-row {
     display: grid;

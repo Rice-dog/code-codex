@@ -564,7 +564,25 @@ interface ParticleNumericControlDefinition {
   readonly format: (value: number) => string;
 }
 
-interface ParticleImageRecord {
+interface ParticleImageTransform {
+  readonly positionX: number;
+  readonly positionY: number;
+  readonly zoom: number;
+}
+
+type ParticleImageTransformKey = keyof ParticleImageTransform;
+
+interface ParticleImageTransformControlDefinition {
+  readonly key: ParticleImageTransformKey;
+  readonly id: string;
+  readonly label: string;
+  readonly minimum: number;
+  readonly maximum: number;
+  readonly step: number;
+  readonly format: (value: number) => string;
+}
+
+interface ParticleImageRecord extends ParticleImageTransform {
   readonly id: string;
   readonly name: string;
   readonly type: string;
@@ -622,6 +640,12 @@ const DEFAULT_PARTICLE_BACKGROUND_SETTINGS: ParticleBackgroundSettings = Object.
   dprCap: 1.5,
 });
 
+const DEFAULT_PARTICLE_IMAGE_TRANSFORM: ParticleImageTransform = Object.freeze({
+  positionX: 50,
+  positionY: 50,
+  zoom: 1,
+});
+
 const PARTICLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
   { key: "particleCount", group: "particles", id: "cle-particle-count", label: "Particle count", minimum: 10_000, maximum: 2_000_000, step: 10_000, live: false, format: (value: number) => Math.round(value).toLocaleString() },
   { key: "particleSize", group: "particles", id: "cle-particle-size", label: "Particle size", minimum: 0.5, maximum: 4, step: 0.1, live: true, format: (value: number) => value.toFixed(1) },
@@ -637,6 +661,12 @@ const PARTICLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
   { key: "cursorStrength", group: "pointer", id: "cle-particle-cursor-strength", label: "Cursor strength", minimum: 0, maximum: PARTICLE_BACKGROUND_CURSOR_MAX_STRENGTH, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
   { key: "dprCap", group: "render", id: "cle-particle-dpr-cap", label: "DPR cap", minimum: 1, maximum: 2, step: 0.25, live: true, format: (value: number) => value.toFixed(2) },
 ] satisfies readonly ParticleNumericControlDefinition[]);
+
+const PARTICLE_IMAGE_TRANSFORM_CONTROL_DEFINITIONS = Object.freeze([
+  { key: "positionX", id: "cle-particle-image-position-x", label: "Position X", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
+  { key: "positionY", id: "cle-particle-image-position-y", label: "Position Y", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
+  { key: "zoom", id: "cle-particle-image-zoom", label: "Zoom", minimum: 0.25, maximum: 4, step: 0.05, format: (value: number) => `${Math.round(value * 100)}%` },
+] satisfies readonly ParticleImageTransformControlDefinition[]);
 
 function clampParticleNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
   const number = typeof value === "number" ? value : Number(value);
@@ -658,6 +688,23 @@ function normalizeSteppedParticleNumber(
   const clamped = clampParticleNumber(value, minimum, maximum, fallback);
   const stepped = minimum + Math.round((clamped - minimum) / step) * step;
   return Number(Math.min(maximum, Math.max(minimum, stepped)).toFixed(precision));
+}
+
+function normalizeParticleImageTransform(value: unknown): ParticleImageTransform {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    positionX: normalizeSteppedParticleNumber(record.positionX, 0, 100, 1, DEFAULT_PARTICLE_IMAGE_TRANSFORM.positionX, 0),
+    positionY: normalizeSteppedParticleNumber(record.positionY, 0, 100, 1, DEFAULT_PARTICLE_IMAGE_TRANSFORM.positionY, 0),
+    zoom: normalizeSteppedParticleNumber(record.zoom, 0.25, 4, 0.05, DEFAULT_PARTICLE_IMAGE_TRANSFORM.zoom, 2),
+  };
+}
+
+function applyParticleImageTransform(image: HTMLImageElement, value: ParticleImageTransform): void {
+  const transform = normalizeParticleImageTransform(value);
+  const position = `${transform.positionX}% ${transform.positionY}%`;
+  image.style.setProperty("object-position", position, "important");
+  image.style.setProperty("transform-origin", position, "important");
+  image.style.setProperty("transform", `scale(${transform.zoom})`, "important");
 }
 
 function normalizeParticleColor(value: unknown): string {
@@ -1881,8 +1928,9 @@ class ParticleImageRenderer {
   #previousColors: Uint8Array<ArrayBuffer> = new Uint8Array(0);
   #colors: Uint8Array<ArrayBuffer> = new Uint8Array(0);
   #seeds: Float32Array<ArrayBuffer> = new Float32Array(0);
-  #naturalWidth = 1;
-  #naturalHeight = 1;
+  #imageWidth = 1;
+  #imageHeight = 1;
+  #imageTransform: ParticleImageTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
   #count = 0;
   #cssWidth = 1;
   #cssHeight = 1;
@@ -2004,7 +2052,7 @@ class ParticleImageRenderer {
     else if (this.#paused) this.#draw(performance.now(), false);
   }
 
-  setPreparedImage(image: PreparedParticleImage): Promise<boolean> {
+  setPreparedImage(image: PreparedParticleImage, transform: ParticleImageTransform): Promise<boolean> {
     if (this.#disposed) return Promise.resolve(false);
     const now = performance.now();
     if (!this.#paused) this.#simulationTime = this.#clockSeconds(now);
@@ -2018,8 +2066,9 @@ class ParticleImageRenderer {
     this.#homes = image.normalizedHomes;
     this.#colors = image.colors;
     this.#seeds = image.seeds;
-    this.#naturalWidth = image.naturalWidth;
-    this.#naturalHeight = image.naturalHeight;
+    this.#imageWidth = image.width;
+    this.#imageHeight = image.height;
+    this.#imageTransform = normalizeParticleImageTransform(transform);
     this.#count = image.targetCount;
     this.#transitionDuration = this.#settings.morphIntervalSeconds;
     this.#transitionStart = this.#clockSeconds();
@@ -2044,6 +2093,12 @@ class ParticleImageRenderer {
     const transition = this.#beginTransition(canMorph, revision);
     if (this.#paused) this.#draw(performance.now(), false);
     return transition;
+  }
+
+  setImageTransform(transform: ParticleImageTransform): void {
+    if (this.#disposed) return;
+    this.#imageTransform = normalizeParticleImageTransform(transform);
+    if (this.#paused) this.#draw(performance.now(), false);
   }
 
   setPaused(paused: boolean): void {
@@ -2132,11 +2187,19 @@ class ParticleImageRenderer {
     gl.vertexAttribPointer(this.#attributes.seed, 1, gl.FLOAT, false, 0, 0);
   }
 
-  #layout(naturalWidth: number, naturalHeight: number): readonly [number, number, number, number] {
-    const scale = Math.min(this.#cssWidth / Math.max(1, naturalWidth), this.#cssHeight / Math.max(1, naturalHeight));
-    const width = naturalWidth * scale;
-    const height = naturalHeight * scale;
-    return [(this.#cssWidth - width) * 0.5, (this.#cssHeight - height) * 0.5, width, height];
+  #layout(imageWidth: number, imageHeight: number): readonly [number, number, number, number] {
+    const containScale = Math.min(
+      this.#cssWidth / Math.max(1, imageWidth),
+      this.#cssHeight / Math.max(1, imageHeight),
+    );
+    const width = imageWidth * containScale * this.#imageTransform.zoom;
+    const height = imageHeight * containScale * this.#imageTransform.zoom;
+    return [
+      (this.#cssWidth - width) * this.#imageTransform.positionX / 100,
+      (this.#cssHeight - height) * this.#imageTransform.positionY / 100,
+      width,
+      height,
+    ];
   }
 
   #transitionNearResponse(): number {
@@ -2171,7 +2234,7 @@ class ParticleImageRenderer {
 
   #copyCurrentHomesTo(destination: Float32Array<ArrayBuffer>): boolean {
     if (destination.length !== this.#homes.length) return false;
-    const [x, y, width, height] = this.#layout(this.#naturalWidth, this.#naturalHeight);
+    const [x, y, width, height] = this.#layout(this.#imageWidth, this.#imageHeight);
     for (let index = 0; index < this.#count; index += 1) {
       const offset = index * 2;
       destination[offset] = x + (this.#homes[offset] ?? 0) * width;
@@ -2196,7 +2259,7 @@ class ParticleImageRenderer {
 
     const elapsed = Math.max(0, this.#simulationTime - this.#transitionStart);
     const stagger = this.#transitionStagger();
-    const [x, y, width, height] = this.#layout(this.#naturalWidth, this.#naturalHeight);
+    const [x, y, width, height] = this.#layout(this.#imageWidth, this.#imageHeight);
     for (let index = 0; index < this.#count; index += 1) {
       const offset = index * 2;
       const previousX = this.#previousHomes[offset] ?? 0;
@@ -2243,7 +2306,7 @@ class ParticleImageRenderer {
   }
 
   #estimateMaximumTransitionResponse(): number {
-    const [x, y, width, height] = this.#layout(this.#naturalWidth, this.#naturalHeight);
+    const [x, y, width, height] = this.#layout(this.#imageWidth, this.#imageHeight);
     let maximumResponse = this.#transitionNearResponse()
       * (1 - PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION);
     let maximumVelocityRatio = 0;
@@ -2492,7 +2555,7 @@ class ParticleImageRenderer {
         this.#pointerMotionValues[segmentOffset + 2] = Math.max(0, time - segment.createdAt);
         this.#pointerMotionValues[segmentOffset + 3] = Math.max(0.001, segment.duration);
       }
-      const layout = this.#layout(this.#naturalWidth, this.#naturalHeight);
+      const layout = this.#layout(this.#imageWidth, this.#imageHeight);
       gl.useProgram(this.#program);
       gl.uniform2f(this.#uniforms.resolution, this.#cssWidth, this.#cssHeight);
       gl.uniform4f(this.#uniforms.layout, layout[0], layout[1], layout[2], layout[3]);
@@ -2569,7 +2632,7 @@ function readParticleImageRecords(database: IDBDatabase): Promise<ParticleImageR
       .getAll();
     request.addEventListener("success", () => {
       const records = Array.isArray(request.result)
-        ? request.result.filter((value): value is ParticleImageRecord => {
+        ? request.result.filter((value): value is Omit<ParticleImageRecord, keyof ParticleImageTransform> & Partial<ParticleImageTransform> => {
           if (!value || typeof value !== "object") return false;
           const record = value as Partial<ParticleImageRecord>;
           return typeof record.id === "string"
@@ -2579,7 +2642,10 @@ function readParticleImageRecords(database: IDBDatabase): Promise<ParticleImageR
             && typeof record.createdAt === "number"
             && record.blob instanceof Blob
             && record.thumbnail instanceof Blob;
-        })
+        }).map((record): ParticleImageRecord => ({
+          ...record,
+          ...normalizeParticleImageTransform(record),
+        }))
         : [];
       resolve(records);
     });
@@ -2649,6 +2715,7 @@ class ParticleBackgroundController {
   #enabled = false;
   #pending = false;
   #error: string | undefined;
+  #imageTransformSaveError: string | undefined;
   #layer: HTMLDivElement | undefined;
   #previousImage: HTMLImageElement | undefined;
   #image: HTMLImageElement | undefined;
@@ -2657,9 +2724,13 @@ class ParticleBackgroundController {
   #preparationCache: ParticleImagePreparationCache | undefined;
   #currentSourceUrl: string | undefined;
   #previousSourceUrl: string | undefined;
+  #currentSourceTransform: ParticleImageTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
+  #previousSourceTransform: ParticleImageTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
   #sourceTransitioning = false;
   #sourceTransitionProgress = 1;
   #sourceTransitionOutgoingScale = 1;
+  #editingImageId: string | null = null;
+  #imageTransformEditingRevision = 0;
   #rotationTimer = 0;
   #generation = 0;
   #disposed = false;
@@ -2692,7 +2763,7 @@ class ParticleBackgroundController {
   }
 
   get error(): string | undefined {
-    return this.#error;
+    return this.#imageTransformSaveError ?? this.#error;
   }
 
   get activeImageId(): string | null {
@@ -2776,8 +2847,10 @@ class ParticleBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
       this.#applySourcePresentation();
-      const initialId = this.#validActiveImageId() ?? this.#settings.selectedImageIds[0] ?? null;
-      if (initialId) await this.#activateImage(initialId, false);
+      const initialId = this.#editingImageId && this.#records.some((record) => record.id === this.#editingImageId)
+        ? this.#editingImageId
+        : this.#validActiveImageId() ?? this.#settings.selectedImageIds[0] ?? null;
+      if (initialId) await this.#activateImage(initialId);
       else {
         this.#error = "Add an image in Source to start the particle effect.";
         this.#scheduleRotation();
@@ -2826,7 +2899,7 @@ class ParticleBackgroundController {
       if (previous.particleCount !== this.#settings.particleCount) {
         this.#preparationCache?.invalidate();
         const activeId = this.#validActiveImageId();
-        if (activeId) await this.#activateImage(activeId, false);
+        if (activeId) await this.#activateImage(activeId);
       } else {
         this.#scheduleRotation();
       }
@@ -2873,6 +2946,7 @@ class ParticleBackgroundController {
             createdAt: Date.now() + imported.length,
             blob: file,
             thumbnail,
+            ...DEFAULT_PARTICLE_IMAGE_TRANSFORM,
           };
           if (this.#database) await saveParticleImageRecord(this.#database, record);
           imported.push(record);
@@ -2891,7 +2965,7 @@ class ParticleBackgroundController {
         activeImageId: imported[0]?.id ?? this.#settings.activeImageId,
       });
       writeParticleBackgroundSettings(this.#settings);
-      if (this.#enabled && imported[0]) await this.#activateImage(imported[0].id, true);
+      if (this.#enabled && imported[0]) await this.#activateImage(imported[0].id);
     } finally {
       this.#pending = false;
       this.#notify();
@@ -2909,8 +2983,59 @@ class ParticleBackgroundController {
     writeParticleBackgroundSettings(this.#settings);
     this.#preparationCache?.invalidate();
     this.#notify();
-    if (index < 0 && this.#enabled) await this.#activateImage(id, true);
+    if (index < 0 && this.#enabled && !this.#editingImageId) await this.#activateImage(id);
     else this.#scheduleRotation();
+  }
+
+  async beginImageTransformEditing(id: string): Promise<boolean> {
+    const revision = ++this.#imageTransformEditingRevision;
+    await this.initialize();
+    if (revision !== this.#imageTransformEditingRevision) return false;
+    if (!this.#records.some((record) => record.id === id)) return false;
+    this.#editingImageId = id;
+    this.#stopRotation();
+    if (!this.#enabled || this.#settings.activeImageId === id) return true;
+    const activated = await this.#activateImage(id);
+    if (revision !== this.#imageTransformEditingRevision) return false;
+    if (!activated) {
+      this.#editingImageId = null;
+      this.#scheduleRotation();
+    }
+    return activated;
+  }
+
+  finishImageTransformEditing(): void {
+    this.#imageTransformEditingRevision += 1;
+    if (!this.#editingImageId) return;
+    this.#editingImageId = null;
+    this.#scheduleRotation();
+  }
+
+  previewImageTransform(id: string, value: ParticleImageTransform): void {
+    if (!this.#enabled || this.#settings.activeImageId !== id) return;
+    const transform = normalizeParticleImageTransform(value);
+    this.#currentSourceTransform = transform;
+    if (this.#image) applyParticleImageTransform(this.#image, transform);
+    this.#renderer?.setImageTransform(transform);
+  }
+
+  async updateImageTransform(id: string, value: ParticleImageTransform): Promise<void> {
+    await this.initialize();
+    const index = this.#records.findIndex((record) => record.id === id);
+    const record = this.#records[index];
+    if (!record) return;
+    const transform = normalizeParticleImageTransform(value);
+    const updated: ParticleImageRecord = { ...record, ...transform };
+    try {
+      if (this.#database) await saveParticleImageRecord(this.#database, updated);
+      this.#records = this.#records.map((candidate, candidateIndex) => candidateIndex === index ? updated : candidate);
+      this.previewImageTransform(id, transform);
+      this.#imageTransformSaveError = undefined;
+    } catch (error) {
+      this.previewImageTransform(id, record);
+      this.#imageTransformSaveError = error instanceof Error ? error.message : "The photo framing could not be saved";
+    }
+    this.#notify();
   }
 
   clearOrder(): void {
@@ -2931,6 +3056,7 @@ class ParticleBackgroundController {
     try {
       if (this.#database) await deleteParticleImageRecord(this.#database, id);
       this.#records = this.#records.filter((candidate) => candidate.id !== id);
+      if (this.#editingImageId === id) this.#editingImageId = null;
       const wasActive = this.#settings.activeImageId === id;
       const selectedImageIds = this.#settings.selectedImageIds.filter((candidate) => candidate !== id);
       const activeImageId = this.#settings.activeImageId === id ? selectedImageIds[0] ?? null : this.#settings.activeImageId;
@@ -2941,7 +3067,7 @@ class ParticleBackgroundController {
       if (thumbnailUrl) URL.revokeObjectURL(thumbnailUrl);
       this.#thumbnailUrls.delete(id);
       if (this.#enabled && wasActive && this.#settings.activeImageId) {
-        await this.#activateImage(this.#settings.activeImageId, true);
+        await this.#activateImage(this.#settings.activeImageId);
       } else if (this.#enabled && wasActive) {
         this.#clearActiveImage();
       } else {
@@ -3007,7 +3133,7 @@ class ParticleBackgroundController {
     this.#notify();
   }
 
-  async #activateImage(id: string, restartRotation: boolean): Promise<boolean> {
+  async #activateImage(id: string): Promise<boolean> {
     if (!this.#enabled) return false;
     const record = this.#records.find((candidate) => candidate.id === id);
     if (!record) return false;
@@ -3015,6 +3141,7 @@ class ParticleBackgroundController {
     const generation = ++this.#generation;
     this.#pending = true;
     this.#notify();
+    let activated = false;
     try {
       const cache = this.#preparationCache;
       if (!cache) return false;
@@ -3027,16 +3154,16 @@ class ParticleBackgroundController {
         && renderer.count > 0
         && !this.#reducedMotion.matches,
       );
-      const sourceReady = await this.#prepareSourceImage(prepared.processedBlob, shouldMorph, generation);
+      const transform = normalizeParticleImageTransform(record);
+      const sourceReady = await this.#prepareSourceImage(prepared.processedBlob, transform, shouldMorph, generation);
       if (!sourceReady || !this.#enabled || generation !== this.#generation) return false;
-      const transitioned = renderer ? await renderer.setPreparedImage(prepared) : true;
+      const transitioned = renderer ? await renderer.setPreparedImage(prepared, transform) : true;
       if (!transitioned || !this.#enabled || generation !== this.#generation) return false;
       this.#settings = normalizeParticleSettings({ ...this.#settings, activeImageId: id });
       writeParticleBackgroundSettings(this.#settings);
       this.#error = renderer ? undefined : this.#error;
       this.#prewarmNext(id);
-      if (restartRotation) this.#scheduleRotation();
-      else this.#scheduleRotation();
+      activated = true;
       return true;
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -3047,11 +3174,17 @@ class ParticleBackgroundController {
       if (generation === this.#generation) {
         this.#pending = false;
         this.#notify();
+        if (activated) this.#scheduleRotation();
       }
     }
   }
 
-  async #prepareSourceImage(processedBlob: Blob, animate: boolean, generation: number): Promise<boolean> {
+  async #prepareSourceImage(
+    processedBlob: Blob,
+    transform: ParticleImageTransform,
+    animate: boolean,
+    generation: number,
+  ): Promise<boolean> {
     const image = this.#image;
     const previousImage = this.#previousImage;
     if (!image || !previousImage) return false;
@@ -3074,6 +3207,7 @@ class ParticleBackgroundController {
     const currentOpacity = Number.parseFloat(image.style.opacity);
     const previousOpacity = Number.parseFloat(previousImage.style.opacity);
     let outgoingUrl = oldCurrentUrl;
+    let outgoingTransform = this.#currentSourceTransform;
     let outgoingOpacity = Number.isFinite(currentOpacity)
       ? currentOpacity
       : this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
@@ -3084,6 +3218,7 @@ class ParticleBackgroundController {
       && previousOpacity > outgoingOpacity
     ) {
       outgoingUrl = oldPreviousUrl;
+      outgoingTransform = this.#previousSourceTransform;
       outgoingOpacity = previousOpacity;
     }
 
@@ -3091,11 +3226,15 @@ class ParticleBackgroundController {
     previousImage.style.transition = "none";
     image.style.opacity = "0";
     this.#currentSourceUrl = nextUrl;
+    this.#currentSourceTransform = normalizeParticleImageTransform(transform);
     image.src = nextUrl;
+    applyParticleImageTransform(image, this.#currentSourceTransform);
     const visibleOpacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
     if (animate && outgoingUrl) {
       this.#previousSourceUrl = outgoingUrl;
+      this.#previousSourceTransform = outgoingTransform;
       previousImage.src = outgoingUrl;
+      applyParticleImageTransform(previousImage, this.#previousSourceTransform);
       this.#sourceTransitionOutgoingScale = visibleOpacity > 0
         ? Math.min(1, Math.max(0, outgoingOpacity / visibleOpacity))
         : 1;
@@ -3104,6 +3243,7 @@ class ParticleBackgroundController {
       this.#updateSourceTransition(0, false);
     } else {
       this.#previousSourceUrl = undefined;
+      this.#previousSourceTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
       previousImage.removeAttribute("src");
       previousImage.style.opacity = "0";
       image.style.opacity = String(visibleOpacity);
@@ -3142,6 +3282,7 @@ class ParticleBackgroundController {
     const previousImage = this.#previousImage;
     if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
     this.#previousSourceUrl = undefined;
+    this.#previousSourceTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
     previousImage?.removeAttribute("src");
     if (previousImage) previousImage.style.opacity = "0";
     if (image) {
@@ -3159,6 +3300,8 @@ class ParticleBackgroundController {
     const previousImage = this.#previousImage;
     if (!layer || !image || !previousImage) return;
     layer.style.backgroundColor = this.#settings.backgroundColor;
+    applyParticleImageTransform(image, this.#currentSourceTransform);
+    if (this.#sourceTransitioning) applyParticleImageTransform(previousImage, this.#previousSourceTransform);
     if (this.#sourceTransitioning) {
       this.#updateSourceTransition(this.#sourceTransitionProgress, false);
       return;
@@ -3188,6 +3331,8 @@ class ParticleBackgroundController {
     if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
     this.#currentSourceUrl = undefined;
     this.#previousSourceUrl = undefined;
+    this.#currentSourceTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
+    this.#previousSourceTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
     this.#sourceTransitioning = false;
     this.#sourceTransitionProgress = 1;
     this.#sourceTransitionOutgoingScale = 1;
@@ -3219,6 +3364,8 @@ class ParticleBackgroundController {
     this.#stopRotation();
     if (
       !this.#enabled
+      || Boolean(this.#editingImageId)
+      || this.#pending
       || !this.#settings.autoSwitch
       || document.hidden
       || this.#reducedMotion.matches
@@ -3230,7 +3377,7 @@ class ParticleBackgroundController {
     this.#rotationTimer = window.setTimeout(() => {
       this.#rotationTimer = 0;
       if (document.hidden || this.#reducedMotion.matches) return;
-      void this.#activateImage(nextId, true);
+      void this.#activateImage(nextId);
     }, delay);
   }
 
@@ -3254,6 +3401,8 @@ class ParticleBackgroundController {
     if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
     this.#currentSourceUrl = undefined;
     this.#previousSourceUrl = undefined;
+    this.#currentSourceTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
+    this.#previousSourceTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
     this.#sourceTransitioning = false;
     this.#sourceTransitionProgress = 1;
     this.#sourceTransitionOutgoingScale = 1;
@@ -3453,6 +3602,21 @@ function particleNumericControlsMarkup(group: ParticleControlGroup): string {
     .join("");
 }
 
+function particleImageTransformControlsMarkup(): string {
+  return PARTICLE_IMAGE_TRANSFORM_CONTROL_DEFINITIONS
+    .map((definition) => {
+      const value = DEFAULT_PARTICLE_IMAGE_TRANSFORM[definition.key];
+      return `
+        <label class="particle-control-row" for="${definition.id}">
+          <span>${definition.label}</span>
+          <input id="${definition.id}" data-particle-image-transform="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-valuetext="${definition.format(value)}">
+          <output for="${definition.id}">${definition.format(value)}</output>
+        </label>
+      `;
+    })
+    .join("");
+}
+
 function particleBackgroundCardMarkup(): string {
   return `
     <article class="preview-extension appearance-extension particle-background-extension" data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}" aria-busy="false">
@@ -3504,6 +3668,22 @@ function particleSettingsPanelMarkup(): string {
             </label>
             <button class="particle-library-clear" type="button" disabled>Clear order</button>
           </div>
+          <section class="particle-image-transform-editor" data-empty="true" tabindex="-1" aria-busy="false" aria-labelledby="cle-particle-image-transform-title cle-particle-image-transform-name">
+            <header class="particle-image-transform-header">
+              <div class="particle-image-transform-identity">
+                <img class="particle-image-transform-thumb" width="28" height="28" alt="" hidden>
+                <div>
+                  <span id="cle-particle-image-transform-title">Photo framing</span>
+                  <strong class="particle-image-transform-name" id="cle-particle-image-transform-name" aria-live="polite">Select a photo</strong>
+                </div>
+              </div>
+              <button class="particle-image-transform-reset" type="button" disabled>Reset</button>
+            </header>
+            <div class="particle-image-transform-controls">
+              ${particleImageTransformControlsMarkup()}
+            </div>
+            <p class="particle-image-transform-empty">Choose Adjust on a photo to set its position and zoom.</p>
+          </section>
           <div class="particle-library-grid">
             <p class="particle-library-empty">Add images, then select them in playback order.</p>
           </div>
@@ -3675,6 +3855,16 @@ export class CodeCodexElement extends HTMLElement {
   readonly #particleLibraryUpload: HTMLInputElement;
   readonly #particleLibraryClear: HTMLButtonElement;
   readonly #particleLibraryGrid: HTMLElement;
+  readonly #particleImageTransformEditor: HTMLElement;
+  readonly #particleImageTransformThumb: HTMLImageElement;
+  readonly #particleImageTransformName: HTMLElement;
+  readonly #particleImageTransformReset: HTMLButtonElement;
+  readonly #particleImageTransformControls = new Map<ParticleImageTransformKey, Readonly<{
+    definition: ParticleImageTransformControlDefinition;
+    input: HTMLInputElement;
+    output: HTMLOutputElement;
+  }>>();
+  #particleTransformImageId: string | null = null;
   readonly #particleAutoSwitchInput: HTMLInputElement;
   readonly #particleShowSourceInput: HTMLInputElement;
   readonly #particleBackgroundColorInput: HTMLInputElement;
@@ -3807,6 +3997,15 @@ export class CodeCodexElement extends HTMLElement {
     this.#particleLibraryUpload = this.#required<HTMLInputElement>(".particle-library-upload");
     this.#particleLibraryClear = this.#required<HTMLButtonElement>(".particle-library-clear");
     this.#particleLibraryGrid = this.#required<HTMLElement>(".particle-library-grid");
+    this.#particleImageTransformEditor = this.#required<HTMLElement>(".particle-image-transform-editor");
+    this.#particleImageTransformThumb = this.#required<HTMLImageElement>(".particle-image-transform-thumb");
+    this.#particleImageTransformName = this.#required<HTMLElement>(".particle-image-transform-name");
+    this.#particleImageTransformReset = this.#required<HTMLButtonElement>(".particle-image-transform-reset");
+    for (const definition of PARTICLE_IMAGE_TRANSFORM_CONTROL_DEFINITIONS) {
+      const input = this.#required<HTMLInputElement>(`#${definition.id}`);
+      const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
+      this.#particleImageTransformControls.set(definition.key, { definition, input, output });
+    }
     this.#particleAutoSwitchInput = this.#required<HTMLInputElement>("#cle-particle-auto-switch");
     this.#particleShowSourceInput = this.#required<HTMLInputElement>("#cle-particle-show-source");
     this.#particleBackgroundColorInput = this.#required<HTMLInputElement>("#cle-particle-background-color");
@@ -4116,6 +4315,8 @@ export class CodeCodexElement extends HTMLElement {
         if (this.#particleSettingsPanel.matches(":popover-open") || !this.#particleSettingsOpen) return;
         this.#particleSettingsOpen = false;
         this.#particleSettingsTrigger.setAttribute("aria-expanded", "false");
+        this.#particleBackgroundController.finishImageTransformEditing();
+        this.#particleTransformImageId = null;
       });
       this.#previewMarketList.addEventListener("scroll", () => {
         if (this.#particleSettingsOpen) this.#positionParticleSettingsPanel();
@@ -4144,6 +4345,17 @@ export class CodeCodexElement extends HTMLElement {
       });
       this.#particleLibraryClear.addEventListener("click", () => this.#particleBackgroundController.clearOrder());
       this.#particleLibraryGrid.addEventListener("click", (event) => void this.#onParticleLibraryClick(event));
+      for (const { definition, input, output } of this.#particleImageTransformControls.values()) {
+        input.addEventListener("input", () => {
+          const transform = this.#particleImageTransformFromControls();
+          output.value = definition.format(transform[definition.key]);
+          input.setAttribute("aria-valuetext", output.value);
+          const id = this.#particleTransformImageId;
+          if (id) this.#particleBackgroundController.previewImageTransform(id, transform);
+        });
+        input.addEventListener("change", () => void this.#saveParticleImageTransform());
+      }
+      this.#particleImageTransformReset.addEventListener("click", () => void this.#resetParticleImageTransform());
       for (const previewer of PREVIEWER_DEFINITIONS) {
         this.#previewerButtons.get(previewer.id)?.addEventListener("click", () => this.#togglePreviewer(previewer));
       }
@@ -7636,6 +7848,31 @@ export class CodeCodexElement extends HTMLElement {
     await this.#particleBackgroundController.updateSettings(normalizeParticleSettings(values));
   }
 
+  #particleImageTransformFromControls(): ParticleImageTransform {
+    const values: Record<string, unknown> = {};
+    for (const [key, { input }] of this.#particleImageTransformControls) values[key] = input.value;
+    return normalizeParticleImageTransform(values);
+  }
+
+  async #saveParticleImageTransform(): Promise<void> {
+    const id = this.#particleTransformImageId;
+    if (!id) return;
+    await this.#particleBackgroundController.updateImageTransform(id, this.#particleImageTransformFromControls());
+  }
+
+  async #resetParticleImageTransform(): Promise<void> {
+    const id = this.#particleTransformImageId;
+    if (!id) return;
+    for (const [key, { definition, input, output }] of this.#particleImageTransformControls) {
+      const value = DEFAULT_PARTICLE_IMAGE_TRANSFORM[key];
+      input.value = String(value);
+      output.value = definition.format(value);
+      input.setAttribute("aria-valuetext", output.value);
+    }
+    this.#particleBackgroundController.previewImageTransform(id, DEFAULT_PARTICLE_IMAGE_TRANSFORM);
+    await this.#particleBackgroundController.updateImageTransform(id, DEFAULT_PARTICLE_IMAGE_TRANSFORM);
+  }
+
   async #onParticleLibraryClick(event: Event): Promise<void> {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -7643,8 +7880,26 @@ export class CodeCodexElement extends HTMLElement {
     if (!button || !this.#particleLibraryGrid.contains(button)) return;
     const id = button.dataset.particleImageId;
     if (!id) return;
-    if (button.dataset.particleAction === "delete") await this.#particleBackgroundController.deleteImage(id);
-    else await this.#particleBackgroundController.toggleImageSelection(id);
+    const action = button.dataset.particleAction;
+    if (action === "delete") {
+      if (this.#particleTransformImageId === id) {
+        this.#particleTransformImageId = null;
+        this.#particleBackgroundController.finishImageTransformEditing();
+      }
+      await this.#particleBackgroundController.deleteImage(id);
+    } else if (action === "adjust") {
+      this.#particleTransformImageId = id;
+      this.#renderParticleBackgroundPlugin();
+      this.#particleImageTransformEditor.scrollIntoView({ block: "nearest" });
+      this.#particleImageTransformEditor.focus({ preventScroll: true });
+      const editingReady = await this.#particleBackgroundController.beginImageTransformEditing(id);
+      if (!this.#particleSettingsOpen || this.#particleTransformImageId !== id) return;
+      if (!editingReady) this.#particleTransformImageId = null;
+      this.#renderParticleBackgroundPlugin();
+      if (editingReady) this.#particleImageTransformControls.get("positionX")?.input.focus();
+    } else {
+      await this.#particleBackgroundController.toggleImageSelection(id);
+    }
   }
 
   #renderParticleBackgroundPlugin(): void {
@@ -7686,6 +7941,29 @@ export class CodeCodexElement extends HTMLElement {
 
     const records = controller.records;
     const selectedIds = new Set(settings.selectedImageIds);
+    const transformRecord = records.find((record) => record.id === this.#particleTransformImageId);
+    this.#particleTransformImageId = transformRecord?.id ?? null;
+    this.#particleImageTransformEditor.dataset.empty = String(!transformRecord);
+    this.#particleImageTransformEditor.setAttribute("aria-busy", String(controller.pending && Boolean(transformRecord)));
+    this.#particleImageTransformThumb.hidden = !transformRecord;
+    this.#particleImageTransformName.textContent = transformRecord ? `Adjusting: ${transformRecord.name}` : "Select a photo";
+    if (transformRecord) {
+      this.#particleImageTransformThumb.src = controller.thumbnailUrl(transformRecord);
+    } else {
+      this.#particleImageTransformThumb.removeAttribute("src");
+    }
+    for (const [key, { definition, input, output }] of this.#particleImageTransformControls) {
+      const value = transformRecord?.[key] ?? DEFAULT_PARTICLE_IMAGE_TRANSFORM[key];
+      input.value = String(value);
+      input.disabled = controller.pending || !transformRecord;
+      output.value = definition.format(value);
+      input.setAttribute("aria-valuetext", output.value);
+    }
+    this.#particleImageTransformReset.disabled = controller.pending || !transformRecord || (
+      transformRecord.positionX === DEFAULT_PARTICLE_IMAGE_TRANSFORM.positionX
+      && transformRecord.positionY === DEFAULT_PARTICLE_IMAGE_TRANSFORM.positionY
+      && transformRecord.zoom === DEFAULT_PARTICLE_IMAGE_TRANSFORM.zoom
+    );
     this.#particleSourceCount.textContent = records.length
       ? `${records.length} saved · ${selectedIds.size} selected`
       : "0 saved";
@@ -7715,6 +7993,7 @@ export class CodeCodexElement extends HTMLElement {
       selectButton.type = "button";
       selectButton.dataset.particleImageId = record.id;
       selectButton.dataset.particleAction = "select";
+      selectButton.disabled = controller.pending;
       selectButton.setAttribute("aria-pressed", String(orderIndex >= 0));
       selectButton.setAttribute("aria-label", orderIndex >= 0
         ? `Remove ${record.name} from the switching order`
@@ -7745,11 +8024,23 @@ export class CodeCodexElement extends HTMLElement {
         live.setAttribute("aria-hidden", "true");
         item.append(live);
       }
+      const adjustButton = document.createElement("button");
+      adjustButton.className = "particle-library-adjust";
+      adjustButton.type = "button";
+      adjustButton.dataset.particleImageId = record.id;
+      adjustButton.dataset.particleAction = "adjust";
+      adjustButton.innerHTML = icons.sliders;
+      adjustButton.disabled = controller.pending;
+      adjustButton.setAttribute("aria-pressed", String(record.id === this.#particleTransformImageId));
+      adjustButton.setAttribute("aria-label", `Adjust position and zoom for ${record.name}`);
+      adjustButton.title = "Adjust position and zoom";
+      item.append(adjustButton);
       const deleteButton = document.createElement("button");
       deleteButton.className = "particle-library-delete";
       deleteButton.type = "button";
       deleteButton.dataset.particleImageId = record.id;
       deleteButton.dataset.particleAction = "delete";
+      deleteButton.disabled = controller.pending;
       deleteButton.textContent = "×";
       deleteButton.setAttribute("aria-label", `Delete ${record.name} from the image library`);
       deleteButton.title = "Delete image";
@@ -8040,6 +8331,8 @@ export class CodeCodexElement extends HTMLElement {
     if (!this.#particleSettingsOpen && !this.#particleSettingsPanel.matches(":popover-open")) return;
     this.#particleSettingsOpen = false;
     this.#particleSettingsTrigger.setAttribute("aria-expanded", "false");
+    this.#particleBackgroundController.finishImageTransformEditing();
+    this.#particleTransformImageId = null;
     if (this.#particleSettingsPanel.matches(":popover-open")) this.#particleSettingsPanel.hidePopover();
     if (restoreFocus && this.#particleSettingsTrigger.isConnected) this.#particleSettingsTrigger.focus();
   }
