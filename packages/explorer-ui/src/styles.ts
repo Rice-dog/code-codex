@@ -1331,6 +1331,7 @@ export const styles = String.raw`
   .particle-settings-trigger:focus-visible,
   .particle-settings-close:focus-visible,
   .particle-settings-panel :is(button, summary, input):focus-visible,
+  .particle-settings-panel output:focus-visible,
   .particle-settings-panel .particle-image-transform-editor:focus-visible,
   .particle-settings-panel .particle-library-add:focus-within {
     outline: 2px solid var(--cle-focus);
@@ -1359,12 +1360,54 @@ export const styles = String.raw`
     accent-color: var(--cle-signal);
     cursor: pointer;
   }
-  .particle-control-row output {
+  .particle-control-value {
+    display: grid;
     min-width: 42px;
+    justify-items: end;
+  }
+  .particle-control-value > * { grid-area: 1 / 1; }
+  .particle-control-row output {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 42px;
+    padding: 0 3px;
     color: var(--cle-ink);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: text;
     font: 9.5px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
     text-align: right;
+    user-select: none;
+  }
+  .particle-control-row output:hover {
+    background: var(--cle-hover);
+    border-color: var(--cle-rule);
+  }
+  .particle-control-row output[hidden],
+  .particle-value-editor[hidden] { display: none; }
+  .particle-value-editor {
+    box-sizing: border-box;
+    width: 64px;
+    max-width: 100%;
+    min-width: 0;
+    height: 20px;
+    margin: 0;
+    padding: 0 4px;
+    color: var(--cle-ink);
+    background: var(--cle-paper-raised);
+    border: 1px solid var(--cle-focus);
+    border-radius: 4px;
+    appearance: textfield;
+    font: 9.5px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .particle-value-editor::-webkit-inner-spin-button,
+  .particle-value-editor::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
   }
   .particle-source-details {
     min-width: 0;
@@ -1540,7 +1583,7 @@ export const styles = String.raw`
     gap: 1px;
   }
   .particle-image-transform-controls .particle-control-row {
-    grid-template-columns: 66px minmax(72px, 1fr) 42px;
+    grid-template-columns: 66px minmax(72px, 1fr) 58px;
     min-height: 23px;
   }
   .particle-image-transform-empty {

@@ -552,16 +552,20 @@ type ParticleNumericSettingKey =
 
 type ParticleControlGroup = "particles" | "flow" | "source" | "pointer" | "render";
 
-interface ParticleNumericControlDefinition {
-  readonly key: ParticleNumericSettingKey;
-  readonly group: ParticleControlGroup;
+interface ParticleValueControlDefinition {
   readonly id: string;
   readonly label: string;
   readonly minimum: number;
   readonly maximum: number;
   readonly step: number;
-  readonly live: boolean;
+  readonly editorScale?: number;
   readonly format: (value: number) => string;
+}
+
+interface ParticleNumericControlDefinition extends ParticleValueControlDefinition {
+  readonly key: ParticleNumericSettingKey;
+  readonly group: ParticleControlGroup;
+  readonly live: boolean;
 }
 
 interface ParticleImageTransform {
@@ -572,14 +576,15 @@ interface ParticleImageTransform {
 
 type ParticleImageTransformKey = keyof ParticleImageTransform;
 
-interface ParticleImageTransformControlDefinition {
+interface ParticleImageTransformControlDefinition extends ParticleValueControlDefinition {
   readonly key: ParticleImageTransformKey;
-  readonly id: string;
-  readonly label: string;
-  readonly minimum: number;
-  readonly maximum: number;
-  readonly step: number;
-  readonly format: (value: number) => string;
+}
+
+interface ParticleValueControl {
+  readonly definition: ParticleValueControlDefinition;
+  readonly input: HTMLInputElement;
+  readonly output: HTMLOutputElement;
+  readonly editor: HTMLInputElement;
 }
 
 interface ParticleImageRecord extends ParticleImageTransform {
@@ -665,8 +670,20 @@ const PARTICLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
 const PARTICLE_IMAGE_TRANSFORM_CONTROL_DEFINITIONS = Object.freeze([
   { key: "positionX", id: "cle-particle-image-position-x", label: "Position X", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
   { key: "positionY", id: "cle-particle-image-position-y", label: "Position Y", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
-  { key: "zoom", id: "cle-particle-image-zoom", label: "Zoom", minimum: 0.25, maximum: 4, step: 0.05, format: (value: number) => `${Math.round(value * 100)}%` },
+  { key: "zoom", id: "cle-particle-image-zoom", label: "Zoom", minimum: 0.25, maximum: 4, step: 0.05, editorScale: 100, format: (value: number) => `${Math.round(value * 100)}%` },
 ] satisfies readonly ParticleImageTransformControlDefinition[]);
+
+function particleEditorScale(definition: ParticleValueControlDefinition): number {
+  return definition.editorScale ?? 1;
+}
+
+function particleEditorNumber(definition: ParticleValueControlDefinition, value: number): number {
+  return Number((value * particleEditorScale(definition)).toFixed(8));
+}
+
+function particleOutputAriaLabel(definition: ParticleValueControlDefinition, formattedValue: string): string {
+  return `Edit ${definition.label} value. Current value ${formattedValue}.`;
+}
 
 function clampParticleNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
   const number = typeof value === "number" ? value : Number(value);
@@ -3586,17 +3603,28 @@ function transparentBackgroundCardMarkup(): string {
   `;
 }
 
+function particleValueEditorMarkup(definition: ParticleValueControlDefinition, value: number): string {
+  const formattedValue = definition.format(value);
+  return `
+    <span class="particle-control-value">
+      <output for="${definition.id}" tabindex="0" role="button" title="Double-click to enter a value" aria-label="${particleOutputAriaLabel(definition, formattedValue)}">${formattedValue}</output>
+      <input class="particle-value-editor" id="${definition.id}-value" type="number" inputmode="decimal" min="${particleEditorNumber(definition, definition.minimum)}" max="${particleEditorNumber(definition, definition.maximum)}" step="${particleEditorNumber(definition, definition.step)}" value="${particleEditorNumber(definition, value)}" aria-label="Enter ${definition.label} value" hidden>
+    </span>
+  `;
+}
+
 function particleNumericControlsMarkup(group: ParticleControlGroup): string {
   return PARTICLE_NUMERIC_CONTROL_DEFINITIONS
     .filter((definition) => definition.group === group)
     .map((definition) => {
       const value = DEFAULT_PARTICLE_BACKGROUND_SETTINGS[definition.key];
+      const formattedValue = definition.format(value);
       return `
-        <label class="particle-control-row" for="${definition.id}">
-          <span>${definition.label}</span>
-          <input id="${definition.id}" data-particle-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}">
-          <output for="${definition.id}">${definition.format(value)}</output>
-        </label>
+        <div class="particle-control-row">
+          <label for="${definition.id}">${definition.label}</label>
+          <input id="${definition.id}" data-particle-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-valuetext="${formattedValue}">
+          ${particleValueEditorMarkup(definition, value)}
+        </div>
       `;
     })
     .join("");
@@ -3607,11 +3635,11 @@ function particleImageTransformControlsMarkup(): string {
     .map((definition) => {
       const value = DEFAULT_PARTICLE_IMAGE_TRANSFORM[definition.key];
       return `
-        <label class="particle-control-row" for="${definition.id}">
-          <span>${definition.label}</span>
+        <div class="particle-control-row">
+          <label for="${definition.id}">${definition.label}</label>
           <input id="${definition.id}" data-particle-image-transform="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-valuetext="${definition.format(value)}">
-          <output for="${definition.id}">${definition.format(value)}</output>
-        </label>
+          ${particleValueEditorMarkup(definition, value)}
+        </div>
       `;
     })
     .join("");
@@ -3849,6 +3877,7 @@ export class CodeCodexElement extends HTMLElement {
     definition: ParticleNumericControlDefinition;
     input: HTMLInputElement;
     output: HTMLOutputElement;
+    editor: HTMLInputElement;
   }>>();
   readonly #particleSourceDetails: HTMLDetailsElement;
   readonly #particleSourceCount: HTMLElement;
@@ -3863,6 +3892,7 @@ export class CodeCodexElement extends HTMLElement {
     definition: ParticleImageTransformControlDefinition;
     input: HTMLInputElement;
     output: HTMLOutputElement;
+    editor: HTMLInputElement;
   }>>();
   #particleTransformImageId: string | null = null;
   readonly #particleAutoSwitchInput: HTMLInputElement;
@@ -3990,7 +4020,8 @@ export class CodeCodexElement extends HTMLElement {
     for (const definition of PARTICLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
       const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
-      this.#particleNumericControls.set(definition.key, { definition, input, output });
+      const editor = this.#required<HTMLInputElement>(`#${definition.id}-value`);
+      this.#particleNumericControls.set(definition.key, { definition, input, output, editor });
     }
     this.#particleSourceDetails = this.#required<HTMLDetailsElement>(".particle-source-details");
     this.#particleSourceCount = this.#required<HTMLElement>(".particle-source-count");
@@ -4004,7 +4035,8 @@ export class CodeCodexElement extends HTMLElement {
     for (const definition of PARTICLE_IMAGE_TRANSFORM_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
       const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
-      this.#particleImageTransformControls.set(definition.key, { definition, input, output });
+      const editor = this.#required<HTMLInputElement>(`#${definition.id}-value`);
+      this.#particleImageTransformControls.set(definition.key, { definition, input, output, editor });
     }
     this.#particleAutoSwitchInput = this.#required<HTMLInputElement>("#cle-particle-auto-switch");
     this.#particleShowSourceInput = this.#required<HTMLInputElement>("#cle-particle-show-source");
@@ -4315,19 +4347,22 @@ export class CodeCodexElement extends HTMLElement {
         if (this.#particleSettingsPanel.matches(":popover-open") || !this.#particleSettingsOpen) return;
         this.#particleSettingsOpen = false;
         this.#particleSettingsTrigger.setAttribute("aria-expanded", "false");
+        this.#cancelParticleValueEditors();
         this.#particleBackgroundController.finishImageTransformEditing();
         this.#particleTransformImageId = null;
       });
       this.#previewMarketList.addEventListener("scroll", () => {
         if (this.#particleSettingsOpen) this.#positionParticleSettingsPanel();
       }, { passive: true });
-      for (const { definition, input, output } of this.#particleNumericControls.values()) {
+      for (const control of this.#particleNumericControls.values()) {
+        const { definition, input } = control;
+        this.#bindParticleValueEditor(control);
         input.addEventListener("input", () => {
           const normalized = normalizeParticleSettings({
             ...this.#particleBackgroundController.settings,
             [definition.key]: input.value,
           })[definition.key];
-          output.value = definition.format(normalized);
+          this.#syncParticleValueControl(control, normalized);
           if (definition.live) void this.#applyParticleSettingsFromControls();
         });
         if (!definition.live) {
@@ -4345,11 +4380,12 @@ export class CodeCodexElement extends HTMLElement {
       });
       this.#particleLibraryClear.addEventListener("click", () => this.#particleBackgroundController.clearOrder());
       this.#particleLibraryGrid.addEventListener("click", (event) => void this.#onParticleLibraryClick(event));
-      for (const { definition, input, output } of this.#particleImageTransformControls.values()) {
+      for (const control of this.#particleImageTransformControls.values()) {
+        const { definition, input } = control;
+        this.#bindParticleValueEditor(control);
         input.addEventListener("input", () => {
           const transform = this.#particleImageTransformFromControls();
-          output.value = definition.format(transform[definition.key]);
-          input.setAttribute("aria-valuetext", output.value);
+          this.#syncParticleValueControl(control, transform[definition.key]);
           const id = this.#particleTransformImageId;
           if (id) this.#particleBackgroundController.previewImageTransform(id, transform);
         });
@@ -4533,6 +4569,21 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== "Escape") return;
+    const activeValueEditor = event.composedPath().find((target) => (
+      target instanceof HTMLInputElement && target.classList.contains("particle-value-editor")
+    ));
+    if (activeValueEditor instanceof HTMLInputElement && !activeValueEditor.hidden) {
+      const control = [
+        ...this.#particleNumericControls.values(),
+        ...this.#particleImageTransformControls.values(),
+      ].find((candidate) => candidate.editor === activeValueEditor);
+      if (control) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.#closeParticleValueEditor(control, true);
+        return;
+      }
+    }
     if (this.#particleSettingsOpen) {
       event.preventDefault();
       event.stopPropagation();
@@ -7837,6 +7888,82 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  #syncParticleValueControl(control: ParticleValueControl, value: number): void {
+    const formattedValue = control.definition.format(value);
+    control.output.value = formattedValue;
+    control.input.setAttribute("aria-valuetext", formattedValue);
+    control.output.setAttribute("aria-label", particleOutputAriaLabel(control.definition, formattedValue));
+    if (control.editor.hidden) {
+      control.editor.value = String(particleEditorNumber(control.definition, value));
+    }
+  }
+
+  #bindParticleValueEditor(control: ParticleValueControl): void {
+    control.output.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#beginParticleValueEditing(control);
+    });
+    control.output.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " " && event.key !== "F2") return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.#beginParticleValueEditing(control);
+    });
+    control.editor.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.#commitParticleValueEditor(control, true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.#closeParticleValueEditor(control, true);
+      }
+    });
+    control.editor.addEventListener("blur", () => this.#commitParticleValueEditor(control, false));
+  }
+
+  #beginParticleValueEditing(control: ParticleValueControl): void {
+    if (control.input.disabled || !control.editor.hidden) return;
+    this.#cancelParticleValueEditors();
+    control.editor.value = String(particleEditorNumber(control.definition, Number(control.input.value)));
+    control.output.hidden = true;
+    control.editor.hidden = false;
+    control.editor.focus({ preventScroll: true });
+    control.editor.select();
+  }
+
+  #commitParticleValueEditor(control: ParticleValueControl, restoreFocus: boolean): void {
+    if (control.editor.hidden) return;
+    const enteredValue = control.editor.valueAsNumber;
+    if (Number.isFinite(enteredValue) && !control.input.disabled) {
+      control.input.value = String(enteredValue / particleEditorScale(control.definition));
+      this.#closeParticleValueEditor(control, restoreFocus);
+      control.input.dispatchEvent(new Event("input", { bubbles: true }));
+      control.input.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+    this.#closeParticleValueEditor(control, restoreFocus);
+  }
+
+  #closeParticleValueEditor(control: ParticleValueControl, restoreFocus: boolean): void {
+    if (control.editor.hidden) return;
+    control.editor.hidden = true;
+    control.output.hidden = false;
+    control.editor.value = String(particleEditorNumber(control.definition, Number(control.input.value)));
+    if (restoreFocus && control.output.isConnected) control.output.focus({ preventScroll: true });
+  }
+
+  #cancelParticleValueEditors(): void {
+    for (const control of this.#particleNumericControls.values()) {
+      this.#closeParticleValueEditor(control, false);
+    }
+    for (const control of this.#particleImageTransformControls.values()) {
+      this.#closeParticleValueEditor(control, false);
+    }
+  }
+
   async #applyParticleSettingsFromControls(): Promise<void> {
     const current = this.#particleBackgroundController.settings;
     const values: Record<string, unknown> = { ...current };
@@ -7863,11 +7990,11 @@ export class CodeCodexElement extends HTMLElement {
   async #resetParticleImageTransform(): Promise<void> {
     const id = this.#particleTransformImageId;
     if (!id) return;
-    for (const [key, { definition, input, output }] of this.#particleImageTransformControls) {
+    for (const [key, control] of this.#particleImageTransformControls) {
+      const { input } = control;
       const value = DEFAULT_PARTICLE_IMAGE_TRANSFORM[key];
       input.value = String(value);
-      output.value = definition.format(value);
-      input.setAttribute("aria-valuetext", output.value);
+      this.#syncParticleValueControl(control, value);
     }
     this.#particleBackgroundController.previewImageTransform(id, DEFAULT_PARTICLE_IMAGE_TRANSFORM);
     await this.#particleBackgroundController.updateImageTransform(id, DEFAULT_PARTICLE_IMAGE_TRANSFORM);
@@ -7928,11 +8055,14 @@ export class CodeCodexElement extends HTMLElement {
       || this.#appearanceTransitionPending;
 
     const settings = controller.settings;
-    for (const [key, { definition, input, output }] of this.#particleNumericControls) {
+    for (const [key, control] of this.#particleNumericControls) {
+      const { input, editor } = control;
       const value = settings[key];
       input.value = String(value);
       input.disabled = controller.pending;
-      output.value = definition.format(value);
+      editor.disabled = input.disabled;
+      if (editor.disabled) this.#closeParticleValueEditor(control, false);
+      this.#syncParticleValueControl(control, value);
     }
     this.#particleAutoSwitchInput.checked = settings.autoSwitch;
     this.#particleShowSourceInput.checked = settings.showSourceImage;
@@ -7952,12 +8082,14 @@ export class CodeCodexElement extends HTMLElement {
     } else {
       this.#particleImageTransformThumb.removeAttribute("src");
     }
-    for (const [key, { definition, input, output }] of this.#particleImageTransformControls) {
+    for (const [key, control] of this.#particleImageTransformControls) {
+      const { input, editor } = control;
       const value = transformRecord?.[key] ?? DEFAULT_PARTICLE_IMAGE_TRANSFORM[key];
       input.value = String(value);
       input.disabled = controller.pending || !transformRecord;
-      output.value = definition.format(value);
-      input.setAttribute("aria-valuetext", output.value);
+      editor.disabled = input.disabled;
+      if (editor.disabled) this.#closeParticleValueEditor(control, false);
+      this.#syncParticleValueControl(control, value);
     }
     this.#particleImageTransformReset.disabled = controller.pending || !transformRecord || (
       transformRecord.positionX === DEFAULT_PARTICLE_IMAGE_TRANSFORM.positionX
@@ -8331,6 +8463,7 @@ export class CodeCodexElement extends HTMLElement {
     if (!this.#particleSettingsOpen && !this.#particleSettingsPanel.matches(":popover-open")) return;
     this.#particleSettingsOpen = false;
     this.#particleSettingsTrigger.setAttribute("aria-expanded", "false");
+    this.#cancelParticleValueEditors();
     this.#particleBackgroundController.finishImageTransformEditing();
     this.#particleTransformImageId = null;
     if (this.#particleSettingsPanel.matches(":popover-open")) this.#particleSettingsPanel.hidePopover();
