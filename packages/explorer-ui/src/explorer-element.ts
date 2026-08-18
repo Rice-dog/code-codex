@@ -113,6 +113,14 @@ const PARTICLE_BACKGROUND_POINTER_IDLE_SECONDS = 0.18;
 const PARTICLE_BACKGROUND_MAX_FRAME_DELTA_SECONDS = 0.1;
 const PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH = 40;
 const PARTICLE_BACKGROUND_CURSOR_MAX_STRENGTH = 400;
+const PARTICLE_BACKGROUND_MORPH_NEAR_RESPONSE_RATIO = 3.2 / 5.2;
+const PARTICLE_BACKGROUND_MORPH_STAGGER_RATIO = 1.4 / 5.2;
+const PARTICLE_BACKGROUND_MORPH_DISTANCE_SCALE = 0.6;
+const PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION = 0.08;
+const PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT = 4.7438645;
+const PARTICLE_BACKGROUND_MORPH_SETTLE_ERROR = 0.0015;
+const PARTICLE_BACKGROUND_MORPH_SETTLE_VELOCITY = 0.005;
+const PARTICLE_BACKGROUND_MORPH_VISIBILITY_RELEASE_SECONDS = 0.42;
 const PARTICLE_BACKGROUND_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/avif";
 const PARTICLE_BACKGROUND_IMAGE_TYPES = new Set([
   "image/png",
@@ -1368,20 +1376,23 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   precision highp float;
   attribute vec2 a_previousHome;
   attribute vec2 a_home;
+  attribute vec2 a_previousVelocity;
   attribute vec4 a_previousColor;
   attribute vec4 a_color;
   attribute float a_seed;
 
   uniform vec2 u_resolution;
-  uniform vec4 u_previousLayout;
   uniform vec4 u_layout;
   uniform vec4 u_pointerSegments[${PARTICLE_BACKGROUND_POINTER_SEGMENTS}];
   uniform vec4 u_pointerMotion[${PARTICLE_BACKGROUND_POINTER_SEGMENTS}];
   uniform float u_pointerCount;
   uniform float u_time;
   uniform float u_transitionStart;
-  uniform float u_transitionDuration;
+  uniform float u_transitionNearResponse;
+  uniform float u_transitionFarResponse;
+  uniform float u_transitionStagger;
   uniform float u_transitionActive;
+  uniform float u_transitionVisibility;
   uniform float u_dpr;
   uniform float u_particleSize;
   uniform float u_particleOpacity;
@@ -1608,17 +1619,59 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   }
 
   void main() {
-    vec2 previousHome = u_previousLayout.xy + a_previousHome * u_previousLayout.zw;
     vec2 targetHome = u_layout.xy + a_home * u_layout.zw;
-    float morph = 1.0;
+    vec2 home = targetHome;
+    vec4 imageColor = a_color;
     if (u_transitionActive > 0.5) {
-      float elapsed = max(u_time - u_transitionStart - a_seed * u_transitionDuration * 0.12, 0.0);
-      float response = max(0.1, u_transitionDuration * mix(0.88, 1.08, a_seed));
-      float omegaTime = 4.7438645 * elapsed / response;
-      morph = clamp(1.0 - (1.0 + omegaTime) * exp(-omegaTime), 0.0, 1.0);
+      vec2 transitionDelta = targetHome - a_previousHome;
+      float transitionDistance = length(transitionDelta);
+      float transitionDistanceReference = max(
+        length(u_resolution) * ${PARTICLE_BACKGROUND_MORPH_DISTANCE_SCALE.toFixed(2)},
+        80.0
+      );
+      float transitionDistanceFactor = smoother01(
+        transitionDistance / transitionDistanceReference
+      );
+      float transitionVariation = mix(
+        ${(1 - PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION).toFixed(2)},
+        ${(1 + PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION).toFixed(2)},
+        a_seed
+      );
+      float transitionResponse = mix(
+        u_transitionNearResponse,
+        u_transitionFarResponse,
+        transitionDistanceFactor
+      ) * transitionVariation;
+      float transitionElapsed = max(u_time - u_transitionStart, 0.0);
+      float carriedVelocity = step(0.01, length(a_previousVelocity));
+      float transitionDelay = a_seed * a_seed
+        * u_transitionStagger
+        * (1.0 - carriedVelocity);
+      float springElapsed = max(transitionElapsed - transitionDelay, 0.0);
+      float transitionOmega = ${PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT.toFixed(7)}
+        / max(transitionResponse, 0.10);
+      float transitionSpringTime = transitionOmega * springElapsed;
+      float transitionDecay = exp(-transitionSpringTime);
+      float transitionProgress = clamp(
+        1.0 - (1.0 + transitionSpringTime) * transitionDecay,
+        0.0,
+        1.0
+      );
+      vec2 displacement = a_previousHome - targetHome;
+      vec2 velocityTerm = a_previousVelocity
+        + transitionOmega * displacement;
+      home = targetHome + (
+        displacement + velocityTerm * springElapsed
+      ) * transitionDecay;
+      float transitionColorProgress = smoother01(
+        (transitionProgress - 0.18) / 0.82
+      );
+      imageColor = mix(
+        a_previousColor,
+        a_color,
+        transitionColorProgress
+      );
     }
-    vec2 home = mix(previousHome, targetHome, morph);
-    vec4 imageColor = mix(a_previousColor, a_color, smoother01((morph - 0.12) / 0.88));
 
     float lifetime = ${PARTICLE_BACKGROUND_PARTICLE_LIFETIME_SECONDS.toFixed(2)}
       + (hash(a_seed * 53.17 + 7.9) * 2.0 - 1.0)
@@ -1733,7 +1786,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     vec2 restingPosition = home + ambientNow;
     float disturbed = smoothstep(0.75, 3.0, length(position - restingPosition));
     float lifecycleAlpha = mix(1.0, lifeAlpha, disturbed);
-    lifecycleAlpha = mix(lifecycleAlpha, 1.0, u_transitionActive);
+    lifecycleAlpha = mix(lifecycleAlpha, 1.0, u_transitionVisibility);
     vec2 clip = vec2(position.x / u_resolution.x * 2.0 - 1.0, 1.0 - position.y / u_resolution.y * 2.0);
     gl_Position = vec4(clip, 0.0, 1.0);
     gl_PointSize = max(1.0, u_particleSize * u_dpr);
@@ -1788,33 +1841,46 @@ function createParticleProgram(gl: WebGLRenderingContext): {
   return { program, vertexShader, fragmentShader };
 }
 
+function smootherParticleTransition(value: number): number {
+  const progress = Math.min(1, Math.max(0, value));
+  return progress * progress * progress
+    * (progress * (progress * 6 - 15) + 10);
+}
+
+function criticalParticleSpringProgress(elapsed: number, response: number): number {
+  const omega = PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT / Math.max(response, 0.1);
+  const springTime = omega * Math.max(0, elapsed);
+  return Math.min(1, Math.max(0, 1 - (1 + springTime) * Math.exp(-springTime)));
+}
+
 class ParticleImageRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGLRenderingContext;
   readonly #program: WebGLProgram;
   readonly #vertexShader: WebGLShader;
   readonly #fragmentShader: WebGLShader;
-  readonly #attributes: Readonly<Record<"previousHome" | "home" | "previousColor" | "color" | "seed", number>>;
+  readonly #attributes: Readonly<Record<"previousHome" | "home" | "previousVelocity" | "previousColor" | "color" | "seed", number>>;
   readonly #uniforms: Readonly<Record<
-    "resolution" | "previousLayout" | "layout" | "pointerSegments" | "pointerMotion"
-    | "pointerCount" | "time" | "transitionStart" | "transitionDuration" | "transitionActive" | "dpr"
+    "resolution" | "layout" | "pointerSegments" | "pointerMotion"
+    | "pointerCount" | "time" | "transitionStart" | "transitionNearResponse" | "transitionFarResponse"
+    | "transitionStagger" | "transitionActive" | "transitionVisibility" | "dpr"
     | "particleSize" | "particleOpacity" | "speed" | "noiseScale" | "noiseStrength" | "damping"
     | "ambientCycle" | "cursorStrength",
     WebGLUniformLocation
   >>;
-  readonly #buffers: Readonly<Record<"previousHome" | "home" | "previousColor" | "color" | "seed", WebGLBuffer>>;
+  readonly #buffers: Readonly<Record<"previousHome" | "home" | "previousVelocity" | "previousColor" | "color" | "seed", WebGLBuffer>>;
   readonly #pointerSegments: ParticlePointerSegment[] = [];
   readonly #pointerSegmentValues = new Float32Array(PARTICLE_BACKGROUND_POINTER_SEGMENTS * 4);
   readonly #pointerMotionValues = new Float32Array(PARTICLE_BACKGROUND_POINTER_SEGMENTS * 4);
   readonly #reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   readonly #onError: (message: string) => void;
+  readonly #onTransitionFrame: (progress: number, complete: boolean) => void;
   #previousHomes: Float32Array<ArrayBuffer> = new Float32Array(0);
   #homes: Float32Array<ArrayBuffer> = new Float32Array(0);
+  #previousVelocities: Float32Array<ArrayBuffer> = new Float32Array(0);
   #previousColors: Uint8Array<ArrayBuffer> = new Uint8Array(0);
   #colors: Uint8Array<ArrayBuffer> = new Uint8Array(0);
   #seeds: Float32Array<ArrayBuffer> = new Float32Array(0);
-  #previousNaturalWidth = 1;
-  #previousNaturalHeight = 1;
   #naturalWidth = 1;
   #naturalHeight = 1;
   #count = 0;
@@ -1825,17 +1891,30 @@ class ParticleImageRenderer {
   #lastFrame = performance.now();
   #transitionStart = 0;
   #transitionDuration = DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds;
+  #transitionMaxResponse = DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds;
+  #transitionVelocityRatio = 0;
   #transitionActive = false;
+  #transitionVisibility = 0;
+  #transitionReleaseStart = -100;
+  #transitionRevision = 0;
+  #transitionResolve: ((completed: boolean) => void) | undefined;
+  #imageRevision = 0;
   #settings: ParticleBackgroundSettings;
   #animationFrame = 0;
   #disposed = false;
   #paused = false;
   #lastPointer: { readonly x: number; readonly y: number; readonly at: number } | undefined;
 
-  constructor(canvas: HTMLCanvasElement, onError: (message: string) => void, settings: ParticleBackgroundSettings) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    onError: (message: string) => void,
+    settings: ParticleBackgroundSettings,
+    onTransitionFrame: (progress: number, complete: boolean) => void,
+  ) {
     this.#canvas = canvas;
     this.#onError = onError;
     this.#settings = settings;
+    this.#onTransitionFrame = onTransitionFrame;
     const gl = canvas.getContext("webgl", {
       alpha: true,
       antialias: false,
@@ -1853,21 +1932,24 @@ class ParticleImageRenderer {
     this.#attributes = {
       previousHome: this.#requiredAttribute("a_previousHome"),
       home: this.#requiredAttribute("a_home"),
+      previousVelocity: this.#requiredAttribute("a_previousVelocity"),
       previousColor: this.#requiredAttribute("a_previousColor"),
       color: this.#requiredAttribute("a_color"),
       seed: this.#requiredAttribute("a_seed"),
     };
     this.#uniforms = {
       resolution: this.#requiredUniform("u_resolution"),
-      previousLayout: this.#requiredUniform("u_previousLayout"),
       layout: this.#requiredUniform("u_layout"),
       pointerSegments: this.#requiredUniform("u_pointerSegments[0]"),
       pointerMotion: this.#requiredUniform("u_pointerMotion[0]"),
       pointerCount: this.#requiredUniform("u_pointerCount"),
       time: this.#requiredUniform("u_time"),
       transitionStart: this.#requiredUniform("u_transitionStart"),
-      transitionDuration: this.#requiredUniform("u_transitionDuration"),
+      transitionNearResponse: this.#requiredUniform("u_transitionNearResponse"),
+      transitionFarResponse: this.#requiredUniform("u_transitionFarResponse"),
+      transitionStagger: this.#requiredUniform("u_transitionStagger"),
       transitionActive: this.#requiredUniform("u_transitionActive"),
+      transitionVisibility: this.#requiredUniform("u_transitionVisibility"),
       dpr: this.#requiredUniform("u_dpr"),
       particleSize: this.#requiredUniform("u_particleSize"),
       particleOpacity: this.#requiredUniform("u_particleOpacity"),
@@ -1881,6 +1963,7 @@ class ParticleImageRenderer {
     this.#buffers = {
       previousHome: this.#requiredBuffer(),
       home: this.#requiredBuffer(),
+      previousVelocity: this.#requiredBuffer(),
       previousColor: this.#requiredBuffer(),
       color: this.#requiredBuffer(),
       seed: this.#requiredBuffer(),
@@ -1921,20 +2004,17 @@ class ParticleImageRenderer {
     else if (this.#paused) this.#draw(performance.now(), false);
   }
 
-  setPreparedImage(image: PreparedParticleImage): void {
-    if (this.#disposed) return;
-    const canMorph = this.#count === image.targetCount && this.#count > 0 && !this.#reducedMotion.matches;
-    if (canMorph) {
-      this.#previousHomes = this.#homes;
-      this.#previousColors = this.#colors;
-      this.#previousNaturalWidth = this.#naturalWidth;
-      this.#previousNaturalHeight = this.#naturalHeight;
-    } else {
-      this.#previousHomes = image.normalizedHomes;
-      this.#previousColors = image.colors;
-      this.#previousNaturalWidth = image.naturalWidth;
-      this.#previousNaturalHeight = image.naturalHeight;
-    }
+  setPreparedImage(image: PreparedParticleImage): Promise<boolean> {
+    if (this.#disposed) return Promise.resolve(false);
+    const now = performance.now();
+    if (!this.#paused) this.#simulationTime = this.#clockSeconds(now);
+    this.#lastFrame = now;
+    const revision = ++this.#imageRevision;
+    this.#interruptTransition();
+    const canMorph = this.#count === image.targetCount
+      && this.#count > 0
+      && !this.#reducedMotion.matches
+      && this.#captureCurrentImagePresentation();
     this.#homes = image.normalizedHomes;
     this.#colors = image.colors;
     this.#seeds = image.seeds;
@@ -1943,19 +2023,33 @@ class ParticleImageRenderer {
     this.#count = image.targetCount;
     this.#transitionDuration = this.#settings.morphIntervalSeconds;
     this.#transitionStart = this.#clockSeconds();
-    this.#transitionActive = canMorph;
+    if (!canMorph) {
+      this.#previousHomes = new Float32Array(image.targetCount * 2);
+      this.#previousVelocities = new Float32Array(image.targetCount * 2);
+      this.#previousColors = new Uint8Array(image.targetCount * 4);
+      this.#copyCurrentHomesTo(this.#previousHomes);
+      this.#previousColors.set(this.#colors);
+    }
+    this.#transitionMaxResponse = canMorph
+      ? this.#estimateMaximumTransitionResponse()
+      : this.#transitionDuration;
+    if (!canMorph) this.#transitionVelocityRatio = 0;
     this.#uploadBuffer(this.#buffers.previousHome, this.#previousHomes);
     this.#uploadBuffer(this.#buffers.home, this.#homes);
+    this.#uploadBuffer(this.#buffers.previousVelocity, this.#previousVelocities);
     this.#uploadBuffer(this.#buffers.previousColor, this.#previousColors);
     this.#uploadBuffer(this.#buffers.color, this.#colors);
     this.#uploadBuffer(this.#buffers.seed, this.#seeds);
     this.#bindAttributes();
+    const transition = this.#beginTransition(canMorph, revision);
     if (this.#paused) this.#draw(performance.now(), false);
+    return transition;
   }
 
   setPaused(paused: boolean): void {
     this.#paused = paused || document.hidden || this.#reducedMotion.matches;
     this.#lastFrame = performance.now();
+    if (this.#paused && this.#transitionActive) this.#completeTransition();
     if (!this.#paused) this.#scheduleFrame();
     else this.#draw(performance.now(), false);
   }
@@ -1976,6 +2070,7 @@ class ParticleImageRenderer {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#interruptTransition();
     cancelAnimationFrame(this.#animationFrame);
     this.#animationFrame = 0;
     window.removeEventListener("resize", this.resize);
@@ -2023,6 +2118,9 @@ class ParticleImageRenderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffers.home);
     gl.enableVertexAttribArray(this.#attributes.home);
     gl.vertexAttribPointer(this.#attributes.home, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffers.previousVelocity);
+    gl.enableVertexAttribArray(this.#attributes.previousVelocity);
+    gl.vertexAttribPointer(this.#attributes.previousVelocity, 2, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffers.previousColor);
     gl.enableVertexAttribArray(this.#attributes.previousColor);
     gl.vertexAttribPointer(this.#attributes.previousColor, 4, gl.UNSIGNED_BYTE, true, 0, 0);
@@ -2039,6 +2137,193 @@ class ParticleImageRenderer {
     const width = naturalWidth * scale;
     const height = naturalHeight * scale;
     return [(this.#cssWidth - width) * 0.5, (this.#cssHeight - height) * 0.5, width, height];
+  }
+
+  #transitionNearResponse(): number {
+    return this.#transitionDuration * PARTICLE_BACKGROUND_MORPH_NEAR_RESPONSE_RATIO;
+  }
+
+  #transitionStagger(): number {
+    return this.#transitionDuration * PARTICLE_BACKGROUND_MORPH_STAGGER_RATIO;
+  }
+
+  #transitionProgress(): number {
+    if (!this.#transitionActive) return 1;
+    return criticalParticleSpringProgress(
+      this.#simulationTime - this.#transitionStart - this.#transitionStagger() * 0.35,
+      this.#transitionMaxResponse,
+    );
+  }
+
+  #particleTransitionResponse(distance: number, seed: number): number {
+    const distanceReference = Math.max(
+      Math.hypot(this.#cssWidth, this.#cssHeight) * PARTICLE_BACKGROUND_MORPH_DISTANCE_SCALE,
+      80,
+    );
+    const distanceFactor = smootherParticleTransition(distance / distanceReference);
+    const variation = 1 - PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION
+      + seed * PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION * 2;
+    return (
+      this.#transitionNearResponse()
+      + distanceFactor * (this.#transitionDuration - this.#transitionNearResponse())
+    ) * variation;
+  }
+
+  #copyCurrentHomesTo(destination: Float32Array<ArrayBuffer>): boolean {
+    if (destination.length !== this.#homes.length) return false;
+    const [x, y, width, height] = this.#layout(this.#naturalWidth, this.#naturalHeight);
+    for (let index = 0; index < this.#count; index += 1) {
+      const offset = index * 2;
+      destination[offset] = x + (this.#homes[offset] ?? 0) * width;
+      destination[offset + 1] = y + (this.#homes[offset + 1] ?? 0) * height;
+    }
+    return true;
+  }
+
+  #captureCurrentImagePresentation(): boolean {
+    if (
+      !this.#count
+      || this.#previousHomes.length !== this.#homes.length
+      || this.#previousVelocities.length !== this.#homes.length
+      || this.#previousColors.length !== this.#colors.length
+    ) return false;
+    if (!this.#transitionActive) {
+      if (!this.#copyCurrentHomesTo(this.#previousHomes)) return false;
+      this.#previousVelocities.fill(0);
+      this.#previousColors.set(this.#colors);
+      return true;
+    }
+
+    const elapsed = Math.max(0, this.#simulationTime - this.#transitionStart);
+    const stagger = this.#transitionStagger();
+    const [x, y, width, height] = this.#layout(this.#naturalWidth, this.#naturalHeight);
+    for (let index = 0; index < this.#count; index += 1) {
+      const offset = index * 2;
+      const previousX = this.#previousHomes[offset] ?? 0;
+      const previousY = this.#previousHomes[offset + 1] ?? 0;
+      const homeX = x + (this.#homes[offset] ?? 0) * width;
+      const homeY = y + (this.#homes[offset + 1] ?? 0) * height;
+      const distance = Math.hypot(homeX - previousX, homeY - previousY);
+      const response = this.#particleTransitionResponse(distance, this.#seeds[index] ?? 0);
+      const displacementX = previousX - homeX;
+      const displacementY = previousY - homeY;
+      const initialVelocityX = this.#previousVelocities[offset] ?? 0;
+      const initialVelocityY = this.#previousVelocities[offset + 1] ?? 0;
+      const hasCarriedVelocity = Math.hypot(initialVelocityX, initialVelocityY) >= 0.01;
+      const seed = this.#seeds[index] ?? 0;
+      const transitionDelay = hasCarriedVelocity ? 0 : seed * seed * stagger;
+      const springElapsed = Math.max(0, elapsed - transitionDelay);
+      const progress = criticalParticleSpringProgress(springElapsed, response);
+      const omega = PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT / response;
+      const decay = Math.exp(-omega * springElapsed);
+      const velocityTermX = initialVelocityX + omega * displacementX;
+      const velocityTermY = initialVelocityY + omega * displacementY;
+      this.#previousHomes[offset] = homeX
+        + (displacementX + velocityTermX * springElapsed) * decay;
+      this.#previousHomes[offset + 1] = homeY
+        + (displacementY + velocityTermY * springElapsed) * decay;
+      this.#previousVelocities[offset] = (
+        initialVelocityX - omega * velocityTermX * springElapsed
+      ) * decay;
+      this.#previousVelocities[offset + 1] = (
+        initialVelocityY - omega * velocityTermY * springElapsed
+      ) * decay;
+      const colorProgress = smootherParticleTransition((progress - 0.18) / 0.82);
+      const inverseColor = 1 - colorProgress;
+      const colorOffset = index * 4;
+      for (let channel = 0; channel < 4; channel += 1) {
+        const channelOffset = colorOffset + channel;
+        this.#previousColors[channelOffset] = Math.round(
+          (this.#previousColors[channelOffset] ?? 0) * inverseColor
+          + (this.#colors[channelOffset] ?? 0) * colorProgress,
+        );
+      }
+    }
+    return true;
+  }
+
+  #estimateMaximumTransitionResponse(): number {
+    const [x, y, width, height] = this.#layout(this.#naturalWidth, this.#naturalHeight);
+    let maximumResponse = this.#transitionNearResponse()
+      * (1 - PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION);
+    let maximumVelocityRatio = 0;
+    for (let index = 0; index < this.#count; index += 1) {
+      const offset = index * 2;
+      const homeX = x + (this.#homes[offset] ?? 0) * width;
+      const homeY = y + (this.#homes[offset + 1] ?? 0) * height;
+      const distance = Math.hypot(
+        homeX - (this.#previousHomes[offset] ?? 0),
+        homeY - (this.#previousHomes[offset + 1] ?? 0),
+      );
+      const response = this.#particleTransitionResponse(distance, this.#seeds[index] ?? 0);
+      maximumResponse = Math.max(maximumResponse, response);
+      const velocity = Math.hypot(
+        this.#previousVelocities[offset] ?? 0,
+        this.#previousVelocities[offset + 1] ?? 0,
+      );
+      const omega = PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT / response;
+      maximumVelocityRatio = Math.max(maximumVelocityRatio, velocity / (omega * Math.max(distance, 1)));
+    }
+    this.#transitionVelocityRatio = maximumVelocityRatio;
+    return maximumResponse;
+  }
+
+  #transitionSettled(): boolean {
+    if (!this.#transitionActive) return true;
+    const elapsed = Math.max(
+      0,
+      this.#simulationTime - this.#transitionStart - this.#transitionStagger(),
+    );
+    const omega = PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT / this.#transitionMaxResponse;
+    const springTime = omega * elapsed;
+    const decay = Math.exp(-springTime);
+    const carriedVelocity = this.#transitionVelocityRatio;
+    const error = (1 + (1 + carriedVelocity) * springTime) * decay;
+    const velocity = omega * (
+      carriedVelocity + (1 + carriedVelocity) * springTime
+    ) * decay;
+    return error <= PARTICLE_BACKGROUND_MORPH_SETTLE_ERROR
+      && velocity <= PARTICLE_BACKGROUND_MORPH_SETTLE_VELOCITY;
+  }
+
+  #interruptTransition(): void {
+    const resolve = this.#transitionResolve;
+    this.#transitionResolve = undefined;
+    this.#transitionRevision = 0;
+    resolve?.(false);
+  }
+
+  #beginTransition(active: boolean, revision: number): Promise<boolean> {
+    this.#transitionActive = active;
+    this.#transitionVisibility = active ? 1 : 0;
+    this.#transitionReleaseStart = -100;
+    this.#onTransitionFrame(active ? 0 : 1, !active);
+    if (!active) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      this.#transitionRevision = revision;
+      this.#transitionResolve = resolve;
+    });
+  }
+
+  #completeTransition(): void {
+    if (!this.#transitionActive) return;
+    this.#transitionActive = false;
+    this.#transitionVisibility = 1;
+    this.#transitionReleaseStart = this.#simulationTime;
+    this.#onTransitionFrame(1, true);
+    const resolve = this.#transitionResolve;
+    const revision = this.#transitionRevision;
+    this.#transitionResolve = undefined;
+    this.#transitionRevision = 0;
+    resolve?.(revision === this.#imageRevision && !this.#disposed);
+  }
+
+  #updateTransitionVisibility(): void {
+    if (this.#transitionActive || this.#transitionVisibility <= 0) return;
+    const elapsed = this.#simulationTime - this.#transitionReleaseStart;
+    this.#transitionVisibility = 1 - smootherParticleTransition(
+      elapsed / PARTICLE_BACKGROUND_MORPH_VISIBILITY_RELEASE_SECONDS,
+    );
   }
 
   #clockSeconds(timestamp = performance.now()): number {
@@ -2181,6 +2466,11 @@ class ParticleImageRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
     if (this.#count > 0) {
       const time = this.#simulationTime;
+      if (this.#transitionActive) {
+        this.#onTransitionFrame(this.#transitionProgress(), false);
+        if (this.#transitionSettled()) this.#completeTransition();
+      }
+      this.#updateTransitionVisibility();
       while (
         this.#pointerSegments.length
         && time - (this.#pointerSegments[0]?.createdAt ?? time) > PARTICLE_BACKGROUND_MAX_LIFETIME_SECONDS
@@ -2202,19 +2492,20 @@ class ParticleImageRenderer {
         this.#pointerMotionValues[segmentOffset + 2] = Math.max(0, time - segment.createdAt);
         this.#pointerMotionValues[segmentOffset + 3] = Math.max(0.001, segment.duration);
       }
-      const previousLayout = this.#layout(this.#previousNaturalWidth, this.#previousNaturalHeight);
       const layout = this.#layout(this.#naturalWidth, this.#naturalHeight);
       gl.useProgram(this.#program);
       gl.uniform2f(this.#uniforms.resolution, this.#cssWidth, this.#cssHeight);
-      gl.uniform4f(this.#uniforms.previousLayout, previousLayout[0], previousLayout[1], previousLayout[2], previousLayout[3]);
       gl.uniform4f(this.#uniforms.layout, layout[0], layout[1], layout[2], layout[3]);
       gl.uniform4fv(this.#uniforms.pointerSegments, this.#pointerSegmentValues);
       gl.uniform4fv(this.#uniforms.pointerMotion, this.#pointerMotionValues);
       gl.uniform1f(this.#uniforms.pointerCount, this.#pointerSegments.length);
       gl.uniform1f(this.#uniforms.time, time);
       gl.uniform1f(this.#uniforms.transitionStart, this.#transitionStart);
-      gl.uniform1f(this.#uniforms.transitionDuration, this.#transitionDuration);
+      gl.uniform1f(this.#uniforms.transitionNearResponse, this.#transitionNearResponse());
+      gl.uniform1f(this.#uniforms.transitionFarResponse, this.#transitionDuration);
+      gl.uniform1f(this.#uniforms.transitionStagger, this.#transitionStagger());
       gl.uniform1f(this.#uniforms.transitionActive, this.#transitionActive ? 1 : 0);
+      gl.uniform1f(this.#uniforms.transitionVisibility, this.#transitionVisibility);
       gl.uniform1f(this.#uniforms.dpr, this.#dpr);
       gl.uniform1f(this.#uniforms.particleSize, this.#settings.particleSize);
       gl.uniform1f(this.#uniforms.particleOpacity, this.#settings.particleOpacity);
@@ -2226,9 +2517,6 @@ class ParticleImageRenderer {
       gl.uniform1f(this.#uniforms.cursorStrength, this.#settings.cursorStrength);
       this.#bindAttributes();
       gl.drawArrays(gl.POINTS, 0, this.#count);
-      if (this.#transitionActive && time - this.#transitionStart > this.#transitionDuration * 2.25) {
-        this.#transitionActive = false;
-      }
     }
     if (scheduleNext) this.#scheduleFrame();
   }
@@ -2370,8 +2658,9 @@ class ParticleBackgroundController {
   #currentSourceUrl: string | undefined;
   #previousSourceUrl: string | undefined;
   #sourceTransitioning = false;
+  #sourceTransitionProgress = 1;
+  #sourceTransitionOutgoingScale = 1;
   #rotationTimer = 0;
-  #sourceReleaseTimer = 0;
   #generation = 0;
   #disposed = false;
   #enableOperation: Promise<void> | undefined;
@@ -2475,7 +2764,9 @@ class ParticleBackgroundController {
         this.#renderer = new ParticleImageRenderer(canvas, (message) => {
           this.#error = message;
           this.#notify();
-        }, this.#settings);
+        }, this.#settings, (progress, complete) => {
+          this.#updateSourceTransition(progress, complete);
+        });
       } catch (error) {
         this.#error = error instanceof Error ? `${error.message}; showing the source image only.` : "WebGL is unavailable; showing the source image only.";
       }
@@ -2729,11 +3020,20 @@ class ParticleBackgroundController {
       if (!cache) return false;
       const prepared = await cache.prepare(record, this.#settings.particleCount);
       if (!this.#enabled || generation !== this.#generation) return false;
-      this.#renderer?.setPreparedImage(prepared);
-      this.#transitionSourceImage(prepared.processedBlob);
+      const renderer = this.#renderer;
+      const shouldMorph = Boolean(
+        renderer
+        && renderer.count === prepared.targetCount
+        && renderer.count > 0
+        && !this.#reducedMotion.matches,
+      );
+      const sourceReady = await this.#prepareSourceImage(prepared.processedBlob, shouldMorph, generation);
+      if (!sourceReady || !this.#enabled || generation !== this.#generation) return false;
+      const transitioned = renderer ? await renderer.setPreparedImage(prepared) : true;
+      if (!transitioned || !this.#enabled || generation !== this.#generation) return false;
       this.#settings = normalizeParticleSettings({ ...this.#settings, activeImageId: id });
       writeParticleBackgroundSettings(this.#settings);
-      this.#error = this.#renderer ? undefined : this.#error;
+      this.#error = renderer ? undefined : this.#error;
       this.#prewarmNext(id);
       if (restartRotation) this.#scheduleRotation();
       else this.#scheduleRotation();
@@ -2751,45 +3051,106 @@ class ParticleBackgroundController {
     }
   }
 
-  #transitionSourceImage(processedBlob: Blob): void {
+  async #prepareSourceImage(processedBlob: Blob, animate: boolean, generation: number): Promise<boolean> {
+    const image = this.#image;
+    const previousImage = this.#previousImage;
+    if (!image || !previousImage) return false;
+    const nextUrl = URL.createObjectURL(processedBlob);
+    try {
+      const decoder = new Image();
+      decoder.src = nextUrl;
+      await decoder.decode();
+    } catch (error) {
+      URL.revokeObjectURL(nextUrl);
+      throw new Error("The processed particle image could not be decoded", { cause: error });
+    }
+    if (!this.#enabled || generation !== this.#generation) {
+      URL.revokeObjectURL(nextUrl);
+      return false;
+    }
+
+    const oldCurrentUrl = this.#currentSourceUrl;
+    const oldPreviousUrl = this.#previousSourceUrl;
+    const currentOpacity = Number.parseFloat(image.style.opacity);
+    const previousOpacity = Number.parseFloat(previousImage.style.opacity);
+    let outgoingUrl = oldCurrentUrl;
+    let outgoingOpacity = Number.isFinite(currentOpacity)
+      ? currentOpacity
+      : this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+    if (
+      this.#sourceTransitioning
+      && oldPreviousUrl
+      && Number.isFinite(previousOpacity)
+      && previousOpacity > outgoingOpacity
+    ) {
+      outgoingUrl = oldPreviousUrl;
+      outgoingOpacity = previousOpacity;
+    }
+
+    image.style.transition = "none";
+    previousImage.style.transition = "none";
+    image.style.opacity = "0";
+    this.#currentSourceUrl = nextUrl;
+    image.src = nextUrl;
+    const visibleOpacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+    if (animate && outgoingUrl) {
+      this.#previousSourceUrl = outgoingUrl;
+      previousImage.src = outgoingUrl;
+      this.#sourceTransitionOutgoingScale = visibleOpacity > 0
+        ? Math.min(1, Math.max(0, outgoingOpacity / visibleOpacity))
+        : 1;
+      this.#sourceTransitioning = true;
+      this.#sourceTransitionProgress = 0;
+      this.#updateSourceTransition(0, false);
+    } else {
+      this.#previousSourceUrl = undefined;
+      previousImage.removeAttribute("src");
+      previousImage.style.opacity = "0";
+      image.style.opacity = String(visibleOpacity);
+      this.#sourceTransitioning = false;
+      this.#sourceTransitionProgress = 1;
+      this.#sourceTransitionOutgoingScale = 1;
+    }
+    for (const staleUrl of new Set([oldCurrentUrl, oldPreviousUrl])) {
+      if (staleUrl && staleUrl !== this.#previousSourceUrl) URL.revokeObjectURL(staleUrl);
+    }
+    return true;
+  }
+
+  #updateSourceTransition(progress: number, complete: boolean): void {
     const image = this.#image;
     const previousImage = this.#previousImage;
     if (!image || !previousImage) return;
-    window.clearTimeout(this.#sourceReleaseTimer);
-    const nextUrl = URL.createObjectURL(processedBlob);
-    if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
-    this.#previousSourceUrl = this.#currentSourceUrl;
-    if (this.#previousSourceUrl) previousImage.src = this.#previousSourceUrl;
-    else previousImage.removeAttribute("src");
-    this.#currentSourceUrl = nextUrl;
-    image.src = nextUrl;
-    const duration = this.#reducedMotion.matches ? 0 : this.#settings.morphIntervalSeconds;
-    const visibleOpacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
-    previousImage.style.transition = `opacity ${duration}s cubic-bezier(.2,.75,.2,1)`;
-    image.style.transition = `opacity ${duration}s cubic-bezier(.2,.75,.2,1)`;
-    previousImage.style.opacity = this.#previousSourceUrl ? String(visibleOpacity) : "0";
-    image.style.opacity = "0";
-    if (duration === 0) {
+    this.#sourceTransitionProgress = Math.min(1, Math.max(0, progress));
+    const opacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+    if (!this.#sourceTransitioning) {
+      image.style.opacity = String(opacity);
       previousImage.style.opacity = "0";
-      image.style.opacity = String(visibleOpacity);
-      if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
-      this.#previousSourceUrl = undefined;
-      previousImage.removeAttribute("src");
-      this.#sourceTransitioning = false;
       return;
     }
-    this.#sourceTransitioning = true;
-    requestAnimationFrame(() => {
-      if (!this.#enabled || this.#currentSourceUrl !== nextUrl) return;
-      previousImage.style.opacity = "0";
-      image.style.opacity = String(visibleOpacity);
-    });
-    this.#sourceReleaseTimer = window.setTimeout(() => {
-      if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
-      this.#previousSourceUrl = undefined;
-      previousImage.removeAttribute("src");
-      this.#sourceTransitioning = false;
-    }, Math.ceil(duration * 1_000 + 300));
+    const blend = smootherParticleTransition(this.#sourceTransitionProgress);
+    const particleReveal = 1 - Math.sin(this.#sourceTransitionProgress * Math.PI) ** 2 * 0.58;
+    previousImage.style.opacity = String(
+      opacity * this.#sourceTransitionOutgoingScale * (1 - blend) * particleReveal,
+    );
+    image.style.opacity = String(opacity * blend * particleReveal);
+    if (complete) this.#finishSourceTransition();
+  }
+
+  #finishSourceTransition(): void {
+    const image = this.#image;
+    const previousImage = this.#previousImage;
+    if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
+    this.#previousSourceUrl = undefined;
+    previousImage?.removeAttribute("src");
+    if (previousImage) previousImage.style.opacity = "0";
+    if (image) {
+      const opacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+      image.style.opacity = String(opacity);
+    }
+    this.#sourceTransitioning = false;
+    this.#sourceTransitionProgress = 1;
+    this.#sourceTransitionOutgoingScale = 1;
   }
 
   #applySourcePresentation(): void {
@@ -2798,10 +3159,13 @@ class ParticleBackgroundController {
     const previousImage = this.#previousImage;
     if (!layer || !image || !previousImage) return;
     layer.style.backgroundColor = this.#settings.backgroundColor;
+    if (this.#sourceTransitioning) {
+      this.#updateSourceTransition(this.#sourceTransitionProgress, false);
+      return;
+    }
     const opacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
     image.style.opacity = String(opacity);
-    if (!this.#sourceTransitioning) previousImage.style.opacity = "0";
-    else if (!this.#settings.showSourceImage) previousImage.style.opacity = "0";
+    previousImage.style.opacity = "0";
   }
 
   #clearActiveImage(): void {
@@ -2813,7 +3177,9 @@ class ParticleBackgroundController {
         this.#renderer = new ParticleImageRenderer(this.#canvas, (message) => {
           this.#error = message;
           this.#notify();
-        }, this.#settings);
+        }, this.#settings, (progress, complete) => {
+          this.#updateSourceTransition(progress, complete);
+        });
       } catch {
         this.#renderer = undefined;
       }
@@ -2822,6 +3188,9 @@ class ParticleBackgroundController {
     if (this.#previousSourceUrl) URL.revokeObjectURL(this.#previousSourceUrl);
     this.#currentSourceUrl = undefined;
     this.#previousSourceUrl = undefined;
+    this.#sourceTransitioning = false;
+    this.#sourceTransitionProgress = 1;
+    this.#sourceTransitionOutgoingScale = 1;
     this.#image?.removeAttribute("src");
     this.#previousImage?.removeAttribute("src");
   }
@@ -2877,8 +3246,6 @@ class ParticleBackgroundController {
     window.clearTimeout(this.#codexThemePreferenceTimer);
     this.#codexThemePreferenceTimer = 0;
     this.#stopRotation();
-    window.clearTimeout(this.#sourceReleaseTimer);
-    this.#sourceReleaseTimer = 0;
     this.#preparationCache?.dispose();
     this.#preparationCache = undefined;
     this.#renderer?.dispose();
@@ -2888,6 +3255,8 @@ class ParticleBackgroundController {
     this.#currentSourceUrl = undefined;
     this.#previousSourceUrl = undefined;
     this.#sourceTransitioning = false;
+    this.#sourceTransitionProgress = 1;
+    this.#sourceTransitionOutgoingScale = 1;
     this.#layer?.remove();
     this.#layer = undefined;
     this.#previousImage = undefined;

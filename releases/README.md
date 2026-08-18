@@ -5,6 +5,15 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.88
+
+- `CodeCodex-0.1.88-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.88-x64.msi`: MSI installer.
+- `CodeCodex-0.1.88-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Synchronizes source-image blending with the particle spring, preserves motion
+  during interrupted morphs, and starts each image's dwell after morph settle.
+
 ## v0.1.87
 
 - `CodeCodex-0.1.87-x64-setup.exe`: recommended installer.
@@ -515,5 +524,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.87
+./scripts/package.ps1 -Version 0.1.88
 ```
