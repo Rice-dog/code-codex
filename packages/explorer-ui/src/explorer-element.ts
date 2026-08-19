@@ -308,6 +308,16 @@ const MEDIA_PREVIEW_ROUTES: Readonly<Record<string, MediaPreviewRoute>> = Object
 
 type StateCopy = { title: string; copy: string; action?: string };
 type PreviewUnavailableReason = "binary" | "invalid-utf8" | "sensitive" | "previewer-disabled" | "unsupported-type" | "unknown";
+type UpdateCheckStatus = "upToDate" | "updateAvailable" | "ahead";
+type UpdateCheckPresentation = "idle" | "checking" | "upToDate" | "updateAvailable" | "ahead" | "error";
+
+interface UpdateCheckResult {
+  readonly currentVersion: string;
+  readonly latestVersion: string;
+  readonly status: UpdateCheckStatus;
+  readonly tagName: string;
+  readonly releaseUrl: string;
+}
 
 interface PreviewTab {
   readonly instanceId: number;
@@ -3816,6 +3826,10 @@ export class CodeCodexElement extends HTMLElement {
   #contextMenuError: string | undefined;
   #contextActionPending = false;
   #actionNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+  #updateCheckPending = false;
+  #updateCheckOperation = 0;
+  #updateCheckPresentation: UpdateCheckPresentation = "idle";
+  #updateCheckSummary = `Check GitHub for updates (current version v${__CODE_CODEX_VERSION__})`;
   #dragSource: DragSource | undefined;
   #externalDragActive = false;
   #dropTargetPath: string | undefined;
@@ -3854,7 +3868,7 @@ export class CodeCodexElement extends HTMLElement {
   readonly #rootLabel: HTMLElement;
   readonly #masthead: HTMLElement;
   readonly #editModeButton: HTMLButtonElement;
-  readonly #statusCode: HTMLElement;
+  readonly #statusCode: HTMLButtonElement;
   readonly #previewMarketButton: HTMLButtonElement;
   readonly #previewMarketPopover: HTMLElement;
   readonly #previewMarketList: HTMLElement;
@@ -3966,7 +3980,7 @@ export class CodeCodexElement extends HTMLElement {
             </div>
           </div>
           <button class="preview-market-button" type="button" aria-haspopup="dialog" aria-controls="cle-preview-market" aria-expanded="false">${icons.preview}<span>Preview Market</span></button>
-          <span class="status-code">WAIT</span>
+          <button class="status-code" type="button" title="Check GitHub for updates" aria-label="Check GitHub for updates">WAIT</button>
         </footer>
         <div class="action-notice" hidden></div>
         <div class="context-menu" role="menu" aria-label="Explorer actions" aria-busy="false" hidden></div>
@@ -3987,7 +4001,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#rootLabel = this.#required<HTMLElement>(".root-label");
     this.#masthead = this.#required<HTMLElement>(".masthead");
     this.#editModeButton = this.#required<HTMLButtonElement>(".edit-mode-toggle");
-    this.#statusCode = this.#required<HTMLElement>(".status-code");
+    this.#statusCode = this.#required<HTMLButtonElement>(".status-code");
     this.#previewMarketButton = this.#required<HTMLButtonElement>(".preview-market-button");
     this.#previewMarketPopover = this.#required<HTMLElement>(".preview-market-popover");
     this.#previewMarketList = this.#required<HTMLElement>(".preview-market-list");
@@ -4128,6 +4142,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#appearanceSyncQueued = false;
     this.#appearanceHealthPending = false;
     this.#appearanceOperation += 1;
+    this.#cancelUpdateCheck();
     this.#queuedThreadSwitch = undefined;
     this.#queuedMainPreviewReconcile = undefined;
     this.#queuedNativeReconnect = undefined;
@@ -4291,6 +4306,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#appearanceSyncQueued = false;
     this.#appearanceHealthPending = false;
     this.#appearanceOperation += 1;
+    this.#cancelUpdateCheck();
     this.#cancelAppearanceHealthCheck();
     this.#clearTransparentBackgroundPresentation();
     this.#bridge?.dispose();
@@ -4337,6 +4353,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#collapseButton.addEventListener("click", () => this.collapse(true));
       this.#collapsedTab.addEventListener("click", () => this.collapse(false));
       this.#editModeButton.addEventListener("click", () => this.#toggleEditing());
+      this.#statusCode.addEventListener("click", () => void this.#checkForUpdates());
       this.#previewMarketButton.addEventListener("click", () => this.#togglePreviewMarket());
       this.#previewMarketCloseButton.addEventListener("click", () => this.#closePreviewMarket(true));
       this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
@@ -8653,10 +8670,75 @@ export class CodeCodexElement extends HTMLElement {
     }, 220);
   }
 
+  #cancelUpdateCheck(): void {
+    this.#updateCheckOperation += 1;
+    this.#updateCheckPending = false;
+    if (this.#updateCheckPresentation === "checking") {
+      this.#updateCheckPresentation = "idle";
+      this.#updateCheckSummary = `Check GitHub for updates (current version v${__CODE_CODEX_VERSION__})`;
+      if (!this.#actionNotice.hidden && this.#actionNotice.dataset.tone === "progress") this.#hideActionNotice();
+    }
+  }
+
+  async #checkForUpdates(): Promise<void> {
+    const versionVisible = this.#state === "ready" || this.#state === "empty" || this.#state === "no-project";
+    if (!versionVisible || this.#updateCheckPending) return;
+
+    const bridge = this.#bridge;
+    if (!bridge?.available) {
+      this.#updateCheckPresentation = "error";
+      this.#updateCheckSummary = "Could not check GitHub because Code-Codex is disconnected.";
+      this.#renderStatus();
+      this.#showActionNotice(this.#updateCheckSummary, "error");
+      return;
+    }
+
+    const operation = ++this.#updateCheckOperation;
+    this.#updateCheckPending = true;
+    this.#updateCheckPresentation = "checking";
+    this.#updateCheckSummary = "Checking GitHub for the latest release…";
+    this.#renderStatus();
+    this.#showActionProgress(this.#updateCheckSummary);
+
+    try {
+      const result = normalizeUpdateCheckResult(await bridge.request<unknown>("explorer.update.check", {}));
+      if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
+
+      this.#updateCheckPresentation = result.status;
+      if (result.status === "updateAvailable") {
+        this.#updateCheckSummary = `Code-Codex v${result.latestVersion} is available on GitHub.`;
+      } else if (result.status === "ahead") {
+        this.#updateCheckSummary = `This build (v${result.currentVersion}) is newer than GitHub’s latest published release (v${result.latestVersion}).`;
+      } else {
+        this.#updateCheckSummary = `Code-Codex v${result.currentVersion} is up to date.`;
+      }
+      this.#showActionNotice(this.#updateCheckSummary);
+    } catch (error) {
+      if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
+      this.#updateCheckPresentation = "error";
+      this.#updateCheckSummary = updateCheckError(error);
+      this.#showActionNotice(this.#updateCheckSummary, "error");
+    } finally {
+      if (operation === this.#updateCheckOperation) {
+        this.#updateCheckPending = false;
+        this.#renderStatus();
+      }
+    }
+  }
+
   #renderStatus(): void {
-    this.#statusCode.textContent = this.#state === "ready" || this.#state === "empty" || this.#state === "no-project"
-      ? `v${__CODE_CODEX_VERSION__}`
-      : this.#state.toUpperCase().slice(0, 8);
+    const versionVisible = this.#state === "ready" || this.#state === "empty" || this.#state === "no-project";
+    this.#statusCode.textContent = versionVisible ? `v${__CODE_CODEX_VERSION__}` : this.#state.toUpperCase().slice(0, 8);
+    this.#statusCode.disabled = !versionVisible || this.#updateCheckPending;
+    this.#statusCode.dataset.updateState = versionVisible ? this.#updateCheckPresentation : "idle";
+    this.#statusCode.setAttribute("aria-busy", String(versionVisible && this.#updateCheckPending));
+    if (versionVisible) {
+      this.#statusCode.title = this.#updateCheckSummary;
+      this.#statusCode.setAttribute("aria-label", this.#updateCheckSummary);
+    } else {
+      this.#statusCode.removeAttribute("title");
+      this.#statusCode.setAttribute("aria-label", this.#statusCode.textContent);
+    }
   }
 
   #announce(message: string): void {
@@ -8665,10 +8747,6 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #showActionNotice(message: string, tone: "success" | "error" = "success"): void {
-    if (tone !== "error") {
-      this.#hideActionNotice();
-      return;
-    }
     this.#hideActionNotice();
     this.#actionNotice.textContent = message;
     this.#actionNotice.dataset.tone = tone;
@@ -9079,6 +9157,65 @@ function externalImportError(error: unknown, committedCount: number): string {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function normalizeUpdateCheckResult(raw: unknown): UpdateCheckResult {
+  const object = asRecord(raw);
+  const versionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+  const status = object?.status;
+  if (
+    !object ||
+    Object.keys(object).length !== 5 ||
+    typeof object.currentVersion !== "string" ||
+    object.currentVersion !== __CODE_CODEX_VERSION__ ||
+    !versionPattern.test(object.currentVersion) ||
+    typeof object.latestVersion !== "string" ||
+    !versionPattern.test(object.latestVersion) ||
+    (status !== "upToDate" && status !== "updateAvailable" && status !== "ahead") ||
+    typeof object.tagName !== "string" ||
+    (object.tagName !== object.latestVersion && object.tagName !== `v${object.latestVersion}`) ||
+    typeof object.releaseUrl !== "string"
+  ) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The GitHub update response was not valid." });
+  }
+
+  let releaseUrl: URL;
+  try {
+    releaseUrl = new URL(object.releaseUrl);
+  } catch {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The GitHub release URL was not valid." });
+  }
+  if (
+    releaseUrl.protocol !== "https:" ||
+    releaseUrl.hostname !== "github.com" ||
+    releaseUrl.port ||
+    releaseUrl.username ||
+    releaseUrl.password ||
+    releaseUrl.search ||
+    releaseUrl.hash ||
+    releaseUrl.pathname !== `/Rice-dog/code-codex/releases/tag/${object.tagName}`
+  ) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The GitHub release URL was not valid." });
+  }
+
+  return {
+    currentVersion: object.currentVersion,
+    latestVersion: object.latestVersion,
+    status,
+    tagName: object.tagName,
+    releaseUrl: releaseUrl.href,
+  };
+}
+
+function updateCheckError(error: unknown): string {
+  const code = errorCode(error);
+  if (code === "UPDATE_CHECK_RATE_LIMITED") return "GitHub’s update-check limit was reached. Try again later.";
+  if (code === "UPDATE_NOT_PUBLISHED") return "GitHub does not have a published stable release yet.";
+  if (code === "UPDATE_CHECK_INVALID_RESPONSE" || code === "INVALID_REQUEST") {
+    return "GitHub returned an update response Code-Codex could not verify.";
+  }
+  if (code === "NO_BRIDGE") return "Could not check GitHub because Code-Codex is disconnected.";
+  return "Could not reach GitHub. Check your internet connection and try again.";
 }
 
 function isTransientBootstrapError(error: unknown): boolean {

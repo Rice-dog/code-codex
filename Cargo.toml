@@ -8,7 +8,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.91"
+version = "0.1.93"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -26,6 +26,7 @@ notify = "8.2"
 process-wrap = { version = "8.2.1", default-features = false, features = ["creation-flags", "job-object", "kill-on-drop", "tokio1"] }
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"

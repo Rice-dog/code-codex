@@ -19,6 +19,8 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use cdp_client::CapabilityToken;
 use cdp_client::{BindingRequest, BridgeError, BridgeHandler, BridgeNotification};
 use context_resolver::{AppServerClient, ResolverError};
+use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
@@ -70,6 +72,14 @@ use workspace_service::{
     WorkspaceWatcher,
 };
 
+const GITHUB_LATEST_RELEASE_ENDPOINT: &str =
+    "https://api.github.com/repos/Rice-dog/code-codex/releases/latest";
+const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
+const GITHUB_API_VERSION: &str = "2022-11-28";
+const MAX_UPDATE_RESPONSE_BYTES: usize = 256 * 1024;
+const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[derive(Clone)]
 pub struct NativeBridge {
     inner: Arc<BridgeInner>,
@@ -88,6 +98,194 @@ struct BridgeInner {
     lifecycle_epoch: AtomicU64,
     notification_sender: RwLock<Option<broadcast::Sender<BridgeNotification>>>,
     window_transparency: WindowTransparencyController,
+    update_checker: UpdateChecker,
+}
+
+struct UpdateChecker {
+    client: Option<reqwest::Client>,
+    endpoint: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubLatestRelease {
+    tag_name: String,
+    html_url: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum UpdateAvailability {
+    UpToDate,
+    UpdateAvailable,
+    Ahead,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckResult {
+    current_version: String,
+    latest_version: String,
+    status: UpdateAvailability,
+    tag_name: String,
+    release_url: String,
+}
+
+impl UpdateChecker {
+    fn github() -> Self {
+        Self::new(GITHUB_LATEST_RELEASE_ENDPOINT)
+    }
+
+    fn new(endpoint: impl Into<String>) -> Self {
+        let client = reqwest::Client::builder()
+            .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+            .timeout(UPDATE_REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .ok();
+        Self {
+            client,
+            endpoint: endpoint.into(),
+        }
+    }
+
+    async fn check(&self, current_version: &str) -> Result<UpdateCheckResult, BridgeError> {
+        let client = self.client.as_ref().ok_or_else(update_unavailable_error)?;
+        let mut response = client
+            .get(&self.endpoint)
+            .header(ACCEPT, GITHUB_API_ACCEPT)
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .header(USER_AGENT, format!("Code-Codex/{current_version}"))
+            .send()
+            .await
+            .map_err(|_| update_unavailable_error())?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::FORBIDDEN
+            || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        {
+            return Err(update_rate_limited_error());
+        }
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(BridgeError::new(
+                "UPDATE_NOT_PUBLISHED",
+                "No published Code-Codex release was found on GitHub.",
+            ));
+        }
+        if !status.is_success() {
+            return Err(update_unavailable_error());
+        }
+        if !response_is_json(&response)
+            || response
+                .content_length()
+                .is_some_and(|length| length > MAX_UPDATE_RESPONSE_BYTES as u64)
+        {
+            return Err(update_invalid_response_error());
+        }
+
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| update_unavailable_error())?
+        {
+            if body.len().saturating_add(chunk.len()) > MAX_UPDATE_RESPONSE_BYTES {
+                return Err(update_invalid_response_error());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let release: GithubLatestRelease =
+            serde_json::from_slice(&body).map_err(|_| update_invalid_response_error())?;
+        classify_update(current_version, release)
+    }
+}
+
+fn response_is_json(response: &reqwest::Response) -> bool {
+    response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json"))
+}
+
+fn classify_update(
+    current_version: &str,
+    release: GithubLatestRelease,
+) -> Result<UpdateCheckResult, BridgeError> {
+    let current = Version::parse(current_version).map_err(|_| update_internal_error())?;
+    if release.tag_name.len() > 80 {
+        return Err(update_invalid_response_error());
+    }
+    let latest_text = release
+        .tag_name
+        .strip_prefix('v')
+        .unwrap_or(&release.tag_name);
+    let latest = Version::parse(latest_text).map_err(|_| update_invalid_response_error())?;
+    if !latest.pre.is_empty() || !latest.build.is_empty() {
+        return Err(update_invalid_response_error());
+    }
+    validate_release_url(&release.html_url, &release.tag_name)?;
+
+    let status = match current.cmp(&latest) {
+        std::cmp::Ordering::Less => UpdateAvailability::UpdateAvailable,
+        std::cmp::Ordering::Equal => UpdateAvailability::UpToDate,
+        std::cmp::Ordering::Greater => UpdateAvailability::Ahead,
+    };
+    Ok(UpdateCheckResult {
+        current_version: current.to_string(),
+        latest_version: latest.to_string(),
+        status,
+        tag_name: release.tag_name,
+        release_url: release.html_url,
+    })
+}
+
+fn validate_release_url(release_url: &str, tag_name: &str) -> Result<(), BridgeError> {
+    if release_url.len() > 512 {
+        return Err(update_invalid_response_error());
+    }
+    let parsed = url::Url::parse(release_url).map_err(|_| update_invalid_response_error())?;
+    let expected_path = format!("/Rice-dog/code-codex/releases/tag/{tag_name}");
+    if parsed.scheme() != "https"
+        || parsed.host_str() != Some("github.com")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.path() != expected_path
+    {
+        return Err(update_invalid_response_error());
+    }
+    Ok(())
+}
+
+fn update_unavailable_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_CHECK_UNAVAILABLE",
+        "GitHub could not be reached. Check your connection and try again.",
+    )
+}
+
+fn update_rate_limited_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_CHECK_RATE_LIMITED",
+        "GitHub temporarily limited update checks. Try again later.",
+    )
+}
+
+fn update_invalid_response_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_CHECK_INVALID_RESPONSE",
+        "GitHub returned an invalid update response. Try again later.",
+    )
+}
+
+fn update_internal_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_CHECK_FAILED",
+        "The installed Code-Codex version could not be checked.",
+    )
 }
 
 struct BridgeState {
@@ -1556,6 +1754,7 @@ impl NativeBridge {
                 lifecycle_epoch: AtomicU64::new(0),
                 notification_sender: RwLock::new(None),
                 window_transparency: WindowTransparencyController::new(),
+                update_checker: UpdateChecker::github(),
             }),
         }
     }
@@ -2325,6 +2524,18 @@ impl NativeBridge {
             .map_err(|_| internal_error())
     }
 
+    async fn update_check(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        require_empty_object(&params)?;
+        self.ensure_epoch(epoch)?;
+        let result = self
+            .inner
+            .update_checker
+            .check(env!("CARGO_PKG_VERSION"))
+            .await?;
+        self.ensure_epoch(epoch)?;
+        serde_json::to_value(result).map_err(|_| update_internal_error())
+    }
+
     fn window_transparency_set(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         self.ensure_epoch(epoch)?;
         let params: WindowTransparencyParams =
@@ -2647,6 +2858,7 @@ impl BridgeHandler for NativeBridge {
             "explorer.watch.stop" => self.watch_stop(request.params, epoch),
             "explorer.settings.get" => self.settings_get(request.params).await,
             "explorer.settings.set" => self.settings_set(request.params, epoch).await,
+            "explorer.update.check" => self.update_check(request.params, epoch).await,
             "explorer.window.transparency.set" => {
                 self.window_transparency_set(request.params, epoch)
             }
@@ -3087,8 +3299,10 @@ mod tests {
     use cdp_client::CapabilityToken;
     use tempfile::TempDir;
     use tokio::io::{
-        AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, duplex, split,
+        AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, duplex,
+        split,
     };
+    use tokio::net::TcpListener;
     use tokio::sync::oneshot;
     #[cfg(windows)]
     use windows_sys::Win32::Foundation::POINT;
@@ -3141,6 +3355,164 @@ mod tests {
         let mut encoded = serde_json::to_vec(&value).expect("encode JSONL");
         encoded.push(b'\n');
         writer.write_all(&encoded).await.expect("write JSONL");
+    }
+
+    async fn mock_update_server(
+        response: Vec<u8>,
+    ) -> (
+        String,
+        oneshot::Receiver<String>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock update server");
+        let address = listener.local_addr().expect("mock server address");
+        let (request_sender, request_receiver) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept update request");
+            let mut request = Vec::new();
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let mut chunk = [0_u8; 1024];
+                let read = stream.read(&mut chunk).await.expect("read update request");
+                if read == 0 || request.len().saturating_add(read) > 16 * 1024 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+            let _ = request_sender.send(String::from_utf8_lossy(&request).into_owned());
+            let _ = stream.write_all(&response).await;
+        });
+        (
+            format!("http://{address}/repos/Rice-dog/code-codex/releases/latest"),
+            request_receiver,
+            task,
+        )
+    }
+
+    fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
+        let head = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        [head.as_bytes(), body].concat()
+    }
+
+    fn github_release(tag_name: &str) -> GithubLatestRelease {
+        GithubLatestRelease {
+            tag_name: tag_name.to_owned(),
+            html_url: format!("https://github.com/Rice-dog/code-codex/releases/tag/{tag_name}"),
+        }
+    }
+
+    #[test]
+    fn update_comparison_covers_current_ahead_and_available_versions() {
+        let current =
+            classify_update("0.1.91", github_release("v0.1.91")).expect("current release");
+        assert_eq!(current.status, UpdateAvailability::UpToDate);
+        assert_eq!(current.current_version, "0.1.91");
+        assert_eq!(current.latest_version, "0.1.91");
+
+        let ahead = classify_update("0.1.91", github_release("v0.1.72")).expect("ahead release");
+        assert_eq!(ahead.status, UpdateAvailability::Ahead);
+
+        let available =
+            classify_update("0.1.91", github_release("v0.2.0")).expect("available release");
+        assert_eq!(available.status, UpdateAvailability::UpdateAvailable);
+    }
+
+    #[test]
+    fn update_metadata_rejects_prereleases_and_untrusted_release_urls() {
+        let prerelease = classify_update("0.1.91", github_release("v0.2.0-beta.1"))
+            .expect_err("latest endpoint must only return stable releases");
+        assert_eq!(prerelease.code, "UPDATE_CHECK_INVALID_RESPONSE");
+
+        let build_metadata = classify_update("0.1.91", github_release("v0.2.0+build.1"))
+            .expect_err("release versions must match the three-part package version contract");
+        assert_eq!(build_metadata.code, "UPDATE_CHECK_INVALID_RESPONSE");
+
+        let untrusted = classify_update(
+            "0.1.91",
+            GithubLatestRelease {
+                tag_name: "v0.2.0".to_owned(),
+                html_url: "https://example.com/Rice-dog/code-codex/releases/tag/v0.2.0".to_owned(),
+            },
+        )
+        .expect_err("untrusted release URL");
+        assert_eq!(untrusted.code, "UPDATE_CHECK_INVALID_RESPONSE");
+    }
+
+    #[tokio::test]
+    async fn update_rpc_uses_bounded_native_github_request_and_required_headers() {
+        let body = serde_json::to_vec(&json!({
+            "tag_name": "v0.2.0",
+            "html_url": "https://github.com/Rice-dog/code-codex/releases/tag/v0.2.0"
+        }))
+        .expect("release JSON");
+        let response = http_response("200 OK", "application/json; charset=utf-8", &body);
+        let (endpoint, request_receiver, server) = mock_update_server(response).await;
+        let (_directory, mut bridge) = manual_bridge().await;
+        Arc::get_mut(&mut bridge.inner)
+            .expect("exclusive bridge")
+            .update_checker = UpdateChecker::new(endpoint);
+
+        let result = bridge
+            .handle(request("explorer.update.check", json!({})))
+            .await
+            .expect("update result");
+        assert_eq!(result["currentVersion"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(result["latestVersion"], "0.2.0");
+        assert_eq!(result["status"], "updateAvailable");
+        assert_eq!(
+            result["releaseUrl"],
+            "https://github.com/Rice-dog/code-codex/releases/tag/v0.2.0"
+        );
+
+        let request = request_receiver.await.expect("captured update request");
+        let request = request.to_ascii_lowercase();
+        assert!(request.starts_with("get /repos/rice-dog/code-codex/releases/latest http/1.1\r\n"));
+        assert!(request.contains("accept: application/vnd.github+json\r\n"));
+        assert!(request.contains("x-github-api-version: 2022-11-28\r\n"));
+        assert!(request.contains(&format!(
+            "user-agent: code-codex/{}\r\n",
+            env!("CARGO_PKG_VERSION")
+        )));
+        server.await.expect("mock update server");
+    }
+
+    #[tokio::test]
+    async fn update_rpc_rejects_parameters_before_any_network_request() {
+        let (_directory, bridge) = manual_bridge().await;
+        let error = bridge
+            .handle(request(
+                "explorer.update.check",
+                json!({ "endpoint": "https://example.com/latest" }),
+            ))
+            .await
+            .expect_err("update endpoint cannot be supplied by the renderer");
+        assert_eq!(error.code, "INVALID_REQUEST");
+    }
+
+    #[tokio::test]
+    async fn update_check_rejects_oversized_and_rate_limited_responses() {
+        let oversized_body = vec![b'x'; MAX_UPDATE_RESPONSE_BYTES + 1];
+        let oversized_response = http_response("200 OK", "application/json", &oversized_body);
+        let (endpoint, _request, server) = mock_update_server(oversized_response).await;
+        let error = UpdateChecker::new(endpoint)
+            .check("0.1.91")
+            .await
+            .expect_err("oversized response");
+        assert_eq!(error.code, "UPDATE_CHECK_INVALID_RESPONSE");
+        server.await.expect("oversized response server");
+
+        let limited_response = http_response("403 Forbidden", "application/json", b"{}");
+        let (endpoint, _request, server) = mock_update_server(limited_response).await;
+        let error = UpdateChecker::new(endpoint)
+            .check("0.1.91")
+            .await
+            .expect_err("rate limited response");
+        assert_eq!(error.code, "UPDATE_CHECK_RATE_LIMITED");
+        server.await.expect("rate limited response server");
     }
 
     #[cfg(windows)]

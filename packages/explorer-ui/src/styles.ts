@@ -854,6 +854,7 @@ export const styles = String.raw`
     line-height: 16px;
   }
   .action-notice[data-tone="error"] { box-shadow: inset 3px 0 var(--cle-deleted), 0 6px 18px rgba(0, 0, 0, .16); }
+  .action-notice[data-tone="progress"] { box-shadow: inset 3px 0 var(--cle-focus), 0 6px 18px rgba(0, 0, 0, .16); }
   .action-notice[hidden] { display: none; }
 
   .clipboard-proxy {
@@ -1808,10 +1809,58 @@ export const styles = String.raw`
   }
   .particle-plugin-error[hidden] { display: none; }
   .status-code {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 22px;
+    margin-right: -4px;
+    padding: 2px 4px;
     color: var(--cle-ink);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    cursor: pointer;
+    font: inherit;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0;
+  }
+  .status-code:hover:not(:disabled) { background: var(--cle-hover); }
+  .status-code:focus-visible { outline: 2px solid var(--cle-focus); outline-offset: 0; }
+  .status-code:disabled { cursor: default; }
+  .status-code::after {
+    display: none;
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 8px;
+    text-align: center;
+  }
+  .status-code[data-update-state="checking"]::after {
+    display: block;
+    content: "";
+    border: 1px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: cle-version-check 650ms linear infinite;
+  }
+  .status-code[data-update-state="upToDate"]::after,
+  .status-code[data-update-state="ahead"]::after {
+    display: block;
+    content: "✓";
+    color: var(--cle-added);
+  }
+  .status-code[data-update-state="updateAvailable"]::after {
+    display: block;
+    content: "↑";
+    color: var(--cle-focus);
+  }
+  .status-code[data-update-state="error"]::after {
+    display: block;
+    content: "!";
+    color: var(--cle-deleted);
   }
 
   .resize-handle {
@@ -1906,7 +1955,8 @@ export const styles = String.raw`
     :host,
     :host([data-busy="true"]) .activity-bus,
     .preview-market-popover,
-    .particle-settings-panel { animation: none !important; }
+    .particle-settings-panel,
+    .status-code[data-update-state="checking"]::after { animation: none !important; }
     .activity-bus,
     .twisty svg { transition: none; }
   }
@@ -1915,6 +1965,7 @@ export const styles = String.raw`
     from { opacity: 0; transform: translateY(5px) scale(.985); }
     to { opacity: 1; transform: translateY(0) scale(1); }
   }
+  @keyframes cle-version-check { to { transform: rotate(360deg); } }
   @keyframes cle-particle-settings-in {
     from { opacity: 0; transform: translateY(3px) scale(.99); }
     to { opacity: 1; transform: translateY(0) scale(1); }

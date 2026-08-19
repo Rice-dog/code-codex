@@ -1,5 +1,7 @@
 import type { BridgeMessage, BridgeRequest, ObjectBridge, TreeNodeInput } from "../src/types";
 
+declare const __CODE_CODEX_VERSION__: string;
+
 const rootEntries: TreeNodeInput[] = [
   { name: "src", relativePath: "src", kind: "directory" },
   { name: "demo", relativePath: "demo", kind: "directory" },
@@ -788,6 +790,15 @@ const bridge: ObjectBridge = {
       if (Object.keys(params).length !== 1 || typeof params.enabled !== "boolean") throw new Error("INVALID_REQUEST");
       transparentBackgroundEnabled = params.enabled;
       return { enabled: transparentBackgroundEnabled, background: "transparent" };
+    }
+    if (method === "explorer.update.check") {
+      return {
+        currentVersion: __CODE_CODEX_VERSION__,
+        latestVersion: __CODE_CODEX_VERSION__,
+        status: "upToDate",
+        tagName: `v${__CODE_CODEX_VERSION__}`,
+        releaseUrl: `https://github.com/Rice-dog/code-codex/releases/tag/v${__CODE_CODEX_VERSION__}`,
+      };
     }
     if (method === "explorer.context") {
       return {

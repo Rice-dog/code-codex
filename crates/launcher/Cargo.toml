@@ -41,6 +41,8 @@ context-resolver = { path = "../context-resolver" }
 dunce.workspace = true
 futures-util.workspace = true
 process-wrap.workspace = true
+reqwest.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 same-file = "1.0.6"
