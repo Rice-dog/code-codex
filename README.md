@@ -113,7 +113,7 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 - Text preview and editing, including multilingual Markdown content.
 - Independently enabled Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews from Preview Market.
 - Optional Transparent Background appearance plugin with a reversible Windows compositor surface that reveals content behind Codex while keeping the full Codex window input-active.
-- Particle Image Background appearance plugin with a persistent grayscale image library, ordered auto-switching, and smooth particle morphing; users control only Particle count and Source settings.
+- Particle Image Background appearance plugin with a persistent grayscale image library, ordered auto-switching, smooth particle morphing, per-photo framing, and adjustable particle, source, flow, pointer, and render settings.
 - Click the version number at the bottom of the file tree to check GitHub for the latest published stable release.
 - Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
 - Local CSV table previews with quoted fields, embedded line breaks, sticky headers, and bounded rendering.
@@ -136,9 +136,15 @@ glTF 3D models. Preview processing runs locally on the user's computer.
 
 The 3D Model Preview plugin provides an interactive view for `.gltf` and `.glb`
 files with orbit, pan, zoom, fit/reset, reference-grid, and animation controls.
-Transparent Background and Particle Image Background are available separately
-as appearance plugins. Particle images and settings remain local to the user's
-Codex profile.
+
+![Code-Codex Particle Image Background appearance plugin](docs/screenshots/particle-image-background.png)
+
+The Particle Image Background appearance plugin transforms locally selected
+images into an animated grayscale particle field across Codex. Its image
+library supports ordered auto-switching, smooth morphing, per-photo position
+and zoom, direct numeric values, and adjustable flow, pointer, source, and
+render settings. Transparent Background is available separately. Particle
+images and settings remain local to the user's Codex profile.
 
 ## Repository Layout
 
