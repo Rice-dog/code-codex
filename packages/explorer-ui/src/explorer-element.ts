@@ -534,6 +534,18 @@ interface ParticleBackgroundSettings {
   readonly dprCap: number;
 }
 
+interface ParticleCursorStrengthValues {
+  readonly baseStrength: number;
+  readonly cursorScale: number;
+  readonly strengthRatio: number;
+  readonly extendedStrength: number;
+  readonly extremeStrength: number;
+  readonly overdrive: number;
+  readonly highStrengthScale: number;
+  readonly stepStrengthScale: number;
+  readonly strength: number;
+}
+
 type CodexAppearanceTheme = "system" | "light" | "dark";
 
 type CodexAppearanceAction =
@@ -735,6 +747,47 @@ const PARTICLE_IMAGE_TRANSFORM_CONTROL_DEFINITIONS = Object.freeze([
   { key: "positionY", id: "cle-particle-image-position-y", label: "Position Y", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
   { key: "zoom", id: "cle-particle-image-zoom", label: "Zoom", minimum: 0.25, maximum: 4, step: 0.05, editorScale: 100, format: (value: number) => `${Math.round(value * 100)}%` },
 ] satisfies readonly ParticleImageTransformControlDefinition[]);
+
+function calculateParticleCursorStrengthValues(cursorStrength: number): ParticleCursorStrengthValues {
+  const baseStrength = Math.min(
+    Math.max(cursorStrength, 0),
+    PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH,
+  );
+  const cursorScale = baseStrength * 6.25;
+  const strengthRatio = Math.max(baseStrength / 0.64, 0);
+  const extendedStrength = Math.max(strengthRatio / 15.625, 1);
+  const extremeStrength = Math.max(strengthRatio / 31.25, 1);
+  const overdrive = Math.max(
+    cursorStrength / PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH,
+    1,
+  );
+  const highStrengthScale = Math.pow(Math.max(strengthRatio, 1), 0.45)
+    * Math.pow(extendedStrength, 0.28)
+    * Math.pow(extremeStrength, 0.32)
+    * Math.pow(overdrive, 0.45);
+  const stepStrengthScale = Math.pow(Math.max(strengthRatio, 1), 0.35)
+    * Math.pow(extendedStrength, 0.18)
+    * Math.pow(extremeStrength, 0.22)
+    * Math.pow(overdrive, 0.35);
+  const strength = 4.0 * (
+    strengthRatio < 1
+      ? strengthRatio
+      : Math.pow(Math.max(strengthRatio, 1), 0.55)
+  ) * Math.pow(extendedStrength, 0.30)
+    * Math.pow(extremeStrength, 0.34)
+    * overdrive;
+  return {
+    baseStrength,
+    cursorScale,
+    strengthRatio,
+    extendedStrength,
+    extremeStrength,
+    overdrive,
+    highStrengthScale,
+    stepStrengthScale,
+    strength,
+  };
+}
 
 function particleEditorScale(definition: ParticleValueControlDefinition): number {
   return definition.editorScale ?? 1;
@@ -1793,6 +1846,11 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   uniform float u_damping;
   uniform float u_ambientCycle;
   uniform float u_cursorStrength;
+  // Cursor-strength powers are calculated once on the CPU and shared by the draw.
+  // x/y/z/w = strengthRatio/extendedStrength/extremeStrength/overdrive.
+  uniform vec4 u_cursorStrengthFactors;
+  // x/y/z = highStrengthScale/stepStrengthScale/strength.
+  uniform vec3 u_cursorStrengthScales;
 
   varying vec4 v_color;
 
@@ -1879,11 +1937,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     float segmentPhase,
     float maximumVelocity,
     float maximumStep,
-    float strength,
-    float influenceRadius,
-    float strengthRatio,
-    float extendedStrength,
-    float extremeStrength
+    float influenceRadius
   ) {
     float dt = clamp(elapsed, 0.0, ${PARTICLE_BACKGROUND_POINTER_IDLE_SECONDS.toFixed(2)});
     if (dt <= 0.00001) return;
@@ -1932,15 +1986,15 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
       dt / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)}
     );
     vec2 nextVelocity = oldVelocity * decay;
-    float flowResponse = 1.0 - exp(-5.2 * influence * strength * dt);
+    float flowResponse = 1.0 - exp(-5.2 * influence * u_cursorStrengthScales.z * dt);
     nextVelocity = mix(nextVelocity, driverVelocity, flowResponse);
     nextVelocity *= mix(1.0, 0.76, reversal * influence);
     nextVelocity += normal * driverSpeed
-      * (0.85 * turn * curlEnvelope * strength) * dt;
+      * (0.85 * turn * curlEnvelope * u_cursorStrengthScales.z) * dt;
     nextVelocity += swirlDirection * driverSpeed
-      * (0.48 * turn * curlEnvelope * strength) * dt;
+      * (0.48 * turn * curlEnvelope * u_cursorStrengthScales.z) * dt;
     nextVelocity += normal * driverSpeed
-      * (0.025 * seededVariation * curlEnvelope * strength) * dt;
+      * (0.025 * seededVariation * curlEnvelope * u_cursorStrengthScales.z) * dt;
 
     float segmentEnergy = smoother01(
       cursorDistance / max(influenceRadius * 0.55, 1.0)
@@ -1953,9 +2007,9 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     float speedEnergy = smoother01(driverSpeed / 1500.0);
     float wakeLength = influenceRadius
       * mix(4.5, 10.0, speedEnergy)
-      * pow(max(strengthRatio, 1.0), 0.12)
-      * pow(extendedStrength, 0.16)
-      * pow(extremeStrength, 0.20);
+      * pow(max(u_cursorStrengthFactors.x, 1.0), 0.12)
+      * pow(u_cursorStrengthFactors.y, 0.16)
+      * pow(u_cursorStrengthFactors.z, 0.20);
     float wakeProgress = clamp(downstream / max(wakeLength, 1.0), 0.0, 1.0);
     float originalEndScale = mix(2.15, 2.65, speedEnergy);
     float wakeStartSquared = influenceRadius * influenceRadius;
@@ -1996,7 +2050,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     float pressureGain = segmentEnergy * pressureStart
       / (1.0 + pressureDistance * pressureDistance);
     vec2 pressureVelocity = dipoleDirection * driverSpeed * (0.018 * pressureGain);
-    float inducedResponse = 1.0 - exp(-1.15 * sqrt(max(strength, 0.0)) * dt);
+    float inducedResponse = 1.0 - exp(-1.15 * sqrt(max(u_cursorStrengthScales.z, 0.0)) * dt);
     nextVelocity += (wakeVelocity + pressureVelocity) * inducedResponse;
     nextVelocity = softLimit(nextVelocity, maximumVelocity);
 
@@ -2080,32 +2134,6 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     float integratedAge = 0.0;
 
     if (u_pointerCount > 0.5 && u_cursorStrength > 0.0001) {
-    float baseCursorStrength = min(
-      max(u_cursorStrength, 0.0),
-      ${PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH.toFixed(1)}
-    );
-    float strengthRatio = max(baseCursorStrength / 0.64, 0.0);
-    float extendedStrength = max(strengthRatio / 15.625, 1.0);
-    float extremeStrength = max(strengthRatio / 31.25, 1.0);
-    float overdrive = max(
-      u_cursorStrength / ${PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH.toFixed(1)},
-      1.0
-    );
-    float highStrengthScale = pow(max(strengthRatio, 1.0), 0.45)
-      * pow(extendedStrength, 0.28)
-      * pow(extremeStrength, 0.32)
-      * pow(overdrive, 0.45);
-    float stepStrengthScale = pow(max(strengthRatio, 1.0), 0.35)
-      * pow(extendedStrength, 0.18)
-      * pow(extremeStrength, 0.22)
-      * pow(overdrive, 0.35);
-    float strength = 4.0 * mix(
-      strengthRatio,
-      pow(max(strengthRatio, 1.0), 0.55),
-      step(1.0, strengthRatio)
-    ) * pow(extendedStrength, 0.30)
-      * pow(extremeStrength, 0.34)
-      * overdrive;
     float radiusVariation = mix(0.90, 1.10, hash(a_seed * 43.71 + 2.19));
     float influenceRadius = clamp(
       min(u_resolution.x, u_resolution.y) * 0.16,
@@ -2117,9 +2145,9 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
       motionReferenceRadius * 0.42 / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)},
       180.0,
       340.0
-    ) * highStrengthScale;
+    ) * u_cursorStrengthScales.x;
     float maximumStep = clamp(motionReferenceRadius * 0.42, 8.0, 20.0)
-      * stepStrengthScale;
+      * u_cursorStrengthScales.y;
 
     for (int index = 0; index < ${PARTICLE_BACKGROUND_POINTER_SEGMENTS}; index += 1) {
       if (float(index) >= u_pointerCount) break;
@@ -2154,11 +2182,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
           float(index),
           maximumVelocity,
           maximumStep,
-          strength,
-          influenceRadius,
-          strengthRatio,
-          extendedStrength,
-          extremeStrength
+          influenceRadius
         );
       }
       integratedAge = max(integratedAge, segmentEndAge);
@@ -2261,7 +2285,7 @@ class ParticleImageRenderer {
     | "pointerCount" | "time" | "transitionElapsed" | "transitionNearResponse" | "transitionFarResponse"
     | "transitionStagger" | "transitionActive" | "transitionVisibility" | "dpr"
     | "particleSize" | "particleOpacity" | "speed" | "noiseScale" | "noiseStrength" | "damping"
-    | "ambientCycle" | "cursorStrength",
+    | "ambientCycle" | "cursorStrength" | "cursorStrengthFactors" | "cursorStrengthScales",
     WebGLUniformLocation
   >>;
   readonly #buffers: Readonly<Record<"previousHome" | "home" | "previousVelocity" | "previousColor" | "color" | "seed", WebGLBuffer>>;
@@ -2301,6 +2325,17 @@ class ParticleImageRenderer {
   #transitionResolve: ((completed: boolean) => void) | undefined;
   #imageRevision = 0;
   #settings: ParticleBackgroundSettings;
+  #cursorStrengthValues: ParticleCursorStrengthValues;
+  #viewportUniformsDirty = true;
+  #layoutUniformDirty = true;
+  #renderSettingsUniformsDirty = true;
+  #transitionConstantsUniformsDirty = true;
+  #transitionActiveUniformDirty = true;
+  #transitionVisibilityUniformDirty = true;
+  #transitionElapsedUniformDirty = true;
+  #pointerGeometryUniformsDirty = true;
+  #pointerCountUniformDirty = true;
+  #cursorStrengthUniformsDirty = true;
   #animationFrame = 0;
   #disposed = false;
   #paused = false;
@@ -2315,6 +2350,7 @@ class ParticleImageRenderer {
     this.#canvas = canvas;
     this.#onError = onError;
     this.#settings = settings;
+    this.#cursorStrengthValues = calculateParticleCursorStrengthValues(settings.cursorStrength);
     this.#onTransitionFrame = onTransitionFrame;
     const gl = canvas.getContext("webgl", {
       alpha: true,
@@ -2360,6 +2396,8 @@ class ParticleImageRenderer {
       damping: this.#requiredUniform("u_damping"),
       ambientCycle: this.#requiredUniform("u_ambientCycle"),
       cursorStrength: this.#requiredUniform("u_cursorStrength"),
+      cursorStrengthFactors: this.#requiredUniform("u_cursorStrengthFactors"),
+      cursorStrengthScales: this.#requiredUniform("u_cursorStrengthScales"),
     };
     this.#buffers = {
       previousHome: this.#requiredBuffer(),
@@ -2374,6 +2412,8 @@ class ParticleImageRenderer {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.disable(gl.DEPTH_TEST);
     gl.clearColor(0, 0, 0, 0);
+    // Attribute pointers retain their buffer association in this private context;
+    // replacing buffer data does not require rebinding them for every draw.
     this.#bindAttributes();
     this.resize();
     window.addEventListener("resize", this.resize, { passive: true });
@@ -2392,10 +2432,31 @@ class ParticleImageRenderer {
 
   setRenderSettings(settings: ParticleBackgroundSettings): void {
     if (this.#disposed) return;
-    const dprChanged = settings.dprCap !== this.#settings.dprCap;
-    const cursorDisabled = this.#settings.cursorInteraction && !settings.cursorInteraction;
+    const previousSettings = this.#settings;
+    const dprChanged = settings.dprCap !== previousSettings.dprCap;
+    const cursorDisabled = previousSettings.cursorInteraction && !settings.cursorInteraction;
+    const transitionDurationChanged = settings.morphIntervalSeconds !== previousSettings.morphIntervalSeconds;
+    if (
+      settings.particleSize !== previousSettings.particleSize
+      || settings.particleOpacity !== previousSettings.particleOpacity
+      || settings.speed !== previousSettings.speed
+      || settings.noiseScale !== previousSettings.noiseScale
+      || settings.noiseStrength !== previousSettings.noiseStrength
+      || settings.damping !== previousSettings.damping
+      || settings.ambientCycle !== previousSettings.ambientCycle
+      || settings.cursorStrength !== previousSettings.cursorStrength
+    ) {
+      this.#renderSettingsUniformsDirty = true;
+    }
+    if (settings.cursorStrength !== previousSettings.cursorStrength) {
+      this.#cursorStrengthValues = calculateParticleCursorStrengthValues(settings.cursorStrength);
+      this.#cursorStrengthUniformsDirty = true;
+    }
     this.#settings = settings;
-    if (!this.#transitionActive) this.#transitionDuration = settings.morphIntervalSeconds;
+    if (!this.#transitionActive) {
+      this.#transitionDuration = settings.morphIntervalSeconds;
+      if (transitionDurationChanged) this.#transitionConstantsUniformsDirty = true;
+    }
     if (cursorDisabled) {
       this.#lastPointer = undefined;
       const tail = this.#pointerSegments.at(-1);
@@ -2424,6 +2485,7 @@ class ParticleImageRenderer {
     this.#imageTransform = normalizeParticleImageTransform(transform);
     this.#count = image.targetCount;
     this.#transitionDuration = this.#settings.morphIntervalSeconds;
+    this.#layoutUniformDirty = true;
     if (!canMorph) {
       this.#previousHomes = new Float32Array(image.targetCount * 2);
       this.#previousVelocities = new Float32Array(image.targetCount * 2);
@@ -2441,7 +2503,6 @@ class ParticleImageRenderer {
     this.#uploadBuffer(this.#buffers.previousColor, this.#previousColors);
     this.#uploadBuffer(this.#buffers.color, this.#colors);
     this.#uploadBuffer(this.#buffers.seed, this.#seeds);
-    this.#bindAttributes();
     const transition = this.#beginTransition(canMorph, revision);
     if (this.#paused) this.#draw(performance.now(), false);
     return transition;
@@ -2449,7 +2510,14 @@ class ParticleImageRenderer {
 
   setImageTransform(transform: ParticleImageTransform): void {
     if (this.#disposed) return;
-    this.#imageTransform = normalizeParticleImageTransform(transform);
+    const nextTransform = normalizeParticleImageTransform(transform);
+    if (
+      nextTransform.positionX === this.#imageTransform.positionX
+      && nextTransform.positionY === this.#imageTransform.positionY
+      && nextTransform.zoom === this.#imageTransform.zoom
+    ) return;
+    this.#imageTransform = nextTransform;
+    this.#layoutUniformDirty = true;
     if (this.#paused) this.#draw(performance.now(), false);
   }
 
@@ -2463,14 +2531,22 @@ class ParticleImageRenderer {
 
   readonly resize = (): void => {
     if (this.#disposed) return;
-    this.#cssWidth = Math.max(1, window.innerWidth);
-    this.#cssHeight = Math.max(1, window.innerHeight);
-    this.#dpr = Math.min(this.#settings.dprCap, Math.max(1, window.devicePixelRatio || 1));
-    const width = Math.max(1, Math.round(this.#cssWidth * this.#dpr));
-    const height = Math.max(1, Math.round(this.#cssHeight * this.#dpr));
+    const cssWidth = Math.max(1, window.innerWidth);
+    const cssHeight = Math.max(1, window.innerHeight);
+    const dpr = Math.min(this.#settings.dprCap, Math.max(1, window.devicePixelRatio || 1));
+    const cssSizeChanged = cssWidth !== this.#cssWidth || cssHeight !== this.#cssHeight;
+    const dprChanged = dpr !== this.#dpr;
+    this.#cssWidth = cssWidth;
+    this.#cssHeight = cssHeight;
+    this.#dpr = dpr;
+    if (cssSizeChanged || dprChanged) this.#viewportUniformsDirty = true;
+    if (cssSizeChanged) this.#layoutUniformDirty = true;
+    const width = Math.max(1, Math.round(cssWidth * dpr));
+    const height = Math.max(1, Math.round(cssHeight * dpr));
+    const drawingBufferChanged = this.#canvas.width !== width || this.#canvas.height !== height;
     if (this.#canvas.width !== width) this.#canvas.width = width;
     if (this.#canvas.height !== height) this.#canvas.height = height;
-    this.#gl.viewport(0, 0, width, height);
+    if (drawingBufferChanged) this.#gl.viewport(0, 0, width, height);
     if (this.#paused) this.#draw(performance.now(), false);
   };
 
@@ -2741,6 +2817,10 @@ class ParticleImageRenderer {
     this.#transitionActive = active;
     this.#transitionVisibility = active ? 1 : 0;
     this.#transitionReleaseStart = -100;
+    this.#transitionConstantsUniformsDirty = true;
+    this.#transitionActiveUniformDirty = true;
+    this.#transitionVisibilityUniformDirty = true;
+    this.#transitionElapsedUniformDirty = true;
     this.#onTransitionFrame(active ? 0 : 1, !active);
     if (!active) return Promise.resolve(true);
     return new Promise<boolean>((resolve) => {
@@ -2756,6 +2836,9 @@ class ParticleImageRenderer {
     this.#transitionClockCache = undefined;
     this.#transitionVisibility = 1;
     this.#transitionReleaseStart = this.#simulationTime;
+    this.#transitionActiveUniformDirty = true;
+    this.#transitionVisibilityUniformDirty = true;
+    this.#transitionElapsedUniformDirty = true;
     this.#onTransitionFrame(1, true);
     const resolve = this.#transitionResolve;
     const revision = this.#transitionRevision;
@@ -2767,9 +2850,12 @@ class ParticleImageRenderer {
   #updateTransitionVisibility(): void {
     if (this.#transitionActive || this.#transitionVisibility <= 0) return;
     const elapsed = this.#simulationTime - this.#transitionReleaseStart;
-    this.#transitionVisibility = 1 - smootherParticleTransition(
+    const visibility = 1 - smootherParticleTransition(
       elapsed / PARTICLE_BACKGROUND_MORPH_VISIBILITY_RELEASE_SECONDS,
     );
+    if (visibility === this.#transitionVisibility) return;
+    this.#transitionVisibility = visibility;
+    this.#transitionVisibilityUniformDirty = true;
   }
 
   #clockSeconds(timestamp = performance.now()): number {
@@ -2787,6 +2873,7 @@ class ParticleImageRenderer {
     const previous = this.#lastPointer;
     this.#lastPointer = { x: event.clientX, y: event.clientY, at: now };
     if (!previous) return;
+    const previousSegmentCount = this.#pointerSegments.length;
     const tail = this.#pointerSegments.at(-1);
     const elapsed = now - previous.at;
     const deltaX = event.clientX - previous.x;
@@ -2811,23 +2898,8 @@ class ParticleImageRenderer {
     }
     const rawVelocityX = deltaX / elapsed;
     const rawVelocityY = deltaY / elapsed;
-    const baseStrength = Math.min(
-      Math.max(this.#settings.cursorStrength, 0),
-      PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH,
-    );
-    const cursorScale = baseStrength * 6.25;
-    const strengthRatio = Math.max(0, baseStrength / 0.64);
-    const extendedStrength = Math.max(1, strengthRatio / 15.625);
-    const extremeStrength = Math.max(1, strengthRatio / 31.25);
-    const overdrive = Math.max(
-      1,
-      this.#settings.cursorStrength / PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH,
-    );
-    const targetSpeedLimit = 5_200
-      * Math.pow(Math.max(strengthRatio, 1), 0.45)
-      * Math.pow(extendedStrength, 0.28)
-      * Math.pow(extremeStrength, 0.32)
-      * Math.pow(overdrive, 0.45);
+    const { cursorScale, overdrive, highStrengthScale } = this.#cursorStrengthValues;
+    const targetSpeedLimit = 5_200 * highStrengthScale;
     const targetSpeed = cursorScale > 0
       ? Math.min(targetSpeedLimit, speed * (1.04 + 0.14 * cursorScale) * Math.sqrt(overdrive))
       : 0;
@@ -2863,6 +2935,8 @@ class ParticleImageRenderer {
     if (this.#pointerSegments.length > PARTICLE_BACKGROUND_POINTER_SEGMENTS) {
       this.#pointerSegments.shift();
     }
+    this.#pointerGeometryUniformsDirty = true;
+    if (this.#pointerSegments.length !== previousSegmentCount) this.#pointerCountUniformDirty = true;
   };
 
   #resetPointer = (): void => {
@@ -2922,46 +2996,97 @@ class ParticleImageRenderer {
         && time - (this.#pointerSegments[0]?.createdAt ?? time) > PARTICLE_BACKGROUND_MAX_LIFETIME_SECONDS
       ) {
         this.#pointerSegments.shift();
+        this.#pointerGeometryUniformsDirty = true;
+        this.#pointerCountUniformDirty = true;
       }
-      this.#pointerSegmentValues.fill(0);
-      this.#pointerMotionValues.fill(0);
+      const pointerCount = this.#pointerSegments.length;
+      if (this.#pointerGeometryUniformsDirty) this.#pointerSegmentValues.fill(0);
+      if (pointerCount > 0) this.#pointerMotionValues.fill(0);
       for (let index = 0; index < this.#pointerSegments.length; index += 1) {
         const segment = this.#pointerSegments[index];
         if (!segment) continue;
         const segmentOffset = index * 4;
-        this.#pointerSegmentValues[segmentOffset] = segment.startX;
-        this.#pointerSegmentValues[segmentOffset + 1] = segment.startY;
-        this.#pointerSegmentValues[segmentOffset + 2] = segment.endX;
-        this.#pointerSegmentValues[segmentOffset + 3] = segment.endY;
+        if (this.#pointerGeometryUniformsDirty) {
+          this.#pointerSegmentValues[segmentOffset] = segment.startX;
+          this.#pointerSegmentValues[segmentOffset + 1] = segment.startY;
+          this.#pointerSegmentValues[segmentOffset + 2] = segment.endX;
+          this.#pointerSegmentValues[segmentOffset + 3] = segment.endY;
+        }
         this.#pointerMotionValues[segmentOffset] = segment.velocityX;
         this.#pointerMotionValues[segmentOffset + 1] = segment.velocityY;
         this.#pointerMotionValues[segmentOffset + 2] = Math.max(0, time - segment.createdAt);
         this.#pointerMotionValues[segmentOffset + 3] = Math.max(0.001, segment.duration);
       }
-      const layout = this.#layout(this.#imageWidth, this.#imageHeight);
-      gl.useProgram(this.#program);
-      gl.uniform2f(this.#uniforms.resolution, this.#cssWidth, this.#cssHeight);
-      gl.uniform4f(this.#uniforms.layout, layout[0], layout[1], layout[2], layout[3]);
-      gl.uniform4fv(this.#uniforms.pointerSegments, this.#pointerSegmentValues);
-      gl.uniform4fv(this.#uniforms.pointerMotion, this.#pointerMotionValues);
-      gl.uniform1f(this.#uniforms.pointerCount, this.#pointerSegments.length);
+      if (this.#viewportUniformsDirty) {
+        gl.uniform2f(this.#uniforms.resolution, this.#cssWidth, this.#cssHeight);
+        gl.uniform1f(this.#uniforms.dpr, this.#dpr);
+        this.#viewportUniformsDirty = false;
+      }
+      if (this.#layoutUniformDirty) {
+        const layout = this.#layout(this.#imageWidth, this.#imageHeight);
+        gl.uniform4f(this.#uniforms.layout, layout[0], layout[1], layout[2], layout[3]);
+        this.#layoutUniformDirty = false;
+      }
+      if (this.#pointerGeometryUniformsDirty) {
+        if (pointerCount > 0) {
+          gl.uniform4fv(this.#uniforms.pointerSegments, this.#pointerSegmentValues);
+        }
+        this.#pointerGeometryUniformsDirty = false;
+      }
+      if (this.#pointerCountUniformDirty) {
+        gl.uniform1f(this.#uniforms.pointerCount, pointerCount);
+        this.#pointerCountUniformDirty = false;
+      }
+      if (pointerCount > 0) {
+        gl.uniform4fv(this.#uniforms.pointerMotion, this.#pointerMotionValues);
+      }
       gl.uniform1f(this.#uniforms.time, time);
-      gl.uniform1f(this.#uniforms.transitionElapsed, this.#transitionClock().elapsed);
-      gl.uniform1f(this.#uniforms.transitionNearResponse, this.#transitionNearResponse());
-      gl.uniform1f(this.#uniforms.transitionFarResponse, this.#transitionDuration);
-      gl.uniform1f(this.#uniforms.transitionStagger, this.#transitionStagger());
-      gl.uniform1f(this.#uniforms.transitionActive, this.#transitionActive ? 1 : 0);
-      gl.uniform1f(this.#uniforms.transitionVisibility, this.#transitionVisibility);
-      gl.uniform1f(this.#uniforms.dpr, this.#dpr);
-      gl.uniform1f(this.#uniforms.particleSize, this.#settings.particleSize);
-      gl.uniform1f(this.#uniforms.particleOpacity, this.#settings.particleOpacity);
-      gl.uniform1f(this.#uniforms.speed, this.#settings.speed);
-      gl.uniform1f(this.#uniforms.noiseScale, this.#settings.noiseScale);
-      gl.uniform1f(this.#uniforms.noiseStrength, this.#settings.noiseStrength);
-      gl.uniform1f(this.#uniforms.damping, this.#settings.damping);
-      gl.uniform1f(this.#uniforms.ambientCycle, this.#settings.ambientCycle);
-      gl.uniform1f(this.#uniforms.cursorStrength, this.#settings.cursorStrength);
-      this.#bindAttributes();
+      if (this.#transitionActive || this.#transitionElapsedUniformDirty) {
+        gl.uniform1f(this.#uniforms.transitionElapsed, this.#transitionClock().elapsed);
+        this.#transitionElapsedUniformDirty = false;
+      }
+      if (this.#transitionConstantsUniformsDirty) {
+        gl.uniform1f(this.#uniforms.transitionNearResponse, this.#transitionNearResponse());
+        gl.uniform1f(this.#uniforms.transitionFarResponse, this.#transitionDuration);
+        gl.uniform1f(this.#uniforms.transitionStagger, this.#transitionStagger());
+        this.#transitionConstantsUniformsDirty = false;
+      }
+      if (this.#transitionActiveUniformDirty) {
+        gl.uniform1f(this.#uniforms.transitionActive, this.#transitionActive ? 1 : 0);
+        this.#transitionActiveUniformDirty = false;
+      }
+      if (this.#transitionVisibilityUniformDirty) {
+        gl.uniform1f(this.#uniforms.transitionVisibility, this.#transitionVisibility);
+        this.#transitionVisibilityUniformDirty = false;
+      }
+      if (this.#renderSettingsUniformsDirty) {
+        gl.uniform1f(this.#uniforms.particleSize, this.#settings.particleSize);
+        gl.uniform1f(this.#uniforms.particleOpacity, this.#settings.particleOpacity);
+        gl.uniform1f(this.#uniforms.speed, this.#settings.speed);
+        gl.uniform1f(this.#uniforms.noiseScale, this.#settings.noiseScale);
+        gl.uniform1f(this.#uniforms.noiseStrength, this.#settings.noiseStrength);
+        gl.uniform1f(this.#uniforms.damping, this.#settings.damping);
+        gl.uniform1f(this.#uniforms.ambientCycle, this.#settings.ambientCycle);
+        gl.uniform1f(this.#uniforms.cursorStrength, this.#settings.cursorStrength);
+        this.#renderSettingsUniformsDirty = false;
+      }
+      if (this.#cursorStrengthUniformsDirty) {
+        const cursorStrengthValues = this.#cursorStrengthValues;
+        gl.uniform4f(
+          this.#uniforms.cursorStrengthFactors,
+          cursorStrengthValues.strengthRatio,
+          cursorStrengthValues.extendedStrength,
+          cursorStrengthValues.extremeStrength,
+          cursorStrengthValues.overdrive,
+        );
+        gl.uniform3f(
+          this.#uniforms.cursorStrengthScales,
+          cursorStrengthValues.highStrengthScale,
+          cursorStrengthValues.stepStrengthScale,
+          cursorStrengthValues.strength,
+        );
+        this.#cursorStrengthUniformsDirty = false;
+      }
       gl.drawArrays(gl.POINTS, 0, this.#count);
     }
     if (scheduleNext) this.#scheduleFrame();
