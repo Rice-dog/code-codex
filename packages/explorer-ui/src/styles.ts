@@ -1410,6 +1410,219 @@ export const styles = String.raw`
     margin: 0;
     appearance: none;
   }
+  .particle-morph-curve-control {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    margin-top: 2px;
+    padding: 7px;
+    background: color-mix(in srgb, var(--cle-subtle) 82%, var(--cle-paper-raised));
+    border: 1px solid var(--cle-rule);
+    border-radius: 7px;
+  }
+  .particle-morph-curve-head,
+  .particle-morph-curve-actions {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+  .particle-morph-curve-head {
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 23px;
+    color: var(--cle-ink);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+  }
+  .particle-morph-curve-actions {
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+  .particle-morph-curve-mode {
+    max-width: 92px;
+    overflow: hidden;
+    color: var(--cle-muted);
+    font: 700 8px/13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: .045em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .particle-morph-curve-reset {
+    min-width: 42px;
+    min-height: 22px;
+    margin: 0;
+    padding: 2px 7px;
+    color: var(--cle-muted);
+    background: var(--cle-paper-raised);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 9px;
+    line-height: 15px;
+  }
+  .particle-morph-curve-reset:hover:not(:disabled) {
+    color: var(--cle-ink);
+    background: var(--cle-hover);
+    border-color: color-mix(in srgb, var(--cle-signal) 45%, var(--cle-rule-strong));
+  }
+  .particle-morph-curve-reset:focus-visible {
+    outline: 2px solid var(--cle-focus);
+    outline-offset: 1px;
+  }
+  .particle-morph-curve-reset:disabled {
+    cursor: default;
+    opacity: .46;
+  }
+  .particle-morph-curve-editor {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    overflow: visible;
+    color: var(--cle-signal);
+    background:
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--cle-paper) 54%, var(--cle-subtle)),
+        color-mix(in srgb, var(--cle-subtle) 82%, #000000 18%));
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 6px;
+    box-shadow: inset 0 1px color-mix(in srgb, var(--cle-ink) 4%, transparent);
+    touch-action: none;
+    user-select: none;
+  }
+  .particle-morph-curve-grid,
+  .particle-morph-curve-diagonal,
+  .particle-morph-curve-tangent,
+  .particle-morph-curve-path,
+  .particle-morph-curve-path-glow,
+  .particle-morph-curve-keyframe,
+  .particle-morph-curve-axis {
+    pointer-events: none;
+  }
+  .particle-morph-curve-grid-line {
+    fill: none;
+    stroke: color-mix(in srgb, var(--cle-muted) 18%, transparent);
+    stroke-width: .75;
+    vector-effect: non-scaling-stroke;
+  }
+  .particle-morph-curve-diagonal {
+    fill: none;
+    stroke: color-mix(in srgb, var(--cle-muted) 32%, transparent);
+    stroke-dasharray: 2 4;
+    stroke-width: .8;
+    vector-effect: non-scaling-stroke;
+  }
+  .particle-morph-curve-tangent {
+    stroke: color-mix(in srgb, var(--cle-signal) 46%, transparent);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .particle-morph-curve-path,
+  .particle-morph-curve-path-glow {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .particle-morph-curve-path-glow {
+    stroke: color-mix(in srgb, var(--cle-signal) 22%, transparent);
+    stroke-width: 7;
+  }
+  .particle-morph-curve-path {
+    stroke: var(--cle-signal);
+    stroke-width: 2;
+  }
+  .particle-morph-curve-nodes { overflow: visible; }
+  .particle-morph-curve-node,
+  .particle-morph-curve-handle {
+    cursor: grab;
+    outline: none;
+  }
+  .particle-morph-curve-node-hit,
+  .particle-morph-curve-hit {
+    fill: transparent;
+    pointer-events: all;
+  }
+  .particle-morph-curve-node-knob,
+  .particle-morph-curve-knob {
+    fill: var(--cle-paper-raised);
+    stroke: var(--cle-signal);
+    stroke-width: 1.6;
+    pointer-events: none;
+    vector-effect: non-scaling-stroke;
+  }
+  .particle-morph-curve-node-knob {
+    stroke: color-mix(in srgb, var(--cle-signal) 78%, var(--cle-muted));
+    stroke-width: 1.4;
+  }
+  .particle-morph-curve-node:hover .particle-morph-curve-node-knob,
+  .particle-morph-curve-node.is-selected .particle-morph-curve-node-knob,
+  .particle-morph-curve-node[aria-selected="true"] .particle-morph-curve-node-knob,
+  .particle-morph-curve-handle:hover .particle-morph-curve-knob {
+    fill: var(--cle-signal);
+    stroke: var(--cle-ink);
+    stroke-width: 2;
+  }
+  .particle-morph-curve-node:hover .particle-morph-curve-node-hit,
+  .particle-morph-curve-node.is-selected .particle-morph-curve-node-hit,
+  .particle-morph-curve-node[aria-selected="true"] .particle-morph-curve-node-hit {
+    fill: color-mix(in srgb, var(--cle-signal) 10%, transparent);
+    stroke: color-mix(in srgb, var(--cle-signal) 62%, transparent);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .particle-morph-curve-node:focus-visible .particle-morph-curve-node-knob,
+  .particle-morph-curve-handle:focus-visible .particle-morph-curve-knob {
+    fill: var(--cle-signal);
+    stroke: var(--cle-ink);
+    stroke-width: 2.4;
+  }
+  .particle-morph-curve-node:focus-visible .particle-morph-curve-node-hit,
+  .particle-morph-curve-handle:focus-visible .particle-morph-curve-hit {
+    fill: color-mix(in srgb, var(--cle-focus) 14%, transparent);
+    stroke: var(--cle-focus);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+  .particle-morph-curve-keyframe {
+    fill: var(--cle-paper-raised);
+    stroke: var(--cle-signal);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .particle-morph-curve-axis {
+    fill: var(--cle-muted);
+    font: 700 5px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: .1em;
+  }
+  .particle-morph-curve-editor.is-dragging,
+  .particle-morph-curve-editor[data-dragging="true"],
+  .particle-morph-curve-node.is-dragging,
+  .particle-morph-curve-handle.is-dragging {
+    cursor: grabbing;
+  }
+  .particle-morph-curve-editor.is-dragging :is(.particle-morph-curve-node, .particle-morph-curve-handle),
+  .particle-morph-curve-editor[data-dragging="true"] :is(.particle-morph-curve-node, .particle-morph-curve-handle) {
+    cursor: grabbing;
+  }
+  .particle-morph-curve-control[data-disabled="true"],
+  .particle-morph-curve-control[aria-disabled="true"] {
+    opacity: .56;
+  }
+  .particle-morph-curve-control[data-disabled="true"] :is(.particle-morph-curve-editor, .particle-morph-curve-node, .particle-morph-curve-handle),
+  .particle-morph-curve-control[aria-disabled="true"] :is(.particle-morph-curve-editor, .particle-morph-curve-node, .particle-morph-curve-handle),
+  .particle-morph-curve-editor[aria-disabled="true"] :is(.particle-morph-curve-node, .particle-morph-curve-handle) {
+    cursor: default;
+    pointer-events: none;
+  }
+  .particle-morph-curve-help {
+    margin: 0;
+    color: var(--cle-muted);
+    font-size: 8.5px;
+    line-height: 13px;
+  }
   .particle-source-details {
     min-width: 0;
     overflow: hidden;

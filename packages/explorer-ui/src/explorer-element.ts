@@ -498,6 +498,19 @@ interface ExternalDataTransferItem extends DataTransferItem {
   getAsEntry?: () => FileSystemEntry | null;
 }
 
+interface ParticleMorphCurveNode {
+  readonly time: number;
+  readonly progress: number;
+}
+
+interface ParticleMorphCurve {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+  readonly nodes: readonly ParticleMorphCurveNode[];
+}
+
 interface ParticleBackgroundSettings {
   readonly particleCount: number;
   readonly particleSize: number;
@@ -512,6 +525,7 @@ interface ParticleBackgroundSettings {
   readonly autoSwitch: boolean;
   readonly imageDurationSeconds: number;
   readonly morphIntervalSeconds: number;
+  readonly morphCurve: ParticleMorphCurve;
   readonly imageOpacity: number;
   readonly showSourceImage: boolean;
   readonly backgroundColor: string;
@@ -597,6 +611,24 @@ interface ParticleValueControl {
   readonly editor: HTMLInputElement;
 }
 
+type ParticleMorphCurveHandle = "start" | "end";
+
+type ParticleMorphCurveDragState =
+  | {
+      readonly pointerId: number;
+      readonly kind: "handle";
+      readonly handle: ParticleMorphCurveHandle;
+      readonly targetElement: SVGGElement;
+      readonly originalCurve: ParticleMorphCurve;
+    }
+  | {
+      readonly pointerId: number;
+      readonly kind: "node";
+      readonly nodeIndex: number;
+      readonly targetElement: SVGGElement;
+      readonly originalCurve: ParticleMorphCurve;
+    };
+
 interface ParticleImageRecord extends ParticleImageTransform {
   readonly id: string;
   readonly name: string;
@@ -633,6 +665,26 @@ interface ParticlePointerSegment {
   sealed: boolean;
 }
 
+const DEFAULT_PARTICLE_MORPH_CURVE: ParticleMorphCurve = Object.freeze({
+  x1: 0.42,
+  y1: 0,
+  x2: 0.58,
+  y2: 1,
+  nodes: Object.freeze([]),
+});
+const MAX_PARTICLE_MORPH_CURVE_NODES = 32;
+const PARTICLE_MORPH_CURVE_NODE_EPSILON = 0.0001;
+const PARTICLE_MORPH_CURVE_EDITOR_NODE_GAP = 0.008;
+const PARTICLE_MORPH_CURVE_SVG_NS = "http://www.w3.org/2000/svg";
+const PARTICLE_MORPH_CURVE_EDITOR_BOUNDS = Object.freeze({
+  width: 240,
+  height: 116,
+  left: 14,
+  right: 226,
+  top: 12,
+  bottom: 100,
+});
+
 const DEFAULT_PARTICLE_BACKGROUND_SETTINGS: ParticleBackgroundSettings = Object.freeze({
   particleCount: 560_000,
   particleSize: 1.8,
@@ -647,6 +699,7 @@ const DEFAULT_PARTICLE_BACKGROUND_SETTINGS: ParticleBackgroundSettings = Object.
   autoSwitch: true,
   imageDurationSeconds: 2,
   morphIntervalSeconds: 2.5,
+  morphCurve: DEFAULT_PARTICLE_MORPH_CURVE,
   imageOpacity: 1,
   showSourceImage: true,
   backgroundColor: "#000000",
@@ -698,6 +751,269 @@ function particleOutputAriaLabel(definition: ParticleValueControlDefinition, for
 function clampParticleNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback;
+}
+
+function clampParticleUnitInterval(value: unknown, fallback = 0): number {
+  return clampParticleNumber(value, 0, 1, fallback);
+}
+
+function normalizeParticleMorphCurve(value: unknown): ParticleMorphCurve {
+  const source: Record<string, unknown> = Array.isArray(value)
+    ? { nodes: value }
+    : value && typeof value === "object"
+      ? value as Record<string, unknown>
+      : DEFAULT_PARTICLE_MORPH_CURVE as unknown as Record<string, unknown>;
+  let x1 = clampParticleUnitInterval(source.x1, DEFAULT_PARTICLE_MORPH_CURVE.x1);
+  let y1 = clampParticleUnitInterval(source.y1, DEFAULT_PARTICLE_MORPH_CURVE.y1);
+  let x2 = clampParticleUnitInterval(source.x2, DEFAULT_PARTICLE_MORPH_CURVE.x2);
+  let y2 = clampParticleUnitInterval(source.y2, DEFAULT_PARTICLE_MORPH_CURVE.y2);
+  if (x1 > x2) [x1, x2] = [x2, x1];
+  if (y1 > y2) [y1, y2] = [y2, y1];
+
+  const candidates: ParticleMorphCurveNode[] = [];
+  const rawNodes = Array.isArray(source.nodes) ? source.nodes : [];
+  for (const rawNode of rawNodes) {
+    let rawTime: unknown;
+    let rawProgress: unknown;
+    if (Array.isArray(rawNode)) {
+      rawTime = rawNode[0];
+      rawProgress = rawNode[1];
+    } else if (rawNode && typeof rawNode === "object") {
+      const node = rawNode as Record<string, unknown>;
+      rawTime = node.time ?? node.x;
+      rawProgress = node.progress ?? node.y;
+    } else {
+      continue;
+    }
+    const time = Number(rawTime);
+    const progress = Number(rawProgress);
+    if (!Number.isFinite(time) || !Number.isFinite(progress)) continue;
+    candidates.push({
+      time: clampParticleUnitInterval(time),
+      progress: clampParticleUnitInterval(progress),
+    });
+  }
+  candidates.sort((first, second) => first.time - second.time || first.progress - second.progress);
+
+  const nodes: ParticleMorphCurveNode[] = [];
+  let previousTime = 0;
+  let previousProgress = 0;
+  for (const candidate of candidates) {
+    if (
+      candidate.time <= PARTICLE_MORPH_CURVE_NODE_EPSILON
+      || candidate.time >= 1 - PARTICLE_MORPH_CURVE_NODE_EPSILON
+      || candidate.progress <= PARTICLE_MORPH_CURVE_NODE_EPSILON
+      || candidate.progress >= 1 - PARTICLE_MORPH_CURVE_NODE_EPSILON
+      || candidate.time <= previousTime + PARTICLE_MORPH_CURVE_NODE_EPSILON
+      || candidate.progress <= previousProgress + PARTICLE_MORPH_CURVE_NODE_EPSILON
+    ) continue;
+    nodes.push(candidate);
+    previousTime = candidate.time;
+    previousProgress = candidate.progress;
+    if (nodes.length >= MAX_PARTICLE_MORPH_CURVE_NODES) break;
+  }
+  return { x1, y1, x2, y2, nodes };
+}
+
+function cloneParticleMorphCurve(curve: ParticleMorphCurve): ParticleMorphCurve {
+  return {
+    x1: curve.x1,
+    y1: curve.y1,
+    x2: curve.x2,
+    y2: curve.y2,
+    nodes: curve.nodes.map((node) => ({ time: node.time, progress: node.progress })),
+  };
+}
+
+function particleMorphCurvesMatch(first: ParticleMorphCurve, second: ParticleMorphCurve, tolerance = 0.002): boolean {
+  if (
+    Math.abs(first.x1 - second.x1) > tolerance
+    || Math.abs(first.y1 - second.y1) > tolerance
+    || Math.abs(first.x2 - second.x2) > tolerance
+    || Math.abs(first.y2 - second.y2) > tolerance
+    || first.nodes.length !== second.nodes.length
+  ) return false;
+  return first.nodes.every((node, index) => {
+    const comparison = second.nodes[index];
+    return Boolean(
+      comparison
+      && Math.abs(node.time - comparison.time) <= tolerance
+      && Math.abs(node.progress - comparison.progress) <= tolerance
+    );
+  });
+}
+
+function particleCubicBezierCoordinate(parameter: number, firstControl: number, secondControl: number): number {
+  const inverse = 1 - parameter;
+  return 3 * inverse * inverse * parameter * firstControl
+    + 3 * inverse * parameter * parameter * secondControl
+    + parameter * parameter * parameter;
+}
+
+function particleCubicBezierDerivative(parameter: number, firstControl: number, secondControl: number): number {
+  const inverse = 1 - parameter;
+  return 3 * inverse * inverse * firstControl
+    + 6 * inverse * parameter * (secondControl - firstControl)
+    + 3 * parameter * parameter * (1 - secondControl);
+}
+
+function particleMonotoneEndpointSlope(
+  firstSpan: number,
+  secondSpan: number,
+  firstSecant: number,
+  secondSecant: number,
+): number {
+  if (!(firstSecant > 0)) return 0;
+  const slope = (
+    (2 * firstSpan + secondSpan) * firstSecant - firstSpan * secondSecant
+  ) / Math.max(firstSpan + secondSpan, PARTICLE_MORPH_CURVE_NODE_EPSILON);
+  if (!Number.isFinite(slope) || slope <= 0 || firstSecant * secondSecant <= 0) return 0;
+  return Math.min(slope, 3 * firstSecant);
+}
+
+interface ParticleMorphCurveSegments {
+  readonly anchors: readonly ParticleMorphCurveNode[];
+  readonly spans: readonly number[];
+  readonly slopes: readonly number[];
+}
+
+const particleMorphCurveSegmentCache = new WeakMap<ParticleMorphCurve, ParticleMorphCurveSegments>();
+
+function getParticleMorphCurveSegments(curve: ParticleMorphCurve): ParticleMorphCurveSegments {
+  const cached = particleMorphCurveSegmentCache.get(curve);
+  if (cached) return cached;
+  const anchors: ParticleMorphCurveNode[] = [
+    { time: 0, progress: 0 },
+    ...curve.nodes,
+    { time: 1, progress: 1 },
+  ];
+  const spans: number[] = [];
+  const secants: number[] = [];
+  for (let index = 0; index < anchors.length - 1; index += 1) {
+    const start = anchors[index];
+    const end = anchors[index + 1];
+    if (!start || !end) continue;
+    const span = Math.max(end.time - start.time, PARTICLE_MORPH_CURVE_NODE_EPSILON);
+    spans.push(span);
+    secants.push(Math.max(0, end.progress - start.progress) / span);
+  }
+
+  const slopes = new Array<number>(anchors.length).fill(0);
+  if (secants.length === 1) {
+    slopes[0] = secants[0] ?? 0;
+    slopes[1] = secants[0] ?? 0;
+  } else if (secants.length > 1) {
+    const firstSecant = secants[0] ?? 0;
+    const secondSecant = secants[1] ?? firstSecant;
+    const startHandleSlope = curve.x1 > PARTICLE_MORPH_CURVE_NODE_EPSILON
+      ? curve.y1 / curve.x1
+      : Number.NaN;
+    const endHandleSpan = 1 - curve.x2;
+    const endHandleSlope = endHandleSpan > PARTICLE_MORPH_CURVE_NODE_EPSILON
+      ? (1 - curve.y2) / endHandleSpan
+      : Number.NaN;
+    slopes[0] = Number.isFinite(startHandleSlope)
+      ? Math.min(Math.max(0, startHandleSlope), 3 * firstSecant)
+      : particleMonotoneEndpointSlope(spans[0] ?? 1, spans[1] ?? 1, firstSecant, secondSecant);
+    for (let index = 1; index < anchors.length - 1; index += 1) {
+      const previousSecant = secants[index - 1] ?? 0;
+      const nextSecant = secants[index] ?? 0;
+      if (previousSecant <= 0 || nextSecant <= 0) {
+        slopes[index] = 0;
+        continue;
+      }
+      const previousSpan = spans[index - 1] ?? 1;
+      const nextSpan = spans[index] ?? 1;
+      const weightA = 2 * nextSpan + previousSpan;
+      const weightB = nextSpan + 2 * previousSpan;
+      slopes[index] = (weightA + weightB) / (weightA / previousSecant + weightB / nextSecant);
+    }
+    const lastSecantIndex = secants.length - 1;
+    const lastAnchorIndex = anchors.length - 1;
+    const lastSecant = secants[lastSecantIndex] ?? 0;
+    const previousLastSecant = secants[lastSecantIndex - 1] ?? lastSecant;
+    slopes[lastAnchorIndex] = Number.isFinite(endHandleSlope)
+      ? Math.min(Math.max(0, endHandleSlope), 3 * lastSecant)
+      : particleMonotoneEndpointSlope(
+          spans[lastSecantIndex] ?? 1,
+          spans[lastSecantIndex - 1] ?? 1,
+          lastSecant,
+          previousLastSecant,
+        );
+  }
+  const segments = { anchors, spans, slopes };
+  particleMorphCurveSegmentCache.set(curve, segments);
+  return segments;
+}
+
+interface ParticleMorphCurveEvaluation {
+  readonly value: number;
+  readonly slope: number;
+  readonly parameter: number;
+}
+
+function evaluateParticleMorphCurve(
+  progress: number,
+  curve: ParticleMorphCurve = DEFAULT_PARTICLE_MORPH_CURVE,
+): ParticleMorphCurveEvaluation {
+  const time = clampParticleUnitInterval(progress);
+  if (time <= 0) return { value: 0, slope: 0, parameter: 0 };
+  if (time >= 1) return { value: 1, slope: 0, parameter: 1 };
+  if (curve.nodes.length) {
+    const { anchors, spans, slopes } = getParticleMorphCurveSegments(curve);
+    let segmentIndex = 0;
+    while (
+      segmentIndex < spans.length - 1
+      && time > (anchors[segmentIndex + 1]?.time ?? 1)
+    ) segmentIndex += 1;
+    const start = anchors[segmentIndex] ?? anchors[0] ?? { time: 0, progress: 0 };
+    const end = anchors[segmentIndex + 1] ?? anchors.at(-1) ?? { time: 1, progress: 1 };
+    const span = spans[segmentIndex] ?? 1;
+    const local = Math.min(1, Math.max(0, (time - start.time) / span));
+    const local2 = local * local;
+    const local3 = local2 * local;
+    const h00 = 2 * local3 - 3 * local2 + 1;
+    const h10 = local3 - 2 * local2 + local;
+    const h01 = -2 * local3 + 3 * local2;
+    const h11 = local3 - local2;
+    const startSlope = slopes[segmentIndex] ?? 0;
+    const endSlope = slopes[segmentIndex + 1] ?? 0;
+    const value = Math.min(end.progress, Math.max(
+      start.progress,
+      h00 * start.progress + h10 * span * startSlope + h01 * end.progress + h11 * span * endSlope,
+    ));
+    const derivative = (6 * local2 - 6 * local) * start.progress / span
+      + (3 * local2 - 4 * local + 1) * startSlope
+      + (-6 * local2 + 6 * local) * end.progress / span
+      + (3 * local2 - 2 * local) * endSlope;
+    return {
+      value: clampParticleUnitInterval(value),
+      slope: Math.min(8, Math.max(0, Number.isFinite(derivative) ? derivative : 0)),
+      parameter: local,
+    };
+  }
+
+  let parameter = time;
+  for (let iteration = 0; iteration < 5; iteration += 1) {
+    const error = particleCubicBezierCoordinate(parameter, curve.x1, curve.x2) - time;
+    const derivative = particleCubicBezierDerivative(parameter, curve.x1, curve.x2);
+    if (Math.abs(error) < 0.00001 || Math.abs(derivative) < 0.00001) break;
+    parameter = Math.min(1, Math.max(0, parameter - error / derivative));
+  }
+  let lower = 0;
+  let upper = 1;
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    const x = particleCubicBezierCoordinate(parameter, curve.x1, curve.x2);
+    if (Math.abs(x - time) < 0.00001) break;
+    if (x < time) lower = parameter;
+    else upper = parameter;
+    parameter = 0.5 * (lower + upper);
+  }
+  const value = clampParticleUnitInterval(particleCubicBezierCoordinate(parameter, curve.y1, curve.y2));
+  const xDerivative = particleCubicBezierDerivative(parameter, curve.x1, curve.x2);
+  const yDerivative = particleCubicBezierDerivative(parameter, curve.y1, curve.y2);
+  const slope = xDerivative > 0.00001 ? Math.min(8, Math.max(0, yDerivative / xDerivative)) : 0;
+  return { value, slope, parameter };
 }
 
 function normalizeParticleCount(value: unknown): number {
@@ -771,6 +1087,7 @@ function normalizeParticleSettings(value: unknown): ParticleBackgroundSettings {
       12,
       DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds,
     ) * 10) / 10,
+    morphCurve: normalizeParticleMorphCurve(record.morphCurve),
     imageOpacity: Math.round(clampParticleNumber(
       record.imageOpacity,
       0,
@@ -1461,7 +1778,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   uniform vec4 u_pointerMotion[${PARTICLE_BACKGROUND_POINTER_SEGMENTS}];
   uniform float u_pointerCount;
   uniform float u_time;
-  uniform float u_transitionStart;
+  uniform float u_transitionElapsed;
   uniform float u_transitionNearResponse;
   uniform float u_transitionFarResponse;
   uniform float u_transitionStagger;
@@ -1716,7 +2033,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
         u_transitionFarResponse,
         transitionDistanceFactor
       ) * transitionVariation;
-      float transitionElapsed = max(u_time - u_transitionStart, 0.0);
+      float transitionElapsed = max(u_transitionElapsed, 0.0);
       float carriedVelocity = step(0.01, length(a_previousVelocity));
       float transitionDelay = a_seed * a_seed
         * u_transitionStagger
@@ -1927,6 +2244,11 @@ function criticalParticleSpringProgress(elapsed: number, response: number): numb
   return Math.min(1, Math.max(0, 1 - (1 + springTime) * Math.exp(-springTime)));
 }
 
+interface ParticleTransitionClock {
+  readonly rawProgress: number;
+  readonly elapsed: number;
+}
+
 class ParticleImageRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGLRenderingContext;
@@ -1936,7 +2258,7 @@ class ParticleImageRenderer {
   readonly #attributes: Readonly<Record<"previousHome" | "home" | "previousVelocity" | "previousColor" | "color" | "seed", number>>;
   readonly #uniforms: Readonly<Record<
     "resolution" | "layout" | "pointerSegments" | "pointerMotion"
-    | "pointerCount" | "time" | "transitionStart" | "transitionNearResponse" | "transitionFarResponse"
+    | "pointerCount" | "time" | "transitionElapsed" | "transitionNearResponse" | "transitionFarResponse"
     | "transitionStagger" | "transitionActive" | "transitionVisibility" | "dpr"
     | "particleSize" | "particleOpacity" | "speed" | "noiseScale" | "noiseStrength" | "damping"
     | "ambientCycle" | "cursorStrength",
@@ -1966,6 +2288,10 @@ class ParticleImageRenderer {
   #lastFrame = performance.now();
   #transitionStart = 0;
   #transitionDuration = DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds;
+  #transitionTimelineDuration = DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds;
+  #transitionCurve = cloneParticleMorphCurve(DEFAULT_PARTICLE_MORPH_CURVE);
+  #transitionClockCacheTime = Number.NaN;
+  #transitionClockCache: ParticleTransitionClock | undefined;
   #transitionMaxResponse = DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds;
   #transitionVelocityRatio = 0;
   #transitionActive = false;
@@ -2019,7 +2345,7 @@ class ParticleImageRenderer {
       pointerMotion: this.#requiredUniform("u_pointerMotion[0]"),
       pointerCount: this.#requiredUniform("u_pointerCount"),
       time: this.#requiredUniform("u_time"),
-      transitionStart: this.#requiredUniform("u_transitionStart"),
+      transitionElapsed: this.#requiredUniform("u_transitionElapsed"),
       transitionNearResponse: this.#requiredUniform("u_transitionNearResponse"),
       transitionFarResponse: this.#requiredUniform("u_transitionFarResponse"),
       transitionStagger: this.#requiredUniform("u_transitionStagger"),
@@ -2069,7 +2395,7 @@ class ParticleImageRenderer {
     const dprChanged = settings.dprCap !== this.#settings.dprCap;
     const cursorDisabled = this.#settings.cursorInteraction && !settings.cursorInteraction;
     this.#settings = settings;
-    this.#transitionDuration = settings.morphIntervalSeconds;
+    if (!this.#transitionActive) this.#transitionDuration = settings.morphIntervalSeconds;
     if (cursorDisabled) {
       this.#lastPointer = undefined;
       const tail = this.#pointerSegments.at(-1);
@@ -2098,7 +2424,6 @@ class ParticleImageRenderer {
     this.#imageTransform = normalizeParticleImageTransform(transform);
     this.#count = image.targetCount;
     this.#transitionDuration = this.#settings.morphIntervalSeconds;
-    this.#transitionStart = this.#clockSeconds();
     if (!canMorph) {
       this.#previousHomes = new Float32Array(image.targetCount * 2);
       this.#previousVelocities = new Float32Array(image.targetCount * 2);
@@ -2237,10 +2562,51 @@ class ParticleImageRenderer {
     return this.#transitionDuration * PARTICLE_BACKGROUND_MORPH_STAGGER_RATIO;
   }
 
+  #calculateTransitionTimelineDuration(): number {
+    const response = Math.max(this.#transitionMaxResponse, 0.1);
+    const omega = PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT / response;
+    const carriedVelocity = Math.max(0, this.#transitionVelocityRatio);
+    const settled = (springElapsed: number): boolean => {
+      const springTime = omega * springElapsed;
+      const decay = Math.exp(-springTime);
+      const error = (1 + (1 + carriedVelocity) * springTime) * decay;
+      const velocity = omega * (
+        carriedVelocity + (1 + carriedVelocity) * springTime
+      ) * decay;
+      return error <= PARTICLE_BACKGROUND_MORPH_SETTLE_ERROR
+        && velocity <= PARTICLE_BACKGROUND_MORPH_SETTLE_VELOCITY;
+    };
+    let lower = 0;
+    let upper = response;
+    for (let iteration = 0; iteration < 18 && !settled(upper); iteration += 1) upper *= 1.5;
+    for (let iteration = 0; iteration < 24; iteration += 1) {
+      const middle = 0.5 * (lower + upper);
+      if (settled(middle)) upper = middle;
+      else lower = middle;
+    }
+    return Math.max(0.1, this.#transitionStagger() + upper);
+  }
+
+  #transitionClock(): ParticleTransitionClock {
+    if (this.#transitionClockCache && this.#transitionClockCacheTime === this.#simulationTime) {
+      return this.#transitionClockCache;
+    }
+    const duration = Math.max(0.1, this.#transitionTimelineDuration);
+    const rawElapsed = Math.max(0, this.#simulationTime - this.#transitionStart);
+    const rawProgress = this.#transitionActive
+      ? Math.min(1, rawElapsed / duration)
+      : 1;
+    const curve = evaluateParticleMorphCurve(rawProgress, this.#transitionCurve);
+    const clock = { rawProgress, elapsed: curve.value * duration };
+    this.#transitionClockCacheTime = this.#simulationTime;
+    this.#transitionClockCache = clock;
+    return clock;
+  }
+
   #transitionProgress(): number {
     if (!this.#transitionActive) return 1;
     return criticalParticleSpringProgress(
-      this.#simulationTime - this.#transitionStart - this.#transitionStagger() * 0.35,
+      this.#transitionClock().elapsed - this.#transitionStagger() * 0.35,
       this.#transitionMaxResponse,
     );
   }
@@ -2284,7 +2650,7 @@ class ParticleImageRenderer {
       return true;
     }
 
-    const elapsed = Math.max(0, this.#simulationTime - this.#transitionStart);
+    const elapsed = this.#transitionClock().elapsed;
     const stagger = this.#transitionStagger();
     const [x, y, width, height] = this.#layout(this.#imageWidth, this.#imageHeight);
     for (let index = 0; index < this.#count; index += 1) {
@@ -2312,12 +2678,8 @@ class ParticleImageRenderer {
         + (displacementX + velocityTermX * springElapsed) * decay;
       this.#previousHomes[offset + 1] = homeY
         + (displacementY + velocityTermY * springElapsed) * decay;
-      this.#previousVelocities[offset] = (
-        initialVelocityX - omega * velocityTermX * springElapsed
-      ) * decay;
-      this.#previousVelocities[offset + 1] = (
-        initialVelocityY - omega * velocityTermY * springElapsed
-      ) * decay;
+      this.#previousVelocities[offset] = 0;
+      this.#previousVelocities[offset + 1] = 0;
       const colorProgress = smootherParticleTransition((progress - 0.18) / 0.82);
       const inverseColor = 1 - colorProgress;
       const colorOffset = index * 4;
@@ -2360,20 +2722,7 @@ class ParticleImageRenderer {
 
   #transitionSettled(): boolean {
     if (!this.#transitionActive) return true;
-    const elapsed = Math.max(
-      0,
-      this.#simulationTime - this.#transitionStart - this.#transitionStagger(),
-    );
-    const omega = PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT / this.#transitionMaxResponse;
-    const springTime = omega * elapsed;
-    const decay = Math.exp(-springTime);
-    const carriedVelocity = this.#transitionVelocityRatio;
-    const error = (1 + (1 + carriedVelocity) * springTime) * decay;
-    const velocity = omega * (
-      carriedVelocity + (1 + carriedVelocity) * springTime
-    ) * decay;
-    return error <= PARTICLE_BACKGROUND_MORPH_SETTLE_ERROR
-      && velocity <= PARTICLE_BACKGROUND_MORPH_SETTLE_VELOCITY;
+    return this.#transitionClock().rawProgress >= 1;
   }
 
   #interruptTransition(): void {
@@ -2384,6 +2733,11 @@ class ParticleImageRenderer {
   }
 
   #beginTransition(active: boolean, revision: number): Promise<boolean> {
+    this.#transitionStart = this.#simulationTime;
+    this.#transitionCurve = normalizeParticleMorphCurve(this.#settings.morphCurve);
+    this.#transitionTimelineDuration = this.#calculateTransitionTimelineDuration();
+    this.#transitionClockCacheTime = Number.NaN;
+    this.#transitionClockCache = undefined;
     this.#transitionActive = active;
     this.#transitionVisibility = active ? 1 : 0;
     this.#transitionReleaseStart = -100;
@@ -2398,6 +2752,8 @@ class ParticleImageRenderer {
   #completeTransition(): void {
     if (!this.#transitionActive) return;
     this.#transitionActive = false;
+    this.#transitionClockCacheTime = Number.NaN;
+    this.#transitionClockCache = undefined;
     this.#transitionVisibility = 1;
     this.#transitionReleaseStart = this.#simulationTime;
     this.#onTransitionFrame(1, true);
@@ -2590,7 +2946,7 @@ class ParticleImageRenderer {
       gl.uniform4fv(this.#uniforms.pointerMotion, this.#pointerMotionValues);
       gl.uniform1f(this.#uniforms.pointerCount, this.#pointerSegments.length);
       gl.uniform1f(this.#uniforms.time, time);
-      gl.uniform1f(this.#uniforms.transitionStart, this.#transitionStart);
+      gl.uniform1f(this.#uniforms.transitionElapsed, this.#transitionClock().elapsed);
       gl.uniform1f(this.#uniforms.transitionNearResponse, this.#transitionNearResponse());
       gl.uniform1f(this.#uniforms.transitionFarResponse, this.#transitionDuration);
       gl.uniform1f(this.#uniforms.transitionStagger, this.#transitionStagger());
@@ -3655,6 +4011,47 @@ function particleImageTransformControlsMarkup(): string {
     .join("");
 }
 
+function particleMorphCurveEditorMarkup(): string {
+  return `
+    <section class="particle-morph-curve-control" aria-labelledby="cle-particle-morph-curve-label">
+      <header class="particle-morph-curve-head">
+        <span id="cle-particle-morph-curve-label">Morph curve</span>
+        <span class="particle-morph-curve-actions">
+          <span class="particle-morph-curve-mode">Smooth</span>
+          <button class="particle-morph-curve-reset" type="button">Reset</button>
+        </span>
+      </header>
+      <svg class="particle-morph-curve-editor" viewBox="0 0 240 116" role="group" aria-labelledby="cle-particle-morph-curve-label" aria-describedby="cle-particle-morph-curve-help" data-disabled="false" data-dragging="false">
+        <defs>
+          <pattern id="cle-particle-morph-grid-pattern" width="53" height="22" patternUnits="userSpaceOnUse">
+            <path class="particle-morph-curve-grid-line" d="M 53 0 L 0 0 0 22" fill="none"></path>
+          </pattern>
+        </defs>
+        <rect class="particle-morph-curve-grid" x="14" y="12" width="212" height="88" fill="url(#cle-particle-morph-grid-pattern)"></rect>
+        <path class="particle-morph-curve-diagonal" d="M 14 100 L 226 12"></path>
+        <line class="particle-morph-curve-tangent particle-morph-curve-tangent-start"></line>
+        <line class="particle-morph-curve-tangent particle-morph-curve-tangent-end"></line>
+        <path class="particle-morph-curve-path-glow"></path>
+        <path class="particle-morph-curve-path"></path>
+        <g class="particle-morph-curve-nodes" role="group" aria-label="Intermediate morph keyframes"></g>
+        <path class="particle-morph-curve-keyframe" d="M 14 95 L 19 100 L 14 105 L 9 100 Z"></path>
+        <path class="particle-morph-curve-keyframe" d="M 226 7 L 231 12 L 226 17 L 221 12 Z"></path>
+        <g class="particle-morph-curve-handle particle-morph-curve-handle-start" data-handle="start" tabindex="0" role="slider" aria-label="Outgoing curve handle" aria-valuemin="0" aria-valuemax="100">
+          <circle class="particle-morph-curve-hit" r="12"></circle>
+          <circle class="particle-morph-curve-knob" r="5"></circle>
+        </g>
+        <g class="particle-morph-curve-handle particle-morph-curve-handle-end" data-handle="end" tabindex="0" role="slider" aria-label="Incoming curve handle" aria-valuemin="0" aria-valuemax="100">
+          <circle class="particle-morph-curve-hit" r="12"></circle>
+          <circle class="particle-morph-curve-knob" r="5"></circle>
+        </g>
+        <text class="particle-morph-curve-axis" x="14" y="8">MORPH</text>
+        <text class="particle-morph-curve-axis" x="226" y="111" text-anchor="end">TIME</text>
+      </svg>
+      <p class="particle-morph-curve-help" id="cle-particle-morph-curve-help">Double-click to add a keyframe · drag to move · Delete removes it.</p>
+    </section>
+  `;
+}
+
 function particleBackgroundCardMarkup(): string {
   return `
     <article class="preview-extension appearance-extension particle-background-extension" data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}" aria-busy="false">
@@ -3731,6 +4128,7 @@ function particleSettingsPanelMarkup(): string {
           </label>
         </details>
           ${particleNumericControlsMarkup("source")}
+          ${particleMorphCurveEditorMarkup()}
           <label class="particle-toggle-row" for="cle-particle-show-source">
             <span>Show source image</span>
             <input id="cle-particle-show-source" type="checkbox" checked>
@@ -3893,6 +4291,21 @@ export class CodeCodexElement extends HTMLElement {
     output: HTMLOutputElement;
     editor: HTMLInputElement;
   }>>();
+  readonly #particleMorphCurveEditor: SVGSVGElement;
+  readonly #particleMorphCurvePath: SVGPathElement;
+  readonly #particleMorphCurvePathGlow: SVGPathElement;
+  readonly #particleMorphCurveStartHandle: SVGGElement;
+  readonly #particleMorphCurveEndHandle: SVGGElement;
+  readonly #particleMorphCurveStartTangent: SVGLineElement;
+  readonly #particleMorphCurveEndTangent: SVGLineElement;
+  readonly #particleMorphCurveNodes: SVGGElement;
+  readonly #particleMorphCurveMode: HTMLElement;
+  readonly #particleMorphCurveReset: HTMLButtonElement;
+  #particleMorphCurveDraft = cloneParticleMorphCurve(DEFAULT_PARTICLE_MORPH_CURVE);
+  #particleMorphCurveNodeElements: SVGGElement[] = [];
+  #particleMorphCurveSelectedNodeIndex: number | null = null;
+  #particleMorphCurveDragState: ParticleMorphCurveDragState | undefined;
+  #particleMorphCurveFocusSnapshot: ParticleMorphCurve | undefined;
   readonly #particleSourceDetails: HTMLDetailsElement;
   readonly #particleSourceCount: HTMLElement;
   readonly #particleLibraryUpload: HTMLInputElement;
@@ -4037,6 +4450,16 @@ export class CodeCodexElement extends HTMLElement {
       const editor = this.#required<HTMLInputElement>(`#${definition.id}-value`);
       this.#particleNumericControls.set(definition.key, { definition, input, output, editor });
     }
+    this.#particleMorphCurveEditor = this.#required<SVGSVGElement>(".particle-morph-curve-editor");
+    this.#particleMorphCurvePath = this.#required<SVGPathElement>(".particle-morph-curve-path");
+    this.#particleMorphCurvePathGlow = this.#required<SVGPathElement>(".particle-morph-curve-path-glow");
+    this.#particleMorphCurveStartHandle = this.#required<SVGGElement>(".particle-morph-curve-handle-start");
+    this.#particleMorphCurveEndHandle = this.#required<SVGGElement>(".particle-morph-curve-handle-end");
+    this.#particleMorphCurveStartTangent = this.#required<SVGLineElement>(".particle-morph-curve-tangent-start");
+    this.#particleMorphCurveEndTangent = this.#required<SVGLineElement>(".particle-morph-curve-tangent-end");
+    this.#particleMorphCurveNodes = this.#required<SVGGElement>(".particle-morph-curve-nodes");
+    this.#particleMorphCurveMode = this.#required<HTMLElement>(".particle-morph-curve-mode");
+    this.#particleMorphCurveReset = this.#required<HTMLButtonElement>(".particle-morph-curve-reset");
     this.#particleSourceDetails = this.#required<HTMLDetailsElement>(".particle-source-details");
     this.#particleSourceCount = this.#required<HTMLElement>(".particle-source-count");
     this.#particleLibraryUpload = this.#required<HTMLInputElement>(".particle-library-upload");
@@ -4365,6 +4788,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#particleSettingsOpen = false;
         this.#particleSettingsTrigger.setAttribute("aria-expanded", "false");
         this.#cancelParticleValueEditors();
+        this.#cancelParticleMorphCurveInteraction(true);
         this.#particleBackgroundController.finishImageTransformEditing();
         this.#particleTransformImageId = null;
       });
@@ -4386,6 +4810,7 @@ export class CodeCodexElement extends HTMLElement {
           input.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
         }
       }
+      this.#bindParticleMorphCurveEditor();
       this.#particleAutoSwitchInput.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
       this.#particleShowSourceInput.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
       this.#particleBackgroundColorInput.addEventListener("input", () => void this.#applyParticleSettingsFromControls());
@@ -4586,6 +5011,23 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== "Escape") return;
+    if (this.#particleMorphCurveDragState) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#cancelParticleMorphCurveInteraction(true);
+      return;
+    }
+    if (
+      event.composedPath().includes(this.#particleMorphCurveEditor)
+      && this.#particleMorphCurveFocusSnapshot
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#particleMorphCurveDraft = cloneParticleMorphCurve(this.#particleMorphCurveFocusSnapshot);
+      this.#renderParticleMorphCurveEditor();
+      this.#saveParticleMorphCurve("Morph curve restored");
+      return;
+    }
     const activeValueEditor = event.composedPath().find((target) => (
       target instanceof HTMLInputElement && target.classList.contains("particle-value-editor")
     ));
@@ -7905,6 +8347,416 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  #particleMorphCurvePoint(time: number, progress: number): { readonly x: number; readonly y: number } {
+    const bounds = PARTICLE_MORPH_CURVE_EDITOR_BOUNDS;
+    return {
+      x: bounds.left + time * (bounds.right - bounds.left),
+      y: bounds.bottom - progress * (bounds.bottom - bounds.top),
+    };
+  }
+
+  #particleMorphCurvePathFor(curve: ParticleMorphCurve): string {
+    const start = this.#particleMorphCurvePoint(0, 0);
+    const end = this.#particleMorphCurvePoint(1, 1);
+    if (!curve.nodes.length) {
+      const outgoing = this.#particleMorphCurvePoint(curve.x1, curve.y1);
+      const incoming = this.#particleMorphCurvePoint(curve.x2, curve.y2);
+      return `M ${start.x} ${start.y} C ${outgoing.x} ${outgoing.y} ${incoming.x} ${incoming.y} ${end.x} ${end.y}`;
+    }
+    let path = "";
+    for (let index = 0; index <= 96; index += 1) {
+      const time = index / 96;
+      const point = this.#particleMorphCurvePoint(
+        time,
+        evaluateParticleMorphCurve(time, curve).value,
+      );
+      path += `${index === 0 ? "M" : "L"} ${point.x} ${point.y} `;
+    }
+    return path.trim();
+  }
+
+  #updateParticleMorphCurveNodeSelection(): void {
+    for (const element of this.#particleMorphCurveNodeElements) {
+      const selected = Number(element.dataset.nodeIndex) === this.#particleMorphCurveSelectedNodeIndex;
+      element.classList.toggle("is-selected", selected);
+      element.setAttribute("aria-selected", String(selected));
+    }
+  }
+
+  #createParticleMorphCurveNodeElement(index: number): SVGGElement {
+    const element = document.createElementNS(PARTICLE_MORPH_CURVE_SVG_NS, "g");
+    element.classList.add("particle-morph-curve-node");
+    element.dataset.nodeIndex = String(index);
+    element.setAttribute("tabindex", "0");
+    element.setAttribute("role", "slider");
+    element.setAttribute("aria-valuemin", "0");
+    element.setAttribute("aria-valuemax", "100");
+    const hit = document.createElementNS(PARTICLE_MORPH_CURVE_SVG_NS, "circle");
+    hit.classList.add("particle-morph-curve-node-hit");
+    hit.setAttribute("r", "12");
+    const knob = document.createElementNS(PARTICLE_MORPH_CURVE_SVG_NS, "circle");
+    knob.classList.add("particle-morph-curve-node-knob");
+    knob.setAttribute("r", "4.5");
+    element.append(hit, knob);
+
+    element.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || this.#particleBackgroundController.pending) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nodeIndex = Number(element.dataset.nodeIndex);
+      if (!Number.isInteger(nodeIndex) || !this.#particleMorphCurveDraft.nodes[nodeIndex]) return;
+      this.#particleMorphCurveSelectedNodeIndex = nodeIndex;
+      this.#updateParticleMorphCurveNodeSelection();
+      element.focus({ preventScroll: true });
+      this.#particleMorphCurveDragState = {
+        pointerId: event.pointerId,
+        kind: "node",
+        nodeIndex,
+        targetElement: element,
+        originalCurve: cloneParticleMorphCurve(this.#particleMorphCurveDraft),
+      };
+      this.#particleMorphCurveEditor.setPointerCapture?.(event.pointerId);
+      this.#particleMorphCurveEditor.dataset.dragging = "true";
+    });
+    element.addEventListener("focus", () => {
+      this.#particleMorphCurveSelectedNodeIndex = Number(element.dataset.nodeIndex);
+      this.#updateParticleMorphCurveNodeSelection();
+      this.#particleMorphCurveFocusSnapshot = cloneParticleMorphCurve(this.#particleMorphCurveDraft);
+    });
+    element.addEventListener("blur", () => {
+      if (!this.#particleMorphCurveDragState) this.#particleMorphCurveFocusSnapshot = undefined;
+    });
+    element.addEventListener("keydown", (event) => {
+      if (this.#particleBackgroundController.pending) return;
+      const nodeIndex = Number(element.dataset.nodeIndex);
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        this.#removeParticleMorphCurveNode(nodeIndex);
+        return;
+      }
+      const step = event.shiftKey ? 0.05 : 0.01;
+      let timeDelta = 0;
+      let progressDelta = 0;
+      if (event.key === "ArrowLeft") timeDelta = -step;
+      else if (event.key === "ArrowRight") timeDelta = step;
+      else if (event.key === "ArrowDown") progressDelta = -step;
+      else if (event.key === "ArrowUp") progressDelta = step;
+      else return;
+      event.preventDefault();
+      const node = this.#particleMorphCurveDraft.nodes[nodeIndex];
+      if (!node) return;
+      this.#setParticleMorphCurveNode(nodeIndex, node.time + timeDelta, node.progress + progressDelta);
+      this.#saveParticleMorphCurve("Morph keyframe adjusted");
+    });
+    return element;
+  }
+
+  #renderParticleMorphCurveNodes(disabled: boolean): void {
+    const nodes = this.#particleMorphCurveDraft.nodes;
+    if (this.#particleMorphCurveNodeElements.length !== nodes.length) {
+      const fragment = document.createDocumentFragment();
+      this.#particleMorphCurveNodeElements = nodes.map((_node, index) => {
+        const element = this.#createParticleMorphCurveNodeElement(index);
+        fragment.append(element);
+        return element;
+      });
+      this.#particleMorphCurveNodes.replaceChildren(fragment);
+    }
+    nodes.forEach((node, index) => {
+      const element = this.#particleMorphCurveNodeElements[index];
+      if (!element) return;
+      const point = this.#particleMorphCurvePoint(node.time, node.progress);
+      const timePercent = Math.round(node.time * 100);
+      const progressPercent = Math.round(node.progress * 100);
+      element.setAttribute("transform", `translate(${point.x} ${point.y})`);
+      element.setAttribute("tabindex", disabled ? "-1" : "0");
+      element.setAttribute("aria-disabled", String(disabled));
+      element.setAttribute("aria-valuenow", String(progressPercent));
+      element.setAttribute("aria-valuetext", `${progressPercent}% morph progress at ${timePercent}% transition time`);
+      element.setAttribute("aria-label", `Intermediate keyframe ${timePercent}% time, ${progressPercent}% morph progress`);
+    });
+    this.#updateParticleMorphCurveNodeSelection();
+  }
+
+  #renderParticleMorphCurveEditor(): void {
+    const curve = this.#particleMorphCurveDraft;
+    const start = this.#particleMorphCurvePoint(0, 0);
+    const end = this.#particleMorphCurvePoint(1, 1);
+    const outgoing = this.#particleMorphCurvePoint(curve.x1, curve.y1);
+    const incoming = this.#particleMorphCurvePoint(curve.x2, curve.y2);
+    const path = this.#particleMorphCurvePathFor(curve);
+    this.#particleMorphCurvePath.setAttribute("d", path);
+    this.#particleMorphCurvePathGlow.setAttribute("d", path);
+    this.#particleMorphCurveStartTangent.setAttribute("x1", String(start.x));
+    this.#particleMorphCurveStartTangent.setAttribute("y1", String(start.y));
+    this.#particleMorphCurveStartTangent.setAttribute("x2", String(outgoing.x));
+    this.#particleMorphCurveStartTangent.setAttribute("y2", String(outgoing.y));
+    this.#particleMorphCurveEndTangent.setAttribute("x1", String(end.x));
+    this.#particleMorphCurveEndTangent.setAttribute("y1", String(end.y));
+    this.#particleMorphCurveEndTangent.setAttribute("x2", String(incoming.x));
+    this.#particleMorphCurveEndTangent.setAttribute("y2", String(incoming.y));
+    this.#particleMorphCurveStartHandle.setAttribute("transform", `translate(${outgoing.x} ${outgoing.y})`);
+    this.#particleMorphCurveEndHandle.setAttribute("transform", `translate(${incoming.x} ${incoming.y})`);
+    const disabled = this.#particleBackgroundController.pending;
+    this.#particleMorphCurveEditor.dataset.disabled = String(disabled);
+    this.#particleMorphCurveEditor.setAttribute("aria-disabled", String(disabled));
+    for (const [element, time, progress] of [
+      [this.#particleMorphCurveStartHandle, curve.x1, curve.y1],
+      [this.#particleMorphCurveEndHandle, curve.x2, curve.y2],
+    ] as const) {
+      const timePercent = Math.round(time * 100);
+      const progressPercent = Math.round(progress * 100);
+      element.setAttribute("tabindex", disabled ? "-1" : "0");
+      element.setAttribute("aria-disabled", String(disabled));
+      element.setAttribute("aria-valuenow", String(progressPercent));
+      element.setAttribute("aria-valuetext", `${progressPercent}% morph progress at ${timePercent}% transition time`);
+    }
+    this.#renderParticleMorphCurveNodes(disabled);
+    const nodeCount = curve.nodes.length;
+    const isDefault = particleMorphCurvesMatch(curve, DEFAULT_PARTICLE_MORPH_CURVE);
+    const isLinear = Math.abs(curve.x1 - curve.y1) < 0.012
+      && Math.abs(curve.x2 - curve.y2) < 0.012;
+    this.#particleMorphCurveMode.textContent = isDefault
+      ? "Smooth"
+      : nodeCount
+        ? `${nodeCount} keyframe${nodeCount === 1 ? "" : "s"}`
+        : isLinear ? "Linear" : "Custom";
+    this.#particleMorphCurveReset.disabled = disabled || isDefault;
+  }
+
+  #setParticleMorphCurveHandle(handle: ParticleMorphCurveHandle, time: number, progress: number): void {
+    let nextTime = clampParticleUnitInterval(time);
+    let nextProgress = clampParticleUnitInterval(progress);
+    const curve = this.#particleMorphCurveDraft;
+    if (handle === "start") {
+      nextTime = Math.min(nextTime, curve.x2);
+      nextProgress = Math.min(nextProgress, curve.y2);
+      this.#particleMorphCurveDraft = {
+        ...curve,
+        x1: Math.round(nextTime * 1_000) / 1_000,
+        y1: Math.round(nextProgress * 1_000) / 1_000,
+      };
+    } else {
+      nextTime = Math.max(nextTime, curve.x1);
+      nextProgress = Math.max(nextProgress, curve.y1);
+      this.#particleMorphCurveDraft = {
+        ...curve,
+        x2: Math.round(nextTime * 1_000) / 1_000,
+        y2: Math.round(nextProgress * 1_000) / 1_000,
+      };
+    }
+    this.#renderParticleMorphCurveEditor();
+  }
+
+  #setParticleMorphCurveNode(index: number, time: number, progress: number): void {
+    const nodes = this.#particleMorphCurveDraft.nodes;
+    if (!nodes[index]) return;
+    const previous = nodes[index - 1];
+    const next = nodes[index + 1];
+    const timeLower = previous?.time ?? 0;
+    const timeUpper = next?.time ?? 1;
+    const progressLower = previous?.progress ?? 0;
+    const progressUpper = next?.progress ?? 1;
+    const timeGap = Math.min(PARTICLE_MORPH_CURVE_EDITOR_NODE_GAP, Math.max(0, timeUpper - timeLower) / 3);
+    const progressGap = Math.min(PARTICLE_MORPH_CURVE_EDITOR_NODE_GAP, Math.max(0, progressUpper - progressLower) / 3);
+    const nextTime = Math.min(timeUpper - timeGap, Math.max(timeLower + timeGap, clampParticleUnitInterval(time)));
+    const nextProgress = Math.min(progressUpper - progressGap, Math.max(progressLower + progressGap, clampParticleUnitInterval(progress)));
+    this.#particleMorphCurveDraft = {
+      ...this.#particleMorphCurveDraft,
+      nodes: nodes.map((node, nodeIndex) => nodeIndex === index
+        ? {
+            time: Math.round(nextTime * 1_000) / 1_000,
+            progress: Math.round(nextProgress * 1_000) / 1_000,
+          }
+        : { ...node }),
+    };
+    this.#particleMorphCurveSelectedNodeIndex = index;
+    this.#renderParticleMorphCurveEditor();
+  }
+
+  #addParticleMorphCurveNode(time: number, progress: number): void {
+    const nodes = this.#particleMorphCurveDraft.nodes;
+    if (nodes.length >= MAX_PARTICLE_MORPH_CURVE_NODES) {
+      this.#showActionNotice(`Morph curves support up to ${MAX_PARTICLE_MORPH_CURVE_NODES} keyframes.`, "error");
+      return;
+    }
+    const insertionIndex = nodes.findIndex((node) => node.time > time);
+    const index = insertionIndex < 0 ? nodes.length : insertionIndex;
+    const previous = nodes[index - 1];
+    const next = nodes[index];
+    const timeLower = previous?.time ?? 0;
+    const timeUpper = next?.time ?? 1;
+    const progressLower = previous?.progress ?? 0;
+    const progressUpper = next?.progress ?? 1;
+    const timeGap = Math.min(PARTICLE_MORPH_CURVE_EDITOR_NODE_GAP, Math.max(0, timeUpper - timeLower) / 3);
+    const progressGap = Math.min(PARTICLE_MORPH_CURVE_EDITOR_NODE_GAP, Math.max(0, progressUpper - progressLower) / 3);
+    const candidate = {
+      time: Math.round(Math.min(timeUpper - timeGap, Math.max(timeLower + timeGap, clampParticleUnitInterval(time))) * 1_000) / 1_000,
+      progress: Math.round(Math.min(progressUpper - progressGap, Math.max(progressLower + progressGap, clampParticleUnitInterval(progress))) * 1_000) / 1_000,
+    };
+    const nextNodes = [...nodes];
+    nextNodes.splice(index, 0, candidate);
+    this.#particleMorphCurveDraft = normalizeParticleMorphCurve({
+      ...this.#particleMorphCurveDraft,
+      nodes: nextNodes,
+    });
+    this.#particleMorphCurveSelectedNodeIndex = this.#particleMorphCurveDraft.nodes.findIndex((node) => (
+      Math.abs(node.time - candidate.time) < 0.002
+      && Math.abs(node.progress - candidate.progress) < 0.002
+    ));
+    this.#renderParticleMorphCurveEditor();
+    this.#saveParticleMorphCurve("Morph keyframe added");
+  }
+
+  #removeParticleMorphCurveNode(index: number): void {
+    const node = this.#particleMorphCurveDraft.nodes[index];
+    if (!node) return;
+    this.#particleMorphCurveDraft = {
+      ...this.#particleMorphCurveDraft,
+      nodes: this.#particleMorphCurveDraft.nodes.filter((_candidate, nodeIndex) => nodeIndex !== index),
+    };
+    this.#particleMorphCurveSelectedNodeIndex = null;
+    this.#renderParticleMorphCurveEditor();
+    this.#saveParticleMorphCurve(`Morph keyframe at ${Math.round(node.time * 100)}% removed`);
+  }
+
+  #particleMorphCurvePointerValue(event: PointerEvent | MouseEvent): { readonly time: number; readonly progress: number } {
+    const rect = this.#particleMorphCurveEditor.getBoundingClientRect();
+    const bounds = PARTICLE_MORPH_CURVE_EDITOR_BOUNDS;
+    const svgX = (event.clientX - rect.left) * bounds.width / Math.max(rect.width, 1);
+    const svgY = (event.clientY - rect.top) * bounds.height / Math.max(rect.height, 1);
+    return {
+      time: (svgX - bounds.left) / (bounds.right - bounds.left),
+      progress: (bounds.bottom - svgY) / (bounds.bottom - bounds.top),
+    };
+  }
+
+  #finishParticleMorphCurveDrag(event: PointerEvent, cancelled: boolean): void {
+    const drag = this.#particleMorphCurveDragState;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (this.#particleMorphCurveEditor.hasPointerCapture?.(event.pointerId)) {
+      this.#particleMorphCurveEditor.releasePointerCapture?.(event.pointerId);
+    }
+    this.#particleMorphCurveDragState = undefined;
+    this.#particleMorphCurveEditor.dataset.dragging = "false";
+    if (cancelled) this.#particleMorphCurveDraft = cloneParticleMorphCurve(drag.originalCurve);
+    this.#renderParticleMorphCurveEditor();
+    if (!cancelled) this.#saveParticleMorphCurve(
+      drag.kind === "node" ? "Morph keyframe saved" : "Morph curve saved",
+    );
+  }
+
+  #cancelParticleMorphCurveInteraction(restoreDraft: boolean): void {
+    const drag = this.#particleMorphCurveDragState;
+    if (drag) {
+      if (this.#particleMorphCurveEditor.hasPointerCapture?.(drag.pointerId)) {
+        this.#particleMorphCurveEditor.releasePointerCapture?.(drag.pointerId);
+      }
+      if (restoreDraft) this.#particleMorphCurveDraft = cloneParticleMorphCurve(drag.originalCurve);
+    } else if (restoreDraft) {
+      this.#particleMorphCurveDraft = cloneParticleMorphCurve(this.#particleBackgroundController.settings.morphCurve);
+    }
+    this.#particleMorphCurveDragState = undefined;
+    this.#particleMorphCurveFocusSnapshot = undefined;
+    this.#particleMorphCurveEditor.dataset.dragging = "false";
+    this.#renderParticleMorphCurveEditor();
+  }
+
+  #saveParticleMorphCurve(message: string): void {
+    const curve = normalizeParticleMorphCurve(this.#particleMorphCurveDraft);
+    this.#particleMorphCurveDraft = cloneParticleMorphCurve(curve);
+    void this.#particleBackgroundController.updateSettings(normalizeParticleSettings({
+      ...this.#particleBackgroundController.settings,
+      morphCurve: curve,
+    })).then(() => this.#announce(`${message} · applies to the next image switch`)).catch((error: unknown) => {
+      this.#showActionNotice(
+        error instanceof Error ? error.message : "The morph curve could not be saved.",
+        "error",
+      );
+    });
+  }
+
+  #bindParticleMorphCurveEditor(): void {
+    for (const [element, handle] of [
+      [this.#particleMorphCurveStartHandle, "start"],
+      [this.#particleMorphCurveEndHandle, "end"],
+    ] as const) {
+      element.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0 || this.#particleBackgroundController.pending) return;
+        event.preventDefault();
+        element.focus({ preventScroll: true });
+        this.#particleMorphCurveDragState = {
+          pointerId: event.pointerId,
+          kind: "handle",
+          handle,
+          targetElement: element,
+          originalCurve: cloneParticleMorphCurve(this.#particleMorphCurveDraft),
+        };
+        this.#particleMorphCurveEditor.setPointerCapture?.(event.pointerId);
+        this.#particleMorphCurveEditor.dataset.dragging = "true";
+      });
+      element.addEventListener("focus", () => {
+        this.#particleMorphCurveFocusSnapshot = cloneParticleMorphCurve(this.#particleMorphCurveDraft);
+      });
+      element.addEventListener("blur", () => {
+        if (!this.#particleMorphCurveDragState) this.#particleMorphCurveFocusSnapshot = undefined;
+      });
+      element.addEventListener("keydown", (event) => {
+        if (this.#particleBackgroundController.pending) return;
+        const step = event.shiftKey ? 0.05 : 0.01;
+        let timeDelta = 0;
+        let progressDelta = 0;
+        if (event.key === "ArrowLeft") timeDelta = -step;
+        else if (event.key === "ArrowRight") timeDelta = step;
+        else if (event.key === "ArrowDown") progressDelta = -step;
+        else if (event.key === "ArrowUp") progressDelta = step;
+        else return;
+        event.preventDefault();
+        const curve = this.#particleMorphCurveDraft;
+        this.#setParticleMorphCurveHandle(
+          handle,
+          (handle === "start" ? curve.x1 : curve.x2) + timeDelta,
+          (handle === "start" ? curve.y1 : curve.y2) + progressDelta,
+        );
+        this.#saveParticleMorphCurve("Morph curve adjusted");
+      });
+    }
+
+    this.#particleMorphCurveEditor.addEventListener("dblclick", (event) => {
+      if (this.#particleBackgroundController.pending) return;
+      const target = event.target;
+      if (
+        target instanceof Element
+        && target.closest(".particle-morph-curve-handle, .particle-morph-curve-node")
+      ) return;
+      event.preventDefault();
+      const value = this.#particleMorphCurvePointerValue(event);
+      this.#addParticleMorphCurveNode(value.time, value.progress);
+    });
+    this.#particleMorphCurveEditor.addEventListener("pointermove", (event) => {
+      const drag = this.#particleMorphCurveDragState;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      event.preventDefault();
+      const value = this.#particleMorphCurvePointerValue(event);
+      if (drag.kind === "node") this.#setParticleMorphCurveNode(drag.nodeIndex, value.time, value.progress);
+      else this.#setParticleMorphCurveHandle(drag.handle, value.time, value.progress);
+    });
+    this.#particleMorphCurveEditor.addEventListener("pointerup", (event) => {
+      this.#finishParticleMorphCurveDrag(event, false);
+    });
+    this.#particleMorphCurveEditor.addEventListener("pointercancel", (event) => {
+      this.#finishParticleMorphCurveDrag(event, true);
+    });
+    this.#particleMorphCurveReset.addEventListener("click", () => {
+      if (this.#particleBackgroundController.pending) return;
+      this.#particleMorphCurveDraft = cloneParticleMorphCurve(DEFAULT_PARTICLE_MORPH_CURVE);
+      this.#particleMorphCurveSelectedNodeIndex = null;
+      this.#renderParticleMorphCurveEditor();
+      this.#saveParticleMorphCurve("Morph curve reset to Smooth");
+    });
+    this.#renderParticleMorphCurveEditor();
+  }
+
   #syncParticleValueControl(control: ParticleValueControl, value: number): void {
     const formattedValue = control.definition.format(value);
     control.output.value = formattedValue;
@@ -7985,6 +8837,7 @@ export class CodeCodexElement extends HTMLElement {
     const current = this.#particleBackgroundController.settings;
     const values: Record<string, unknown> = { ...current };
     for (const [key, { input }] of this.#particleNumericControls) values[key] = input.value;
+    values.morphCurve = this.#particleMorphCurveDraft;
     values.autoSwitch = this.#particleAutoSwitchInput.checked;
     values.showSourceImage = this.#particleShowSourceInput.checked;
     values.backgroundColor = this.#particleBackgroundColorInput.value;
@@ -8081,6 +8934,10 @@ export class CodeCodexElement extends HTMLElement {
       if (editor.disabled) this.#closeParticleValueEditor(control, false);
       this.#syncParticleValueControl(control, value);
     }
+    if (!this.#particleMorphCurveDragState) {
+      this.#particleMorphCurveDraft = cloneParticleMorphCurve(settings.morphCurve);
+    }
+    this.#renderParticleMorphCurveEditor();
     this.#particleAutoSwitchInput.checked = settings.autoSwitch;
     this.#particleShowSourceInput.checked = settings.showSourceImage;
     this.#particleBackgroundColorInput.value = settings.backgroundColor;
@@ -8481,6 +9338,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#particleSettingsOpen = false;
     this.#particleSettingsTrigger.setAttribute("aria-expanded", "false");
     this.#cancelParticleValueEditors();
+    this.#cancelParticleMorphCurveInteraction(true);
     this.#particleBackgroundController.finishImageTransformEditing();
     this.#particleTransformImageId = null;
     if (this.#particleSettingsPanel.matches(":popover-open")) this.#particleSettingsPanel.hidePopover();
