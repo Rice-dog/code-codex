@@ -91,9 +91,35 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body {
 
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
   main.main-surface,
-  main[data-app-shell-main-surface="default"]
+  [data-app-shell-main-surface="default"]
 ) {
   background-color: var(--code-codex-particle-ui-surface) !important;
+}
+
+/*
+ * Codex renders Settings in the same app-shell surface, but its Settings
+ * route is a separate full-page panel. Keep the conversation surface's
+ * normal translucent treatment while allowing the Settings page itself to
+ * show the particle layer through it. The focus-area and utility-class
+ * markers are emitted by Codex's Settings shell; avoid depending on hashed
+ * class names such as MainContentSurface_*.
+ */
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
+  main.main-surface,
+  [data-app-shell-main-surface="default"]
+):has(
+  [data-app-shell-focus-area="main"] > div > div[class*="electron\\:bg-surface"][class*="rounded-tl-lg"]
+) {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
+  main.main-surface,
+  [data-app-shell-main-surface="default"]
+) [data-app-shell-focus-area="main"] > div > div[class*="electron\\:bg-surface"][class*="rounded-tl-lg"] {
+  background-color: transparent !important;
+  background-image: none !important;
 }
 
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(

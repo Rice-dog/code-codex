@@ -5,11 +5,11 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-## v0.1.96
+## v0.1.97
 
-- `CodeCodex-0.1.96-x64-setup.exe`: recommended installer.
-- `CodeCodex-0.1.96-x64.msi`: MSI installer.
-- `CodeCodex-0.1.96-x64.zip`: portable package, including
+- `CodeCodex-0.1.97-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.97-x64.msi`: MSI installer.
+- `CodeCodex-0.1.97-x64.zip`: portable package, including
   `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
 - Caches stable WebGL state and uniform values in the particle background,
   reducing idle JS-to-WebGL calls from 42 to 3 per frame while preserving
@@ -585,5 +585,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.96
+./scripts/package.ps1 -Version 0.1.97
 ```
