@@ -11,9 +11,18 @@ with the official stable Codex/ChatGPT Desktop app installed.
 - `CodeCodex-0.1.97-x64.msi`: MSI installer.
 - `CodeCodex-0.1.97-x64.zip`: portable package, including
   `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
-- Caches stable WebGL state and uniform values in the particle background,
-  reducing idle JS-to-WebGL calls from 42 to 3 per frame while preserving
-  live pointer motion and image-morph animation.
+- Keeps the native Codex Settings main surface transparent while the Particle
+  Image Background is active, leaves settings cards readable, and does not
+  change conversation surfaces.
+
+## v0.1.96
+
+- `CodeCodex-0.1.96-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.96-x64.msi`: MSI installer.
+- `CodeCodex-0.1.96-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Caches stable particle WebGL state and uniforms so unchanged values are not
+  resent every frame, while pointer motion and image morphing remain live.
 
 ## v0.1.95
 
@@ -24,6 +33,22 @@ with the official stable Codex/ChatGPT Desktop app installed.
 - Finalizes the GitHub version checker by clearing interrupted progress notices
   and enforcing the same three-part release-version contract in native and UI
   validation.
+
+## v0.1.94
+
+- `CodeCodex-0.1.94-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.94-x64.msi`: MSI installer.
+- `CodeCodex-0.1.94-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds editable Morph curve keyframes and intermediate nodes to Particle Image
+  Background image transitions.
+
+## v0.1.93
+
+- `CodeCodex-0.1.93-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.93-x64.msi`: MSI installer.
+- `CodeCodex-0.1.93-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
 
 ## v0.1.92
 

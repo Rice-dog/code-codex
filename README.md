@@ -113,6 +113,7 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 - Text preview and editing, including multilingual Markdown content.
 - Independently enabled Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews from Preview Market.
 - Optional Transparent Background appearance plugin with a reversible Windows compositor surface that reveals content behind Codex while keeping the full Codex window input-active.
+- When Particle Image Background is active, the native Codex Settings surface can remain transparent while its settings cards stay readable; conversation surfaces are unchanged.
 - Particle Image Background appearance plugin with a persistent grayscale image library, ordered auto-switching, smooth particle morphing, per-photo framing, and adjustable particle, source, flow, pointer, and render settings.
 - Click the version number at the bottom of the file tree to check GitHub for the latest published stable release.
 - Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
