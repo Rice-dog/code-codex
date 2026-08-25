@@ -5,6 +5,16 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.103
+
+- `CodeCodex-0.1.103-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.103-x64.msi`: MSI installer.
+- `CodeCodex-0.1.103-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds a conservative screen-region early exit to the Black Hole scene shader,
+  skipping ray integration outside the expanded disc and strong-lensing area
+  while preserving the full-screen star path.
+
 ## v0.1.102
 
 - `CodeCodex-0.1.102-x64-setup.exe`: recommended installer.

@@ -4503,9 +4503,51 @@ vec3 starField(vec3 d) {
 }
 #endif
 
+#if HAS_STARS == 0
+bool missesVisibleDisc(vec3 origin, vec3 direction) {
+  // Test a deliberately expanded cylinder around the emitting gas. Rays that
+  // miss both this volume and the central strong-lensing zone cannot
+  // contribute visible light, so they can skip the expensive integration.
+  float cullOuter = uDiskOut * 1.16 + 0.65;
+  float cullHalfThickness = uThick * 6.5 + 0.35;
+  if (length(origin.xz) <= cullOuter + 0.5) return false;
+
+  vec2 radialOrigin = origin.xz;
+  vec2 radialDirection = direction.xz;
+  float a = dot(radialDirection, radialDirection);
+  float b = dot(radialOrigin, radialDirection);
+  float c = dot(radialOrigin, radialOrigin) - cullOuter * cullOuter;
+  float discriminant = b * b - a * c;
+  bool intersectsExpandedDisc = false;
+
+  if (a > 0.00001 && discriminant >= 0.0) {
+    float root = sqrt(discriminant);
+    float nearTime = (-b - root) / a;
+    float farTime = (-b + root) / a;
+    if (farTime > 0.0) {
+      nearTime = max(0.0, nearTime);
+      float nearY = origin.y + direction.y * nearTime;
+      float farY = origin.y + direction.y * farTime;
+      intersectsExpandedDisc = min(nearY, farY) <= cullHalfThickness
+                            && max(nearY, farY) >= -cullHalfThickness;
+    }
+  }
+
+  float impactParameter = length(cross(origin, direction));
+  float lensingRadius = min(cullOuter, max(8.0, uDiskIn * 1.8 + 1.0));
+  return !intersectsExpandedDisc && impactParameter > lensingRadius;
+}
+#endif
+
 void main() {
   vec2 uv = (gl_FragCoord.xy + uJitter - uFocus * uRes) / uRes.y;
   vec3 dir = normalize(uFwd + (uv.x * uRight + uv.y * uUp) * 2.0 * uTanHalf);
+#if HAS_STARS == 0
+  if (missesVisibleDisc(uCamPos, dir)) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+#endif
   vec3 pos = uCamPos;
   vec3 vel = dir;
   vec3 hv = cross(pos, vel);
