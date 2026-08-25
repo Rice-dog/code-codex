@@ -190,6 +190,10 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-particle-source {
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-particle-canvas {
   z-index: 2 !important;
 }
+
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-black-hole-canvas[hidden] {
+  display: none !important;
+}
 `;
 
 let remountObserver: MutationObserver | undefined;

@@ -5,6 +5,14 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.98
+
+- `CodeCodex-0.1.98-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.98-x64.msi`: MSI installer.
+- `CodeCodex-0.1.98-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds the Black Hole Background appearance plugin to Preview Market.
+
 ## v0.1.97
 
 - `CodeCodex-0.1.97-x64-setup.exe`: recommended installer.
@@ -610,5 +618,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.97
+./scripts/package.ps1 -Version 0.1.98
 ```

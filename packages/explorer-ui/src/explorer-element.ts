@@ -80,7 +80,12 @@ const PREVIEWER_SETTINGS_KEY = "code-codex:previewers:v1";
 const APPEARANCE_PLUGIN_SETTINGS_KEY = "code-codex:appearance-plugins:v1";
 const TRANSPARENT_BACKGROUND_PLUGIN_ID = "code-codex.transparent-background";
 const PARTICLE_BACKGROUND_PLUGIN_ID = "code-codex.particle-image-background";
-const APPEARANCE_PLUGIN_IDS = new Set([TRANSPARENT_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID]);
+const BLACK_HOLE_BACKGROUND_PLUGIN_ID = "code-codex.black-hole-background";
+const APPEARANCE_PLUGIN_IDS = new Set([
+  TRANSPARENT_BACKGROUND_PLUGIN_ID,
+  PARTICLE_BACKGROUND_PLUGIN_ID,
+  BLACK_HOLE_BACKGROUND_PLUGIN_ID,
+]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
 export const PARTICLE_BACKGROUND_ATTRIBUTE = "data-code-codex-particle-image-background";
@@ -90,6 +95,7 @@ const FORCED_COLORS_QUERY = "(forced-colors: active)";
 const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
 const PARTICLE_BACKGROUND_SETTINGS_KEY = "code-codex:particle-image-background:v1";
 const PARTICLE_BACKGROUND_THEME_LEASE_KEY = "code-codex:particle-theme-lease:v1";
+const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1";
 const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
 const CODEX_APPEARANCE_POLL_INTERVAL_MS = 1_500;
 const PARTICLE_BACKGROUND_DB_NAME = "code-codex-particle-image-background";
@@ -566,9 +572,62 @@ interface CodexAppearanceAdapter {
   };
 }
 
+type DarkBackgroundPluginId = typeof PARTICLE_BACKGROUND_PLUGIN_ID | typeof BLACK_HOLE_BACKGROUND_PLUGIN_ID;
+
 interface ParticleThemeLease {
+  readonly owner?: DarkBackgroundPluginId;
   readonly previousPreference: Exclude<CodexAppearanceTheme, "dark">;
   readonly forcedPreference: "dark";
+}
+
+interface BlackHoleBackgroundSettings {
+  readonly distance: number;
+  readonly elevation: number;
+  readonly azimuth: number;
+  readonly orbitSpeed: number;
+  readonly roll: number;
+  readonly fov: number;
+  readonly diskInner: number;
+  readonly diskOuter: number;
+  readonly diskThickness: number;
+  readonly diskDensity: number;
+  readonly brightness: number;
+  readonly spinSpeed: number;
+  readonly grain: number;
+  readonly doppler: number;
+  readonly hotColor: string;
+  readonly midColor: string;
+  readonly coolColor: string;
+  readonly starBrightness: number;
+  readonly glow: number;
+  readonly exposure: number;
+  readonly vignette: number;
+  readonly steps: number;
+  readonly resolution: number;
+  readonly maxDpr: number;
+  readonly paused: boolean;
+}
+
+type BlackHolePresetName = "cinema" | "lens" | "ember";
+type BlackHoleColorSettingKey = "hotColor" | "midColor" | "coolColor";
+
+type BlackHoleNumericSettingKey = {
+  [Key in keyof BlackHoleBackgroundSettings]: BlackHoleBackgroundSettings[Key] extends number ? Key : never;
+}[keyof BlackHoleBackgroundSettings];
+
+type BlackHoleControlGroup = "camera" | "disc" | "light" | "renderer";
+
+interface BlackHoleNumericControlDefinition {
+  readonly key: BlackHoleNumericSettingKey;
+  readonly group: BlackHoleControlGroup;
+  readonly id: string;
+  readonly label: string;
+  readonly hint: string;
+  readonly minimum: number;
+  readonly maximum: number;
+  readonly step: number;
+  readonly unit?: string;
+  readonly percent?: boolean;
 }
 
 type ParticleNumericSettingKey =
@@ -747,6 +806,93 @@ const PARTICLE_IMAGE_TRANSFORM_CONTROL_DEFINITIONS = Object.freeze([
   { key: "positionY", id: "cle-particle-image-position-y", label: "Position Y", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
   { key: "zoom", id: "cle-particle-image-zoom", label: "Zoom", minimum: 0.25, maximum: 4, step: 0.05, editorScale: 100, format: (value: number) => `${Math.round(value * 100)}%` },
 ] satisfies readonly ParticleImageTransformControlDefinition[]);
+
+const DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS: BlackHoleBackgroundSettings = Object.freeze({
+  distance: 24,
+  elevation: -5.5,
+  azimuth: 0,
+  orbitSpeed: 0,
+  roll: -20,
+  fov: 42,
+  diskInner: 3,
+  diskOuter: 15,
+  diskThickness: 0.26,
+  diskDensity: 1,
+  brightness: 1,
+  spinSpeed: 0.06,
+  grain: 0.48,
+  doppler: 0.35,
+  hotColor: "#FFF3DE",
+  midColor: "#FF9838",
+  coolColor: "#8E3A0B",
+  starBrightness: 0,
+  glow: 1,
+  exposure: 0.9,
+  vignette: 0.28,
+  steps: 300,
+  resolution: 0.7,
+  maxDpr: 1.75,
+  paused: false,
+});
+
+const BLACK_HOLE_BACKGROUND_PRESETS: Readonly<Record<BlackHolePresetName, BlackHoleBackgroundSettings>> = Object.freeze({
+  cinema: DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS,
+  lens: Object.freeze({
+    ...DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS,
+    elevation: 6,
+    roll: 0,
+    fov: 47,
+    diskDensity: 0.78,
+    brightness: 0.88,
+    spinSpeed: 0.045,
+    doppler: 1,
+    starBrightness: 0.42,
+    glow: 0.58,
+    exposure: 0.82,
+    vignette: 0.18,
+  }),
+  ember: Object.freeze({
+    ...DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS,
+    elevation: -2,
+    roll: -28,
+    diskThickness: 0.34,
+    diskDensity: 1.32,
+    brightness: 1.22,
+    spinSpeed: 0.085,
+    grain: 0.62,
+    doppler: 0.5,
+    hotColor: "#FFF0CB",
+    midColor: "#FF6A1A",
+    coolColor: "#5B1605",
+    glow: 1.3,
+    exposure: 0.96,
+    vignette: 0.38,
+  }),
+});
+
+const BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
+  { key: "distance", group: "camera", id: "cle-black-hole-distance", label: "Distance", hint: "Camera distance in horizon radii", minimum: 10, maximum: 40, step: 0.5, unit: " rH" },
+  { key: "elevation", group: "camera", id: "cle-black-hole-elevation", label: "Elevation", hint: "Angle above the accretion disc", minimum: -30, maximum: 30, step: 0.5, unit: "deg" },
+  { key: "azimuth", group: "camera", id: "cle-black-hole-azimuth", label: "Azimuth", hint: "Position around the black hole", minimum: -180, maximum: 180, step: 1, unit: "deg" },
+  { key: "roll", group: "camera", id: "cle-black-hole-roll", label: "Roll", hint: "Disc angle across the frame", minimum: -45, maximum: 45, step: 1, unit: "deg" },
+  { key: "fov", group: "camera", id: "cle-black-hole-fov", label: "Field of view", hint: "Vertical camera field of view", minimum: 25, maximum: 75, step: 1, unit: "deg" },
+  { key: "orbitSpeed", group: "camera", id: "cle-black-hole-orbit-speed", label: "Orbit drift", hint: "Camera movement in degrees per second", minimum: -8, maximum: 8, step: 0.1, unit: "deg/s" },
+  { key: "diskInner", group: "disc", id: "cle-black-hole-disk-inner", label: "Inner edge", hint: "Closest stable gas orbit", minimum: 1.2, maximum: 6, step: 0.1, unit: " rH" },
+  { key: "diskOuter", group: "disc", id: "cle-black-hole-disk-outer", label: "Outer edge", hint: "Disc radius", minimum: 8, maximum: 24, step: 0.5, unit: " rH" },
+  { key: "diskThickness", group: "disc", id: "cle-black-hole-disk-thickness", label: "Thickness", hint: "Gas depth at the inner rim", minimum: 0.05, maximum: 0.8, step: 0.01 },
+  { key: "diskDensity", group: "disc", id: "cle-black-hole-disk-density", label: "Density", hint: "Opacity of the gas", minimum: 0.1, maximum: 2, step: 0.05 },
+  { key: "brightness", group: "disc", id: "cle-black-hole-brightness", label: "Emission", hint: "Light emitted before tone mapping", minimum: 0.2, maximum: 2, step: 0.05 },
+  { key: "spinSpeed", group: "disc", id: "cle-black-hole-spin-speed", label: "Spin", hint: "Inner-rim turns per second", minimum: 0, maximum: 0.2, step: 0.005, unit: " t/s" },
+  { key: "grain", group: "disc", id: "cle-black-hole-grain", label: "Turbulence", hint: "Scale of gas detail", minimum: 0.1, maximum: 1.2, step: 0.02 },
+  { key: "doppler", group: "disc", id: "cle-black-hole-doppler", label: "Doppler beaming", hint: "Relativistic color and brightness shift", minimum: 0, maximum: 1, step: 0.05, percent: true },
+  { key: "starBrightness", group: "light", id: "cle-black-hole-star-brightness", label: "Lensed stars", hint: "Brightness of the background sky", minimum: 0, maximum: 2, step: 0.05 },
+  { key: "glow", group: "light", id: "cle-black-hole-glow", label: "Bloom", hint: "Halo around bright gas", minimum: 0, maximum: 2, step: 0.05 },
+  { key: "exposure", group: "light", id: "cle-black-hole-exposure", label: "Exposure", hint: "Intensity entering the tone curve", minimum: 0.25, maximum: 1.8, step: 0.05 },
+  { key: "vignette", group: "light", id: "cle-black-hole-vignette", label: "Vignette", hint: "Darkening at the corners", minimum: 0, maximum: 1, step: 0.01, percent: true },
+  { key: "steps", group: "renderer", id: "cle-black-hole-steps", label: "Ray steps", hint: "Integration steps per pixel", minimum: 120, maximum: 460, step: 10 },
+  { key: "resolution", group: "renderer", id: "cle-black-hole-resolution", label: "Render scale", hint: "Canvas resolution before upscaling", minimum: 0.4, maximum: 1, step: 0.05, percent: true },
+  { key: "maxDpr", group: "renderer", id: "cle-black-hole-max-dpr", label: "Pixel ratio cap", hint: "Maximum device pixel density", minimum: 1, maximum: 2.5, step: 0.25 },
+] satisfies readonly BlackHoleNumericControlDefinition[]);
 
 function calculateParticleCursorStrengthValues(cursorStrength: number): ParticleCursorStrengthValues {
   const baseStrength = Math.min(
@@ -1175,6 +1321,60 @@ function writeParticleBackgroundSettings(settings: ParticleBackgroundSettings): 
   }
 }
 
+function normalizeBlackHoleColor(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim();
+  return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized.toUpperCase() : fallback;
+}
+
+function normalizeBlackHoleSettings(value: unknown): BlackHoleBackgroundSettings {
+  const record = isObjectRecord(value) ? value : {};
+  const defaults = DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS;
+  return {
+    distance: clampParticleNumber(record.distance, 10, 40, defaults.distance),
+    elevation: clampParticleNumber(record.elevation, -30, 30, defaults.elevation),
+    azimuth: clampParticleNumber(record.azimuth, -180, 180, defaults.azimuth),
+    orbitSpeed: clampParticleNumber(record.orbitSpeed, -8, 8, defaults.orbitSpeed),
+    roll: clampParticleNumber(record.roll, -45, 45, defaults.roll),
+    fov: clampParticleNumber(record.fov, 25, 75, defaults.fov),
+    diskInner: clampParticleNumber(record.diskInner, 1.2, 6, defaults.diskInner),
+    diskOuter: clampParticleNumber(record.diskOuter, 8, 24, defaults.diskOuter),
+    diskThickness: clampParticleNumber(record.diskThickness, 0.05, 0.8, defaults.diskThickness),
+    diskDensity: clampParticleNumber(record.diskDensity, 0.1, 2, defaults.diskDensity),
+    brightness: clampParticleNumber(record.brightness, 0.2, 2, defaults.brightness),
+    spinSpeed: clampParticleNumber(record.spinSpeed, 0, 0.2, defaults.spinSpeed),
+    grain: clampParticleNumber(record.grain, 0.1, 1.2, defaults.grain),
+    doppler: clampParticleNumber(record.doppler, 0, 1, defaults.doppler),
+    hotColor: normalizeBlackHoleColor(record.hotColor, defaults.hotColor),
+    midColor: normalizeBlackHoleColor(record.midColor, defaults.midColor),
+    coolColor: normalizeBlackHoleColor(record.coolColor, defaults.coolColor),
+    starBrightness: clampParticleNumber(record.starBrightness, 0, 2, defaults.starBrightness),
+    glow: clampParticleNumber(record.glow, 0, 2, defaults.glow),
+    exposure: clampParticleNumber(record.exposure, 0.25, 1.8, defaults.exposure),
+    vignette: clampParticleNumber(record.vignette, 0, 1, defaults.vignette),
+    steps: Math.round(clampParticleNumber(record.steps, 120, 460, defaults.steps) / 10) * 10,
+    resolution: clampParticleNumber(record.resolution, 0.4, 1, defaults.resolution),
+    maxDpr: clampParticleNumber(record.maxDpr, 1, 2.5, defaults.maxDpr),
+    paused: typeof record.paused === "boolean" ? record.paused : defaults.paused,
+  };
+}
+
+function readBlackHoleBackgroundSettings(): BlackHoleBackgroundSettings {
+  try {
+    return normalizeBlackHoleSettings(JSON.parse(localStorage.getItem(BLACK_HOLE_BACKGROUND_SETTINGS_KEY) || "{}"));
+  } catch {
+    return { ...DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS };
+  }
+}
+
+function writeBlackHoleBackgroundSettings(settings: BlackHoleBackgroundSettings): void {
+  try {
+    localStorage.setItem(BLACK_HOLE_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // The current session keeps working when DOM storage is unavailable.
+  }
+}
+
 function isCodexAppearanceTheme(value: unknown): value is CodexAppearanceTheme {
   return value === "system" || value === "light" || value === "dark";
 }
@@ -1259,7 +1459,12 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
     if (!value || typeof value !== "object") return undefined;
     const lease = value as Partial<ParticleThemeLease>;
     if ((lease.previousPreference === "system" || lease.previousPreference === "light") && lease.forcedPreference === "dark") {
-      return { previousPreference: lease.previousPreference, forcedPreference: "dark" };
+      const owner = lease.owner === PARTICLE_BACKGROUND_PLUGIN_ID || lease.owner === BLACK_HOLE_BACKGROUND_PLUGIN_ID
+        ? lease.owner
+        : undefined;
+      return owner
+        ? { owner, previousPreference: lease.previousPreference, forcedPreference: "dark" }
+        : { previousPreference: lease.previousPreference, forcedPreference: "dark" };
     }
   } catch {
     // Invalid or inaccessible storage is handled as an absent lease.
@@ -1275,8 +1480,24 @@ function writeParticleThemeLease(lease: ParticleThemeLease): void {
   }
 }
 
-function clearParticleThemeLease(): void {
+function transferParticleThemeLease(from: DarkBackgroundPluginId, to: DarkBackgroundPluginId): void {
+  const lease = readParticleThemeLease();
+  if (!lease) return;
+  if (lease.owner === to) return;
+  if (lease.owner && lease.owner !== from) {
+    throw new Error("Another Code-Codex background owns the Dark appearance lease");
+  }
+  writeParticleThemeLease({
+    owner: to,
+    previousPreference: lease.previousPreference,
+    forcedPreference: "dark",
+  });
+}
+
+function clearParticleThemeLease(owner?: DarkBackgroundPluginId): void {
   try {
+    const lease = readParticleThemeLease();
+    if (owner && lease?.owner && lease.owner !== owner) return;
     localStorage.removeItem(PARTICLE_BACKGROUND_THEME_LEASE_KEY);
   } catch {
     // The setting bridge still owns the authoritative theme preference.
@@ -3378,7 +3599,7 @@ class ParticleBackgroundController {
     }
   }
 
-  async disable(): Promise<void> {
+  async disable(preserveTheme = false): Promise<void> {
     const pendingEnable = this.#enableOperation;
     this.#stoppedForExternalThemeChange = false;
     const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
@@ -3388,7 +3609,7 @@ class ParticleBackgroundController {
     if (hadPresentation) this.#teardownPresentation();
     if (pendingEnable) await pendingEnable.catch(() => undefined);
     try {
-      await this.#restoreCodexAppearanceTheme();
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
@@ -3924,6 +4145,7 @@ class ParticleBackgroundController {
   }
 
   async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = PARTICLE_BACKGROUND_PLUGIN_ID;
     let current: CodexAppearanceTheme;
     try {
       current = await readCodexAppearanceTheme();
@@ -3934,24 +4156,33 @@ class ParticleBackgroundController {
 
     const lease = readParticleThemeLease();
     if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) {
+        throw new Error("Another Code-Codex background is still using Dark mode");
+      }
+      if (lease && !lease.owner) {
+        writeParticleThemeLease({ ...lease, owner });
+      }
       if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
       return;
     }
     if (lease) {
-      clearParticleThemeLease();
+      if (lease.owner && lease.owner !== owner) {
+        throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      }
+      clearParticleThemeLease(owner);
       this.#stoppedForExternalThemeChange = true;
       throw new Error("Particle Image Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
     }
 
-    writeParticleThemeLease({ previousPreference: current, forcedPreference: "dark" });
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
     try {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
       try {
         await writeCodexAppearanceTheme(current);
-        clearParticleThemeLease();
+        clearParticleThemeLease(owner);
       } catch {
         // Retain the lease so a later disable/startup can retry restoration.
       }
@@ -3960,15 +4191,17 @@ class ParticleBackgroundController {
   }
 
   async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = PARTICLE_BACKGROUND_PLUGIN_ID;
     const lease = readParticleThemeLease();
     if (!lease) return;
+    if (lease.owner && lease.owner !== owner) return;
     const current = await readCodexAppearanceTheme();
     if (current !== lease.forcedPreference) {
-      clearParticleThemeLease();
+      clearParticleThemeLease(owner);
       return;
     }
     await writeCodexAppearanceTheme(lease.previousPreference);
-    clearParticleThemeLease();
+    clearParticleThemeLease(owner);
   }
 
   #observeCodexTheme(): void {
@@ -4017,7 +4250,7 @@ class ParticleBackgroundController {
     this.#error = "Particle Image Background stopped because Codex Appearance is no longer Dark.";
     this.#stoppedForExternalThemeChange = true;
     this.#teardownPresentation();
-    clearParticleThemeLease();
+    clearParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID);
     this.#notify();
   }
 
@@ -4059,6 +4292,1535 @@ function getParticleBackgroundController(): ParticleBackgroundController {
   }
   const controller = new ParticleBackgroundController();
   globalState[PARTICLE_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
+const BLACK_HOLE_VERTEX_SHADER = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main() {
+  vUv = aPos * 0.5 + 0.5;
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}
+`;
+
+const BLACK_HOLE_SCENE_FRAGMENT_SHADER = `
+precision highp float;
+
+#define MAX_STEPS __MAX_STEPS__
+#define HAS_FIXED_STEPS __HAS_FIXED_STEPS__
+#define HAS_STARS __HAS_STARS__
+#define WIND_CYCLE 46.0
+
+varying vec2 vUv;
+
+uniform vec2  uRes;
+uniform float uTime;
+uniform vec3  uCamPos;
+uniform vec3  uRight;
+uniform vec3  uUp;
+uniform vec3  uFwd;
+uniform float uTanHalf;
+uniform vec2  uFocus;
+#if HAS_FIXED_STEPS == 0
+uniform float uSteps;
+#endif
+uniform float uSkyR;
+uniform float uDiskIn;
+uniform float uDiskOut;
+uniform float uThick;
+uniform float uDensity;
+uniform float uSpin;
+uniform float uGrain;
+uniform float uBright;
+uniform float uDoppler;
+uniform vec3  uHot;
+uniform vec3  uMid;
+uniform vec3  uCool;
+#if HAS_STARS
+uniform float uStars;
+#endif
+uniform float uEncode;
+uniform vec2  uJitter;
+uniform float uSeed;
+
+float hash13(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float vnoise(vec3 x) {
+  vec3 i = floor(x);
+  vec3 f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = hash13(i + vec3(0.0, 0.0, 0.0));
+  float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
+  float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
+  float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
+  float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
+  float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
+  float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
+  float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
+  return mix(
+    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+    f.z
+  );
+}
+
+float fbm(vec3 p, float lod) {
+  float a = 0.5;
+  float s = 0.0;
+  for (int i = 0; i < 4; i++) {
+    if (i != 3 || lod > 0.0) {
+      s += (i == 3 ? a * lod : a) * vnoise(p);
+    }
+    p = p * 2.03 + vec3(11.3, 7.1, 3.7);
+    a *= 0.5;
+  }
+  return s;
+}
+
+void gasAt(vec3 p, float rd, float dt, out float dens, out vec3 tint, out float heat) {
+  float rn = clamp((rd - uDiskIn) / max(0.001, uDiskOut - uDiskIn), 0.0, 1.0);
+  float tk = uThick * (0.35 + 1.25 * rn);
+  float v = p.y / tk;
+  float sheet = exp(-v * v);
+  float q = uDiskIn / rd;
+  float inner = smoothstep(0.0, 0.07, rn);
+  float outer = 1.0 - smoothstep(0.45, 1.0, rn);
+  float prof = inner * outer * pow(q, 2.0);
+  if (sheet * prof * uDensity * 10.0 <= 0.001) {
+    dens = 0.0;
+    tint = vec3(0.0);
+    heat = 0.0;
+    return;
+  }
+
+  float lod = clamp(1.0 - dt * uGrain * 14.0, 0.0, 1.0);
+  float phi = atan(p.z, p.x);
+  float omega = uSpin * pow(q, 1.5);
+  float lr = log(rd) * 1.1 + uSpin * uTime * 0.05;
+  float u = uTime / WIND_CYCLE;
+  float fA = fract(u);
+  float fB = fract(u + 0.5);
+  float w = abs(2.0 * fA - 1.0);
+
+  float cloudsA = fbm(vec3(vec2(cos(phi + omega * fA * WIND_CYCLE),
+                                sin(phi + omega * fA * WIND_CYCLE)) * (rd * uGrain), lr), lod);
+  float cloudsB = fbm(vec3(vec2(cos(phi + omega * fB * WIND_CYCLE),
+                                sin(phi + omega * fB * WIND_CYCLE)) * (rd * uGrain), lr + 40.0), lod);
+  float clouds = mix(cloudsA, cloudsB, w);
+  float filaments = clouds * clouds * 1.75;
+  dens = max(0.0, filaments * 1.5 - 0.30) * sheet * prof * uDensity * 4.6;
+
+  if (dens <= 0.001) {
+    tint = vec3(0.0);
+    heat = 0.0;
+    return;
+  }
+
+  heat = pow(q, 0.8) * (0.72 + 0.55 * clouds);
+  tint = mix(uCool, uMid, smoothstep(0.10, 0.52, heat));
+  tint = mix(tint, uHot, smoothstep(0.52, 1.05, heat));
+}
+
+#if HAS_STARS
+vec3 starField(vec3 d) {
+  vec3 a = abs(d);
+  vec2 uv;
+  float face;
+  if (a.x >= a.y && a.x >= a.z)      { uv = d.yz / a.x; face = d.x > 0.0 ? 0.0 : 1.0; }
+  else if (a.y >= a.z)               { uv = d.xz / a.y; face = d.y > 0.0 ? 2.0 : 3.0; }
+  else                               { uv = d.xy / a.z; face = d.z > 0.0 ? 4.0 : 5.0; }
+
+  vec3 col = vec3(0.0);
+  for (int k = 0; k < 3; k++) {
+    float sc = 90.0 * pow(2.2, float(k));
+    vec2 p = uv * sc;
+    vec2 id = floor(p);
+    vec2 f = fract(p) - 0.5;
+    float h = hash13(vec3(id, face * 19.0));
+    if (h > 0.965) {
+      vec2 off = vec2(hash13(vec3(id, face + 11.0)), hash13(vec3(id, face + 23.0)));
+      float dd = length(f - (off - 0.5) * 0.7);
+      float s = smoothstep(0.055, 0.0, dd);
+      float warm = hash13(vec3(id, face + 51.0));
+      col += s * (0.6 + 4.5 * fract(h * 97.0))
+           * mix(vec3(0.72, 0.82, 1.0), vec3(1.0, 0.88, 0.72), warm)
+           / pow(2.2, float(k));
+    }
+  }
+  col += vec3(0.013, 0.017, 0.030) * fbm(d * 2.6, 1.0);
+  return col;
+}
+#endif
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy + uJitter - uFocus * uRes) / uRes.y;
+  vec3 dir = normalize(uFwd + (uv.x * uRight + uv.y * uUp) * 2.0 * uTanHalf);
+  vec3 pos = uCamPos;
+  vec3 vel = dir;
+  vec3 hv = cross(pos, vel);
+  float h2 = dot(hv, hv);
+  float h = sqrt(h2);
+  float swept = 0.0;
+  vec3 col = vec3(0.0);
+  float transmit = 1.0;
+#if HAS_STARS
+  bool captured = false;
+#endif
+  float jitter = fract(sin(dot(gl_FragCoord.xy + uSeed, vec2(12.9898, 78.233))) * 43758.5453);
+
+  for (int i = 0; i < MAX_STEPS; i++) {
+#if HAS_FIXED_STEPS == 0
+    if (float(i) >= uSteps) break;
+#endif
+    float r2 = dot(pos, pos);
+    float r = sqrt(r2);
+    if (r < 1.0) {
+#if HAS_STARS
+      captured = true;
+#endif
+      break;
+    }
+    if (r > uSkyR && dot(pos, vel) > 0.0) break;
+    if (transmit < 0.004) break;
+
+    float dt = clamp(0.14 * (r - 1.0), 0.025, 1.1);
+    if (r < uDiskOut * 1.25) {
+      float rn = clamp((r - uDiskIn) / max(0.001, uDiskOut - uDiskIn), 0.0, 1.0);
+      float tk = uThick * (0.35 + 1.25 * rn);
+      dt = min(dt, max(tk * 0.38, abs(pos.y) * 0.5));
+    }
+
+    swept += h * dt / r2;
+    jitter = fract(jitter + 0.6180339887);
+    float sampleStep = dt * jitter;
+    float midY = pos.y + vel.y * sampleStep;
+    if (abs(midY) < uThick * 5.0) {
+      vec2 midXZ = pos.xz + vel.xz * sampleStep;
+      float rd = length(midXZ);
+      if (rd > uDiskIn && rd < uDiskOut) {
+        vec3 mid = vec3(midXZ.x, midY, midXZ.y);
+        float dens;
+        float heat;
+        vec3 tint;
+        gasAt(mid, rd, dt, dens, tint, heat);
+        if (dens > 0.001) {
+          float deep = exp(-1.3 * max(0.0, swept - 4.6));
+          vec3 tang = vec3(mid.z, 0.0, -mid.x) / rd;
+          float beta = min(0.85, sqrt(0.5 / max(rd, 1.5)));
+          float gam = inversesqrt(max(1e-4, 1.0 - beta * beta));
+          vec3 toObs = -normalize(vel);
+          float g = 1.0 / (gam * (1.0 - beta * dot(tang, toObs)));
+          g *= sqrt(max(0.05, 1.0 - 1.0 / rd));
+          float boost = pow(max(g, 0.02), 3.0 * uDoppler);
+          vec3 shift = mix(
+            vec3(1.0),
+            g > 1.0 ? vec3(0.86, 0.94, 1.14) : vec3(1.15, 0.82, 0.62),
+            clamp(abs(g - 1.0) * 1.6, 0.0, 1.0) * uDoppler
+          );
+          float emit = uBright * (0.26 + 2.0 * heat * heat);
+          col += tint * shift * (emit * boost * dens * transmit * dt * deep);
+          transmit *= exp(-dens * 0.30 * dt);
+        }
+      }
+    }
+
+    vec3 acc = -1.5 * h2 * pos / (r2 * r2 * r);
+    vel += acc * dt;
+    pos += vel * dt;
+  }
+
+#if HAS_STARS
+  if (!captured && uStars > 0.001) {
+    vec3 toHole = normalize(-uCamPos);
+    float sI = length(cross(normalize(dir), toHole));
+    float sS = length(cross(normalize(vel), toHole));
+    float stretch = clamp(sI / max(1e-3, sS), 1.0, 40.0);
+    col += starField(normalize(vel)) * uStars * transmit / stretch;
+  }
+#endif
+
+  if (uEncode > 0.5) col = col / (1.0 + col);
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function blackHoleSceneFragmentSource(starsEnabled: boolean, fixedSteps: number | null = null): string {
+  return BLACK_HOLE_SCENE_FRAGMENT_SHADER
+    .replace("__MAX_STEPS__", fixedSteps === null ? "460" : String(fixedSteps))
+    .replace("__HAS_FIXED_STEPS__", fixedSteps === null ? "0" : "1")
+    .replace("__HAS_STARS__", starsEnabled ? "1" : "0");
+}
+
+const BLACK_HOLE_BLEND_FRAGMENT_SHADER = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uCur;
+uniform sampler2D uPrev;
+uniform float uAlpha;
+void main() {
+  vec3 c = texture2D(uCur, vUv).rgb;
+  vec3 p = texture2D(uPrev, vUv).rgb;
+  gl_FragColor = vec4(mix(p, c, uAlpha), 1.0);
+}
+`;
+
+const BLACK_HOLE_BRIGHT_FRAGMENT_SHADER = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uDecode;
+uniform float uPack;
+uniform float uThreshold;
+void main() {
+  vec3 s = texture2D(uTex, vUv + uTexel * vec2(-1.0, -1.0)).rgb
+         + texture2D(uTex, vUv + uTexel * vec2( 1.0, -1.0)).rgb
+         + texture2D(uTex, vUv + uTexel * vec2(-1.0,  1.0)).rgb
+         + texture2D(uTex, vUv + uTexel * vec2( 1.0,  1.0)).rgb;
+  s *= 0.25;
+  if (uDecode > 0.5) s = s / max(vec3(0.002), 1.0 - s);
+  float l = max(s.r, max(s.g, s.b));
+  s *= max(0.0, l - uThreshold) / max(0.0001, l);
+  gl_FragColor = vec4(s * uPack, 1.0);
+}
+`;
+
+const BLACK_HOLE_BLUR_FRAGMENT_SHADER = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uStep;
+void main() {
+  vec3 s = texture2D(uTex, vUv).rgb * 0.2270270;
+  s += (texture2D(uTex, vUv + uStep * 1.3846154).rgb
+      + texture2D(uTex, vUv - uStep * 1.3846154).rgb) * 0.3162162;
+  s += (texture2D(uTex, vUv + uStep * 3.2307692).rgb
+      + texture2D(uTex, vUv - uStep * 3.2307692).rgb) * 0.0702702;
+  gl_FragColor = vec4(s, 1.0);
+}
+`;
+
+const BLACK_HOLE_COMPOSITE_FRAGMENT_SHADER = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform float uDecode;
+uniform float uPack;
+uniform float uGlow;
+uniform float uExposure;
+uniform float uVignette;
+uniform float uScrimDir;
+uniform float uScrimAmt;
+uniform float uSeed;
+vec3 aces(vec3 x) {
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+void main() {
+  vec3 scene = texture2D(uScene, vUv).rgb;
+  if (uDecode > 0.5) scene = scene / max(vec3(0.002), 1.0 - scene);
+  vec3 bloom = texture2D(uBloom, vUv).rgb / uPack;
+  vec3 c = scene + bloom * uGlow;
+  c = aces(c * uExposure);
+  c = pow(max(c, 0.0), vec3(0.4545));
+  vec2 d = vUv - 0.5;
+  c *= 1.0 - uVignette * dot(d, d) * 1.9;
+  if (uScrimDir > 0.5) {
+    float x = uScrimDir < 1.5 ? vUv.x
+            : uScrimDir < 2.5 ? 1.0 - vUv.x
+            : uScrimDir < 3.5 ? 1.0 - vUv.y
+            : vUv.y;
+    c *= 1.0 - uScrimAmt * pow(1.0 - clamp(x, 0.0, 1.0), 2.4);
+  }
+  float n = fract(sin(dot(gl_FragCoord.xy + uSeed, vec2(12.9898, 78.233))) * 43758.5453);
+  c += (n - 0.5) / 255.0;
+  gl_FragColor = vec4(c, 1.0);
+}
+`;
+
+interface BlackHoleProgram {
+  readonly program: WebGLProgram;
+  readonly uniforms: Record<string, WebGLUniformLocation | null>;
+}
+
+interface BlackHoleRenderTarget {
+  readonly framebuffer: WebGLFramebuffer;
+  readonly texture: WebGLTexture;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface BlackHoleRendererRuntime {
+  readonly invalidate: (sceneChanged: boolean, sizeChanged: boolean) => void;
+  readonly dispose: () => void;
+}
+
+const BLACK_HOLE_FOCUS: readonly [number, number] = Object.freeze([0.72, 0.46]);
+const BLACK_HOLE_RADIANS = Math.PI / 180;
+
+function blackHoleHexToLinear(hex: string): [number, number, number] {
+  const value = hex.trim().replace("#", "");
+  const complete = value.length === 3
+    ? value.charAt(0) + value.charAt(0) + value.charAt(1) + value.charAt(1) + value.charAt(2) + value.charAt(2)
+    : value.slice(0, 6);
+  const number = Number.parseInt(complete, 16);
+  const srgb = [((number >> 16) & 255) / 255, ((number >> 8) & 255) / 255, (number & 255) / 255];
+  return srgb.map((channel) => channel <= 0.04045
+    ? channel / 12.92
+    : Math.pow((channel + 0.055) / 1.055, 2.4)) as [number, number, number];
+}
+
+function blackHoleSceneSignature(settings: BlackHoleBackgroundSettings): string {
+  return [
+    settings.distance,
+    settings.elevation,
+    settings.azimuth,
+    settings.orbitSpeed,
+    settings.roll,
+    settings.fov,
+    settings.diskInner,
+    settings.diskOuter,
+    settings.diskThickness,
+    settings.diskDensity,
+    settings.brightness,
+    settings.spinSpeed,
+    settings.grain,
+    settings.doppler,
+    settings.hotColor,
+    settings.midColor,
+    settings.coolColor,
+    settings.starBrightness,
+    settings.steps,
+  ].join("|");
+}
+
+function blackHoleSizeSignature(settings: BlackHoleBackgroundSettings): string {
+  return `${settings.resolution}|${settings.maxDpr}`;
+}
+
+function startBlackHoleRenderer(
+  host: HTMLElement,
+  canvas: HTMLCanvasElement,
+  readSettings: () => BlackHoleBackgroundSettings,
+  onError: (message?: string) => void,
+): BlackHoleRendererRuntime {
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let reduced = reducedMotion.matches;
+  const contextOptions: WebGLContextAttributes = {
+    alpha: false,
+    antialias: false,
+    depth: false,
+    stencil: false,
+    powerPreference: "high-performance",
+    preserveDrawingBuffer: false,
+  };
+  const gl = (canvas.getContext("webgl2", contextOptions) || canvas.getContext("webgl", contextOptions)) as
+    | WebGL2RenderingContext
+    | WebGLRenderingContext
+    | null;
+  let reportedFailure: string | undefined;
+  const giveUp = (reason: string, message: string): void => {
+    host.dataset.webgl = reason;
+    canvas.hidden = true;
+    if (reportedFailure !== message) {
+      reportedFailure = message;
+      onError(message);
+    }
+  };
+  if (!gl) {
+    const message = "WebGL is unavailable; Black Hole Background could not be rendered.";
+    giveUp("unsupported", message);
+    throw new Error(message);
+  }
+
+  interface DebugRendererInfo { readonly UNMASKED_RENDERER_WEBGL: number }
+  interface HalfFloatExtension { readonly HALF_FLOAT_OES: number }
+  const debugInfo = gl.getExtension("WEBGL_debug_renderer_info") as DebugRendererInfo | null;
+  const rendererName = debugInfo ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "") : "";
+  const softwareRenderer = /swiftshader|llvmpipe|softpipe|software|microsoft basic/i.test(rendererName);
+  const webGl2 = typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext;
+  const maxTextureSize = Math.max(2, Number(gl.getParameter(gl.MAX_TEXTURE_SIZE)) || 4096);
+  const viewportDimensions = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array | number[] | null;
+  const maxViewportWidth = Math.max(2, Number(viewportDimensions?.[0]) || maxTextureSize);
+  const maxViewportHeight = Math.max(2, Number(viewportDimensions?.[1]) || maxTextureSize);
+  const maxRenderWidth = Math.min(maxTextureSize, maxViewportWidth);
+  const maxRenderHeight = Math.min(maxTextureSize, maxViewportHeight);
+
+  const compileShader = (type: number, source: string): WebGLShader | null => {
+    const shader = gl.createShader(type);
+    if (!shader) return null;
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error("black-hole: shader compilation failed", gl.getShaderInfoLog(shader) || "no log");
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  };
+
+  const linkProgram = (fragmentSource: string): BlackHoleProgram | null => {
+    const vertexShader = compileShader(gl.VERTEX_SHADER, BLACK_HOLE_VERTEX_SHADER);
+    if (!vertexShader) return null;
+    const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentSource);
+    if (!fragmentShader) {
+      gl.deleteShader(vertexShader);
+      return null;
+    }
+    const program = gl.createProgram();
+    if (!program) {
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      return null;
+    }
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.bindAttribLocation(program, 0, "aPos");
+    gl.linkProgram(program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error("black-hole: program link failed", gl.getProgramInfoLog(program) || "no log");
+      gl.deleteProgram(program);
+      return null;
+    }
+    const uniforms: Record<string, WebGLUniformLocation | null> = {};
+    const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS) as number;
+    for (let index = 0; index < count; index += 1) {
+      const info = gl.getActiveUniform(program, index);
+      if (info) uniforms[info.name] = gl.getUniformLocation(program, info.name);
+    }
+    return { program, uniforms };
+  };
+
+  let hdr = true;
+  let textureType: number = gl.UNSIGNED_BYTE;
+  let internalFormat: number = gl.RGBA;
+  if (webGl2) {
+    const gl2 = gl as WebGL2RenderingContext;
+    const supported = gl2.getExtension("EXT_color_buffer_half_float") || gl2.getExtension("EXT_color_buffer_float");
+    if (supported) {
+      textureType = gl2.HALF_FLOAT;
+      internalFormat = gl2.RGBA16F;
+    } else {
+      hdr = false;
+    }
+  } else {
+    const halfFloat = gl.getExtension("OES_texture_half_float") as HalfFloatExtension | null;
+    const colorBuffer = gl.getExtension("EXT_color_buffer_half_float");
+    if (halfFloat && colorBuffer) textureType = halfFloat.HALF_FLOAT_OES;
+    else hdr = false;
+  }
+  if (!hdr) {
+    textureType = gl.UNSIGNED_BYTE;
+    internalFormat = gl.RGBA;
+  }
+  const linearFiltering = webGl2 || Boolean(gl.getExtension("OES_texture_half_float_linear")) || !hdr;
+  let textureFilter = linearFiltering ? gl.LINEAR : gl.NEAREST;
+  let bloomPack = hdr ? 1 : 0.12;
+
+  const createTarget = (width: number, height: number): BlackHoleRenderTarget | null => {
+    const texture = gl.createTexture();
+    const framebuffer = gl.createFramebuffer();
+    if (!texture || !framebuffer) {
+      if (texture) gl.deleteTexture(texture);
+      if (framebuffer) gl.deleteFramebuffer(framebuffer);
+      return null;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, gl.RGBA, textureType, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, textureFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, textureFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.deleteTexture(texture);
+      gl.deleteFramebuffer(framebuffer);
+      return null;
+    }
+    return { framebuffer, texture, width, height };
+  };
+
+  let sceneProgram: BlackHoleProgram | null = null;
+  let starSceneProgram: BlackHoleProgram | null = null;
+  let starSceneUnavailable = false;
+  type StepVariant = { readonly program: BlackHoleProgram; lastUsed: number };
+  const stepVariants = new Map<string, StepVariant>();
+  const failedStepVariants = new Set<string>();
+  let stepVariantClock = 0;
+  const maximumStepVariants = 6;
+  let blendProgram: BlackHoleProgram | null = null;
+  let brightProgram: BlackHoleProgram | null = null;
+  let blurProgram: BlackHoleProgram | null = null;
+  let compositeProgram: BlackHoleProgram | null = null;
+  let vertexBuffer: WebGLBuffer | null = null;
+  let sceneTarget: BlackHoleRenderTarget | null = null;
+  let historyA: BlackHoleRenderTarget | null = null;
+  let historyB: BlackHoleRenderTarget | null = null;
+  let bloomA: BlackHoleRenderTarget | null = null;
+  let bloomB: BlackHoleRenderTarget | null = null;
+  let shownTarget: BlackHoleRenderTarget | null = null;
+  let shownBloomTarget: BlackHoleRenderTarget | null = null;
+  let settledFrames = 0;
+  let canvasWidth = 0;
+  let canvasHeight = 0;
+  let sceneWidth = 0;
+  let sceneHeight = 0;
+  let activeProgram: WebGLProgram | null = null;
+  let activeTextureUnit = -1;
+  let viewportWidth = -1;
+  let viewportHeight = -1;
+  type PendingVariant = { readonly key: string; readonly stars: boolean; readonly steps: number };
+  let pendingVariant: PendingVariant | null = null;
+  let pendingVariantIdle: number | null = null;
+  let pendingVariantTimer: number | null = null;
+  let clock = reduced ? 6 : 0;
+  let lastFrame = 0;
+  let running = true;
+  let inViewport = true;
+  let documentVisible = !document.hidden;
+  let contextReady = true;
+  let allocationFailed = false;
+  let animationFrame = 0;
+  let needsScene = true;
+  let needsComposite = true;
+  let resizePending = false;
+  let stillPassesRemaining = 16;
+  let lastPaused = readSettings().paused || reduced;
+
+  const effectiveSteps = (value: number): number => softwareRenderer ? 130 : Math.max(60, Math.min(460, Math.round(value)));
+  const variantKey = (stars: boolean, steps: number): string => `${stars ? "stars" : "plain"}:${steps}`;
+  const configureSceneProgram = (program: BlackHoleProgram): void => {
+    gl.useProgram(program.program);
+    gl.uniform1f(program.uniforms.uEncode ?? null, hdr ? 0 : 1);
+    if (sceneWidth > 0 && sceneHeight > 0) gl.uniform2f(program.uniforms.uRes ?? null, sceneWidth, sceneHeight);
+    activeProgram = null;
+  };
+  const cacheStepVariant = (key: string, program: BlackHoleProgram): void => {
+    stepVariants.set(key, { program, lastUsed: ++stepVariantClock });
+    while (stepVariants.size > maximumStepVariants) {
+      let oldestKey: string | undefined;
+      let oldestUse = Number.POSITIVE_INFINITY;
+      for (const [candidateKey, candidate] of stepVariants) {
+        if (candidate.lastUsed < oldestUse) {
+          oldestKey = candidateKey;
+          oldestUse = candidate.lastUsed;
+        }
+      }
+      if (!oldestKey) break;
+      const evicted = stepVariants.get(oldestKey);
+      stepVariants.delete(oldestKey);
+      if (evicted) gl.deleteProgram(evicted.program.program);
+    }
+  };
+  const clearStepVariants = (deletePrograms: boolean): void => {
+    if (deletePrograms) {
+      for (const variant of stepVariants.values()) gl.deleteProgram(variant.program.program);
+    }
+    stepVariants.clear();
+    failedStepVariants.clear();
+    stepVariantClock = 0;
+  };
+  const compileExactProgram = (stars: boolean, steps: number): BlackHoleProgram | null => {
+    const key = variantKey(stars, steps);
+    const cached = stepVariants.get(key);
+    if (cached) {
+      cached.lastUsed = ++stepVariantClock;
+      return cached.program;
+    }
+    if (failedStepVariants.has(key)) return null;
+    const program = linkProgram(blackHoleSceneFragmentSource(stars, steps));
+    if (!program) {
+      failedStepVariants.add(key);
+      return null;
+    }
+    configureSceneProgram(program);
+    cacheStepVariant(key, program);
+    return program;
+  };
+  const cancelPendingVariant = (): void => {
+    if (pendingVariantIdle !== null) {
+      const cancelIdle = (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback;
+      cancelIdle?.(pendingVariantIdle);
+      pendingVariantIdle = null;
+    }
+    if (pendingVariantTimer !== null) {
+      window.clearTimeout(pendingVariantTimer);
+      pendingVariantTimer = null;
+    }
+    pendingVariant = null;
+  };
+  const queueExactProgram = (stars: boolean, steps: number): void => {
+    const key = variantKey(stars, steps);
+    if (stepVariants.has(key) || failedStepVariants.has(key)) return;
+    pendingVariant = { key, stars, steps };
+    if (pendingVariantIdle !== null || pendingVariantTimer !== null) return;
+    const compilePending = (): void => {
+      pendingVariantIdle = null;
+      pendingVariantTimer = null;
+      const request = pendingVariant;
+      pendingVariant = null;
+      if (!request || !running || !contextReady) return;
+      if (!inViewport || !documentVisible) {
+        pendingVariant = request;
+        return;
+      }
+      const compiled = compileExactProgram(request.stars, request.steps);
+      if (compiled) {
+        const current = readSettings();
+        const currentKey = variantKey(current.starBrightness > 0.001, effectiveSteps(current.steps));
+        if (currentKey === request.key) {
+          settledFrames = 0;
+          needsScene = true;
+          needsComposite = true;
+          schedule();
+        }
+      }
+      const nextRequest = pendingVariant as PendingVariant | null;
+      if (nextRequest && running && contextReady) queueExactProgram(nextRequest.stars, nextRequest.steps);
+    };
+    const requestIdle = (window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+    }).requestIdleCallback;
+    if (requestIdle) pendingVariantIdle = requestIdle(compilePending, { timeout: 400 });
+    else pendingVariantTimer = window.setTimeout(compilePending, 100);
+  };
+  const dynamicSceneProgram = (stars: boolean): BlackHoleProgram | null => {
+    if (!stars) return sceneProgram;
+    if (!starSceneProgram && !starSceneUnavailable) {
+      starSceneProgram = linkProgram(blackHoleSceneFragmentSource(true));
+      if (starSceneProgram) configureSceneProgram(starSceneProgram);
+      else starSceneUnavailable = true;
+    }
+    return starSceneProgram ?? sceneProgram;
+  };
+  const selectSceneProgram = (stars: boolean, steps: number): BlackHoleProgram | null => {
+    const exact = stepVariants.get(variantKey(stars, steps));
+    if (exact) {
+      exact.lastUsed = ++stepVariantClock;
+      return exact.program;
+    }
+    queueExactProgram(stars, steps);
+    return dynamicSceneProgram(stars);
+  };
+  const build = (): boolean => {
+    cancelPendingVariant();
+    clearStepVariants(true);
+    sceneProgram = linkProgram(blackHoleSceneFragmentSource(false));
+    starSceneProgram = null;
+    starSceneUnavailable = false;
+    blendProgram = linkProgram(BLACK_HOLE_BLEND_FRAGMENT_SHADER);
+    brightProgram = linkProgram(BLACK_HOLE_BRIGHT_FRAGMENT_SHADER);
+    blurProgram = linkProgram(BLACK_HOLE_BLUR_FRAGMENT_SHADER);
+    compositeProgram = linkProgram(BLACK_HOLE_COMPOSITE_FRAGMENT_SHADER);
+    if (!sceneProgram || !blendProgram || !brightProgram || !blurProgram || !compositeProgram) return false;
+    configureSceneProgram(sceneProgram);
+    gl.useProgram(blendProgram.program);
+    gl.uniform1i(blendProgram.uniforms.uCur ?? null, 0);
+    gl.uniform1i(blendProgram.uniforms.uPrev ?? null, 1);
+    gl.useProgram(brightProgram.program);
+    gl.uniform1i(brightProgram.uniforms.uTex ?? null, 0);
+    gl.uniform1f(brightProgram.uniforms.uDecode ?? null, hdr ? 0 : 1);
+    gl.uniform1f(brightProgram.uniforms.uPack ?? null, bloomPack);
+    gl.uniform1f(brightProgram.uniforms.uThreshold ?? null, 0.85);
+    gl.useProgram(blurProgram.program);
+    gl.uniform1i(blurProgram.uniforms.uTex ?? null, 0);
+    gl.useProgram(compositeProgram.program);
+    gl.uniform1i(compositeProgram.uniforms.uScene ?? null, 0);
+    gl.uniform1i(compositeProgram.uniforms.uBloom ?? null, 1);
+    gl.uniform1f(compositeProgram.uniforms.uDecode ?? null, hdr ? 0 : 1);
+    gl.uniform1f(compositeProgram.uniforms.uPack ?? null, bloomPack);
+    activeProgram = null;
+    activeTextureUnit = -1;
+    viewportWidth = -1;
+    viewportHeight = -1;
+    vertexBuffer = gl.createBuffer();
+    if (!vertexBuffer) return false;
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    const settings = readSettings();
+    compileExactProgram(settings.starBrightness > 0.001, effectiveSteps(settings.steps));
+    return true;
+  };
+  const dropTargets = (): void => {
+    for (const target of [sceneTarget, historyA, historyB, bloomA, bloomB]) {
+      if (!target) continue;
+      gl.deleteTexture(target.texture);
+      gl.deleteFramebuffer(target.framebuffer);
+    }
+    sceneTarget = historyA = historyB = bloomA = bloomB = null;
+    shownTarget = shownBloomTarget = null;
+    settledFrames = 0;
+  };
+  const destroyGpuResources = (): void => {
+    dropTargets();
+    if (vertexBuffer) gl.deleteBuffer(vertexBuffer);
+    vertexBuffer = null;
+    for (const program of [sceneProgram, starSceneProgram, blendProgram, brightProgram, blurProgram, compositeProgram]) {
+      if (program) gl.deleteProgram(program.program);
+    }
+    sceneProgram = starSceneProgram = blendProgram = brightProgram = blurProgram = compositeProgram = null;
+    clearStepVariants(true);
+  };
+  const resize = (): boolean => {
+    const rect = host.getBoundingClientRect();
+    const settings = readSettings();
+    const dpr = softwareRenderer ? 1 : Math.min(window.devicePixelRatio || 1, Math.max(1, settings.maxDpr));
+    const cssWidth = Math.max(1, Math.round(rect.width));
+    const cssHeight = Math.max(1, Math.round(rect.height));
+    const scale = softwareRenderer ? 0.34 : Math.min(1, Math.max(0.4, settings.resolution));
+    const requestedWidth = Math.max(2, Math.round(cssWidth * dpr));
+    const requestedHeight = Math.max(2, Math.round(cssHeight * dpr));
+    const gpuSizeScale = Math.min(1, maxRenderWidth / requestedWidth, maxRenderHeight / requestedHeight);
+    const width = Math.max(2, Math.floor(requestedWidth * gpuSizeScale));
+    const height = Math.max(2, Math.floor(requestedHeight * gpuSizeScale));
+    const nextSceneWidth = Math.max(2, Math.round(width * scale));
+    const nextSceneHeight = Math.max(2, Math.round(height * scale));
+    if (
+      width === canvasWidth
+      && height === canvasHeight
+      && nextSceneWidth === sceneWidth
+      && nextSceneHeight === sceneHeight
+      && sceneTarget
+      && historyA
+      && historyB
+      && bloomA
+      && bloomB
+    ) return false;
+    canvasWidth = width;
+    canvasHeight = height;
+    sceneWidth = nextSceneWidth;
+    sceneHeight = nextSceneHeight;
+    canvas.width = width;
+    canvas.height = height;
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    dropTargets();
+    const bloomWidth = Math.max(2, sceneWidth >> 2);
+    const bloomHeight = Math.max(2, sceneHeight >> 2);
+    const allocateTargets = (): boolean => {
+      sceneTarget = createTarget(sceneWidth, sceneHeight);
+      historyA = createTarget(sceneWidth, sceneHeight);
+      historyB = createTarget(sceneWidth, sceneHeight);
+      bloomA = createTarget(bloomWidth, bloomHeight);
+      bloomB = createTarget(bloomWidth, bloomHeight);
+      return Boolean(sceneTarget && historyA && historyB && bloomA && bloomB);
+    };
+    let allocated = allocateTargets();
+    if (!allocated && hdr) {
+      dropTargets();
+      hdr = false;
+      textureType = gl.UNSIGNED_BYTE;
+      internalFormat = gl.RGBA;
+      textureFilter = gl.LINEAR;
+      bloomPack = 0.12;
+      allocated = allocateTargets();
+    }
+    if (!allocated || !sceneTarget || !historyA || !historyB || !bloomA || !bloomB) {
+      dropTargets();
+      canvasWidth = canvasHeight = sceneWidth = sceneHeight = 0;
+      allocationFailed = true;
+      giveUp("allocation-failed", "The GPU could not allocate the Black Hole Background render targets.");
+      return false;
+    }
+    allocationFailed = false;
+    canvas.hidden = false;
+    host.dataset.webgl = "";
+    if (reportedFailure) {
+      reportedFailure = undefined;
+      onError(undefined);
+    }
+    if (sceneProgram) configureSceneProgram(sceneProgram);
+    if (starSceneProgram) configureSceneProgram(starSceneProgram);
+    for (const variant of stepVariants.values()) configureSceneProgram(variant.program);
+    if (brightProgram) {
+      gl.useProgram(brightProgram.program);
+      gl.uniform1f(brightProgram.uniforms.uDecode ?? null, hdr ? 0 : 1);
+      gl.uniform1f(brightProgram.uniforms.uPack ?? null, bloomPack);
+      gl.uniform2f(brightProgram.uniforms.uTexel ?? null, 1 / sceneWidth, 1 / sceneHeight);
+    }
+    if (compositeProgram) {
+      gl.useProgram(compositeProgram.program);
+      gl.uniform1f(compositeProgram.uniforms.uDecode ?? null, hdr ? 0 : 1);
+      gl.uniform1f(compositeProgram.uniforms.uPack ?? null, bloomPack);
+    }
+    activeProgram = null;
+    return true;
+  };
+
+  const pass = (program: BlackHoleProgram, target: BlackHoleRenderTarget | null): void => {
+    if (activeProgram !== program.program) {
+      gl.useProgram(program.program);
+      activeProgram = program.program;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target?.framebuffer ?? null);
+    const width = target?.width ?? canvasWidth;
+    const height = target?.height ?? canvasHeight;
+    if (viewportWidth !== width || viewportHeight !== height) {
+      gl.viewport(0, 0, width, height);
+      viewportWidth = width;
+      viewportHeight = height;
+    }
+  };
+  const draw = (): void => gl.drawArrays(gl.TRIANGLES, 0, 3);
+  const bindTexture = (texture: WebGLTexture, unit: number): void => {
+    if (activeTextureUnit !== unit) {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      activeTextureUnit = unit;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+  };
+  const halton: readonly (readonly [number, number])[] = [
+    [0.5, 0.333], [0.25, 0.667], [0.75, 0.111], [0.125, 0.444],
+    [0.625, 0.778], [0.375, 0.222], [0.875, 0.556], [0.0625, 0.889],
+  ];
+  type LinearColorCache = { source: string | null; value: [number, number, number] };
+  const colorCache: Record<"hot" | "mid" | "cool", LinearColorCache> = {
+    hot: { source: null, value: [0, 0, 0] },
+    mid: { source: null, value: [0, 0, 0] },
+    cool: { source: null, value: [0, 0, 0] },
+  };
+  const linearColor = (source: string, cache: LinearColorCache): [number, number, number] => {
+    if (cache.source !== source) {
+      cache.source = source;
+      cache.value = blackHoleHexToLinear(source);
+    }
+    return cache.value;
+  };
+
+  const render = (time: number, includeScene = true, finishScene = true): void => {
+    if (!sceneProgram || !blendProgram || !brightProgram || !blurProgram || !compositeProgram) return;
+    const activeBlurProgram = blurProgram;
+    if (!sceneTarget || !historyA || !historyB || !bloomA || !bloomB) return;
+    const settings = readSettings();
+    if (!includeScene && (!shownTarget || !shownBloomTarget)) return;
+
+    if (includeScene) {
+      const steps = effectiveSteps(settings.steps);
+      const selectedSceneProgram = selectSceneProgram(settings.starBrightness > 0.001, steps);
+      if (!selectedSceneProgram) return;
+      const azimuth = (settings.azimuth + settings.orbitSpeed * time) * BLACK_HOLE_RADIANS;
+      const elevation = Math.max(-88, Math.min(88, settings.elevation)) * BLACK_HOLE_RADIANS;
+      const distance = Math.max(2.2, settings.distance);
+      const cosineElevation = Math.cos(elevation);
+      const cameraX = distance * cosineElevation * Math.cos(azimuth);
+      const cameraY = distance * Math.sin(elevation);
+      const cameraZ = distance * cosineElevation * Math.sin(azimuth);
+      const forwardX = -cameraX / distance;
+      const forwardY = -cameraY / distance;
+      const forwardZ = -cameraZ / distance;
+      let rightX = forwardZ;
+      let rightY = 0;
+      let rightZ = -forwardX;
+      const rightLength = Math.hypot(rightX, rightY, rightZ) || 1;
+      rightX /= rightLength;
+      rightY /= rightLength;
+      rightZ /= rightLength;
+      const upX = rightY * forwardZ - rightZ * forwardY;
+      const upY = rightZ * forwardX - rightX * forwardZ;
+      const upZ = rightX * forwardY - rightY * forwardX;
+      const cosineRoll = Math.cos(settings.roll * BLACK_HOLE_RADIANS);
+      const sineRoll = Math.sin(settings.roll * BLACK_HOLE_RADIANS);
+      const rolledRightX = rightX * cosineRoll + upX * sineRoll;
+      const rolledRightY = rightY * cosineRoll + upY * sineRoll;
+      const rolledRightZ = rightZ * cosineRoll + upZ * sineRoll;
+      const rolledUpX = -rightX * sineRoll + upX * cosineRoll;
+      const rolledUpY = -rightY * sineRoll + upY * cosineRoll;
+      const rolledUpZ = -rightZ * sineRoll + upZ * cosineRoll;
+      const hot = linearColor(settings.hotColor, colorCache.hot);
+      const mid = linearColor(settings.midColor, colorCache.mid);
+      const cool = linearColor(settings.coolColor, colorCache.cool);
+      const outer = Math.max(settings.diskInner + 0.5, settings.diskOuter);
+
+      pass(selectedSceneProgram, sceneTarget);
+      const uniforms = selectedSceneProgram.uniforms;
+      gl.uniform1f(uniforms.uTime ?? null, time);
+      gl.uniform3f(uniforms.uCamPos ?? null, cameraX, cameraY, cameraZ);
+      gl.uniform3f(uniforms.uRight ?? null, rolledRightX, rolledRightY, rolledRightZ);
+      gl.uniform3f(uniforms.uUp ?? null, rolledUpX, rolledUpY, rolledUpZ);
+      gl.uniform3f(uniforms.uFwd ?? null, forwardX, forwardY, forwardZ);
+      gl.uniform1f(uniforms.uTanHalf ?? null, Math.tan(Math.max(8, Math.min(110, settings.fov)) * 0.5 * BLACK_HOLE_RADIANS));
+      gl.uniform2f(uniforms.uFocus ?? null, BLACK_HOLE_FOCUS[0], 1 - BLACK_HOLE_FOCUS[1]);
+      if (uniforms.uSteps) gl.uniform1f(uniforms.uSteps, steps);
+      gl.uniform1f(uniforms.uSkyR ?? null, Math.max(distance * 1.35, outer * 2.4));
+      gl.uniform1f(uniforms.uDiskIn ?? null, Math.max(1.05, settings.diskInner));
+      gl.uniform1f(uniforms.uDiskOut ?? null, outer);
+      gl.uniform1f(uniforms.uThick ?? null, Math.max(0.02, settings.diskThickness));
+      gl.uniform1f(uniforms.uDensity ?? null, Math.max(0, settings.diskDensity));
+      gl.uniform1f(uniforms.uSpin ?? null, settings.spinSpeed * 6.2831853);
+      gl.uniform1f(uniforms.uGrain ?? null, Math.max(0.02, settings.grain));
+      gl.uniform1f(uniforms.uBright ?? null, Math.max(0, settings.brightness));
+      gl.uniform1f(uniforms.uDoppler ?? null, Math.max(0, Math.min(1, settings.doppler)));
+      gl.uniform3f(uniforms.uHot ?? null, hot[0], hot[1], hot[2]);
+      gl.uniform3f(uniforms.uMid ?? null, mid[0], mid[1], mid[2]);
+      gl.uniform3f(uniforms.uCool ?? null, cool[0], cool[1], cool[2]);
+      if (uniforms.uStars) gl.uniform1f(uniforms.uStars, Math.max(0, settings.starBrightness));
+      const jitter = halton[settledFrames % halton.length] ?? halton[0];
+      if (!jitter) return;
+      gl.uniform2f(uniforms.uJitter ?? null, jitter[0] - 0.5, jitter[1] - 0.5);
+      gl.uniform1f(uniforms.uSeed ?? null, (settledFrames % 64) * 17.13);
+      draw();
+
+      const historyWeight = settledFrames === 0 ? 1 : 0.14;
+      pass(blendProgram, historyB);
+      bindTexture(sceneTarget.texture, 0);
+      bindTexture(historyA.texture, 1);
+      gl.uniform1f(blendProgram.uniforms.uAlpha ?? null, historyWeight);
+      draw();
+      const shown = historyB;
+      const swap = historyA;
+      historyA = historyB;
+      historyB = swap;
+      settledFrames += 1;
+      shownTarget = shown;
+
+      if (finishScene) {
+        pass(brightProgram, bloomA);
+        bindTexture(shown.texture, 0);
+        draw();
+        const blurStep = (source: BlackHoleRenderTarget, destination: BlackHoleRenderTarget, dx: number, dy: number): void => {
+          pass(activeBlurProgram, destination);
+          bindTexture(source.texture, 0);
+          gl.uniform2f(activeBlurProgram.uniforms.uStep ?? null, dx / destination.width, dy / destination.height);
+          draw();
+        };
+        blurStep(bloomA, bloomB, 1, 0);
+        blurStep(bloomB, bloomA, 0, 1);
+        blurStep(bloomA, bloomB, 2.6, 0);
+        blurStep(bloomB, bloomA, 0, 2.6);
+        shownBloomTarget = bloomA;
+      }
+    }
+
+    if (includeScene && !finishScene) return;
+    const scene = shownTarget;
+    const bloom = shownBloomTarget;
+    if (!scene || !bloom) return;
+    pass(compositeProgram, null);
+    bindTexture(scene.texture, 0);
+    bindTexture(bloom.texture, 1);
+    gl.uniform1f(compositeProgram.uniforms.uGlow ?? null, Math.max(0, settings.glow) * 0.26);
+    gl.uniform1f(compositeProgram.uniforms.uExposure ?? null, Math.max(0.05, settings.exposure));
+    gl.uniform1f(compositeProgram.uniforms.uVignette ?? null, Math.max(0, Math.min(1, settings.vignette)));
+    gl.uniform1f(compositeProgram.uniforms.uScrimDir ?? null, 0);
+    gl.uniform1f(compositeProgram.uniforms.uScrimAmt ?? null, 0);
+    gl.uniform1f(compositeProgram.uniforms.uSeed ?? null, (time * 60) % 1000);
+    draw();
+  };
+
+  const canRun = (): boolean => running && contextReady && inViewport && documentVisible;
+  function schedule(): void {
+    if (!canRun() || animationFrame || (allocationFailed && !resizePending)) return;
+    animationFrame = requestAnimationFrame(tick);
+  }
+  const stopLoop = (): void => {
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    animationFrame = 0;
+    lastFrame = 0;
+  };
+  function tick(now: number): void {
+    animationFrame = 0;
+    if (!canRun()) return;
+    if (resizePending) {
+      resizePending = false;
+      if (resize()) {
+        settledFrames = 0;
+        stillPassesRemaining = 16;
+        needsScene = true;
+      }
+    }
+    if (allocationFailed) return;
+    const paused = readSettings().paused || reduced;
+    if (paused !== lastPaused) {
+      if (paused) {
+        settledFrames = 0;
+        stillPassesRemaining = 16;
+        needsScene = true;
+      }
+      lastPaused = paused;
+      lastFrame = 0;
+      needsComposite = true;
+    }
+    const delta = lastFrame ? Math.min(0.05, (now - lastFrame) / 1_000) : 0;
+    lastFrame = now;
+    if (!paused) {
+      clock += delta;
+      render(clock, true, true);
+      needsScene = false;
+      needsComposite = false;
+    } else if (needsScene) {
+      const finishScene = stillPassesRemaining === 16 || stillPassesRemaining <= 1;
+      render(clock, true, finishScene);
+      stillPassesRemaining = Math.max(0, stillPassesRemaining - 1);
+      if (stillPassesRemaining === 0) {
+        needsScene = false;
+        needsComposite = false;
+      }
+    } else if (needsComposite) {
+      render(clock, false, true);
+      needsComposite = false;
+    }
+    if (!paused || needsScene || needsComposite || resizePending) schedule();
+    else lastFrame = 0;
+  }
+
+  if (!build()) {
+    const message = "The Black Hole Background shaders could not be initialized.";
+    giveUp("build-failed", message);
+    destroyGpuResources();
+    throw new Error(message);
+  }
+  if (!resize()) {
+    const message = "The GPU could not allocate the Black Hole Background render targets.";
+    destroyGpuResources();
+    throw new Error(message);
+  }
+  schedule();
+
+  const resizeObserver = new ResizeObserver(() => {
+    resizePending = true;
+    schedule();
+  });
+  resizeObserver.observe(host);
+  const intersectionObserver = new IntersectionObserver((entries) => {
+    inViewport = entries[0]?.isIntersecting ?? true;
+    if (inViewport) {
+      lastFrame = 0;
+      needsComposite = true;
+      schedule();
+    } else {
+      stopLoop();
+    }
+  }, { threshold: 0 });
+  intersectionObserver.observe(host);
+  const onVisibilityChange = (): void => {
+    documentVisible = !document.hidden;
+    lastFrame = 0;
+    if (documentVisible) {
+      needsComposite = true;
+      schedule();
+    } else {
+      stopLoop();
+    }
+  };
+  const onContextLost = (event: Event): void => {
+    event.preventDefault();
+    contextReady = false;
+    allocationFailed = false;
+    cancelPendingVariant();
+    stopLoop();
+    canvasWidth = canvasHeight = sceneWidth = sceneHeight = 0;
+    giveUp("context-lost", "The Black Hole Background graphics context was lost; waiting for recovery.");
+  };
+  const onContextRestored = (): void => {
+    destroyGpuResources();
+    canvasWidth = canvasHeight = sceneWidth = sceneHeight = 0;
+    contextReady = true;
+    if (!build()) {
+      contextReady = false;
+      destroyGpuResources();
+      giveUp("lost", "The Black Hole Background WebGL context could not be restored.");
+      return;
+    }
+    lastFrame = 0;
+    resizePending = false;
+    if (!resize()) return;
+    stillPassesRemaining = 16;
+    needsScene = true;
+    needsComposite = true;
+    schedule();
+  };
+  const onReducedMotionChange = (event: MediaQueryListEvent): void => {
+    reduced = event.matches;
+    lastFrame = 0;
+    settledFrames = 0;
+    stillPassesRemaining = 16;
+    needsScene = true;
+    needsComposite = true;
+    schedule();
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  canvas.addEventListener("webglcontextlost", onContextLost);
+  canvas.addEventListener("webglcontextrestored", onContextRestored);
+  reducedMotion.addEventListener("change", onReducedMotionChange);
+
+  return {
+    invalidate: (sceneChanged: boolean, sizeChanged: boolean): void => {
+      if (!running) return;
+      if (sizeChanged) resizePending = true;
+      if (sceneChanged) {
+        settledFrames = 0;
+        stillPassesRemaining = 16;
+        needsScene = true;
+      }
+      needsComposite = true;
+      schedule();
+    },
+    dispose: (): void => {
+      if (!running) return;
+      running = false;
+      cancelPendingVariant();
+      stopLoop();
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      canvas.removeEventListener("webglcontextlost", onContextLost);
+      canvas.removeEventListener("webglcontextrestored", onContextRestored);
+      reducedMotion.removeEventListener("change", onReducedMotionChange);
+      destroyGpuResources();
+    },
+  };
+}
+
+class BlackHoleRenderer {
+  #settings: BlackHoleBackgroundSettings;
+  readonly #runtime: BlackHoleRendererRuntime;
+
+  constructor(
+    host: HTMLElement,
+    canvas: HTMLCanvasElement,
+    settings: BlackHoleBackgroundSettings,
+    onError: (message?: string) => void,
+  ) {
+    this.#settings = normalizeBlackHoleSettings(settings);
+    this.#runtime = startBlackHoleRenderer(host, canvas, () => this.#settings, onError);
+  }
+
+  setSettings(settings: BlackHoleBackgroundSettings): void {
+    const next = normalizeBlackHoleSettings(settings);
+    const sceneChanged = blackHoleSceneSignature(next) !== blackHoleSceneSignature(this.#settings);
+    const sizeChanged = blackHoleSizeSignature(next) !== blackHoleSizeSignature(this.#settings);
+    this.#settings = next;
+    this.#runtime.invalidate(sceneChanged, sizeChanged);
+  }
+
+  dispose(): void {
+    this.#runtime.dispose();
+  }
+}
+
+class BlackHoleBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readBlackHoleBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #canvas: HTMLCanvasElement | undefined;
+  #renderer: BlackHoleRenderer | undefined;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() {
+    window.addEventListener("pagehide", this.#onPageHide, { once: true });
+  }
+
+  get settings(): BlackHoleBackgroundSettings {
+    return this.#settings;
+  }
+
+  get enabled(): boolean {
+    return this.#enabled;
+  }
+
+  get pending(): boolean {
+    return this.#pending;
+  }
+
+  get error(): string | undefined {
+    return this.#error;
+  }
+
+  get stoppedForExternalThemeChange(): boolean {
+    return this.#stoppedForExternalThemeChange;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Black Hole Background is unavailable");
+  }
+
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (
+      this.#disposed
+      || this.#enabled
+      || this.#pending
+      || this.#enableOperation
+      || generation !== this.#generation
+    ) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.#enableOperation === operation) this.#enableOperation = undefined;
+    }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexParticleLayer = "v1";
+      layer.dataset.codeCodexBlackHoleLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.backgroundColor = "#000000";
+      const canvas = document.createElement("canvas");
+      canvas.className = "code-codex-particle-canvas code-codex-black-hole-canvas";
+      layer.append(canvas);
+      document.body.prepend(layer);
+      this.#layer = layer;
+      this.#canvas = canvas;
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, "#000000");
+      this.#renderer = new BlackHoleRenderer(layer, canvas, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Black Hole Background could not be enabled";
+      this.#teardownPresentation();
+      try {
+        await this.#restoreCodexAppearanceTheme();
+      } catch {
+        // Retain the activation error. A retained theme lease retries on disable.
+      }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: BlackHoleBackgroundSettings): void {
+    this.#settings = normalizeBlackHoleSettings(next);
+    writeBlackHoleBackgroundSettings(this.#settings);
+    this.#renderer?.setSettings(this.#settings);
+    this.#notify();
+  }
+
+  applyPreset(name: BlackHolePresetName): void {
+    this.updateSettings(BLACK_HOLE_BACKGROUND_PRESETS[name]);
+  }
+
+  reset(): void {
+    this.updateSettings(DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS);
+  }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    this.#canvas = undefined;
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = BLACK_HOLE_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try {
+      current = await readCodexAppearanceTheme();
+    } catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) {
+        throw new Error("Another Code-Codex background is still using Dark mode");
+      }
+      if (lease && !lease.owner) {
+        writeParticleThemeLease({ ...lease, owner });
+      }
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) {
+        throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      }
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Black Hole Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try {
+        await writeCodexAppearanceTheme(current);
+        clearParticleThemeLease(owner);
+      } catch {
+        // Retain the lease so a later disable/startup can retry restoration.
+      }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = BLACK_HOLE_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease) return;
+    if (lease.owner && lease.owner !== owner) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) {
+      clearParticleThemeLease(owner);
+      return;
+    }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    });
+  }
+
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") {
+        this.#stopForExternalThemeChange();
+        return;
+      }
+    } catch {
+      // A transient read failure must not tear down an active presentation.
+    }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) {
+      this.#scheduleCodexThemePreferenceCheck();
+    }
+  }
+
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Black Hole Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+
+  #notify(): void {
+    for (const listener of this.#listeners) listener();
+  }
+
+  #onPageHide = (): void => {
+    this.dispose();
+  };
+}
+
+const BLACK_HOLE_BACKGROUND_CONTROLLER = Symbol.for("code-codex:black-hole-background-controller:v1");
+
+function getBlackHoleBackgroundController(): BlackHoleBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[BLACK_HOLE_BACKGROUND_CONTROLLER];
+  if (existing instanceof BlackHoleBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try {
+      existing.dispose();
+    } catch {
+      // Replace a stale controller from an earlier injected bundle.
+    }
+  }
+  const controller = new BlackHoleBackgroundController();
+  globalState[BLACK_HOLE_BACKGROUND_CONTROLLER] = controller;
   return controller;
 }
 
@@ -4281,6 +6043,103 @@ function particleSettingsPanelMarkup(): string {
   `;
 }
 
+function formatBlackHoleControlValue(definition: BlackHoleNumericControlDefinition, value: number): string {
+  if (definition.percent) return `${Math.round(value * 100)}%`;
+  const precision = Math.max(0, (String(definition.step).split(".")[1] ?? "").length);
+  return `${value.toFixed(precision)}${definition.unit ?? ""}`;
+}
+
+function blackHoleNumericControlsMarkup(group: BlackHoleControlGroup): string {
+  return BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS
+    .filter((definition) => definition.group === group)
+    .map((definition) => {
+      const value = DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS[definition.key];
+      const formattedValue = formatBlackHoleControlValue(definition, value);
+      return `
+        <div class="particle-control-row" title="${definition.hint}">
+          <label for="${definition.id}">${definition.label}</label>
+          <input id="${definition.id}" data-black-hole-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-valuetext="${formattedValue}">
+          <span class="particle-control-value"><output for="${definition.id}">${formattedValue}</output></span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function blackHoleBackgroundCardMarkup(): string {
+  const icon = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2.25" fill="currentColor" stroke="none"/><ellipse cx="8" cy="8" rx="6.1" ry="3.15" transform="rotate(-18 8 8)"/><path d="M2.5 9.7c2.4 1.15 8.2 1.15 11-2.35"/></svg>`;
+  return `
+    <article class="preview-extension appearance-extension black-hole-background-extension" data-appearance-plugin="${BLACK_HOLE_BACKGROUND_PLUGIN_ID}" aria-busy="false">
+      <span class="preview-extension-icon" aria-hidden="true">${icon}</span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>Black Hole Background</h4>
+          <span class="preview-extension-status" id="cle-black-hole-background-status">Disabled</span>
+        </div>
+      </div>
+      <div class="preview-extension-actions">
+        <button class="preview-extension-action" type="button" aria-describedby="cle-black-hole-background-status" aria-pressed="false">Enable</button>
+        <button class="particle-settings-trigger black-hole-settings-trigger" type="button" title="Configure Black Hole Background" aria-label="Configure Black Hole Background" aria-haspopup="dialog" aria-controls="cle-black-hole-settings" aria-expanded="false">${icons.sliders}</button>
+      </div>
+    </article>
+  `;
+}
+
+function blackHoleSettingsPanelMarkup(): string {
+  return `
+    <section class="particle-settings-panel black-hole-settings-panel" id="cle-black-hole-settings" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-black-hole-settings-title">
+      <header class="particle-settings-header">
+        <div class="particle-settings-heading">
+          <p>Appearance</p>
+          <h3 id="cle-black-hole-settings-title">Black hole settings</h3>
+        </div>
+        <button class="particle-settings-close black-hole-settings-close" type="button" title="Close black hole settings" aria-label="Close black hole settings">${icons.close}</button>
+      </header>
+      <div class="particle-settings-scroll">
+        <div class="black-hole-preset-toolbar" role="group" aria-label="Black hole scene presets">
+          <button type="button" data-black-hole-preset="cinema">Cinema</button>
+          <button type="button" data-black-hole-preset="lens">Lens</button>
+          <button type="button" data-black-hole-preset="ember">Ember</button>
+          <button class="black-hole-reset" type="button">Reset</button>
+        </div>
+        <fieldset class="particle-settings-group">
+          <legend>Camera</legend>
+          ${blackHoleNumericControlsMarkup("camera")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>Accretion disc</legend>
+          ${blackHoleNumericControlsMarkup("disc")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>Light</legend>
+          ${blackHoleNumericControlsMarkup("light")}
+          <label class="particle-color-row" for="cle-black-hole-hot-color">
+            <span>Hot color</span>
+            <input id="cle-black-hole-hot-color" data-black-hole-color="hotColor" type="color" value="${DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS.hotColor}">
+          </label>
+          <label class="particle-color-row" for="cle-black-hole-mid-color">
+            <span>Mid color</span>
+            <input id="cle-black-hole-mid-color" data-black-hole-color="midColor" type="color" value="${DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS.midColor}">
+          </label>
+          <label class="particle-color-row" for="cle-black-hole-cool-color">
+            <span>Cool color</span>
+            <input id="cle-black-hole-cool-color" data-black-hole-color="coolColor" type="color" value="${DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS.coolColor}">
+          </label>
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>Renderer</legend>
+          ${blackHoleNumericControlsMarkup("renderer")}
+          <label class="particle-toggle-row" for="cle-black-hole-paused">
+            <span>Pause animation</span>
+            <input id="cle-black-hole-paused" type="checkbox">
+          </label>
+        </fieldset>
+        <p class="particle-plugin-error black-hole-plugin-error" role="status" hidden></p>
+      </div>
+    </section>
+  `;
+}
+
 function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? path;
   const dot = name.lastIndexOf(".");
@@ -4375,9 +6234,11 @@ export class CodeCodexElement extends HTMLElement {
   #appearanceHealthPending = false;
   #appearanceHealthTimer: ReturnType<typeof setTimeout> | undefined;
   #appearanceOperation = 0;
+  #appearanceInitializationGeneration = 0;
   #appearanceRpcTail: Promise<void> = Promise.resolve();
   #previewMarketOpen = false;
   #particleSettingsOpen = false;
+  #blackHoleSettingsOpen = false;
   #forcedColorsQuery: MediaQueryList | undefined;
   #reducedTransparencyQuery: MediaQueryList | undefined;
 
@@ -4452,6 +6313,25 @@ export class CodeCodexElement extends HTMLElement {
   readonly #particleBackgroundColorInput: HTMLInputElement;
   readonly #particleCursorInteractionInput: HTMLInputElement;
   readonly #particlePluginError: HTMLElement;
+  readonly #blackHoleBackgroundController = getBlackHoleBackgroundController();
+  #blackHoleBackgroundUnsubscribe: (() => void) | undefined;
+  #blackHoleBackgroundInitialization: Promise<void> | undefined;
+  readonly #blackHoleBackgroundCard: HTMLElement;
+  readonly #blackHoleBackgroundButton: HTMLButtonElement;
+  readonly #blackHoleBackgroundStatus: HTMLElement;
+  readonly #blackHoleSettingsPanel: HTMLElement;
+  readonly #blackHoleSettingsTrigger: HTMLButtonElement;
+  readonly #blackHoleSettingsCloseButton: HTMLButtonElement;
+  readonly #blackHoleNumericControls = new Map<BlackHoleNumericSettingKey, Readonly<{
+    definition: BlackHoleNumericControlDefinition;
+    input: HTMLInputElement;
+    output: HTMLOutputElement;
+  }>>();
+  readonly #blackHoleColorInputs = new Map<BlackHoleColorSettingKey, HTMLInputElement>();
+  readonly #blackHolePausedInput: HTMLInputElement;
+  readonly #blackHoleResetButton: HTMLButtonElement;
+  readonly #blackHolePresetButtons: readonly HTMLButtonElement[];
+  readonly #blackHolePluginError: HTMLElement;
   readonly #liveRegion: HTMLElement;
   readonly #collapseButton: HTMLButtonElement;
   readonly #collapsedTab: HTMLButtonElement;
@@ -4509,7 +6389,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -4525,6 +6405,7 @@ export class CodeCodexElement extends HTMLElement {
         <div class="resize-handle" role="separator" aria-label="Resize explorer" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="260" tabindex="0"></div>
       </div>
       ${particleSettingsPanelMarkup()}
+      ${blackHoleSettingsPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -4605,6 +6486,28 @@ export class CodeCodexElement extends HTMLElement {
     this.#particleBackgroundColorInput = this.#required<HTMLInputElement>("#cle-particle-background-color");
     this.#particleCursorInteractionInput = this.#required<HTMLInputElement>("#cle-particle-cursor-interaction");
     this.#particlePluginError = this.#required<HTMLElement>(".particle-plugin-error");
+    this.#blackHoleBackgroundCard = this.#required<HTMLElement>(`[data-appearance-plugin="${BLACK_HOLE_BACKGROUND_PLUGIN_ID}"]`);
+    this.#blackHoleBackgroundButton = this.#required<HTMLButtonElement>(
+      `[data-appearance-plugin="${BLACK_HOLE_BACKGROUND_PLUGIN_ID}"] .preview-extension-action`,
+    );
+    this.#blackHoleBackgroundStatus = this.#required<HTMLElement>(
+      `[data-appearance-plugin="${BLACK_HOLE_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
+    );
+    this.#blackHoleSettingsPanel = this.#required<HTMLElement>(".black-hole-settings-panel");
+    this.#blackHoleSettingsTrigger = this.#required<HTMLButtonElement>(".black-hole-settings-trigger");
+    this.#blackHoleSettingsCloseButton = this.#required<HTMLButtonElement>(".black-hole-settings-close");
+    for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
+      const input = this.#required<HTMLInputElement>(`#${definition.id}`);
+      const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
+      this.#blackHoleNumericControls.set(definition.key, { definition, input, output });
+    }
+    for (const key of ["hotColor", "midColor", "coolColor"] as const) {
+      this.#blackHoleColorInputs.set(key, this.#required<HTMLInputElement>(`[data-black-hole-color="${key}"]`));
+    }
+    this.#blackHolePausedInput = this.#required<HTMLInputElement>("#cle-black-hole-paused");
+    this.#blackHoleResetButton = this.#required<HTMLButtonElement>(".black-hole-reset");
+    this.#blackHolePresetButtons = Array.from(this.#shadow.querySelectorAll<HTMLButtonElement>("[data-black-hole-preset]"));
+    this.#blackHolePluginError = this.#required<HTMLElement>(".black-hole-plugin-error");
     this.#liveRegion = this.#required<HTMLElement>(".live-region");
     this.#collapseButton = this.#required<HTMLButtonElement>(".collapse");
     this.#collapsedTab = this.#required<HTMLButtonElement>(".collapsed-tab");
@@ -4622,16 +6525,32 @@ export class CodeCodexElement extends HTMLElement {
   connectedCallback(): void {
     if (this.#connected) return;
     this.#connected = true;
+    const appearanceInitializationGeneration = ++this.#appearanceInitializationGeneration;
     this.#requestedPlacement = this.dataset.placement || "inline";
     this.#rememberInlineMount();
     this.#settings = this.#readLocalSettings();
     for (const previewer of this.#readEnabledPreviewers()) this.#enabledPreviewers.add(previewer);
     this.#enabledAppearancePlugins.clear();
     for (const plugin of this.#readEnabledAppearancePlugins()) this.#enabledAppearancePlugins.add(plugin);
-    if (
-      this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
-      && this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
-    ) {
+    let normalizedAppearancePlugins = false;
+    if (this.#particleBackgroundController.stoppedForExternalThemeChange) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    }
+    if (this.#blackHoleBackgroundController.stoppedForExternalThemeChange) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    }
+    if (this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    } else if (this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    }
+    if (normalizedAppearancePlugins) {
       this.#writeEnabledAppearancePlugins();
     }
     this.#particleBackgroundUnsubscribe?.();
@@ -4645,7 +6564,20 @@ export class CodeCodexElement extends HTMLElement {
       }
       this.#renderParticleBackgroundPlugin();
     });
-    this.#particleBackgroundInitialization = this.#initializeParticleBackground();
+    this.#particleBackgroundInitialization = this.#initializeParticleBackground(appearanceInitializationGeneration);
+    this.#blackHoleBackgroundUnsubscribe?.();
+    this.#blackHoleBackgroundUnsubscribe = this.#blackHoleBackgroundController.subscribe(() => {
+      if (!this.#connected) return;
+      if (
+        this.#blackHoleBackgroundController.stoppedForExternalThemeChange
+        && this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+      ) {
+        this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderBlackHoleBackgroundPlugin();
+    });
+    this.#blackHoleBackgroundInitialization = this.#particleBackgroundInitialization
+      .then(() => this.#initializeBlackHoleBackground(appearanceInitializationGeneration));
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
@@ -4680,9 +6612,13 @@ export class CodeCodexElement extends HTMLElement {
     this.#cancelMarquee();
     this.#preserveDetachedDraft();
     this.#connected = false;
+    this.#appearanceInitializationGeneration += 1;
     this.#particleBackgroundUnsubscribe?.();
     this.#particleBackgroundUnsubscribe = undefined;
     this.#particleBackgroundInitialization = undefined;
+    this.#blackHoleBackgroundUnsubscribe?.();
+    this.#blackHoleBackgroundUnsubscribe = undefined;
+    this.#blackHoleBackgroundInitialization = undefined;
     this.#appearancePluginPending = false;
     this.#appearanceTransitionPending = false;
     this.#appearancePluginApplied = undefined;
@@ -4748,11 +6684,19 @@ export class CodeCodexElement extends HTMLElement {
     this.#closePreviewMarket(false);
     if (!this.#leaveEditing("Hide Code-Codex and discard your unsaved changes?")) return;
     this.#disableButton.disabled = true;
-    if (this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)) {
-      this.#writeEnabledAppearancePlugins();
-    }
-    await this.#particleBackgroundController.disable();
     this.#dismissed = true;
+    this.#appearanceOperation += 1;
+    this.#appearanceTransitionPending = false;
+    const particleWasEnabled = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+    const blackHoleWasEnabled = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+    if (particleWasEnabled || blackHoleWasEnabled) this.#writeEnabledAppearancePlugins();
+    if (particleWasEnabled || this.#particleBackgroundController.enabled) {
+      await this.#particleBackgroundController.disable();
+    }
+    if (blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled) {
+      await this.#blackHoleBackgroundController.disable();
+    }
+    await this.#reconcilePersistedWindowTransparency();
     this.#purgePreviewTabs(false);
     dismissExplorerForSession();
     window.dispatchEvent(new Event("code-codex:dismiss"));
@@ -4906,8 +6850,11 @@ export class CodeCodexElement extends HTMLElement {
       this.#previewMarketCloseButton.addEventListener("click", () => this.#closePreviewMarket(true));
       this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
       this.#particleBackgroundButton.addEventListener("click", () => void this.#toggleParticleBackground());
+      this.#blackHoleBackgroundButton.addEventListener("click", () => void this.#toggleBlackHoleBackground());
       this.#particleSettingsTrigger.addEventListener("click", () => this.#toggleParticleSettings());
       this.#particleSettingsCloseButton.addEventListener("click", () => this.#closeParticleSettings(true));
+      this.#blackHoleSettingsTrigger.addEventListener("click", () => this.#toggleBlackHoleSettings());
+      this.#blackHoleSettingsCloseButton.addEventListener("click", () => this.#closeBlackHoleSettings(true));
       this.#particleSettingsPanel.addEventListener("toggle", () => {
         if (this.#particleSettingsPanel.matches(":popover-open") || !this.#particleSettingsOpen) return;
         this.#particleSettingsOpen = false;
@@ -4917,8 +6864,14 @@ export class CodeCodexElement extends HTMLElement {
         this.#particleBackgroundController.finishImageTransformEditing();
         this.#particleTransformImageId = null;
       });
+      this.#blackHoleSettingsPanel.addEventListener("toggle", () => {
+        if (this.#blackHoleSettingsPanel.matches(":popover-open") || !this.#blackHoleSettingsOpen) return;
+        this.#blackHoleSettingsOpen = false;
+        this.#blackHoleSettingsTrigger.setAttribute("aria-expanded", "false");
+      });
       this.#previewMarketList.addEventListener("scroll", () => {
         if (this.#particleSettingsOpen) this.#positionParticleSettingsPanel();
+        if (this.#blackHoleSettingsOpen) this.#positionBlackHoleSettingsPanel();
       }, { passive: true });
       for (const control of this.#particleNumericControls.values()) {
         const { definition, input } = control;
@@ -4959,6 +6912,29 @@ export class CodeCodexElement extends HTMLElement {
         input.addEventListener("change", () => void this.#saveParticleImageTransform());
       }
       this.#particleImageTransformReset.addEventListener("click", () => void this.#resetParticleImageTransform());
+      for (const control of this.#blackHoleNumericControls.values()) {
+        control.input.addEventListener("input", () => {
+          const normalized = normalizeBlackHoleSettings({
+            ...this.#blackHoleBackgroundController.settings,
+            [control.definition.key]: control.input.value,
+          })[control.definition.key];
+          const formatted = formatBlackHoleControlValue(control.definition, normalized);
+          control.output.textContent = formatted;
+          control.input.setAttribute("aria-valuetext", formatted);
+          this.#applyBlackHoleSettingsFromControls();
+        });
+      }
+      for (const input of this.#blackHoleColorInputs.values()) {
+        input.addEventListener("input", () => this.#applyBlackHoleSettingsFromControls());
+      }
+      this.#blackHolePausedInput.addEventListener("change", () => this.#applyBlackHoleSettingsFromControls());
+      this.#blackHoleResetButton.addEventListener("click", () => this.#blackHoleBackgroundController.reset());
+      for (const button of this.#blackHolePresetButtons) {
+        button.addEventListener("click", () => {
+          const preset = button.dataset.blackHolePreset as BlackHolePresetName | undefined;
+          if (preset && preset in BLACK_HOLE_BACKGROUND_PRESETS) this.#blackHoleBackgroundController.applyPreset(preset);
+        });
+      }
       for (const previewer of PREVIEWER_DEFINITIONS) {
         this.#previewerButtons.get(previewer.id)?.addEventListener("click", () => this.#togglePreviewer(previewer));
       }
@@ -5125,10 +7101,18 @@ export class CodeCodexElement extends HTMLElement {
       this.#closeParticleSettings(false);
     }
     if (
+      this.#blackHoleSettingsOpen
+      && !path.includes(this.#blackHoleSettingsPanel)
+      && !path.includes(this.#blackHoleSettingsTrigger)
+    ) {
+      this.#closeBlackHoleSettings(false);
+    }
+    if (
       !this.#previewMarketPopover.hidden
       && !path.includes(this.#previewMarketPopover)
       && !path.includes(this.#previewMarketButton)
       && !path.includes(this.#particleSettingsPanel)
+      && !path.includes(this.#blackHoleSettingsPanel)
     ) {
       this.#closePreviewMarket(false);
     }
@@ -5172,6 +7156,12 @@ export class CodeCodexElement extends HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       this.#closeParticleSettings(true);
+      return;
+    }
+    if (this.#blackHoleSettingsOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeBlackHoleSettings(true);
       return;
     }
     if (!this.#previewMarketOpen) return;
@@ -8387,30 +10377,60 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
-  async #initializeParticleBackground(): Promise<void> {
+  #isCurrentBackgroundInitialization(generation: number): boolean {
+    return this.#connected && generation === this.#appearanceInitializationGeneration;
+  }
+
+  async #awaitBackgroundInitializations(operation: number): Promise<boolean> {
+    const generation = this.#appearanceInitializationGeneration;
+    this.#particleBackgroundInitialization ??= this.#initializeParticleBackground(generation);
+    await this.#particleBackgroundInitialization;
+    if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceOperation) return false;
+    this.#blackHoleBackgroundInitialization ??= this.#particleBackgroundInitialization
+      .then(() => this.#initializeBlackHoleBackground(generation));
+    await this.#blackHoleBackgroundInitialization;
+    return this.#isCurrentBackgroundInitialization(generation) && operation === this.#appearanceOperation;
+  }
+
+  async #initializeParticleBackground(generation: number): Promise<void> {
     try {
       await this.#particleBackgroundController.initialize();
-      if (!this.#connected) return;
+      if (!this.#isCurrentBackgroundInitialization(generation)) return;
       const enabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
       if (enabled) {
-        if (this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
-          this.#writeEnabledAppearancePlugins();
-        }
+        let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
+        if (this.#blackHoleBackgroundController.enabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
         await this.#particleBackgroundController.enable();
-      } else {
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        if (this.#particleBackgroundController.stoppedForExternalThemeChange) {
+          if (this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)) {
+            this.#writeEnabledAppearancePlugins();
+          }
+          return;
+        }
+      } else if (!this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)) {
         await this.#particleBackgroundController.disable();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
       }
     } catch (error) {
       console.error("Code-Codex could not initialize Particle Image Background", error);
     } finally {
-      if (this.#connected) this.#renderPreviewMarket();
+      if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
     }
   }
 
   async #toggleParticleBackground(): Promise<void> {
     if (
       this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -8418,27 +10438,53 @@ export class CodeCodexElement extends HTMLElement {
     this.#appearanceTransitionPending = true;
     this.#cancelAppearanceHealthCheck();
     this.#renderPreviewMarket();
-    const bridge = this.#bridge;
-    const transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
-    const previousTransparentBackground = this.#transparentBackgroundPresentation();
-    const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
     let particleStarted = false;
+    let blackHoleWasEnabled = false;
+    let transparentWasEnabled = false;
+    let previousTransparentBackground: string | undefined;
+    let bridge: ExplorerBridge | undefined;
     try {
-      this.#particleBackgroundInitialization ??= this.#initializeParticleBackground();
-      await this.#particleBackgroundInitialization;
-      if (!this.#connected || operation !== this.#appearanceOperation) return;
+      if (!await this.#awaitBackgroundInitializations(operation)) return;
+      bridge = this.#bridge;
+      transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+      previousTransparentBackground = this.#transparentBackgroundPresentation();
+      const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
       const enabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
-      const nextEnabled = !enabled;
+      const active = this.#particleBackgroundController.enabled;
+      const nextEnabled = !enabled || !active;
       if (nextEnabled) {
         if ((transparentWasEnabled || transparentPresentationWasApplied) && bridge?.available) {
           await this.#setWindowTransparency(bridge, false);
-          if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
         }
+        if (!this.#connected || operation !== this.#appearanceOperation) return;
         this.#clearTransparentBackgroundPresentation();
+        if (blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
         await this.#particleBackgroundController.enable();
-        particleStarted = true;
+        particleStarted = this.#particleBackgroundController.enabled;
+        if (this.#particleBackgroundController.stoppedForExternalThemeChange) {
+          throw new Error(this.#particleBackgroundController.error ?? "Particle Image Background stopped because Codex Appearance changed.");
+        }
+        if (!particleStarted) throw new Error("Particle Image Background could not be enabled");
         if (!this.#connected || operation !== this.#appearanceOperation) {
-          await this.#particleBackgroundController.disable();
+          const reconcilePrevious = this.#connected && !this.#dismissed;
+          const preserveTheme = reconcilePrevious && blackHoleWasEnabled;
+          await this.#particleBackgroundController.disable(preserveTheme);
+          if (reconcilePrevious && blackHoleWasEnabled) {
+            transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+            await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+          }
           return;
         }
         if (transparentWasEnabled) {
@@ -8446,6 +10492,7 @@ export class CodeCodexElement extends HTMLElement {
           this.#appearancePluginError = undefined;
           this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
         }
+        this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(PARTICLE_BACKGROUND_PLUGIN_ID);
       } else {
         await this.#particleBackgroundController.disable();
@@ -8454,11 +10501,206 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#announce(`Particle Image Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
-      if (particleStarted) await this.#particleBackgroundController.disable();
+      if (!this.#connected || operation !== this.#appearanceOperation) {
+        const stoppedForThemeChange = this.#particleBackgroundController.stoppedForExternalThemeChange;
+        const reconcilePrevious = this.#connected
+          && !this.#dismissed
+          && !stoppedForThemeChange;
+        if (particleStarted) await this.#particleBackgroundController.disable(reconcilePrevious && blackHoleWasEnabled);
+        if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
+          let changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+          changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+          if (changed) this.#writeEnabledAppearancePlugins();
+        } else if (reconcilePrevious && blackHoleWasEnabled) {
+          transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+          await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+        }
+        return;
+      }
+      const stoppedForThemeChange = this.#particleBackgroundController.stoppedForExternalThemeChange;
+      if (particleStarted) await this.#particleBackgroundController.disable(blackHoleWasEnabled && !stoppedForThemeChange);
+      if (stoppedForThemeChange) {
+        let changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+      } else if (blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+        transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+      }
       if (transparentWasEnabled && previousTransparentBackground) {
-        this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+        if (bridge?.available) {
+          try {
+            const restored = await this.#setWindowTransparency(bridge, true);
+            this.#applyTransparentBackgroundPresentation(restored.background);
+          } catch {
+            this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+          }
+        } else {
+          this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+        }
       }
       const message = error instanceof Error ? error.message : "Particle Image Background could not be changed";
+      this.#showActionNotice(message, "error");
+    } finally {
+      if (operation === this.#appearanceOperation) {
+        this.#appearanceTransitionPending = false;
+        this.#renderPreviewMarket();
+        if (bridge?.available) this.#flushQueuedAppearanceSync(bridge);
+        if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          this.#scheduleAppearanceHealthCheck();
+        }
+      }
+    }
+  }
+
+  async #initializeBlackHoleBackground(generation: number): Promise<void> {
+    try {
+      await this.#blackHoleBackgroundController.initialize();
+      if (!this.#isCurrentBackgroundInitialization(generation)) return;
+      const enabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+      if (enabled) {
+        let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (this.#particleBackgroundController.enabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        await this.#blackHoleBackgroundController.enable();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        if (this.#blackHoleBackgroundController.stoppedForExternalThemeChange) {
+          if (this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID)) {
+            this.#writeEnabledAppearancePlugins();
+          }
+          return;
+        }
+      } else if (this.#blackHoleBackgroundController.enabled) {
+        await this.#blackHoleBackgroundController.disable();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+      }
+    } catch (error) {
+      console.error("Code-Codex could not initialize Black Hole Background", error);
+    } finally {
+      if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
+    }
+  }
+
+  async #toggleBlackHoleBackground(): Promise<void> {
+    if (
+      this.#blackHoleBackgroundController.pending
+      || this.#particleBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending
+    ) return;
+    const operation = ++this.#appearanceOperation;
+    this.#appearanceTransitionPending = true;
+    this.#cancelAppearanceHealthCheck();
+    this.#renderPreviewMarket();
+    let blackHoleStarted = false;
+    let particleWasEnabled = false;
+    let transparentWasEnabled = false;
+    let previousTransparentBackground: string | undefined;
+    let bridge: ExplorerBridge | undefined;
+    try {
+      if (!await this.#awaitBackgroundInitializations(operation)) return;
+      bridge = this.#bridge;
+      transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
+      previousTransparentBackground = this.#transparentBackgroundPresentation();
+      const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
+      const enabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+      const active = this.#blackHoleBackgroundController.enabled;
+      const nextEnabled = !enabled || !active;
+      if (nextEnabled) {
+        if ((transparentWasEnabled || transparentPresentationWasApplied) && bridge?.available) {
+          await this.#setWindowTransparency(bridge, false);
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        if (!this.#connected || operation !== this.#appearanceOperation) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (particleWasEnabled || this.#particleBackgroundController.enabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        await this.#blackHoleBackgroundController.enable();
+        blackHoleStarted = this.#blackHoleBackgroundController.enabled;
+        if (this.#blackHoleBackgroundController.stoppedForExternalThemeChange) {
+          throw new Error(this.#blackHoleBackgroundController.error ?? "Black Hole Background stopped because Codex Appearance changed.");
+        }
+        if (!blackHoleStarted) throw new Error("Black Hole Background could not be enabled");
+        if (!this.#connected || operation !== this.#appearanceOperation) {
+          const reconcilePrevious = this.#connected && !this.#dismissed;
+          const preserveTheme = reconcilePrevious && particleWasEnabled;
+          await this.#blackHoleBackgroundController.disable(preserveTheme);
+          if (reconcilePrevious && particleWasEnabled) {
+            transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+            await this.#particleBackgroundController.enable().catch(() => undefined);
+          }
+          return;
+        }
+        if (transparentWasEnabled) {
+          this.#appearancePluginApplied = false;
+          this.#appearancePluginError = undefined;
+          this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        }
+        this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.add(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+      } else {
+        await this.#blackHoleBackgroundController.disable();
+        this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+      this.#announce(`Black Hole Background ${nextEnabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      if (!this.#connected || operation !== this.#appearanceOperation) {
+        const stoppedForThemeChange = this.#blackHoleBackgroundController.stoppedForExternalThemeChange;
+        const reconcilePrevious = this.#connected
+          && !this.#dismissed
+          && !stoppedForThemeChange;
+        if (blackHoleStarted) await this.#blackHoleBackgroundController.disable(reconcilePrevious && particleWasEnabled);
+        if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
+          let changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+          changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+          if (changed) this.#writeEnabledAppearancePlugins();
+        } else if (reconcilePrevious && particleWasEnabled) {
+          transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+          await this.#particleBackgroundController.enable().catch(() => undefined);
+        }
+        return;
+      }
+      const stoppedForThemeChange = this.#blackHoleBackgroundController.stoppedForExternalThemeChange;
+      if (blackHoleStarted) await this.#blackHoleBackgroundController.disable(particleWasEnabled && !stoppedForThemeChange);
+      if (stoppedForThemeChange) {
+        let changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+      } else if (particleWasEnabled && !this.#particleBackgroundController.enabled) {
+        transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+        await this.#particleBackgroundController.enable().catch(() => undefined);
+      }
+      if (transparentWasEnabled && previousTransparentBackground) {
+        if (bridge?.available) {
+          try {
+            const restored = await this.#setWindowTransparency(bridge, true);
+            this.#applyTransparentBackgroundPresentation(restored.background);
+          } catch {
+            this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+          }
+        } else {
+          this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+        }
+      }
+      const message = error instanceof Error ? error.message : "Black Hole Background could not be changed";
       this.#showActionNotice(message, "error");
     } finally {
       if (operation === this.#appearanceOperation) {
@@ -9046,6 +11288,7 @@ export class CodeCodexElement extends HTMLElement {
         : `${enabled ? "Disable" : "Enable"} Particle Image Background`,
     );
     this.#particleBackgroundButton.disabled = controller.pending
+      || this.#blackHoleBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -9185,6 +11428,70 @@ export class CodeCodexElement extends HTMLElement {
     if (this.#particleSettingsOpen) requestAnimationFrame(() => this.#positionParticleSettingsPanel());
   }
 
+  #applyBlackHoleSettingsFromControls(): void {
+    const values: Record<string, unknown> = { ...this.#blackHoleBackgroundController.settings };
+    for (const [key, control] of this.#blackHoleNumericControls) values[key] = control.input.value;
+    for (const [key, input] of this.#blackHoleColorInputs) values[key] = input.value;
+    values.paused = this.#blackHolePausedInput.checked;
+    this.#blackHoleBackgroundController.updateSettings(normalizeBlackHoleSettings(values));
+  }
+
+  #renderBlackHoleBackgroundPlugin(): void {
+    const controller = this.#blackHoleBackgroundController;
+    const enabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+    const active = enabled && controller.enabled;
+    const action = enabled && !active ? "Retry" : enabled ? "Disable" : "Enable";
+    let status = enabled ? "Enabled" : "Disabled";
+    if (controller.pending) status = enabled || controller.enabled ? "Enabled · Applying" : "Applying";
+    else if (enabled && !active) status = "Enabled · Not applied";
+    else if (active && controller.error) status = "Enabled · Notice";
+    this.#blackHoleBackgroundStatus.textContent = status;
+    this.#blackHoleBackgroundStatus.dataset.enabled = String(active);
+    this.#blackHoleBackgroundStatus.dataset.pending = String(controller.pending);
+    this.#blackHoleBackgroundCard.setAttribute("aria-busy", String(controller.pending));
+    this.#blackHoleBackgroundButton.textContent = controller.pending ? "Applying…" : action;
+    this.#blackHoleBackgroundButton.dataset.enabled = String(enabled);
+    this.#blackHoleBackgroundButton.setAttribute("aria-pressed", String(enabled));
+    this.#blackHoleBackgroundButton.setAttribute(
+      "aria-label",
+      controller.pending
+        ? "Applying Black Hole Background"
+        : `${action} Black Hole Background`,
+    );
+    this.#blackHoleBackgroundButton.disabled = controller.pending
+      || this.#particleBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending;
+
+    const settings = controller.settings;
+    for (const [key, control] of this.#blackHoleNumericControls) {
+      const value = settings[key];
+      const formatted = formatBlackHoleControlValue(control.definition, value);
+      control.input.value = String(value);
+      control.input.disabled = controller.pending;
+      control.input.setAttribute("aria-valuetext", formatted);
+      control.output.textContent = formatted;
+    }
+    for (const [key, input] of this.#blackHoleColorInputs) {
+      input.value = settings[key];
+      input.disabled = controller.pending;
+    }
+    this.#blackHolePausedInput.checked = settings.paused;
+    this.#blackHolePausedInput.disabled = controller.pending;
+    this.#blackHoleResetButton.disabled = controller.pending;
+    for (const button of this.#blackHolePresetButtons) {
+      const preset = button.dataset.blackHolePreset as BlackHolePresetName | undefined;
+      const selected = Boolean(preset && JSON.stringify(settings) === JSON.stringify(BLACK_HOLE_BACKGROUND_PRESETS[preset]));
+      button.disabled = controller.pending;
+      button.setAttribute("aria-pressed", String(selected));
+    }
+    const error = controller.error;
+    this.#blackHolePluginError.hidden = !error;
+    this.#blackHolePluginError.textContent = error ?? "";
+    this.#blackHoleSettingsPanel.setAttribute("aria-busy", String(controller.pending));
+    if (this.#blackHoleSettingsOpen) requestAnimationFrame(() => this.#positionBlackHoleSettingsPanel());
+  }
+
   #readEnabledAppearancePlugins(): readonly string[] {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(APPEARANCE_PLUGIN_SETTINGS_KEY) || "[]");
@@ -9270,7 +11577,10 @@ export class CodeCodexElement extends HTMLElement {
     let retryDelay = TRANSPARENT_BACKGROUND_HEALTH_INTERVAL_MS;
     try {
       const result = await this.#setWindowTransparency(bridge, true);
-      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+        await this.#reconcilePersistedWindowTransparency();
+        return;
+      }
       this.#applyTransparentBackgroundPresentation(result.background);
       this.#appearancePluginApplied = true;
       this.#appearancePluginError = undefined;
@@ -9294,63 +11604,92 @@ export class CodeCodexElement extends HTMLElement {
       this.#appearancePluginPending
       || this.#appearanceTransitionPending
       || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
     ) return;
-    const bridge = this.#bridge;
-    const enabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
-    const nextEnabled = !enabled;
     const operation = ++this.#appearanceOperation;
     this.#appearanceTransitionPending = true;
-    if (!nextEnabled) this.#cancelAppearanceHealthCheck();
-
-    if (!bridge?.available) {
-      this.#appearanceTransitionPending = false;
-      this.#appearancePluginApplied = undefined;
-      this.#appearancePluginError = "Restart Codex with Code-Codex, then try again.";
-      this.#renderAppearancePlugin();
-      this.#showActionNotice(`Transparent Background was not changed. ${this.#appearancePluginError}`, "error");
-      return;
-    }
-    if (nextEnabled && this.#transparencyPreferenceBlocked()) {
-      this.#appearanceTransitionPending = false;
-      this.#appearancePluginError = "Turn off high contrast or reduced transparency, then try again.";
-      this.#renderAppearancePlugin();
-      this.#showActionNotice(`Transparent Background was not enabled. ${this.#appearancePluginError}`, "error");
-      return;
-    }
-
-    this.#appearancePluginPending = true;
-    this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
-    const previousBackground = this.#transparentBackgroundPresentation();
-    this.#clearTransparentBackgroundPresentation();
+    let bridge: ExplorerBridge | undefined;
+    let nextEnabled = false;
+    let previousBackground: string | undefined;
     try {
+      if (!await this.#awaitBackgroundInitializations(operation)) return;
+      bridge = this.#bridge;
+      const enabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      nextEnabled = !enabled;
+      if (!nextEnabled) this.#cancelAppearanceHealthCheck();
+      if (!bridge?.available) {
+        this.#appearancePluginApplied = undefined;
+        this.#appearancePluginError = "Restart Codex with Code-Codex, then try again.";
+        this.#showActionNotice(`Transparent Background was not changed. ${this.#appearancePluginError}`, "error");
+        return;
+      }
+      if (nextEnabled && this.#transparencyPreferenceBlocked()) {
+        this.#appearancePluginError = "Turn off high contrast or reduced transparency, then try again.";
+        this.#showActionNotice(`Transparent Background was not enabled. ${this.#appearancePluginError}`, "error");
+        return;
+      }
+
+      this.#appearancePluginPending = true;
+      this.#appearancePluginError = undefined;
+      this.#renderPreviewMarket();
+      previousBackground = this.#transparentBackgroundPresentation();
+      this.#clearTransparentBackgroundPresentation();
       const result = await this.#setWindowTransparency(bridge, nextEnabled);
-      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+        await this.#reconcilePersistedWindowTransparency();
+        return;
+      }
       if (nextEnabled) this.#applyTransparentBackgroundPresentation(result.background);
       this.#appearancePluginApplied = nextEnabled;
       if (nextEnabled) {
-        if (this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)) {
+        const particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
+        const blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        const particleWasActive = particleWasEnabled || this.#particleBackgroundController.enabled;
+        const blackHoleWasActive = blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled;
+        if (particleWasActive) {
           await this.#particleBackgroundController.disable();
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            if (this.#connected && !this.#dismissed && particleWasActive) {
+              await this.#particleBackgroundController.enable().catch(() => undefined);
+            }
+            return;
+          }
         }
+        if (blackHoleWasActive) {
+          await this.#blackHoleBackgroundController.disable();
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            if (this.#connected && !this.#dismissed) {
+              if (blackHoleWasActive) await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+              else if (particleWasActive) await this.#particleBackgroundController.enable().catch(() => undefined);
+            }
+            return;
+          }
+        }
+        this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       } else {
         this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       }
       this.#writeEnabledAppearancePlugins();
       this.#renderParticleBackgroundPlugin();
+      this.#renderBlackHoleBackgroundPlugin();
       this.#announce(`Transparent Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
-      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      if (!this.#connected || operation !== this.#appearanceOperation) return;
       if (!nextEnabled && previousBackground) this.#applyTransparentBackgroundPresentation(previousBackground);
       if (nextEnabled) this.#appearancePluginApplied = false;
       this.#appearancePluginError = transparencyActionError(error, nextEnabled);
       this.#showActionNotice(this.#appearancePluginError, "error");
     } finally {
-      if (this.#isCurrentAppearanceOperation(bridge, operation)) {
+      if (this.#connected && operation === this.#appearanceOperation) {
         this.#appearancePluginPending = false;
         this.#appearanceTransitionPending = false;
         this.#renderPreviewMarket();
-        this.#flushQueuedAppearanceSync(bridge);
+        if (bridge?.available) this.#flushQueuedAppearanceSync(bridge);
         if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
           this.#scheduleAppearanceHealthCheck();
         }
@@ -9375,7 +11714,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#clearTransparentBackgroundPresentation();
     try {
       const result = await this.#setWindowTransparency(bridge, requestedEnabled);
-      if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
+      if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+        await this.#reconcilePersistedWindowTransparency();
+        return;
+      }
       if (requestedEnabled) this.#applyTransparentBackgroundPresentation(result.background);
       this.#appearancePluginApplied = requestedEnabled;
     } catch (error) {
@@ -9384,6 +11726,7 @@ export class CodeCodexElement extends HTMLElement {
         !requestedEnabled
         && previousBackground
         && !this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
+        && !this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
       ) {
         this.#applyTransparentBackgroundPresentation(previousBackground);
       }
@@ -9397,6 +11740,22 @@ export class CodeCodexElement extends HTMLElement {
         this.#flushQueuedAppearanceSync(bridge);
         if (requestedEnabled) this.#scheduleAppearanceHealthCheck();
       }
+    }
+  }
+
+  async #reconcilePersistedWindowTransparency(): Promise<void> {
+    const bridge = this.#bridge;
+    if (!bridge?.available) return;
+    const requestedEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)
+      && !this.#transparencyPreferenceBlocked();
+    try {
+      const result = await this.#setWindowTransparency(bridge, requestedEnabled);
+      if (this.#bridge !== bridge) return;
+      if (requestedEnabled) this.#applyTransparentBackgroundPresentation(result.background);
+      else this.#clearTransparentBackgroundPresentation();
+      this.#appearancePluginApplied = requestedEnabled;
+    } catch {
+      // The next bridge synchronization retries the persisted preference.
     }
   }
 
@@ -9446,6 +11805,7 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
     if (!this.#previewMarketOpen) this.#togglePreviewMarket();
+    this.#closeBlackHoleSettings(false);
     this.#particleSettingsOpen = true;
     this.#particleSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderParticleBackgroundPlugin();
@@ -9500,8 +11860,66 @@ export class CodeCodexElement extends HTMLElement {
     panel.dataset.side = side;
   }
 
+  #toggleBlackHoleSettings(): void {
+    if (this.#blackHoleSettingsOpen) {
+      this.#closeBlackHoleSettings(true);
+      return;
+    }
+    if (!this.#previewMarketOpen) this.#togglePreviewMarket();
+    this.#closeParticleSettings(false);
+    this.#blackHoleSettingsOpen = true;
+    this.#blackHoleSettingsTrigger.setAttribute("aria-expanded", "true");
+    this.#renderBlackHoleBackgroundPlugin();
+    if (!this.#blackHoleSettingsPanel.matches(":popover-open")) this.#blackHoleSettingsPanel.showPopover();
+    this.#positionBlackHoleSettingsPanel();
+    queueMicrotask(() => {
+      if (!this.#blackHoleSettingsOpen) return;
+      this.#positionBlackHoleSettingsPanel();
+      this.#blackHoleSettingsCloseButton.focus();
+    });
+  }
+
+  #closeBlackHoleSettings(restoreFocus: boolean): void {
+    if (!this.#blackHoleSettingsOpen && !this.#blackHoleSettingsPanel.matches(":popover-open")) return;
+    this.#blackHoleSettingsOpen = false;
+    this.#blackHoleSettingsTrigger.setAttribute("aria-expanded", "false");
+    if (this.#blackHoleSettingsPanel.matches(":popover-open")) this.#blackHoleSettingsPanel.hidePopover();
+    if (restoreFocus && this.#blackHoleSettingsTrigger.isConnected) this.#blackHoleSettingsTrigger.focus();
+  }
+
+  #positionBlackHoleSettingsPanel(): void {
+    if (!this.#blackHoleSettingsOpen || !this.#blackHoleSettingsPanel.matches(":popover-open")) return;
+    const panel = this.#blackHoleSettingsPanel;
+    const cardRect = this.#blackHoleBackgroundCard.getBoundingClientRect();
+    const edge = 12;
+    const gap = 8;
+    const preferredWidth = 344;
+    const panelWidth = Math.min(preferredWidth, Math.max(240, window.innerWidth - edge * 2));
+    let left = cardRect.right + gap;
+    let side = "right";
+    if (left + panelWidth > window.innerWidth - edge) {
+      left = Math.max(edge, window.innerWidth - edge - panelWidth);
+      side = "overlay";
+    }
+    panel.style.width = `${panelWidth}px`;
+    panel.style.maxHeight = `${Math.max(240, window.innerHeight - edge * 2)}px`;
+    const panelHeight = Math.min(panel.scrollHeight, Math.max(240, window.innerHeight - edge * 2));
+    const top = Math.min(
+      Math.max(edge, cardRect.top),
+      Math.max(edge, window.innerHeight - edge - panelHeight),
+    );
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.setProperty(
+      "--cle-particle-settings-anchor-y",
+      `${Math.round(Math.min(panelHeight - 18, Math.max(18, cardRect.top + cardRect.height * 0.5 - top)))}px`,
+    );
+    panel.dataset.side = side;
+  }
+
   #closePreviewMarket(restoreFocus: boolean): void {
     this.#closeParticleSettings(false);
+    this.#closeBlackHoleSettings(false);
     if (!this.#previewMarketOpen && this.#previewMarketPopover.hidden) return;
     this.#previewMarketOpen = false;
     this.#previewMarketPopover.hidden = true;
@@ -9526,6 +11944,7 @@ export class CodeCodexElement extends HTMLElement {
   #renderPreviewMarket(): void {
     this.#renderAppearancePlugin();
     this.#renderParticleBackgroundPlugin();
+    this.#renderBlackHoleBackgroundPlugin();
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const enabled = this.#enabledPreviewers.has(previewer.id);
       const status = this.#previewerStatuses.get(previewer.id);
@@ -9568,6 +11987,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#appearancePluginPending
       || this.#appearanceTransitionPending
       || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
       || !bridgeAvailable
       || (!enabled && preferenceBlocked);
 

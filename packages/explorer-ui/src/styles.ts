@@ -1198,6 +1198,18 @@ export const styles = String.raw`
     background: color-mix(in srgb, var(--cle-icon-violet) 10%, var(--cle-paper));
     border-color: color-mix(in srgb, var(--cle-icon-violet) 22%, var(--cle-rule));
   }
+  .black-hole-background-extension .preview-extension-icon {
+    color: #f59e0b;
+    background: color-mix(in srgb, #f59e0b 10%, var(--cle-paper));
+    border-color: color-mix(in srgb, #f59e0b 24%, var(--cle-rule));
+  }
+  .black-hole-background-extension .preview-extension-icon svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.1;
+  }
 
   .particle-settings-panel {
     position: fixed;
@@ -1329,6 +1341,39 @@ export const styles = String.raw`
   }
   .particle-settings-group > :is(.particle-toggle-row, .particle-color-row) { margin-inline: 0; }
   .particle-settings-panel .particle-plugin-error { grid-column: auto; }
+  .black-hole-preset-toolbar {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--cle-rule);
+  }
+  .black-hole-preset-toolbar button {
+    min-width: 0;
+    min-height: 25px;
+    padding: 3px 5px;
+    overflow: hidden;
+    color: var(--cle-muted);
+    background: var(--cle-paper-raised);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 9.5px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .black-hole-preset-toolbar button:hover:not(:disabled),
+  .black-hole-preset-toolbar button[aria-pressed="true"] {
+    color: var(--cle-ink);
+    background: color-mix(in srgb, #f59e0b 10%, var(--cle-paper-raised));
+    border-color: color-mix(in srgb, #f59e0b 45%, var(--cle-rule-strong));
+  }
+  .black-hole-preset-toolbar button:disabled { cursor: default; opacity: .55; }
+  .black-hole-preset-toolbar .black-hole-reset {
+    color: var(--cle-muted);
+    background: var(--cle-subtle);
+  }
   .particle-settings-trigger:focus-visible,
   .particle-settings-close:focus-visible,
   .particle-settings-panel :is(button, summary, input):focus-visible,
