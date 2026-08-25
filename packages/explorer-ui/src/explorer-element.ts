@@ -96,6 +96,7 @@ const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
 const PARTICLE_BACKGROUND_SETTINGS_KEY = "code-codex:particle-image-background:v1";
 const PARTICLE_BACKGROUND_THEME_LEASE_KEY = "code-codex:particle-theme-lease:v1";
 const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1";
+const BACKGROUND_SETTINGS_LANGUAGE_KEY = "code-codex:background-settings-language:v1";
 const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
 const CODEX_APPEARANCE_POLL_INTERVAL_MS = 1_500;
 const PARTICLE_BACKGROUND_DB_NAME = "code-codex-particle-image-background";
@@ -608,6 +609,9 @@ interface BlackHoleBackgroundSettings {
   readonly paused: boolean;
 }
 
+type BackgroundSettingsLanguage = "zh" | "en";
+let backgroundSettingsLanguageSession: BackgroundSettingsLanguage = "zh";
+
 type BlackHolePresetName = "cinema" | "lens" | "ember";
 type BlackHoleColorSettingKey = "hotColor" | "midColor" | "coolColor";
 
@@ -622,7 +626,9 @@ interface BlackHoleNumericControlDefinition {
   readonly group: BlackHoleControlGroup;
   readonly id: string;
   readonly label: string;
+  readonly labelZh: string;
   readonly hint: string;
+  readonly hintZh: string;
   readonly minimum: number;
   readonly maximum: number;
   readonly step: number;
@@ -650,6 +656,7 @@ type ParticleControlGroup = "particles" | "flow" | "source" | "pointer" | "rende
 interface ParticleValueControlDefinition {
   readonly id: string;
   readonly label: string;
+  readonly labelZh: string;
   readonly minimum: number;
   readonly maximum: number;
   readonly step: number;
@@ -786,25 +793,25 @@ const DEFAULT_PARTICLE_IMAGE_TRANSFORM: ParticleImageTransform = Object.freeze({
 });
 
 const PARTICLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
-  { key: "particleCount", group: "particles", id: "cle-particle-count", label: "Particle count", minimum: 10_000, maximum: 2_000_000, step: 10_000, live: false, format: (value: number) => Math.round(value).toLocaleString() },
-  { key: "particleSize", group: "particles", id: "cle-particle-size", label: "Particle size", minimum: 0.5, maximum: 4, step: 0.1, live: true, format: (value: number) => value.toFixed(1) },
-  { key: "particleOpacity", group: "particles", id: "cle-particle-opacity", label: "Particle opacity", minimum: 0.1, maximum: 1, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
-  { key: "speed", group: "flow", id: "cle-particle-speed", label: "Speed", minimum: 0, maximum: 2, step: 0.05, live: true, format: (value: number) => value.toFixed(2) },
-  { key: "noiseScale", group: "flow", id: "cle-particle-noise-scale", label: "Noise scale", minimum: 0.0001, maximum: 0.002, step: 0.0001, live: true, format: (value: number) => value.toFixed(4) },
-  { key: "noiseStrength", group: "flow", id: "cle-particle-noise-strength", label: "Noise strength", minimum: 0, maximum: 0.15, step: 0.005, live: true, format: (value: number) => value.toFixed(3) },
-  { key: "damping", group: "flow", id: "cle-particle-damping", label: "Damping", minimum: 0.8, maximum: 0.9999, step: 0.0001, live: true, format: (value: number) => value.toFixed(4) },
-  { key: "ambientCycle", group: "flow", id: "cle-particle-ambient-cycle", label: "Ambient cycle", minimum: 40, maximum: 500, step: 10, live: true, format: (value: number) => String(Math.round(value)) },
-  { key: "imageDurationSeconds", group: "source", id: "cle-particle-image-duration", label: "Image duration", minimum: 1, maximum: 60, step: 1, live: true, format: (value: number) => `${Math.round(value)}s` },
-  { key: "morphIntervalSeconds", group: "source", id: "cle-particle-morph-interval", label: "Morph interval", minimum: 1, maximum: 12, step: 0.1, live: true, format: (value: number) => `${value.toFixed(1)}s` },
-  { key: "imageOpacity", group: "source", id: "cle-particle-image-opacity", label: "Image opacity", minimum: 0, maximum: 1, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
-  { key: "cursorStrength", group: "pointer", id: "cle-particle-cursor-strength", label: "Cursor strength", minimum: 0, maximum: PARTICLE_BACKGROUND_CURSOR_MAX_STRENGTH, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
-  { key: "dprCap", group: "render", id: "cle-particle-dpr-cap", label: "DPR cap", minimum: 1, maximum: 2, step: 0.25, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "particleCount", group: "particles", id: "cle-particle-count", label: "Particle count", labelZh: "粒子数量", minimum: 10_000, maximum: 2_000_000, step: 10_000, live: false, format: (value: number) => Math.round(value).toLocaleString() },
+  { key: "particleSize", group: "particles", id: "cle-particle-size", label: "Particle size", labelZh: "粒子大小", minimum: 0.5, maximum: 4, step: 0.1, live: true, format: (value: number) => value.toFixed(1) },
+  { key: "particleOpacity", group: "particles", id: "cle-particle-opacity", label: "Particle opacity", labelZh: "粒子不透明度", minimum: 0.1, maximum: 1, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "speed", group: "flow", id: "cle-particle-speed", label: "Speed", labelZh: "速度", minimum: 0, maximum: 2, step: 0.05, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "noiseScale", group: "flow", id: "cle-particle-noise-scale", label: "Noise scale", labelZh: "噪声尺度", minimum: 0.0001, maximum: 0.002, step: 0.0001, live: true, format: (value: number) => value.toFixed(4) },
+  { key: "noiseStrength", group: "flow", id: "cle-particle-noise-strength", label: "Noise strength", labelZh: "噪声强度", minimum: 0, maximum: 0.15, step: 0.005, live: true, format: (value: number) => value.toFixed(3) },
+  { key: "damping", group: "flow", id: "cle-particle-damping", label: "Damping", labelZh: "阻尼", minimum: 0.8, maximum: 0.9999, step: 0.0001, live: true, format: (value: number) => value.toFixed(4) },
+  { key: "ambientCycle", group: "flow", id: "cle-particle-ambient-cycle", label: "Ambient cycle", labelZh: "环境循环", minimum: 40, maximum: 500, step: 10, live: true, format: (value: number) => String(Math.round(value)) },
+  { key: "imageDurationSeconds", group: "source", id: "cle-particle-image-duration", label: "Image duration", labelZh: "图片显示时长", minimum: 1, maximum: 60, step: 1, live: true, format: (value: number) => `${Math.round(value)}s` },
+  { key: "morphIntervalSeconds", group: "source", id: "cle-particle-morph-interval", label: "Morph interval", labelZh: "变形间隔", minimum: 1, maximum: 12, step: 0.1, live: true, format: (value: number) => `${value.toFixed(1)}s` },
+  { key: "imageOpacity", group: "source", id: "cle-particle-image-opacity", label: "Image opacity", labelZh: "图片不透明度", minimum: 0, maximum: 1, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "cursorStrength", group: "pointer", id: "cle-particle-cursor-strength", label: "Cursor strength", labelZh: "鼠标强度", minimum: 0, maximum: PARTICLE_BACKGROUND_CURSOR_MAX_STRENGTH, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
+  { key: "dprCap", group: "render", id: "cle-particle-dpr-cap", label: "DPR cap", labelZh: "像素比上限", minimum: 1, maximum: 2, step: 0.25, live: true, format: (value: number) => value.toFixed(2) },
 ] satisfies readonly ParticleNumericControlDefinition[]);
 
 const PARTICLE_IMAGE_TRANSFORM_CONTROL_DEFINITIONS = Object.freeze([
-  { key: "positionX", id: "cle-particle-image-position-x", label: "Position X", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
-  { key: "positionY", id: "cle-particle-image-position-y", label: "Position Y", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
-  { key: "zoom", id: "cle-particle-image-zoom", label: "Zoom", minimum: 0.25, maximum: 4, step: 0.05, editorScale: 100, format: (value: number) => `${Math.round(value * 100)}%` },
+  { key: "positionX", id: "cle-particle-image-position-x", label: "Position X", labelZh: "水平位置", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
+  { key: "positionY", id: "cle-particle-image-position-y", label: "Position Y", labelZh: "垂直位置", minimum: 0, maximum: 100, step: 1, format: (value: number) => `${Math.round(value)}%` },
+  { key: "zoom", id: "cle-particle-image-zoom", label: "Zoom", labelZh: "缩放", minimum: 0.25, maximum: 4, step: 0.05, editorScale: 100, format: (value: number) => `${Math.round(value * 100)}%` },
 ] satisfies readonly ParticleImageTransformControlDefinition[]);
 
 const DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS: BlackHoleBackgroundSettings = Object.freeze({
@@ -829,9 +836,9 @@ const DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS: BlackHoleBackgroundSettings = Obje
   glow: 1,
   exposure: 0.9,
   vignette: 0.28,
-  steps: 300,
-  resolution: 0.7,
-  maxDpr: 1.75,
+  steps: 200,
+  resolution: 0.4,
+  maxDpr: 1,
   paused: false,
 });
 
@@ -871,27 +878,27 @@ const BLACK_HOLE_BACKGROUND_PRESETS: Readonly<Record<BlackHolePresetName, BlackH
 });
 
 const BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
-  { key: "distance", group: "camera", id: "cle-black-hole-distance", label: "Distance", hint: "Camera distance in horizon radii", minimum: 10, maximum: 40, step: 0.5, unit: " rH" },
-  { key: "elevation", group: "camera", id: "cle-black-hole-elevation", label: "Elevation", hint: "Angle above the accretion disc", minimum: -30, maximum: 30, step: 0.5, unit: "deg" },
-  { key: "azimuth", group: "camera", id: "cle-black-hole-azimuth", label: "Azimuth", hint: "Position around the black hole", minimum: -180, maximum: 180, step: 1, unit: "deg" },
-  { key: "roll", group: "camera", id: "cle-black-hole-roll", label: "Roll", hint: "Disc angle across the frame", minimum: -45, maximum: 45, step: 1, unit: "deg" },
-  { key: "fov", group: "camera", id: "cle-black-hole-fov", label: "Field of view", hint: "Vertical camera field of view", minimum: 25, maximum: 75, step: 1, unit: "deg" },
-  { key: "orbitSpeed", group: "camera", id: "cle-black-hole-orbit-speed", label: "Orbit drift", hint: "Camera movement in degrees per second", minimum: -8, maximum: 8, step: 0.1, unit: "deg/s" },
-  { key: "diskInner", group: "disc", id: "cle-black-hole-disk-inner", label: "Inner edge", hint: "Closest stable gas orbit", minimum: 1.2, maximum: 6, step: 0.1, unit: " rH" },
-  { key: "diskOuter", group: "disc", id: "cle-black-hole-disk-outer", label: "Outer edge", hint: "Disc radius", minimum: 8, maximum: 24, step: 0.5, unit: " rH" },
-  { key: "diskThickness", group: "disc", id: "cle-black-hole-disk-thickness", label: "Thickness", hint: "Gas depth at the inner rim", minimum: 0.05, maximum: 0.8, step: 0.01 },
-  { key: "diskDensity", group: "disc", id: "cle-black-hole-disk-density", label: "Density", hint: "Opacity of the gas", minimum: 0.1, maximum: 2, step: 0.05 },
-  { key: "brightness", group: "disc", id: "cle-black-hole-brightness", label: "Emission", hint: "Light emitted before tone mapping", minimum: 0.2, maximum: 2, step: 0.05 },
-  { key: "spinSpeed", group: "disc", id: "cle-black-hole-spin-speed", label: "Spin", hint: "Inner-rim turns per second", minimum: 0, maximum: 0.2, step: 0.005, unit: " t/s" },
-  { key: "grain", group: "disc", id: "cle-black-hole-grain", label: "Turbulence", hint: "Scale of gas detail", minimum: 0.1, maximum: 1.2, step: 0.02 },
-  { key: "doppler", group: "disc", id: "cle-black-hole-doppler", label: "Doppler beaming", hint: "Relativistic color and brightness shift", minimum: 0, maximum: 1, step: 0.05, percent: true },
-  { key: "starBrightness", group: "light", id: "cle-black-hole-star-brightness", label: "Lensed stars", hint: "Brightness of the background sky", minimum: 0, maximum: 2, step: 0.05 },
-  { key: "glow", group: "light", id: "cle-black-hole-glow", label: "Bloom", hint: "Halo around bright gas", minimum: 0, maximum: 2, step: 0.05 },
-  { key: "exposure", group: "light", id: "cle-black-hole-exposure", label: "Exposure", hint: "Intensity entering the tone curve", minimum: 0.25, maximum: 1.8, step: 0.05 },
-  { key: "vignette", group: "light", id: "cle-black-hole-vignette", label: "Vignette", hint: "Darkening at the corners", minimum: 0, maximum: 1, step: 0.01, percent: true },
-  { key: "steps", group: "renderer", id: "cle-black-hole-steps", label: "Ray steps", hint: "Integration steps per pixel", minimum: 120, maximum: 460, step: 10 },
-  { key: "resolution", group: "renderer", id: "cle-black-hole-resolution", label: "Render scale", hint: "Canvas resolution before upscaling", minimum: 0.4, maximum: 1, step: 0.05, percent: true },
-  { key: "maxDpr", group: "renderer", id: "cle-black-hole-max-dpr", label: "Pixel ratio cap", hint: "Maximum device pixel density", minimum: 1, maximum: 2.5, step: 0.25 },
+  { key: "distance", group: "camera", id: "cle-black-hole-distance", label: "Distance", labelZh: "距离", hint: "Camera distance in horizon radii", hintZh: "以视界半径为单位的相机距离", minimum: 10, maximum: 40, step: 0.5, unit: " rH" },
+  { key: "elevation", group: "camera", id: "cle-black-hole-elevation", label: "Elevation", labelZh: "仰角", hint: "Angle above the accretion disc", hintZh: "相对于吸积盘的角度", minimum: -30, maximum: 30, step: 0.5, unit: "deg" },
+  { key: "azimuth", group: "camera", id: "cle-black-hole-azimuth", label: "Azimuth", labelZh: "方位角", hint: "Position around the black hole", hintZh: "黑洞周围的位置", minimum: -180, maximum: 180, step: 1, unit: "deg" },
+  { key: "roll", group: "camera", id: "cle-black-hole-roll", label: "Roll", labelZh: "滚转", hint: "Disc angle across the frame", hintZh: "吸积盘在画面中的倾斜角", minimum: -45, maximum: 45, step: 1, unit: "deg" },
+  { key: "fov", group: "camera", id: "cle-black-hole-fov", label: "Field of view", labelZh: "视野", hint: "Vertical camera field of view", hintZh: "垂直相机视野", minimum: 25, maximum: 75, step: 1, unit: "deg" },
+  { key: "orbitSpeed", group: "camera", id: "cle-black-hole-orbit-speed", label: "Orbit drift", labelZh: "轨道漂移", hint: "Camera movement in degrees per second", hintZh: "相机每秒移动的角度", minimum: -8, maximum: 8, step: 0.1, unit: "deg/s" },
+  { key: "diskInner", group: "disc", id: "cle-black-hole-disk-inner", label: "Inner edge", labelZh: "内边缘", hint: "Closest stable gas orbit", hintZh: "气体可保持的最近稳定轨道", minimum: 1.2, maximum: 6, step: 0.1, unit: " rH" },
+  { key: "diskOuter", group: "disc", id: "cle-black-hole-disk-outer", label: "Outer edge", labelZh: "外边缘", hint: "Disc radius", hintZh: "吸积盘半径", minimum: 8, maximum: 24, step: 0.5, unit: " rH" },
+  { key: "diskThickness", group: "disc", id: "cle-black-hole-disk-thickness", label: "Thickness", labelZh: "厚度", hint: "Gas depth at the inner rim", hintZh: "内缘处的气体深度", minimum: 0.05, maximum: 0.8, step: 0.01 },
+  { key: "diskDensity", group: "disc", id: "cle-black-hole-disk-density", label: "Density", labelZh: "密度", hint: "Opacity of the gas", hintZh: "气体不透明度", minimum: 0.1, maximum: 2, step: 0.05 },
+  { key: "brightness", group: "disc", id: "cle-black-hole-brightness", label: "Emission", labelZh: "发射", hint: "Light emitted before tone mapping", hintZh: "色调映射前的气体亮度", minimum: 0.2, maximum: 2, step: 0.05 },
+  { key: "spinSpeed", group: "disc", id: "cle-black-hole-spin-speed", label: "Spin", labelZh: "自转", hint: "Inner-rim turns per second", hintZh: "内缘每秒旋转圈数", minimum: 0, maximum: 0.2, step: 0.005, unit: " t/s" },
+  { key: "grain", group: "disc", id: "cle-black-hole-grain", label: "Turbulence", labelZh: "湍流", hint: "Scale of gas detail", hintZh: "气体细节尺度", minimum: 0.1, maximum: 1.2, step: 0.02 },
+  { key: "doppler", group: "disc", id: "cle-black-hole-doppler", label: "Doppler beaming", labelZh: "多普勒束射", hint: "Relativistic color and brightness shift", hintZh: "相对论颜色与亮度偏移", minimum: 0, maximum: 1, step: 0.05, percent: true },
+  { key: "starBrightness", group: "light", id: "cle-black-hole-star-brightness", label: "Lensed stars", labelZh: "透镜星光", hint: "Brightness of the background sky", hintZh: "背景天空的亮度", minimum: 0, maximum: 2, step: 0.05 },
+  { key: "glow", group: "light", id: "cle-black-hole-glow", label: "Bloom", labelZh: "辉光", hint: "Halo around bright gas", hintZh: "明亮气体周围的光晕", minimum: 0, maximum: 2, step: 0.05 },
+  { key: "exposure", group: "light", id: "cle-black-hole-exposure", label: "Exposure", labelZh: "曝光", hint: "Intensity entering the tone curve", hintZh: "进入色调曲线的强度", minimum: 0.25, maximum: 1.8, step: 0.05 },
+  { key: "vignette", group: "light", id: "cle-black-hole-vignette", label: "Vignette", labelZh: "暗角", hint: "Darkening at the corners", hintZh: "画面角落的变暗程度", minimum: 0, maximum: 1, step: 0.01, percent: true },
+  { key: "steps", group: "renderer", id: "cle-black-hole-steps", label: "Ray steps", labelZh: "光线步数", hint: "Integration steps per pixel", hintZh: "每个像素的积分步数", minimum: 120, maximum: 460, step: 10 },
+  { key: "resolution", group: "renderer", id: "cle-black-hole-resolution", label: "Render scale", labelZh: "渲染比例", hint: "Canvas resolution before upscaling", hintZh: "放大前的画布分辨率", minimum: 0.4, maximum: 1, step: 0.05, percent: true },
+  { key: "maxDpr", group: "renderer", id: "cle-black-hole-max-dpr", label: "Pixel ratio cap", labelZh: "像素比例上限", hint: "Maximum device pixel density", hintZh: "设备像素密度上限", minimum: 1, maximum: 2.5, step: 0.25 },
 ] satisfies readonly BlackHoleNumericControlDefinition[]);
 
 function calculateParticleCursorStrengthValues(cursorStrength: number): ParticleCursorStrengthValues {
@@ -943,8 +950,47 @@ function particleEditorNumber(definition: ParticleValueControlDefinition, value:
   return Number((value * particleEditorScale(definition)).toFixed(8));
 }
 
-function particleOutputAriaLabel(definition: ParticleValueControlDefinition, formattedValue: string): string {
-  return `Edit ${definition.label} value. Current value ${formattedValue}.`;
+function bilingualLabelMarkup(zh: string, en: string, className = "cle-bilingual-label"): string {
+  return `
+    <span class="${className}">
+      <span class="cle-bilingual-label-zh" lang="zh-CN">${zh}</span>
+      <span class="cle-bilingual-label-en" lang="en">${en}</span>
+    </span>
+  `;
+}
+
+function backgroundSettingsText(language: BackgroundSettingsLanguage, zh: string, en: string): string {
+  return language === "zh" ? zh : en;
+}
+
+function backgroundSettingsError(
+  error: string | undefined,
+  language: BackgroundSettingsLanguage,
+  pluginZh: string,
+  pluginEn: string,
+): string {
+  if (!error) return "";
+  return language === "zh" ? `${pluginZh}错误：${error}` : `${pluginEn} error: ${error}`;
+}
+
+function backgroundLanguageSwitchMarkup(id: string): string {
+  return `
+    <label class="background-language-switch" for="${id}" title="使用英文参数标签 / Use English parameter labels">
+      <span class="background-language-option" data-language-option="zh" lang="zh-CN">中文</span>
+      <input class="background-language-toggle" id="${id}" type="checkbox" role="switch" aria-label="使用英文参数标签 / Use English parameter labels">
+      <span class="background-language-option" data-language-option="en" lang="en">EN</span>
+    </label>
+  `;
+}
+
+function particleOutputAriaLabel(
+  definition: ParticleValueControlDefinition,
+  formattedValue: string,
+  language: BackgroundSettingsLanguage = "zh",
+): string {
+  return language === "zh"
+    ? `编辑${definition.labelZh}数值，当前值为 ${formattedValue}。`
+    : `Edit ${definition.label} value. Current value ${formattedValue}.`;
 }
 
 function clampParticleNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
@@ -1352,10 +1398,10 @@ function normalizeBlackHoleSettings(value: unknown): BlackHoleBackgroundSettings
     glow: clampParticleNumber(record.glow, 0, 2, defaults.glow),
     exposure: clampParticleNumber(record.exposure, 0.25, 1.8, defaults.exposure),
     vignette: clampParticleNumber(record.vignette, 0, 1, defaults.vignette),
-    steps: Math.round(clampParticleNumber(record.steps, 120, 460, defaults.steps) / 10) * 10,
-    resolution: clampParticleNumber(record.resolution, 0.4, 1, defaults.resolution),
-    maxDpr: clampParticleNumber(record.maxDpr, 1, 2.5, defaults.maxDpr),
-    paused: typeof record.paused === "boolean" ? record.paused : defaults.paused,
+    steps: defaults.steps,
+    resolution: defaults.resolution,
+    maxDpr: defaults.maxDpr,
+    paused: defaults.paused,
   };
 }
 
@@ -5860,8 +5906,8 @@ function particleValueEditorMarkup(definition: ParticleValueControlDefinition, v
   const formattedValue = definition.format(value);
   return `
     <span class="particle-control-value">
-      <output for="${definition.id}" tabindex="0" role="button" title="Double-click to enter a value" aria-label="${particleOutputAriaLabel(definition, formattedValue)}">${formattedValue}</output>
-      <input class="particle-value-editor" id="${definition.id}-value" type="number" inputmode="decimal" min="${particleEditorNumber(definition, definition.minimum)}" max="${particleEditorNumber(definition, definition.maximum)}" step="${particleEditorNumber(definition, definition.step)}" value="${particleEditorNumber(definition, value)}" aria-label="Enter ${definition.label} value" hidden>
+      <output for="${definition.id}" tabindex="0" role="button" title="双击输入数值" aria-label="${particleOutputAriaLabel(definition, formattedValue)}">${formattedValue}</output>
+      <input class="particle-value-editor" id="${definition.id}-value" type="number" inputmode="decimal" min="${particleEditorNumber(definition, definition.minimum)}" max="${particleEditorNumber(definition, definition.maximum)}" step="${particleEditorNumber(definition, definition.step)}" value="${particleEditorNumber(definition, value)}" aria-label="输入${definition.labelZh}" hidden>
     </span>
   `;
 }
@@ -5874,8 +5920,8 @@ function particleNumericControlsMarkup(group: ParticleControlGroup): string {
       const formattedValue = definition.format(value);
       return `
         <div class="particle-control-row">
-          <label for="${definition.id}">${definition.label}</label>
-          <input id="${definition.id}" data-particle-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-valuetext="${formattedValue}">
+          <label for="${definition.id}">${bilingualLabelMarkup(definition.labelZh, definition.label)}</label>
+          <input id="${definition.id}" data-particle-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-label="${definition.labelZh}" aria-valuetext="${formattedValue}">
           ${particleValueEditorMarkup(definition, value)}
         </div>
       `;
@@ -5889,8 +5935,8 @@ function particleImageTransformControlsMarkup(): string {
       const value = DEFAULT_PARTICLE_IMAGE_TRANSFORM[definition.key];
       return `
         <div class="particle-control-row">
-          <label for="${definition.id}">${definition.label}</label>
-          <input id="${definition.id}" data-particle-image-transform="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-valuetext="${definition.format(value)}">
+          <label for="${definition.id}">${bilingualLabelMarkup(definition.labelZh, definition.label)}</label>
+          <input id="${definition.id}" data-particle-image-transform="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-label="${definition.labelZh}" aria-valuetext="${definition.format(value)}">
           ${particleValueEditorMarkup(definition, value)}
         </div>
       `;
@@ -5902,10 +5948,10 @@ function particleMorphCurveEditorMarkup(): string {
   return `
     <section class="particle-morph-curve-control" aria-labelledby="cle-particle-morph-curve-label">
       <header class="particle-morph-curve-head">
-        <span id="cle-particle-morph-curve-label">Morph curve</span>
+        <span id="cle-particle-morph-curve-label">${bilingualLabelMarkup("变形曲线", "Morph curve", "cle-bilingual-label cle-bilingual-label-compact")}</span>
         <span class="particle-morph-curve-actions">
-          <span class="particle-morph-curve-mode">Smooth</span>
-          <button class="particle-morph-curve-reset" type="button">Reset</button>
+          <span class="particle-morph-curve-mode">平滑</span>
+          <button class="particle-morph-curve-reset" type="button">${bilingualLabelMarkup("重置", "Reset")}</button>
         </span>
       </header>
       <svg class="particle-morph-curve-editor" viewBox="0 0 240 116" role="group" aria-labelledby="cle-particle-morph-curve-label" aria-describedby="cle-particle-morph-curve-help" data-disabled="false" data-dragging="false">
@@ -5920,21 +5966,23 @@ function particleMorphCurveEditorMarkup(): string {
         <line class="particle-morph-curve-tangent particle-morph-curve-tangent-end"></line>
         <path class="particle-morph-curve-path-glow"></path>
         <path class="particle-morph-curve-path"></path>
-        <g class="particle-morph-curve-nodes" role="group" aria-label="Intermediate morph keyframes"></g>
+        <g class="particle-morph-curve-nodes" role="group" aria-label="中间变形关键帧"></g>
         <path class="particle-morph-curve-keyframe" d="M 14 95 L 19 100 L 14 105 L 9 100 Z"></path>
         <path class="particle-morph-curve-keyframe" d="M 226 7 L 231 12 L 226 17 L 221 12 Z"></path>
-        <g class="particle-morph-curve-handle particle-morph-curve-handle-start" data-handle="start" tabindex="0" role="slider" aria-label="Outgoing curve handle" aria-valuemin="0" aria-valuemax="100">
+        <g class="particle-morph-curve-handle particle-morph-curve-handle-start" data-handle="start" tabindex="0" role="slider" aria-label="输出控制点" aria-valuemin="0" aria-valuemax="100">
           <circle class="particle-morph-curve-hit" r="12"></circle>
           <circle class="particle-morph-curve-knob" r="5"></circle>
         </g>
-        <g class="particle-morph-curve-handle particle-morph-curve-handle-end" data-handle="end" tabindex="0" role="slider" aria-label="Incoming curve handle" aria-valuemin="0" aria-valuemax="100">
+        <g class="particle-morph-curve-handle particle-morph-curve-handle-end" data-handle="end" tabindex="0" role="slider" aria-label="输入控制点" aria-valuemin="0" aria-valuemax="100">
           <circle class="particle-morph-curve-hit" r="12"></circle>
           <circle class="particle-morph-curve-knob" r="5"></circle>
         </g>
-        <text class="particle-morph-curve-axis" x="14" y="8">MORPH</text>
-        <text class="particle-morph-curve-axis" x="226" y="111" text-anchor="end">TIME</text>
+        <text class="particle-morph-curve-axis cle-bilingual-label-zh" x="14" y="8" lang="zh-CN">变形</text>
+        <text class="particle-morph-curve-axis cle-bilingual-label-en" x="14" y="8" lang="en">MORPH</text>
+        <text class="particle-morph-curve-axis cle-bilingual-label-zh" x="226" y="111" text-anchor="end" lang="zh-CN">时间</text>
+        <text class="particle-morph-curve-axis cle-bilingual-label-en" x="226" y="111" text-anchor="end" lang="en">TIME</text>
       </svg>
-      <p class="particle-morph-curve-help" id="cle-particle-morph-curve-help">Double-click to add a keyframe · drag to move · Delete removes it.</p>
+      <p class="particle-morph-curve-help" id="cle-particle-morph-curve-help">${bilingualLabelMarkup("双击添加关键帧 · 拖动移动 · Delete 删除", "Double-click to add a keyframe · drag to move · Delete removes it")}</p>
     </section>
   `;
 }
@@ -5959,82 +6007,85 @@ function particleBackgroundCardMarkup(): string {
 
 function particleSettingsPanelMarkup(): string {
   return `
-    <section class="particle-settings-panel" id="cle-particle-settings" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-particle-settings-title">
+    <section class="particle-settings-panel" id="cle-particle-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-particle-settings-title">
       <header class="particle-settings-header">
-        <div>
-          <p>Appearance</p>
-          <h3 id="cle-particle-settings-title">Particle settings</h3>
+        <div class="particle-settings-heading">
+          <p>${bilingualLabelMarkup("外观", "Appearance")}</p>
+          <h3 id="cle-particle-settings-title">${bilingualLabelMarkup("粒子设置", "Particle settings")}</h3>
         </div>
-        <button class="particle-settings-close" type="button" title="Close particle settings" aria-label="Close particle settings">${icons.close}</button>
+        <div class="particle-settings-header-actions">
+          ${backgroundLanguageSwitchMarkup("cle-particle-settings-language")}
+          <button class="particle-settings-close" type="button" title="关闭粒子设置" aria-label="关闭粒子设置">${icons.close}</button>
+        </div>
       </header>
       <div class="particle-settings-scroll">
         <fieldset class="particle-settings-group">
-          <legend>Particles</legend>
+          <legend>${bilingualLabelMarkup("粒子", "Particles")}</legend>
           ${particleNumericControlsMarkup("particles")}
         </fieldset>
         <fieldset class="particle-settings-group">
-          <legend>Flow</legend>
+          <legend>${bilingualLabelMarkup("流动", "Flow")}</legend>
           ${particleNumericControlsMarkup("flow")}
         </fieldset>
         <fieldset class="particle-settings-group">
-          <legend>Source</legend>
-        <details class="particle-source-details">
-          <summary class="particle-source-summary">
-            <span>Image library</span>
-            <span class="particle-source-count">0 saved</span>
-          </summary>
-          <div class="particle-library-toolbar">
-            <label class="particle-library-add">
-              <span>Add images</span>
-              <input class="particle-library-upload" type="file" accept="${PARTICLE_BACKGROUND_ACCEPT}" multiple>
-            </label>
-            <button class="particle-library-clear" type="button" disabled>Clear order</button>
-          </div>
-          <section class="particle-image-transform-editor" data-empty="true" tabindex="-1" aria-busy="false" aria-labelledby="cle-particle-image-transform-title cle-particle-image-transform-name">
-            <header class="particle-image-transform-header">
-              <div class="particle-image-transform-identity">
-                <img class="particle-image-transform-thumb" width="28" height="28" alt="" hidden>
-                <div>
-                  <span id="cle-particle-image-transform-title">Photo framing</span>
-                  <strong class="particle-image-transform-name" id="cle-particle-image-transform-name" aria-live="polite">Select a photo</strong>
-                </div>
-              </div>
-              <button class="particle-image-transform-reset" type="button" disabled>Reset</button>
-            </header>
-            <div class="particle-image-transform-controls">
-              ${particleImageTransformControlsMarkup()}
+          <legend>${bilingualLabelMarkup("来源", "Source")}</legend>
+          <details class="particle-source-details">
+            <summary class="particle-source-summary">
+              ${bilingualLabelMarkup("图片库", "Image library")}
+              <span class="particle-source-count">0 个已保存</span>
+            </summary>
+            <div class="particle-library-toolbar">
+              <label class="particle-library-add">
+                ${bilingualLabelMarkup("添加图片", "Add images")}
+                <input class="particle-library-upload" type="file" accept="${PARTICLE_BACKGROUND_ACCEPT}" multiple>
+              </label>
+              <button class="particle-library-clear" type="button" disabled>${bilingualLabelMarkup("清除顺序", "Clear order")}</button>
             </div>
-            <p class="particle-image-transform-empty">Choose Adjust on a photo to set its position and zoom.</p>
-          </section>
-          <div class="particle-library-grid">
-            <p class="particle-library-empty">Add images, then select them in playback order.</p>
-          </div>
-          <label class="particle-toggle-row" for="cle-particle-auto-switch">
-            <span>Auto switch</span>
-            <input id="cle-particle-auto-switch" type="checkbox" checked>
-          </label>
-        </details>
+            <section class="particle-image-transform-editor" data-empty="true" tabindex="-1" aria-busy="false" aria-labelledby="cle-particle-image-transform-title cle-particle-image-transform-name">
+              <header class="particle-image-transform-header">
+                <div class="particle-image-transform-identity">
+                  <img class="particle-image-transform-thumb" width="28" height="28" alt="" hidden>
+                  <div>
+                    <span id="cle-particle-image-transform-title">${bilingualLabelMarkup("图片取景", "Photo framing")}</span>
+                    <strong class="particle-image-transform-name" id="cle-particle-image-transform-name" aria-live="polite">选择照片</strong>
+                  </div>
+                </div>
+                <button class="particle-image-transform-reset" type="button" disabled>${bilingualLabelMarkup("重置", "Reset")}</button>
+              </header>
+              <div class="particle-image-transform-controls">
+                ${particleImageTransformControlsMarkup()}
+              </div>
+              <p class="particle-image-transform-empty">${bilingualLabelMarkup("在图片上点击“调整”以设置位置和缩放。", "Choose Adjust on a photo to set its position and zoom.")}</p>
+            </section>
+            <div class="particle-library-grid">
+              <p class="particle-library-empty">${bilingualLabelMarkup("添加图片后按播放顺序选择。", "Add images, then select them in playback order.")}</p>
+            </div>
+            <label class="particle-toggle-row" for="cle-particle-auto-switch">
+              ${bilingualLabelMarkup("自动切换", "Auto switch")}
+              <input id="cle-particle-auto-switch" type="checkbox" checked>
+            </label>
+          </details>
           ${particleNumericControlsMarkup("source")}
           ${particleMorphCurveEditorMarkup()}
           <label class="particle-toggle-row" for="cle-particle-show-source">
-            <span>Show source image</span>
+            ${bilingualLabelMarkup("显示源图", "Show source image")}
             <input id="cle-particle-show-source" type="checkbox" checked>
           </label>
           <label class="particle-color-row" for="cle-particle-background-color">
-            <span>Background</span>
+            ${bilingualLabelMarkup("背景", "Background")}
             <input id="cle-particle-background-color" type="color" value="#000000">
           </label>
         </fieldset>
         <fieldset class="particle-settings-group">
-          <legend>Pointer</legend>
+          <legend>${bilingualLabelMarkup("指针", "Pointer")}</legend>
           ${particleNumericControlsMarkup("pointer")}
           <label class="particle-toggle-row" for="cle-particle-cursor-interaction">
-            <span>Cursor interaction</span>
+            ${bilingualLabelMarkup("鼠标交互", "Cursor interaction")}
             <input id="cle-particle-cursor-interaction" type="checkbox" checked>
           </label>
         </fieldset>
         <fieldset class="particle-settings-group">
-          <legend>Render</legend>
+          <legend>${bilingualLabelMarkup("渲染", "Render")}</legend>
           ${particleNumericControlsMarkup("render")}
         </fieldset>
         <p class="particle-plugin-error" role="status" hidden></p>
@@ -6056,9 +6107,9 @@ function blackHoleNumericControlsMarkup(group: BlackHoleControlGroup): string {
       const value = DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS[definition.key];
       const formattedValue = formatBlackHoleControlValue(definition, value);
       return `
-        <div class="particle-control-row" title="${definition.hint}">
-          <label for="${definition.id}">${definition.label}</label>
-          <input id="${definition.id}" data-black-hole-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-valuetext="${formattedValue}">
+        <div class="particle-control-row" title="${definition.hintZh}" data-hint-zh="${definition.hintZh}" data-hint-en="${definition.hint}">
+          <label for="${definition.id}">${bilingualLabelMarkup(definition.labelZh, definition.label)}</label>
+          <input id="${definition.id}" data-black-hole-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-label="${definition.labelZh}" aria-valuetext="${formattedValue}">
           <span class="particle-control-value"><output for="${definition.id}">${formattedValue}</output></span>
         </div>
       `;
@@ -6087,50 +6138,53 @@ function blackHoleBackgroundCardMarkup(): string {
 
 function blackHoleSettingsPanelMarkup(): string {
   return `
-    <section class="particle-settings-panel black-hole-settings-panel" id="cle-black-hole-settings" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-black-hole-settings-title">
+    <section class="particle-settings-panel black-hole-settings-panel" id="cle-black-hole-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-black-hole-settings-title">
       <header class="particle-settings-header">
         <div class="particle-settings-heading">
-          <p>Appearance</p>
-          <h3 id="cle-black-hole-settings-title">Black hole settings</h3>
+          <p>${bilingualLabelMarkup("外观", "Appearance")}</p>
+          <h3 id="cle-black-hole-settings-title">${bilingualLabelMarkup("黑洞设置", "Black hole settings")}</h3>
         </div>
-        <button class="particle-settings-close black-hole-settings-close" type="button" title="Close black hole settings" aria-label="Close black hole settings">${icons.close}</button>
+        <div class="particle-settings-header-actions">
+          ${backgroundLanguageSwitchMarkup("cle-black-hole-settings-language")}
+          <button class="particle-settings-close black-hole-settings-close" type="button" title="关闭黑洞设置" aria-label="关闭黑洞设置">${icons.close}</button>
+        </div>
       </header>
       <div class="particle-settings-scroll">
-        <div class="black-hole-preset-toolbar" role="group" aria-label="Black hole scene presets">
-          <button type="button" data-black-hole-preset="cinema">Cinema</button>
-          <button type="button" data-black-hole-preset="lens">Lens</button>
-          <button type="button" data-black-hole-preset="ember">Ember</button>
-          <button class="black-hole-reset" type="button">Reset</button>
+        <div class="black-hole-preset-toolbar" role="group" aria-label="黑洞场景预设">
+          <button type="button" data-black-hole-preset="cinema">${bilingualLabelMarkup("电影", "Cinema")}</button>
+          <button type="button" data-black-hole-preset="lens">${bilingualLabelMarkup("透镜", "Lens")}</button>
+          <button type="button" data-black-hole-preset="ember">${bilingualLabelMarkup("余烬", "Ember")}</button>
+          <button class="black-hole-reset" type="button">${bilingualLabelMarkup("重置", "Reset")}</button>
         </div>
         <fieldset class="particle-settings-group">
-          <legend>Camera</legend>
+          <legend>${bilingualLabelMarkup("相机", "Camera")}</legend>
           ${blackHoleNumericControlsMarkup("camera")}
         </fieldset>
         <fieldset class="particle-settings-group">
-          <legend>Accretion disc</legend>
+          <legend>${bilingualLabelMarkup("吸积盘", "Accretion disc")}</legend>
           ${blackHoleNumericControlsMarkup("disc")}
         </fieldset>
         <fieldset class="particle-settings-group">
-          <legend>Light</legend>
+          <legend>${bilingualLabelMarkup("光线", "Light")}</legend>
           ${blackHoleNumericControlsMarkup("light")}
           <label class="particle-color-row" for="cle-black-hole-hot-color">
-            <span>Hot color</span>
+            ${bilingualLabelMarkup("热色", "Hot color")}
             <input id="cle-black-hole-hot-color" data-black-hole-color="hotColor" type="color" value="${DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS.hotColor}">
           </label>
           <label class="particle-color-row" for="cle-black-hole-mid-color">
-            <span>Mid color</span>
+            ${bilingualLabelMarkup("中间色", "Mid color")}
             <input id="cle-black-hole-mid-color" data-black-hole-color="midColor" type="color" value="${DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS.midColor}">
           </label>
           <label class="particle-color-row" for="cle-black-hole-cool-color">
-            <span>Cool color</span>
+            ${bilingualLabelMarkup("冷色", "Cool color")}
             <input id="cle-black-hole-cool-color" data-black-hole-color="coolColor" type="color" value="${DEFAULT_BLACK_HOLE_BACKGROUND_SETTINGS.coolColor}">
           </label>
         </fieldset>
-        <fieldset class="particle-settings-group">
-          <legend>Renderer</legend>
+        <fieldset class="particle-settings-group black-hole-renderer-settings" hidden>
+          <legend>${bilingualLabelMarkup("渲染器", "Renderer")}</legend>
           ${blackHoleNumericControlsMarkup("renderer")}
           <label class="particle-toggle-row" for="cle-black-hole-paused">
-            <span>Pause animation</span>
+            ${bilingualLabelMarkup("暂停动画", "Pause animation")}
             <input id="cle-black-hole-paused" type="checkbox">
           </label>
         </fieldset>
@@ -6239,6 +6293,7 @@ export class CodeCodexElement extends HTMLElement {
   #previewMarketOpen = false;
   #particleSettingsOpen = false;
   #blackHoleSettingsOpen = false;
+  #backgroundSettingsLanguage: BackgroundSettingsLanguage = "zh";
   #forcedColorsQuery: MediaQueryList | undefined;
   #reducedTransparencyQuery: MediaQueryList | undefined;
 
@@ -6322,6 +6377,7 @@ export class CodeCodexElement extends HTMLElement {
   readonly #blackHoleSettingsPanel: HTMLElement;
   readonly #blackHoleSettingsTrigger: HTMLButtonElement;
   readonly #blackHoleSettingsCloseButton: HTMLButtonElement;
+  readonly #backgroundLanguageInputs: readonly HTMLInputElement[];
   readonly #blackHoleNumericControls = new Map<BlackHoleNumericSettingKey, Readonly<{
     definition: BlackHoleNumericControlDefinition;
     input: HTMLInputElement;
@@ -6496,6 +6552,12 @@ export class CodeCodexElement extends HTMLElement {
     this.#blackHoleSettingsPanel = this.#required<HTMLElement>(".black-hole-settings-panel");
     this.#blackHoleSettingsTrigger = this.#required<HTMLButtonElement>(".black-hole-settings-trigger");
     this.#blackHoleSettingsCloseButton = this.#required<HTMLButtonElement>(".black-hole-settings-close");
+    this.#backgroundLanguageInputs = Array.from(
+      this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
+    );
+    if (this.#backgroundLanguageInputs.length !== 2) {
+      throw new Error("Background settings require two synchronized language switches.");
+    }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
       const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
@@ -6529,6 +6591,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#requestedPlacement = this.dataset.placement || "inline";
     this.#rememberInlineMount();
     this.#settings = this.#readLocalSettings();
+    this.#backgroundSettingsLanguage = this.#readBackgroundSettingsLanguage();
+    this.#syncBackgroundSettingsLanguagePresentation();
     for (const previewer of this.#readEnabledPreviewers()) this.#enabledPreviewers.add(previewer);
     this.#enabledAppearancePlugins.clear();
     for (const plugin of this.#readEnabledAppearancePlugins()) this.#enabledAppearancePlugins.add(plugin);
@@ -6839,6 +6903,90 @@ export class CodeCodexElement extends HTMLElement {
     return element;
   }
 
+  #backgroundText(zh: string, en: string): string {
+    return backgroundSettingsText(this.#backgroundSettingsLanguage, zh, en);
+  }
+
+  #readBackgroundSettingsLanguage(): BackgroundSettingsLanguage {
+    try {
+      const stored = localStorage.getItem(BACKGROUND_SETTINGS_LANGUAGE_KEY);
+      if (stored === "en" || stored === "zh") backgroundSettingsLanguageSession = stored;
+    } catch {
+      // Keep the last in-memory selection when DOM storage is unavailable.
+    }
+    return backgroundSettingsLanguageSession;
+  }
+
+  #writeBackgroundSettingsLanguage(): void {
+    backgroundSettingsLanguageSession = this.#backgroundSettingsLanguage;
+    try {
+      localStorage.setItem(BACKGROUND_SETTINGS_LANGUAGE_KEY, this.#backgroundSettingsLanguage);
+    } catch {
+      // The selected language remains active for this session when DOM storage is unavailable.
+    }
+  }
+
+  #syncBackgroundSettingsLanguagePresentation(): void {
+    const language = this.#backgroundSettingsLanguage;
+    const english = language === "en";
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel]) {
+      panel.dataset.language = language;
+      panel.lang = language === "zh" ? "zh-CN" : "en";
+    }
+    for (const input of this.#backgroundLanguageInputs) {
+      input.checked = english;
+    }
+    this.#particleSettingsCloseButton.title = this.#backgroundText("关闭粒子设置", "Close particle settings");
+    this.#particleSettingsCloseButton.setAttribute("aria-label", this.#particleSettingsCloseButton.title);
+    this.#blackHoleSettingsCloseButton.title = this.#backgroundText("关闭黑洞设置", "Close black hole settings");
+    this.#blackHoleSettingsCloseButton.setAttribute("aria-label", this.#blackHoleSettingsCloseButton.title);
+
+    for (const control of [...this.#particleNumericControls.values(), ...this.#particleImageTransformControls.values()]) {
+      const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
+      control.input.setAttribute("aria-label", label);
+      control.output.title = this.#backgroundText("双击输入数值", "Double-click to enter a value");
+      control.editor.setAttribute(
+        "aria-label",
+        this.#backgroundText(`输入${control.definition.labelZh}`, `Enter ${control.definition.label} value`),
+      );
+      this.#syncParticleValueControl(control, Number(control.input.value));
+    }
+    for (const control of this.#blackHoleNumericControls.values()) {
+      control.input.setAttribute(
+        "aria-label",
+        this.#backgroundText(control.definition.labelZh, control.definition.label),
+      );
+      const row = control.input.closest<HTMLElement>(".particle-control-row");
+      if (row) row.title = this.#backgroundText(control.definition.hintZh, control.definition.hint);
+    }
+    this.#particleMorphCurveNodes.setAttribute(
+      "aria-label",
+      this.#backgroundText("中间变形关键帧", "Intermediate morph keyframes"),
+    );
+    this.#particleMorphCurveStartHandle.setAttribute(
+      "aria-label",
+      this.#backgroundText("输出控制点", "Outgoing curve handle"),
+    );
+    this.#particleMorphCurveEndHandle.setAttribute(
+      "aria-label",
+      this.#backgroundText("输入控制点", "Incoming curve handle"),
+    );
+    this.#shadow.querySelector<HTMLElement>(".black-hole-preset-toolbar")?.setAttribute(
+      "aria-label",
+      this.#backgroundText("黑洞场景预设", "Black hole scene presets"),
+    );
+  }
+
+  #setBackgroundSettingsLanguage(language: BackgroundSettingsLanguage): void {
+    this.#backgroundSettingsLanguage = language;
+    this.#writeBackgroundSettingsLanguage();
+    this.#syncBackgroundSettingsLanguagePresentation();
+    this.#renderParticleBackgroundPlugin();
+    this.#renderBlackHoleBackgroundPlugin();
+    if (this.#particleSettingsOpen) requestAnimationFrame(() => this.#positionParticleSettingsPanel());
+    if (this.#blackHoleSettingsOpen) requestAnimationFrame(() => this.#positionBlackHoleSettingsPanel());
+  }
+
   #bindDomEvents(): void {
     if (!this.#domEventsBound) {
       this.#domEventsBound = true;
@@ -6855,6 +7003,11 @@ export class CodeCodexElement extends HTMLElement {
       this.#particleSettingsCloseButton.addEventListener("click", () => this.#closeParticleSettings(true));
       this.#blackHoleSettingsTrigger.addEventListener("click", () => this.#toggleBlackHoleSettings());
       this.#blackHoleSettingsCloseButton.addEventListener("click", () => this.#closeBlackHoleSettings(true));
+      for (const input of this.#backgroundLanguageInputs) {
+        input.addEventListener("change", () => {
+          this.#setBackgroundSettingsLanguage(input.checked ? "en" : "zh");
+        });
+      }
       this.#particleSettingsPanel.addEventListener("toggle", () => {
         if (this.#particleSettingsPanel.matches(":popover-open") || !this.#particleSettingsOpen) return;
         this.#particleSettingsOpen = false;
@@ -7134,7 +7287,7 @@ export class CodeCodexElement extends HTMLElement {
       event.stopPropagation();
       this.#particleMorphCurveDraft = cloneParticleMorphCurve(this.#particleMorphCurveFocusSnapshot);
       this.#renderParticleMorphCurveEditor();
-      this.#saveParticleMorphCurve("Morph curve restored");
+      this.#saveParticleMorphCurve(this.#backgroundText("变形曲线已恢复", "Morph curve restored"));
       return;
     }
     const activeValueEditor = event.composedPath().find((target) => (
@@ -10813,7 +10966,7 @@ export class CodeCodexElement extends HTMLElement {
       const node = this.#particleMorphCurveDraft.nodes[nodeIndex];
       if (!node) return;
       this.#setParticleMorphCurveNode(nodeIndex, node.time + timeDelta, node.progress + progressDelta);
-      this.#saveParticleMorphCurve("Morph keyframe adjusted");
+      this.#saveParticleMorphCurve(this.#backgroundText("变形关键帧已调整", "Morph keyframe adjusted"));
     });
     return element;
   }
@@ -10839,8 +10992,20 @@ export class CodeCodexElement extends HTMLElement {
       element.setAttribute("tabindex", disabled ? "-1" : "0");
       element.setAttribute("aria-disabled", String(disabled));
       element.setAttribute("aria-valuenow", String(progressPercent));
-      element.setAttribute("aria-valuetext", `${progressPercent}% morph progress at ${timePercent}% transition time`);
-      element.setAttribute("aria-label", `Intermediate keyframe ${timePercent}% time, ${progressPercent}% morph progress`);
+      element.setAttribute(
+        "aria-valuetext",
+        this.#backgroundText(
+          `${progressPercent}% 变形进度，${timePercent}% 过渡时间`,
+          `${progressPercent}% morph progress at ${timePercent}% transition time`,
+        ),
+      );
+      element.setAttribute(
+        "aria-label",
+        this.#backgroundText(
+          `中间关键帧：${timePercent}% 时间，${progressPercent}% 变形进度`,
+          `Intermediate keyframe ${timePercent}% time, ${progressPercent}% morph progress`,
+        ),
+      );
     });
     this.#updateParticleMorphCurveNodeSelection();
   }
@@ -10876,7 +11041,13 @@ export class CodeCodexElement extends HTMLElement {
       element.setAttribute("tabindex", disabled ? "-1" : "0");
       element.setAttribute("aria-disabled", String(disabled));
       element.setAttribute("aria-valuenow", String(progressPercent));
-      element.setAttribute("aria-valuetext", `${progressPercent}% morph progress at ${timePercent}% transition time`);
+      element.setAttribute(
+        "aria-valuetext",
+        this.#backgroundText(
+          `${progressPercent}% 变形进度，${timePercent}% 过渡时间`,
+          `${progressPercent}% morph progress at ${timePercent}% transition time`,
+        ),
+      );
     }
     this.#renderParticleMorphCurveNodes(disabled);
     const nodeCount = curve.nodes.length;
@@ -10884,10 +11055,15 @@ export class CodeCodexElement extends HTMLElement {
     const isLinear = Math.abs(curve.x1 - curve.y1) < 0.012
       && Math.abs(curve.x2 - curve.y2) < 0.012;
     this.#particleMorphCurveMode.textContent = isDefault
-      ? "Smooth"
+      ? this.#backgroundText("平滑", "Smooth")
       : nodeCount
-        ? `${nodeCount} keyframe${nodeCount === 1 ? "" : "s"}`
-        : isLinear ? "Linear" : "Custom";
+        ? this.#backgroundText(
+          `${nodeCount} 个关键帧`,
+          `${nodeCount} keyframe${nodeCount === 1 ? "" : "s"}`,
+        )
+        : isLinear
+          ? this.#backgroundText("线性", "Linear")
+          : this.#backgroundText("自定义", "Custom");
     this.#particleMorphCurveReset.disabled = disabled || isDefault;
   }
 
@@ -10944,7 +11120,10 @@ export class CodeCodexElement extends HTMLElement {
   #addParticleMorphCurveNode(time: number, progress: number): void {
     const nodes = this.#particleMorphCurveDraft.nodes;
     if (nodes.length >= MAX_PARTICLE_MORPH_CURVE_NODES) {
-      this.#showActionNotice(`Morph curves support up to ${MAX_PARTICLE_MORPH_CURVE_NODES} keyframes.`, "error");
+      this.#showActionNotice(this.#backgroundText(
+        `变形曲线最多支持 ${MAX_PARTICLE_MORPH_CURVE_NODES} 个关键帧。`,
+        `Morph curves support up to ${MAX_PARTICLE_MORPH_CURVE_NODES} keyframes.`,
+      ), "error");
       return;
     }
     const insertionIndex = nodes.findIndex((node) => node.time > time);
@@ -10972,7 +11151,7 @@ export class CodeCodexElement extends HTMLElement {
       && Math.abs(node.progress - candidate.progress) < 0.002
     ));
     this.#renderParticleMorphCurveEditor();
-    this.#saveParticleMorphCurve("Morph keyframe added");
+    this.#saveParticleMorphCurve(this.#backgroundText("已添加变形关键帧", "Morph keyframe added"));
   }
 
   #removeParticleMorphCurveNode(index: number): void {
@@ -10984,7 +11163,10 @@ export class CodeCodexElement extends HTMLElement {
     };
     this.#particleMorphCurveSelectedNodeIndex = null;
     this.#renderParticleMorphCurveEditor();
-    this.#saveParticleMorphCurve(`Morph keyframe at ${Math.round(node.time * 100)}% removed`);
+    this.#saveParticleMorphCurve(this.#backgroundText(
+      `已删除位于 ${Math.round(node.time * 100)}% 的变形关键帧`,
+      `Morph keyframe at ${Math.round(node.time * 100)}% removed`,
+    ));
   }
 
   #particleMorphCurvePointerValue(event: PointerEvent | MouseEvent): { readonly time: number; readonly progress: number } {
@@ -11008,9 +11190,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#particleMorphCurveEditor.dataset.dragging = "false";
     if (cancelled) this.#particleMorphCurveDraft = cloneParticleMorphCurve(drag.originalCurve);
     this.#renderParticleMorphCurveEditor();
-    if (!cancelled) this.#saveParticleMorphCurve(
-      drag.kind === "node" ? "Morph keyframe saved" : "Morph curve saved",
-    );
+    if (!cancelled) this.#saveParticleMorphCurve(drag.kind === "node"
+      ? this.#backgroundText("变形关键帧已保存", "Morph keyframe saved")
+      : this.#backgroundText("变形曲线已保存", "Morph curve saved"));
   }
 
   #cancelParticleMorphCurveInteraction(restoreDraft: boolean): void {
@@ -11035,7 +11217,7 @@ export class CodeCodexElement extends HTMLElement {
     void this.#particleBackgroundController.updateSettings(normalizeParticleSettings({
       ...this.#particleBackgroundController.settings,
       morphCurve: curve,
-    })).then(() => this.#announce(`${message} · applies to the next image switch`)).catch((error: unknown) => {
+    })).then(() => this.#announce(`${message} · ${this.#backgroundText("将在下次图片切换时生效", "applies to the next image switch")}`)).catch((error: unknown) => {
       this.#showActionNotice(
         error instanceof Error ? error.message : "The morph curve could not be saved.",
         "error",
@@ -11085,7 +11267,7 @@ export class CodeCodexElement extends HTMLElement {
           (handle === "start" ? curve.x1 : curve.x2) + timeDelta,
           (handle === "start" ? curve.y1 : curve.y2) + progressDelta,
         );
-        this.#saveParticleMorphCurve("Morph curve adjusted");
+        this.#saveParticleMorphCurve(this.#backgroundText("变形曲线已调整", "Morph curve adjusted"));
       });
     }
 
@@ -11119,7 +11301,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#particleMorphCurveDraft = cloneParticleMorphCurve(DEFAULT_PARTICLE_MORPH_CURVE);
       this.#particleMorphCurveSelectedNodeIndex = null;
       this.#renderParticleMorphCurveEditor();
-      this.#saveParticleMorphCurve("Morph curve reset to Smooth");
+      this.#saveParticleMorphCurve(this.#backgroundText("变形曲线已重置为平滑", "Morph curve reset to Smooth"));
     });
     this.#renderParticleMorphCurveEditor();
   }
@@ -11128,7 +11310,10 @@ export class CodeCodexElement extends HTMLElement {
     const formattedValue = control.definition.format(value);
     control.output.value = formattedValue;
     control.input.setAttribute("aria-valuetext", formattedValue);
-    control.output.setAttribute("aria-label", particleOutputAriaLabel(control.definition, formattedValue));
+    control.output.setAttribute(
+      "aria-label",
+      particleOutputAriaLabel(control.definition, formattedValue, this.#backgroundSettingsLanguage),
+    );
     if (control.editor.hidden) {
       control.editor.value = String(particleEditorNumber(control.definition, value));
     }
@@ -11318,7 +11503,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#particleImageTransformEditor.dataset.empty = String(!transformRecord);
     this.#particleImageTransformEditor.setAttribute("aria-busy", String(controller.pending && Boolean(transformRecord)));
     this.#particleImageTransformThumb.hidden = !transformRecord;
-    this.#particleImageTransformName.textContent = transformRecord ? `Adjusting: ${transformRecord.name}` : "Select a photo";
+    this.#particleImageTransformName.textContent = transformRecord
+      ? this.#backgroundText(`正在调整：${transformRecord.name}`, `Adjusting: ${transformRecord.name}`)
+      : this.#backgroundText("选择照片", "Select a photo");
     if (transformRecord) {
       this.#particleImageTransformThumb.src = controller.thumbnailUrl(transformRecord);
     } else {
@@ -11339,8 +11526,11 @@ export class CodeCodexElement extends HTMLElement {
       && transformRecord.zoom === DEFAULT_PARTICLE_IMAGE_TRANSFORM.zoom
     );
     this.#particleSourceCount.textContent = records.length
-      ? `${records.length} saved · ${selectedIds.size} selected`
-      : "0 saved";
+      ? this.#backgroundText(
+        `${records.length} 个已保存 · ${selectedIds.size} 个已选`,
+        `${records.length} saved · ${selectedIds.size} selected`,
+      )
+      : this.#backgroundText("0 个已保存", "0 saved");
     this.#particleLibraryClear.disabled = controller.pending || selectedIds.size === 0;
     this.#particleLibraryUpload.disabled = controller.pending;
     this.#particleAutoSwitchInput.disabled = controller.pending || selectedIds.size < 2;
@@ -11352,7 +11542,10 @@ export class CodeCodexElement extends HTMLElement {
     if (!records.length) {
       const empty = document.createElement("p");
       empty.className = "particle-library-empty";
-      empty.textContent = "Add images, then select them in playback order.";
+      empty.textContent = this.#backgroundText(
+        "添加图片后按播放顺序选择。",
+        "Add images, then select them in playback order.",
+      );
       fragment.append(empty);
     }
     for (const record of records) {
@@ -11370,8 +11563,14 @@ export class CodeCodexElement extends HTMLElement {
       selectButton.disabled = controller.pending;
       selectButton.setAttribute("aria-pressed", String(orderIndex >= 0));
       selectButton.setAttribute("aria-label", orderIndex >= 0
-        ? `Remove ${record.name} from the switching order`
-        : `Add ${record.name} to the switching order`);
+        ? this.#backgroundText(
+          `从切换顺序移除 ${record.name}`,
+          `Remove ${record.name} from the switching order`,
+        )
+        : this.#backgroundText(
+          `添加 ${record.name} 到切换顺序`,
+          `Add ${record.name} to the switching order`,
+        ));
       selectButton.title = record.name;
       const thumbnail = document.createElement("img");
       thumbnail.className = "particle-library-thumb";
@@ -11394,7 +11593,7 @@ export class CodeCodexElement extends HTMLElement {
       if (record.id === settings.activeImageId) {
         const live = document.createElement("span");
         live.className = "particle-library-live";
-        live.textContent = "LIVE";
+        live.textContent = this.#backgroundText("当前", "LIVE");
         live.setAttribute("aria-hidden", "true");
         item.append(live);
       }
@@ -11406,8 +11605,14 @@ export class CodeCodexElement extends HTMLElement {
       adjustButton.innerHTML = icons.sliders;
       adjustButton.disabled = controller.pending;
       adjustButton.setAttribute("aria-pressed", String(record.id === this.#particleTransformImageId));
-      adjustButton.setAttribute("aria-label", `Adjust position and zoom for ${record.name}`);
-      adjustButton.title = "Adjust position and zoom";
+      adjustButton.setAttribute(
+        "aria-label",
+        this.#backgroundText(
+          `调整 ${record.name} 的位置和缩放`,
+          `Adjust position and zoom for ${record.name}`,
+        ),
+      );
+      adjustButton.title = this.#backgroundText("调整位置和缩放", "Adjust position and zoom");
       item.append(adjustButton);
       const deleteButton = document.createElement("button");
       deleteButton.className = "particle-library-delete";
@@ -11416,15 +11621,26 @@ export class CodeCodexElement extends HTMLElement {
       deleteButton.dataset.particleAction = "delete";
       deleteButton.disabled = controller.pending;
       deleteButton.textContent = "×";
-      deleteButton.setAttribute("aria-label", `Delete ${record.name} from the image library`);
-      deleteButton.title = "Delete image";
+      deleteButton.setAttribute(
+        "aria-label",
+        this.#backgroundText(
+          `从图片库删除 ${record.name}`,
+          `Delete ${record.name} from the image library`,
+        ),
+      );
+      deleteButton.title = this.#backgroundText("删除图片", "Delete image");
       item.append(deleteButton);
       fragment.append(item);
     }
     this.#particleLibraryGrid.replaceChildren(fragment);
     const error = controller.error;
     this.#particlePluginError.hidden = !error;
-    this.#particlePluginError.textContent = error ?? "";
+    this.#particlePluginError.textContent = backgroundSettingsError(
+      error,
+      this.#backgroundSettingsLanguage,
+      "粒子图片背景",
+      "Particle Image Background",
+    );
     if (this.#particleSettingsOpen) requestAnimationFrame(() => this.#positionParticleSettingsPanel());
   }
 
@@ -11487,7 +11703,12 @@ export class CodeCodexElement extends HTMLElement {
     }
     const error = controller.error;
     this.#blackHolePluginError.hidden = !error;
-    this.#blackHolePluginError.textContent = error ?? "";
+    this.#blackHolePluginError.textContent = backgroundSettingsError(
+      error,
+      this.#backgroundSettingsLanguage,
+      "黑洞背景",
+      "Black Hole Background",
+    );
     this.#blackHoleSettingsPanel.setAttribute("aria-busy", String(controller.pending));
     if (this.#blackHoleSettingsOpen) requestAnimationFrame(() => this.#positionBlackHoleSettingsPanel());
   }

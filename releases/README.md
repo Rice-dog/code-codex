@@ -5,6 +5,43 @@ This folder contains ready-made downloadable packages.
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
+## v0.1.102
+
+- `CodeCodex-0.1.102-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.102-x64.msi`: MSI installer.
+- `CodeCodex-0.1.102-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Fixes Black Hole renderer quality internally at 200 ray steps, 40% render
+  scale, DPR 1.0, and continuous animation, while removing those renderer
+  controls from the user-facing settings panel.
+
+## v0.1.101
+
+- `CodeCodex-0.1.101-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.101-x64.msi`: MSI installer.
+- `CodeCodex-0.1.101-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Keeps both background settings panels interactive when they overlap the
+  Codex draggable title-bar region, including the language switch.
+
+## v0.1.100
+
+- `CodeCodex-0.1.100-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.100-x64.msi`: MSI installer.
+- `CodeCodex-0.1.100-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Keeps both background plugin names in English and adds one shared,
+  persisted Chinese/English language slider to their parameter panels.
+
+## v0.1.99
+
+- `CodeCodex-0.1.99-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.99-x64.msi`: MSI installer.
+- `CodeCodex-0.1.99-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds simultaneous Chinese/English labels and hints to both appearance
+  background plugin settings panels.
+
 ## v0.1.98
 
 - `CodeCodex-0.1.98-x64-setup.exe`: recommended installer.

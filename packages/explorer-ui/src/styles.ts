@@ -1214,6 +1214,9 @@ export const styles = String.raw`
   .particle-settings-panel {
     position: fixed;
     z-index: 2147483646;
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
+    pointer-events: auto;
     inset: auto;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
@@ -1264,6 +1267,67 @@ export const styles = String.raw`
     border-radius: 8px 8px 0 0;
   }
   .particle-settings-heading { min-width: 0; }
+  .particle-settings-header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 7px;
+  }
+  .background-language-switch {
+    display: grid;
+    grid-template-columns: auto 30px auto;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+    color: var(--cle-muted);
+    cursor: pointer;
+    font-size: 9.5px;
+    line-height: 16px;
+    user-select: none;
+  }
+  .background-language-option {
+    transition: color 120ms ease;
+  }
+  .background-language-toggle {
+    position: relative;
+    box-sizing: border-box;
+    width: 30px;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    appearance: none;
+    background: var(--cle-rule-strong);
+    border: 1px solid var(--cle-muted);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .background-language-toggle::before {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 12px;
+    height: 12px;
+    background: var(--cle-paper-raised);
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--cle-muted);
+    content: "";
+    transition: transform 120ms ease;
+  }
+  .background-language-toggle:checked {
+    background: var(--cle-signal);
+    border-color: color-mix(in srgb, var(--cle-signal) 78%, var(--cle-rule-strong));
+  }
+  .background-language-toggle:checked::before { transform: translateX(14px); }
+  .background-language-toggle:focus-visible {
+    outline: 2px solid var(--cle-focus);
+    outline-offset: 2px;
+  }
+  .particle-settings-panel[data-language="zh"] .background-language-option[data-language-option="zh"],
+  .particle-settings-panel[data-language="en"] .background-language-option[data-language-option="en"] {
+    color: var(--cle-ink);
+    font-weight: 700;
+  }
   .particle-settings-header h3 {
     margin: 0;
     overflow: hidden;
@@ -1324,6 +1388,9 @@ export const styles = String.raw`
     padding: 0;
     border: 0;
   }
+  .black-hole-renderer-settings[hidden] {
+    display: none;
+  }
   .particle-settings-group + .particle-settings-group {
     padding-top: 9px;
     border-top: 1px solid var(--cle-rule);
@@ -1341,6 +1408,141 @@ export const styles = String.raw`
   }
   .particle-settings-group > :is(.particle-toggle-row, .particle-color-row) { margin-inline: 0; }
   .particle-settings-panel .particle-plugin-error { grid-column: auto; }
+
+  /* Bilingual labels keep the Chinese name primary while preserving a compact
+     English reference on a second line.  The wrapper is intentionally generic
+     so headings, legends, controls, toggles, and buttons can share the same
+     markup without changing the panel's width. */
+  .cle-bilingual-label {
+    display: grid;
+    min-width: 0;
+    max-width: 100%;
+    align-content: center;
+    gap: 0;
+    line-height: 1.15;
+    white-space: normal;
+  }
+  .cle-bilingual-label-zh,
+  .cle-bilingual-label-en {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cle-bilingual-label-zh {
+    color: inherit;
+    font-size: 1em;
+    font-weight: inherit;
+    line-height: 14px;
+  }
+  .cle-bilingual-label-en {
+    color: var(--cle-muted);
+    font-size: .78em;
+    font-weight: 500;
+    line-height: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .particle-settings-header .cle-bilingual-label,
+  .particle-settings-group legend .cle-bilingual-label,
+  .particle-morph-curve-head .cle-bilingual-label {
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .particle-settings-header h3:has(.cle-bilingual-label),
+  .particle-settings-header h3.cle-bilingual-label,
+  .particle-settings-group legend:has(.cle-bilingual-label),
+  .particle-settings-group legend.cle-bilingual-label {
+    display: grid;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+  .particle-settings-header p.cle-bilingual-label {
+    display: grid;
+    white-space: normal;
+  }
+  .particle-settings-header .cle-bilingual-label-zh {
+    font-size: 1em;
+    line-height: 15px;
+  }
+  .particle-settings-header .cle-bilingual-label-en {
+    font-size: .72em;
+    line-height: 11px;
+  }
+  .particle-settings-group legend .cle-bilingual-label {
+    gap: 1px;
+  }
+  .particle-settings-group legend .cle-bilingual-label-en {
+    font-size: .86em;
+    line-height: 11px;
+    font-weight: 600;
+  }
+  .particle-image-transform-identity .cle-bilingual-label {
+    display: grid;
+    gap: 0;
+    line-height: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .particle-image-transform-identity .cle-bilingual-label-zh {
+    font-size: 8px;
+    line-height: 11px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .particle-image-transform-identity .cle-bilingual-label-en {
+    font-size: 7px;
+    line-height: 10px;
+    font-weight: 600;
+  }
+  .particle-settings-panel :is(.particle-toggle-row, .particle-color-row) .cle-bilingual-label {
+    justify-self: stretch;
+  }
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset) .cle-bilingual-label,
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset).cle-bilingual-label,
+  .black-hole-preset-toolbar button .cle-bilingual-label,
+  .black-hole-preset-toolbar button.cle-bilingual-label {
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    text-align: center;
+  }
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset) .cle-bilingual-label-en,
+  .black-hole-preset-toolbar button .cle-bilingual-label-en {
+    font-size: .72em;
+    line-height: 10px;
+  }
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset):has(.cle-bilingual-label),
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset).cle-bilingual-label,
+  .black-hole-preset-toolbar button:has(.cle-bilingual-label),
+  .black-hole-preset-toolbar button.cle-bilingual-label {
+    min-height: 32px;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+  .particle-settings-panel[data-language="zh"] .cle-bilingual-label-en,
+  .particle-settings-panel[data-language="en"] .cle-bilingual-label-zh {
+    display: none;
+  }
+  .particle-settings-panel[data-language] .cle-bilingual-label {
+    display: block;
+    line-height: inherit;
+    white-space: inherit;
+  }
+  .particle-settings-panel[data-language] :is(.cle-bilingual-label-zh, .cle-bilingual-label-en) {
+    max-width: 100%;
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
   .black-hole-preset-toolbar {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1374,6 +1576,15 @@ export const styles = String.raw`
     color: var(--cle-muted);
     background: var(--cle-subtle);
   }
+  /* The four preset columns are narrow; keep bilingual names readable even
+     when the markup uses a compact 中文 / English string instead of spans. */
+  .black-hole-preset-toolbar button {
+    min-height: 32px;
+    overflow: visible;
+    line-height: 12px;
+    text-overflow: clip;
+    white-space: normal;
+  }
   .particle-settings-trigger:focus-visible,
   .particle-settings-close:focus-visible,
   .particle-settings-panel :is(button, summary, input):focus-visible,
@@ -1385,19 +1596,25 @@ export const styles = String.raw`
   }
   .particle-control-row {
     display: grid;
-    grid-template-columns: minmax(72px, .8fr) minmax(72px, 1.2fr) minmax(42px, auto);
+    grid-template-columns: minmax(92px, .9fr) minmax(72px, 1.1fr) minmax(42px, auto);
     align-items: center;
     gap: 6px;
     min-width: 0;
-    min-height: 26px;
+    min-height: 34px;
     color: var(--cle-muted);
     font-size: 10px;
   }
-  .particle-control-row > :first-child {
+  .particle-control-row > :first-child,
+  .particle-control-row > :first-child .cle-bilingual-label {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  .particle-control-row > :first-child {
+    overflow: visible;
+    white-space: normal;
+  }
+  .particle-control-row > :first-child .cle-bilingual-label {
+    overflow: visible;
+    text-overflow: clip;
   }
   .particle-control-row input[type="range"] {
     width: 100%;
@@ -1842,8 +2059,8 @@ export const styles = String.raw`
     gap: 1px;
   }
   .particle-image-transform-controls .particle-control-row {
-    grid-template-columns: 66px minmax(72px, 1fr) 58px;
-    min-height: 23px;
+    grid-template-columns: minmax(88px, .95fr) minmax(68px, 1fr) 58px;
+    min-height: 32px;
   }
   .particle-image-transform-empty {
     display: none;
@@ -2216,7 +2433,10 @@ export const styles = String.raw`
     .particle-settings-panel,
     .status-code[data-update-state="checking"]::after { animation: none !important; }
     .activity-bus,
-    .twisty svg { transition: none; }
+    .twisty svg,
+    .background-language-option,
+    .background-language-toggle,
+    .background-language-toggle::before { transition: none; }
   }
 
   @keyframes cle-market-in {
