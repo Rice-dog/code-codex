@@ -8,6 +8,30 @@ export const COMPOSER_THREAD_SELECTOR = "[data-above-composer-conversation-id]";
 export const RESPONSE_THREAD_SELECTOR = "[data-response-annotation-conversation]";
 export const MAIN_SURFACE_SELECTOR = 'main:is(.main-surface, [data-app-shell-main-surface="default"])';
 
+/**
+ * Return the app-shell ancestor that owns exactly one conversation surface and
+ * one direct left task rail. Older Codex builds put the rail beside `main`
+ * directly; newer builds wrap `main` in a MainContentClip first. Only the
+ * parent and grandparent are accepted: this covers those two known shapes
+ * without accepting an unrelated page-level `aside`.
+ */
+export function qualifiedAppShellForMain(
+  main: Element,
+  root: ParentNode = document,
+): Element | null {
+  if (!root.querySelector("[data-app-shell-sidebar-trigger]")) return null;
+  const mainParent = main.parentElement;
+  let shell = mainParent;
+  for (let depth = 0; shell && depth < 5; depth += 1, shell = shell.parentElement) {
+    if (shell !== mainParent && shell !== mainParent?.parentElement) continue;
+    const directRails = [...shell.children].filter((child) => child.matches("aside.app-shell-left-panel"));
+    if (directRails.length !== 1) continue;
+    const surfaces = [...shell.querySelectorAll(MAIN_SURFACE_SELECTOR)];
+    if (surfaces.length === 1 && surfaces[0] === main) return shell;
+  }
+  return null;
+}
+
 export function plausibleThreadId(value: unknown): value is string {
   return typeof value === "string" && THREAD_PATTERN.test(value);
 }
@@ -76,8 +100,8 @@ export const codex26715Adapter: RendererAdapter = Object.freeze({
   supportsVersion: (_version: string) => true,
   qualifiesRenderer: (root: ParentNode = document) => {
     const mains = root.querySelectorAll(MAIN_SURFACE_SELECTOR);
-    const parent = mains.length === 1 ? mains[0]?.parentElement : null;
-    return Boolean(parent?.querySelector(":scope > aside.app-shell-left-panel") && root.querySelector("[data-app-shell-sidebar-trigger]"));
+    const main = mains.length === 1 ? mains[0] : undefined;
+    return Boolean(main && qualifiedAppShellForMain(main, root));
   },
   activeThreadId: (root: ParentNode = document) => {
     if (root.querySelector(ACTIVE_THREAD_MARKER_SELECTOR)) {

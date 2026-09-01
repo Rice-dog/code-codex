@@ -81,21 +81,26 @@ const APPEARANCE_PLUGIN_SETTINGS_KEY = "code-codex:appearance-plugins:v1";
 const TRANSPARENT_BACKGROUND_PLUGIN_ID = "code-codex.transparent-background";
 const PARTICLE_BACKGROUND_PLUGIN_ID = "code-codex.particle-image-background";
 const BLACK_HOLE_BACKGROUND_PLUGIN_ID = "code-codex.black-hole-background";
+const GLOW_HORIZON_BACKGROUND_PLUGIN_ID = "code-codex.glow-horizon-background";
 const APPEARANCE_PLUGIN_IDS = new Set([
   TRANSPARENT_BACKGROUND_PLUGIN_ID,
   PARTICLE_BACKGROUND_PLUGIN_ID,
   BLACK_HOLE_BACKGROUND_PLUGIN_ID,
+  GLOW_HORIZON_BACKGROUND_PLUGIN_ID,
 ]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
 export const PARTICLE_BACKGROUND_ATTRIBUTE = "data-code-codex-particle-image-background";
 export const PARTICLE_BACKGROUND_COLOR_PROPERTY = "--code-codex-particle-background";
+export const GLOW_HORIZON_BACKGROUND_ATTRIBUTE = "data-code-codex-glow-horizon-background";
+export const GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY = "--code-codex-glow-horizon-background";
 const TRANSPARENT_BACKGROUND_HEALTH_INTERVAL_MS = 1_500;
 const FORCED_COLORS_QUERY = "(forced-colors: active)";
 const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
 const PARTICLE_BACKGROUND_SETTINGS_KEY = "code-codex:particle-image-background:v1";
 const PARTICLE_BACKGROUND_THEME_LEASE_KEY = "code-codex:particle-theme-lease:v1";
 const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1";
+const GLOW_HORIZON_BACKGROUND_SETTINGS_KEY = "code-codex:glow-horizon-background:v1";
 const BACKGROUND_SETTINGS_LANGUAGE_KEY = "code-codex:background-settings-language:v1";
 const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
 const CODEX_APPEARANCE_POLL_INTERVAL_MS = 1_500;
@@ -551,6 +556,8 @@ interface ParticleCursorStrengthValues {
   readonly highStrengthScale: number;
   readonly stepStrengthScale: number;
   readonly strength: number;
+  readonly wakeLengthScale: number;
+  readonly squareRootStrength: number;
 }
 
 type CodexAppearanceTheme = "system" | "light" | "dark";
@@ -573,7 +580,10 @@ interface CodexAppearanceAdapter {
   };
 }
 
-type DarkBackgroundPluginId = typeof PARTICLE_BACKGROUND_PLUGIN_ID | typeof BLACK_HOLE_BACKGROUND_PLUGIN_ID;
+type DarkBackgroundPluginId =
+  | typeof PARTICLE_BACKGROUND_PLUGIN_ID
+  | typeof BLACK_HOLE_BACKGROUND_PLUGIN_ID
+  | typeof GLOW_HORIZON_BACKGROUND_PLUGIN_ID;
 
 interface ParticleThemeLease {
   readonly owner?: DarkBackgroundPluginId;
@@ -607,6 +617,54 @@ interface BlackHoleBackgroundSettings {
   readonly resolution: number;
   readonly maxDpr: number;
   readonly paused: boolean;
+}
+
+type GlowHorizonVariant = "top" | "bottom" | "left" | "right";
+
+interface GlowHorizonBackgroundSettings {
+  readonly variant: GlowHorizonVariant;
+  readonly inertialWheel: boolean;
+  readonly openingDuration: number;
+  readonly wheelSensitivity: number;
+  readonly wheelDownIntensity: number;
+  readonly wheelUpIntensity: number;
+  readonly wheelTravelScale: number;
+  readonly wheelDownDistance: number;
+  readonly wheelUpDistance: number;
+  readonly wheelUpTrailDistance: number;
+  readonly wheelUpTrailStrength: number;
+  readonly wheelUpStiffness: number;
+  readonly wheelUpDamping: number;
+  readonly wheelReleaseDelay: number;
+  readonly wheelUpReleaseDelay: number;
+  readonly maxReleaseVelocity: number;
+  readonly returnStiffness: number;
+  readonly returnDamping: number;
+  readonly initialStretch: number;
+  readonly initialBlur: number;
+  readonly rimColor: string;
+  readonly violetColor: string;
+  readonly blueColor: string;
+  readonly shadowColor: string;
+}
+
+type GlowHorizonNumericSettingKey = {
+  [Key in keyof GlowHorizonBackgroundSettings]: GlowHorizonBackgroundSettings[Key] extends number ? Key : never;
+}[keyof GlowHorizonBackgroundSettings];
+
+type GlowHorizonControlGroup = "input" | "downward" | "upward" | "release" | "entrance";
+
+interface GlowHorizonNumericControlDefinition {
+  readonly key: GlowHorizonNumericSettingKey;
+  readonly group: GlowHorizonControlGroup;
+  readonly id: string;
+  readonly label: string;
+  readonly labelZh: string;
+  readonly minimum: number;
+  readonly maximum: number;
+  readonly step: number;
+  readonly unit?: string;
+  readonly precision?: number;
 }
 
 type BackgroundSettingsLanguage = "zh" | "en";
@@ -901,6 +959,54 @@ const BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
   { key: "maxDpr", group: "renderer", id: "cle-black-hole-max-dpr", label: "Pixel ratio cap", labelZh: "像素比例上限", hint: "Maximum device pixel density", hintZh: "设备像素密度上限", minimum: 1, maximum: 2.5, step: 0.25 },
 ] satisfies readonly BlackHoleNumericControlDefinition[]);
 
+const DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS: GlowHorizonBackgroundSettings = Object.freeze({
+  variant: "bottom",
+  inertialWheel: true,
+  openingDuration: 2,
+  wheelSensitivity: 1,
+  wheelDownIntensity: 0.4,
+  wheelUpIntensity: 0.8,
+  wheelTravelScale: 1,
+  wheelDownDistance: 100,
+  wheelUpDistance: 20,
+  wheelUpTrailDistance: 18,
+  wheelUpTrailStrength: 1.15,
+  wheelUpStiffness: 180,
+  wheelUpDamping: 48,
+  wheelReleaseDelay: 70,
+  wheelUpReleaseDelay: 80,
+  maxReleaseVelocity: 2.4,
+  returnStiffness: 180,
+  returnDamping: 14,
+  initialStretch: 1.8,
+  initialBlur: 0,
+  rimColor: "#FFFFFF",
+  violetColor: "#A558FB",
+  blueColor: "#4922E5",
+  shadowColor: "#000000",
+});
+
+const GLOW_HORIZON_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
+  { key: "wheelSensitivity", group: "input", id: "cle-glow-wheel-sensitivity", label: "Wheel strength", labelZh: "滚轮力度", minimum: 0.35, maximum: 1.8, step: 0.05, precision: 2 },
+  { key: "wheelTravelScale", group: "input", id: "cle-glow-wheel-travel", label: "Gesture distance", labelZh: "滑动行程", minimum: 0.65, maximum: 1.6, step: 0.05, unit: "×", precision: 2 },
+  { key: "wheelDownIntensity", group: "downward", id: "cle-glow-down-intensity", label: "Downward intensity", labelZh: "下滑强度", minimum: 0, maximum: 2, step: 0.05, unit: "×", precision: 2 },
+  { key: "wheelDownDistance", group: "downward", id: "cle-glow-down-distance", label: "Downward rewind", labelZh: "下滑回退", minimum: 20, maximum: 100, step: 5, unit: "%", precision: 0 },
+  { key: "wheelUpIntensity", group: "upward", id: "cle-glow-up-intensity", label: "Upward intensity", labelZh: "上滑强度", minimum: 0, maximum: 4, step: 0.05, unit: "×", precision: 2 },
+  { key: "wheelUpDistance", group: "upward", id: "cle-glow-up-distance", label: "Upward travel", labelZh: "上滑位移", minimum: 3, maximum: 36, step: 1, unit: "%", precision: 0 },
+  { key: "wheelUpTrailDistance", group: "upward", id: "cle-glow-up-trail-distance", label: "Trail length", labelZh: "拖光长度", minimum: 4, maximum: 42, step: 1, unit: "%", precision: 0 },
+  { key: "wheelUpTrailStrength", group: "upward", id: "cle-glow-up-trail-strength", label: "Trail strength", labelZh: "拖光强度", minimum: 0, maximum: 2, step: 0.05, unit: "×", precision: 2 },
+  { key: "wheelUpStiffness", group: "upward", id: "cle-glow-up-stiffness", label: "Upward response", labelZh: "上滑响应", minimum: 180, maximum: 900, step: 10, precision: 0 },
+  { key: "wheelUpDamping", group: "upward", id: "cle-glow-up-damping", label: "Upward damping", labelZh: "上滑阻尼", minimum: 18, maximum: 48, step: 1, precision: 0 },
+  { key: "wheelReleaseDelay", group: "release", id: "cle-glow-release-delay", label: "Down release delay", labelZh: "下滑释放延迟", minimum: 40, maximum: 220, step: 10, unit: "ms", precision: 0 },
+  { key: "wheelUpReleaseDelay", group: "release", id: "cle-glow-up-release-delay", label: "Up release delay", labelZh: "上滑释放延迟", minimum: 40, maximum: 240, step: 10, unit: "ms", precision: 0 },
+  { key: "maxReleaseVelocity", group: "release", id: "cle-glow-momentum", label: "Momentum limit", labelZh: "惯性速度上限", minimum: 0.8, maximum: 5, step: 0.1, unit: "×", precision: 1 },
+  { key: "returnStiffness", group: "release", id: "cle-glow-return-stiffness", label: "Return tension", labelZh: "回弹张力", minimum: 60, maximum: 180, step: 5, precision: 0 },
+  { key: "returnDamping", group: "release", id: "cle-glow-return-damping", label: "Return damping", labelZh: "回弹阻尼", minimum: 10, maximum: 30, step: 1, precision: 0 },
+  { key: "openingDuration", group: "entrance", id: "cle-glow-opening-duration", label: "Opening duration", labelZh: "开场时长", minimum: 0.8, maximum: 4, step: 0.1, unit: "s", precision: 1 },
+  { key: "initialStretch", group: "entrance", id: "cle-glow-initial-stretch", label: "Initial stretch", labelZh: "初始拉伸", minimum: 1, maximum: 1.8, step: 0.05, unit: "×", precision: 2 },
+  { key: "initialBlur", group: "entrance", id: "cle-glow-initial-blur", label: "Initial blur", labelZh: "初始模糊", minimum: 0, maximum: 30, step: 1, unit: "px", precision: 0 },
+] satisfies readonly GlowHorizonNumericControlDefinition[]);
+
 function calculateParticleCursorStrengthValues(cursorStrength: number): ParticleCursorStrengthValues {
   const baseStrength = Math.min(
     Math.max(cursorStrength, 0),
@@ -929,6 +1035,9 @@ function calculateParticleCursorStrengthValues(cursorStrength: number): Particle
   ) * Math.pow(extendedStrength, 0.30)
     * Math.pow(extremeStrength, 0.34)
     * overdrive;
+  const wakeLengthScale = Math.pow(Math.max(strengthRatio, 1), 0.12)
+    * Math.pow(extendedStrength, 0.16)
+    * Math.pow(extremeStrength, 0.20);
   return {
     baseStrength,
     cursorScale,
@@ -939,6 +1048,8 @@ function calculateParticleCursorStrengthValues(cursorStrength: number): Particle
     highStrengthScale,
     stepStrengthScale,
     strength,
+    wakeLengthScale,
+    squareRootStrength: Math.sqrt(Math.max(strength, 0)),
   };
 }
 
@@ -1421,6 +1532,62 @@ function writeBlackHoleBackgroundSettings(settings: BlackHoleBackgroundSettings)
   }
 }
 
+function normalizeGlowHorizonColor(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim();
+  return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized.toUpperCase() : fallback;
+}
+
+function normalizeGlowHorizonSettings(value: unknown): GlowHorizonBackgroundSettings {
+  const record = isObjectRecord(value) ? value : {};
+  const defaults = DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS;
+  const variant = record.variant === "bottom" || record.variant === "left" || record.variant === "right"
+    ? record.variant
+    : defaults.variant;
+  return {
+    variant,
+    inertialWheel: typeof record.inertialWheel === "boolean" ? record.inertialWheel : defaults.inertialWheel,
+    openingDuration: clampParticleNumber(record.openingDuration, 0.8, 4, defaults.openingDuration),
+    wheelSensitivity: clampParticleNumber(record.wheelSensitivity, 0.35, 1.8, defaults.wheelSensitivity),
+    wheelDownIntensity: clampParticleNumber(record.wheelDownIntensity, 0, 2, defaults.wheelDownIntensity),
+    wheelUpIntensity: clampParticleNumber(record.wheelUpIntensity, 0, 4, defaults.wheelUpIntensity),
+    wheelTravelScale: clampParticleNumber(record.wheelTravelScale, 0.65, 1.6, defaults.wheelTravelScale),
+    wheelDownDistance: clampParticleNumber(record.wheelDownDistance, 20, 100, defaults.wheelDownDistance),
+    wheelUpDistance: clampParticleNumber(record.wheelUpDistance, 3, 36, defaults.wheelUpDistance),
+    wheelUpTrailDistance: clampParticleNumber(record.wheelUpTrailDistance, 4, 42, defaults.wheelUpTrailDistance),
+    wheelUpTrailStrength: clampParticleNumber(record.wheelUpTrailStrength, 0, 2, defaults.wheelUpTrailStrength),
+    wheelUpStiffness: clampParticleNumber(record.wheelUpStiffness, 180, 900, defaults.wheelUpStiffness),
+    wheelUpDamping: clampParticleNumber(record.wheelUpDamping, 18, 48, defaults.wheelUpDamping),
+    wheelReleaseDelay: clampParticleNumber(record.wheelReleaseDelay, 40, 220, defaults.wheelReleaseDelay),
+    wheelUpReleaseDelay: clampParticleNumber(record.wheelUpReleaseDelay, 40, 240, defaults.wheelUpReleaseDelay),
+    maxReleaseVelocity: clampParticleNumber(record.maxReleaseVelocity, 0.8, 5, defaults.maxReleaseVelocity),
+    returnStiffness: clampParticleNumber(record.returnStiffness, 60, 180, defaults.returnStiffness),
+    returnDamping: clampParticleNumber(record.returnDamping, 10, 30, defaults.returnDamping),
+    initialStretch: clampParticleNumber(record.initialStretch, 1, 1.8, defaults.initialStretch),
+    initialBlur: clampParticleNumber(record.initialBlur, 0, 30, defaults.initialBlur),
+    rimColor: normalizeGlowHorizonColor(record.rimColor, defaults.rimColor),
+    violetColor: normalizeGlowHorizonColor(record.violetColor, defaults.violetColor),
+    blueColor: normalizeGlowHorizonColor(record.blueColor, defaults.blueColor),
+    shadowColor: normalizeGlowHorizonColor(record.shadowColor, defaults.shadowColor),
+  };
+}
+
+function readGlowHorizonBackgroundSettings(): GlowHorizonBackgroundSettings {
+  try {
+    return normalizeGlowHorizonSettings(JSON.parse(localStorage.getItem(GLOW_HORIZON_BACKGROUND_SETTINGS_KEY) || "{}"));
+  } catch {
+    return { ...DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS };
+  }
+}
+
+function writeGlowHorizonBackgroundSettings(settings: GlowHorizonBackgroundSettings): void {
+  try {
+    localStorage.setItem(GLOW_HORIZON_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // The current session keeps working when DOM storage is unavailable.
+  }
+}
+
 function isCodexAppearanceTheme(value: unknown): value is CodexAppearanceTheme {
   return value === "system" || value === "light" || value === "dark";
 }
@@ -1505,7 +1672,9 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
     if (!value || typeof value !== "object") return undefined;
     const lease = value as Partial<ParticleThemeLease>;
     if ((lease.previousPreference === "system" || lease.previousPreference === "light") && lease.forcedPreference === "dark") {
-      const owner = lease.owner === PARTICLE_BACKGROUND_PLUGIN_ID || lease.owner === BLACK_HOLE_BACKGROUND_PLUGIN_ID
+      const owner = lease.owner === PARTICLE_BACKGROUND_PLUGIN_ID
+        || lease.owner === BLACK_HOLE_BACKGROUND_PLUGIN_ID
+        || lease.owner === GLOW_HORIZON_BACKGROUND_PLUGIN_ID
         ? lease.owner
         : undefined;
       return owner
@@ -2110,14 +2279,14 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   uniform float u_speed;
   uniform float u_noiseScale;
   uniform float u_noiseStrength;
-  uniform float u_damping;
+  // log(damping) / fixed simulation step, precomputed once when settings change.
+  uniform float u_dampingRate;
   uniform float u_ambientCycle;
   uniform float u_cursorStrength;
-  // Cursor-strength powers are calculated once on the CPU and shared by the draw.
-  // x/y/z/w = strengthRatio/extendedStrength/extremeStrength/overdrive.
-  uniform vec4 u_cursorStrengthFactors;
   // x/y/z = highStrengthScale/stepStrengthScale/strength.
   uniform vec3 u_cursorStrengthScales;
+  // x/y = wakeLengthScale/squareRootStrength; both are invariant per draw.
+  uniform vec2 u_cursorStrengthDerived;
 
   varying vec4 v_color;
 
@@ -2159,13 +2328,17 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     float wakeProgress = clamp(trailDistance / max(wakeLength, 1.0), 0.0, 1.0);
     float wakeEndWidth = radius * 2.35 * sqrt(1.0 / 0.40);
     float wakeWidthSquared = mix(radius * radius, wakeEndWidth * wakeEndWidth, wakeProgress);
-    float wakeMetric = lateralOffset * lateralOffset / max(wakeWidthSquared, 1.0) + pow(wakeProgress, 4.0);
-    float rearSupport = pow(max(0.0, 1.0 - wakeMetric), 3.0);
+    float wakeProgressSquared = wakeProgress * wakeProgress;
+    float wakeMetric = lateralOffset * lateralOffset / max(wakeWidthSquared, 1.0)
+      + wakeProgressSquared * wakeProgressSquared;
+    float rearBase = max(0.0, 1.0 - wakeMetric);
+    float rearSupport = rearBase * rearBase * rearBase;
     float frontDistance = max(-trailDistance, 0.0);
     float frontLength = radius * 0.72;
     float frontMetric = frontDistance * frontDistance / max(frontLength * frontLength, 1.0)
       + lateralOffset * lateralOffset / max(radius * radius, 1.0);
-    float frontSupport = pow(max(0.0, 1.0 - frontMetric), 3.0);
+    float frontBase = max(0.0, 1.0 - frontMetric);
+    float frontSupport = frontBase * frontBase * frontBase;
     float support = mix(frontSupport, rearSupport, step(0.0, trailDistance));
     float coreAxial = 1.0 - smoother01(abs(trailDistance) / max(radius * 0.82, 1.0));
     float coreLateral = 1.0 - smoother01(abs(lateralOffset) / max(radius * 0.28, 1.0));
@@ -2181,8 +2354,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   ) {
     float dt = max(elapsed, 0.0);
     if (dt <= 0.00001) return;
-    float damping = clamp(u_damping, 0.80, 0.9999);
-    float decayRate = log(damping) / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)};
+    float decayRate = u_dampingRate;
     float decay = exp(decayRate * dt);
     float travelTime = abs(decayRate) > 0.00001
       ? (decay - 1.0) / decayRate
@@ -2248,10 +2420,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     float curlEnvelope = influence * (1.0 - influence);
 
     vec2 oldVelocity = gasVelocity;
-    float decay = pow(
-      clamp(u_damping, 0.80, 0.9999),
-      dt / ${PARTICLE_BACKGROUND_FLOW_STEP_SECONDS.toFixed(6)}
-    );
+    float decay = exp(u_dampingRate * dt);
     vec2 nextVelocity = oldVelocity * decay;
     float flowResponse = 1.0 - exp(-5.2 * influence * u_cursorStrengthScales.z * dt);
     nextVelocity = mix(nextVelocity, driverVelocity, flowResponse);
@@ -2274,9 +2443,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     float speedEnergy = smoother01(driverSpeed / 1500.0);
     float wakeLength = influenceRadius
       * mix(4.5, 10.0, speedEnergy)
-      * pow(max(u_cursorStrengthFactors.x, 1.0), 0.12)
-      * pow(u_cursorStrengthFactors.y, 0.16)
-      * pow(u_cursorStrengthFactors.z, 0.20);
+      * u_cursorStrengthDerived.x;
     float wakeProgress = clamp(downstream / max(wakeLength, 1.0), 0.0, 1.0);
     float originalEndScale = mix(2.15, 2.65, speedEnergy);
     float wakeStartSquared = influenceRadius * influenceRadius;
@@ -2288,13 +2455,16 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
       wakeProgress
     );
     float wakeWidth = sqrt(max(wakeWidthSquared, 1.0));
+    float wakeProgressSquared = wakeProgress * wakeProgress;
     float wakeMetric = lateralOffset * lateralOffset / max(wakeWidthSquared, 1.0)
-      + pow(wakeProgress, 4.0);
-    float rearSupport = pow(max(0.0, 1.0 - wakeMetric), 3.0);
+      + wakeProgressSquared * wakeProgressSquared;
+    float rearBase = max(0.0, 1.0 - wakeMetric);
+    float rearSupport = rearBase * rearBase * rearBase;
     float frontLength = influenceRadius * 0.75;
     float frontMetric = upstream * upstream / max(frontLength * frontLength, 1.0)
       + lateralOffset * lateralOffset / max(influenceRadius * influenceRadius, 1.0);
-    float frontSupport = pow(max(0.0, 1.0 - frontMetric), 3.0);
+    float frontBase = max(0.0, 1.0 - frontMetric);
+    float frontSupport = frontBase * frontBase * frontBase;
     float wakeGain = segmentEnergy * mix(frontSupport, rearSupport, step(0.0, signedTrailDistance));
     float side = sign(lateralOffset);
     vec2 entrainmentDirection = -normal * side;
@@ -2317,7 +2487,7 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     float pressureGain = segmentEnergy * pressureStart
       / (1.0 + pressureDistance * pressureDistance);
     vec2 pressureVelocity = dipoleDirection * driverSpeed * (0.018 * pressureGain);
-    float inducedResponse = 1.0 - exp(-1.15 * sqrt(max(u_cursorStrengthScales.z, 0.0)) * dt);
+    float inducedResponse = 1.0 - exp(-1.15 * u_cursorStrengthDerived.y * dt);
     nextVelocity += (wakeVelocity + pressureVelocity) * inducedResponse;
     nextVelocity = softLimit(nextVelocity, maximumVelocity);
 
@@ -2551,8 +2721,8 @@ class ParticleImageRenderer {
     "resolution" | "layout" | "pointerSegments" | "pointerMotion"
     | "pointerCount" | "time" | "transitionElapsed" | "transitionNearResponse" | "transitionFarResponse"
     | "transitionStagger" | "transitionActive" | "transitionVisibility" | "dpr"
-    | "particleSize" | "particleOpacity" | "speed" | "noiseScale" | "noiseStrength" | "damping"
-    | "ambientCycle" | "cursorStrength" | "cursorStrengthFactors" | "cursorStrengthScales",
+    | "particleSize" | "particleOpacity" | "speed" | "noiseScale" | "noiseStrength" | "dampingRate"
+    | "ambientCycle" | "cursorStrength" | "cursorStrengthScales" | "cursorStrengthDerived",
     WebGLUniformLocation
   >>;
   readonly #buffers: Readonly<Record<"previousHome" | "home" | "previousVelocity" | "previousColor" | "color" | "seed", WebGLBuffer>>;
@@ -2660,11 +2830,11 @@ class ParticleImageRenderer {
       speed: this.#requiredUniform("u_speed"),
       noiseScale: this.#requiredUniform("u_noiseScale"),
       noiseStrength: this.#requiredUniform("u_noiseStrength"),
-      damping: this.#requiredUniform("u_damping"),
+      dampingRate: this.#requiredUniform("u_dampingRate"),
       ambientCycle: this.#requiredUniform("u_ambientCycle"),
       cursorStrength: this.#requiredUniform("u_cursorStrength"),
-      cursorStrengthFactors: this.#requiredUniform("u_cursorStrengthFactors"),
       cursorStrengthScales: this.#requiredUniform("u_cursorStrengthScales"),
+      cursorStrengthDerived: this.#requiredUniform("u_cursorStrengthDerived"),
     };
     this.#buffers = {
       previousHome: this.#requiredBuffer(),
@@ -3332,25 +3502,27 @@ class ParticleImageRenderer {
         gl.uniform1f(this.#uniforms.speed, this.#settings.speed);
         gl.uniform1f(this.#uniforms.noiseScale, this.#settings.noiseScale);
         gl.uniform1f(this.#uniforms.noiseStrength, this.#settings.noiseStrength);
-        gl.uniform1f(this.#uniforms.damping, this.#settings.damping);
+        const damping = Math.min(0.9999, Math.max(0.8, this.#settings.damping));
+        gl.uniform1f(
+          this.#uniforms.dampingRate,
+          Math.log(damping) / PARTICLE_BACKGROUND_FLOW_STEP_SECONDS,
+        );
         gl.uniform1f(this.#uniforms.ambientCycle, this.#settings.ambientCycle);
         gl.uniform1f(this.#uniforms.cursorStrength, this.#settings.cursorStrength);
         this.#renderSettingsUniformsDirty = false;
       }
       if (this.#cursorStrengthUniformsDirty) {
         const cursorStrengthValues = this.#cursorStrengthValues;
-        gl.uniform4f(
-          this.#uniforms.cursorStrengthFactors,
-          cursorStrengthValues.strengthRatio,
-          cursorStrengthValues.extendedStrength,
-          cursorStrengthValues.extremeStrength,
-          cursorStrengthValues.overdrive,
-        );
         gl.uniform3f(
           this.#uniforms.cursorStrengthScales,
           cursorStrengthValues.highStrengthScale,
           cursorStrengthValues.stepStrengthScale,
           cursorStrengthValues.strength,
+        );
+        gl.uniform2f(
+          this.#uniforms.cursorStrengthDerived,
+          cursorStrengthValues.wakeLengthScale,
+          cursorStrengthValues.squareRootStrength,
         );
         this.#cursorStrengthUniformsDirty = false;
       }
@@ -4341,6 +4513,665 @@ function getParticleBackgroundController(): ParticleBackgroundController {
   return controller;
 }
 
+interface GlowHorizonRendererRuntime {
+  readonly updateSettings: (settings: GlowHorizonBackgroundSettings) => void;
+  readonly replay: () => void;
+  readonly dispose: () => void;
+}
+
+interface GlowHorizonVariantGeometry {
+  readonly axis: "x" | "y";
+  readonly enter: number;
+  readonly rest: number;
+}
+
+const GLOW_HORIZON_VARIANT_GEOMETRY: Readonly<Record<GlowHorizonVariant, GlowHorizonVariantGeometry>> = Object.freeze({
+  top: { axis: "y", enter: -100, rest: -50 },
+  bottom: { axis: "y", enter: 100, rest: 50 },
+  left: { axis: "x", enter: 100, rest: 50 },
+  right: { axis: "x", enter: -100, rest: -50 },
+});
+
+function glowHorizonWithAlpha(color: string, alpha: number): string {
+  const value = color.replace("#", "");
+  const expanded = value.length === 3
+    ? value.split("").map((character) => character + character).join("")
+    : value;
+  if (!/^[0-9a-f]{6}$/i.test(expanded)) return color;
+  return `#${expanded}${Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, "0")}`;
+}
+
+function glowHorizonClamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function glowHorizonEase(value: number): number {
+  // Close to the source component's [0.16, 1, 0.3, 1] ease-out curve,
+  // evaluated without pulling Framer Motion into the injected bundle.
+  const t = glowHorizonClamp(value, 0, 1);
+  return 1 - (1 - t) ** 3;
+}
+
+function glowHorizonNormalizeWheelDelta(event: WheelEvent): number {
+  if (event.deltaMode === 1) return event.deltaY * 16;
+  if (event.deltaMode === 2) return event.deltaY * window.innerHeight;
+  return event.deltaY;
+}
+
+function glowHorizonInsideControls(event: WheelEvent): boolean {
+  if (event.target instanceof Element && event.target.closest("[data-glow-horizon-controls]")) return true;
+  return event.composedPath().some((entry) => (
+    entry instanceof Element && Boolean(entry.closest("[data-glow-horizon-controls]"))
+  ));
+}
+
+function glowHorizonElementVisible(element: HTMLElement): boolean {
+  const bounds = element.getBoundingClientRect();
+  return bounds.bottom > 0
+    && bounds.top < window.innerHeight
+    && bounds.right > 0
+    && bounds.left < window.innerWidth;
+}
+
+function startGlowHorizonRenderer(
+  layer: HTMLElement,
+  readSettings: () => GlowHorizonBackgroundSettings,
+): GlowHorizonRendererRuntime {
+  const horizon = layer.querySelector<HTMLElement>(".code-codex-glow-horizon-horizon");
+  if (!horizon) throw new Error("Glow Horizon presentation is missing its horizon layer");
+  const arcs = Array.from(horizon.querySelectorAll<HTMLElement>("[data-glow-horizon-arc]"));
+  const trails = Array.from(horizon.querySelectorAll<HTMLElement>("[data-glow-horizon-trail]"));
+  const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let reducedMotion = reducedMotionQuery.matches;
+  let settings = normalizeGlowHorizonSettings(readSettings());
+  let progress = reducedMotion ? 1 : 0;
+  let velocity = 0;
+  let springing = false;
+  let openingActive = !reducedMotion;
+  let springTarget = 1;
+  let springMode: "up" | "return" = "return";
+  let smoothingWheelUp = false;
+  let openingStartedAt = performance.now();
+  let lastFrameAt = openingStartedAt;
+  let lastWheelAt = 0;
+  let wheelVelocity = 0;
+  let wheelTarget = progress;
+  let wheelReleaseTimer: number | undefined;
+  let animationFrame = 0;
+  let running = true;
+
+  // Keep the animation loop allocation-free. These specifications are static;
+  // only their color and animated transform/opacity values change per frame.
+  const arcSpecs = [
+    { scale: 1.32, initialOffset: undefined, delay: 1.20, blur: 0 },
+    { scale: 1.20, initialOffset: 10, delay: 0.60, blur: 31 },
+    { scale: 1.24, initialOffset: 10, delay: 0, blur: 21 },
+    { scale: 1.20, initialOffset: 10, delay: 0, blur: 51 },
+  ] as const;
+  const trailSpecs = [
+    { distance: .20, opacity: .82, blur: .5, width: 2.5 },
+    { distance: .45, opacity: .56, blur: 2, width: 3.5 },
+    { distance: .72, opacity: .34, blur: 4, width: 5 },
+    { distance: 1, opacity: .18, blur: 7, width: 7 },
+  ] as const;
+  const styleCache = new WeakMap<HTMLElement, Map<string, string>>();
+  const setStyle = (element: HTMLElement, property: string, value: string): void => {
+    let values = styleCache.get(element);
+    if (!values) {
+      values = new Map<string, string>();
+      styleCache.set(element, values);
+    }
+    if (values.get(property) === value) return;
+    values.set(property, value);
+    element.style.setProperty(property, value);
+  };
+
+  const setAxisTransform = (element: HTMLElement, amount: number, scale: number): void => {
+    const geometry = GLOW_HORIZON_VARIANT_GEOMETRY[settings.variant];
+    const translate = geometry.axis === "x" ? `translateX(${amount}%)` : `translateY(${amount}%)`;
+    const scaleTransform = geometry.axis === "x" ? `scaleX(${scale})` : `scaleY(${scale})`;
+    setStyle(element, "transform", `${translate} ${scaleTransform}`);
+  };
+
+  const setAxisUniformTransform = (element: HTMLElement, amount: number, scale: number): void => {
+    const geometry = GLOW_HORIZON_VARIANT_GEOMETRY[settings.variant];
+    const translate = geometry.axis === "x" ? `translateX(${amount}%)` : `translateY(${amount}%)`;
+    setStyle(element, "transform", `${translate} scale(${scale})`);
+  };
+
+  const render = (): void => {
+    const geometry = GLOW_HORIZON_VARIANT_GEOMETRY[settings.variant];
+    const clampedProgress = glowHorizonClamp(progress, 0, 1);
+    const overscroll = glowHorizonClamp((progress - 1) / 0.2, 0, 1);
+    const axisAmount = progress <= 1
+      ? geometry.enter + (geometry.rest - geometry.enter) * progress
+      : geometry.rest + Math.sign(geometry.rest - geometry.enter) * settings.wheelUpDistance * overscroll;
+    const axisScale = settings.initialStretch + (1 - settings.initialStretch) * clampedProgress;
+    setStyle(horizon, "opacity", String(clampedProgress));
+    setStyle(horizon, "filter", `blur(${Math.max(0, settings.initialBlur * (1 - clampedProgress))}px)`);
+    setStyle(horizon, "isolation", "isolate");
+    setStyle(horizon, "will-change", "transform, opacity, filter");
+    setAxisTransform(horizon, axisAmount, axisScale);
+
+    const arcDirection = geometry.enter < 0 ? -1 : 1;
+    for (let index = 0; index < arcs.length; index += 1) {
+      const arc = arcs[index];
+      const spec = arcSpecs[index];
+      if (!arc || !spec) continue;
+      // The source component staggers these layers against its fixed two-second
+      // opening timeline. Keep that visual rhythm even when the user changes
+      // the overall opening duration control.
+      const delayProgress = Math.min(spec.delay / 2, .95);
+      const arcProgress = glowHorizonClamp((progress - delayProgress) / Math.max(1 - delayProgress, .001), 0, 1);
+      const startOffset = spec.initialOffset === undefined
+        ? 0
+        : arcDirection * Math.abs(spec.initialOffset - 50);
+      const arcOffset = startOffset * (1 - arcProgress);
+      const color = index === 0
+        ? settings.rimColor
+        : index === 1
+          ? settings.violetColor
+          : index === 2
+            ? settings.blueColor
+            : settings.shadowColor;
+      const shadow = index === 0
+        ? `0 -4px 23px ${glowHorizonWithAlpha(settings.rimColor, .71)}`
+        : "";
+      setStyle(arc, "background", color);
+      setStyle(arc, "box-shadow", shadow);
+      setStyle(arc, "filter", spec.blur > 0 ? `blur(${spec.blur}px)` : "");
+      setStyle(arc, "will-change", "transform");
+      setAxisUniformTransform(arc, arcOffset, spec.scale);
+    }
+    for (let index = 0; index < trails.length; index += 1) {
+      const trail = trails[index];
+      const spec = trailSpecs[index];
+      if (!trail || !spec) continue;
+      const amount = 1 - (1 - overscroll) ** 2;
+      const direction = geometry.enter < 0 ? -1 : 1;
+      const offset = direction * settings.wheelUpTrailDistance * spec.distance * amount;
+      setStyle(trail, "opacity", String(overscroll > .0001
+        ? glowHorizonClamp(Math.sqrt(overscroll) * settings.wheelUpTrailStrength * spec.opacity, 0, 1)
+        : 0));
+      setStyle(trail, "visibility", settings.inertialWheel && overscroll > .0001 ? "visible" : "hidden");
+      setStyle(trail, "border", `${spec.width}px solid ${glowHorizonWithAlpha(settings.violetColor, .92)}`);
+      setStyle(trail, "box-shadow", `0 0 ${14 + spec.blur * 3}px ${glowHorizonWithAlpha(settings.violetColor, .82)}, inset 0 0 ${10 + spec.blur * 2}px ${glowHorizonWithAlpha(settings.violetColor, .58)}`);
+      setStyle(trail, "filter", `blur(${spec.blur}px)`);
+      setStyle(trail, "will-change", "transform, opacity");
+      setAxisUniformTransform(trail, offset, 1.32);
+    }
+  };
+
+  const schedule = (): void => {
+    if (!running || animationFrame) return;
+    animationFrame = requestAnimationFrame(tick);
+  };
+
+  const finishWheel = (): void => {
+    if (!running) return;
+    // Framer Motion carries the gesture velocity into the release spring. Keep
+    // the same behavior for a downward rewind; otherwise the horizon stops
+    // dead and the return feels like a snap instead of an inertial release.
+    const releaseVelocity = smoothingWheelUp
+      ? velocity
+      : glowHorizonClamp(wheelVelocity, -settings.maxReleaseVelocity, settings.maxReleaseVelocity);
+    springTarget = 1;
+    springMode = "return";
+    velocity = releaseVelocity;
+    springing = true;
+    schedule();
+  };
+
+  const handleWheel = (event: WheelEvent): void => {
+    if (!running || reducedMotion || !settings.inertialWheel || glowHorizonInsideControls(event)) return;
+    const host = horizon.parentElement;
+    if (!host || !glowHorizonElementVisible(host)) return;
+    const pixelDelta = glowHorizonNormalizeWheelDelta(event);
+    if (Math.abs(pixelDelta) < .01) return;
+    const now = performance.now();
+    const elapsed = lastWheelAt ? Math.max((now - lastWheelAt) / 1000, 1 / 120) : 1 / 60;
+    const travel = Math.min(960, Math.max(560, window.innerHeight * 1.05)) * settings.wheelTravelScale;
+    const rawDelta = (-pixelDelta / Math.max(1, travel)) * settings.wheelSensitivity;
+    const upward = rawDelta > 0;
+    const delta = rawDelta * (upward ? settings.wheelUpIntensity : settings.wheelDownIntensity);
+    if (Math.abs(delta) < .000001) return;
+    const inputVelocity = delta / elapsed;
+    const freshGesture = now - lastWheelAt > settings.wheelReleaseDelay * 2;
+    const blended = freshGesture ? velocity * .2 + inputVelocity * .8 : wheelVelocity * .55 + inputVelocity * .45;
+    wheelVelocity = glowHorizonClamp(blended, -settings.maxReleaseVelocity, settings.maxReleaseVelocity);
+    openingActive = false;
+    smoothingWheelUp = upward;
+    if (upward) {
+      const base = freshGesture ? progress : wheelTarget;
+      springTarget = glowHorizonClamp(base + delta, 0, 1.2);
+      velocity = glowHorizonClamp(velocity, -settings.maxReleaseVelocity, settings.maxReleaseVelocity);
+      springMode = "up";
+      springing = true;
+    } else {
+      const lower = Math.min(progress, 1 - glowHorizonClamp(settings.wheelDownDistance, 0, 100) / 100);
+      progress = glowHorizonClamp(progress + delta, lower, 1.2);
+      springTarget = 1;
+      velocity = 0;
+      springing = false;
+      smoothingWheelUp = false;
+    }
+    wheelTarget = upward ? springTarget : progress;
+    lastWheelAt = now;
+    if (wheelReleaseTimer !== undefined) window.clearTimeout(wheelReleaseTimer);
+    wheelReleaseTimer = window.setTimeout(finishWheel, upward ? settings.wheelUpReleaseDelay : settings.wheelReleaseDelay);
+    // Wheel/trackpad events can arrive several times between two display
+    // frames. Keep every physics update, but commit the resulting styles only
+    // once in the scheduled animation frame.
+    schedule();
+  };
+
+  function tick(now: number): void {
+    animationFrame = 0;
+    if (!running) return;
+    const dt = Math.min(.05, Math.max(0, (now - lastFrameAt) / 1000));
+    lastFrameAt = now;
+    if (!reducedMotion) {
+      if (openingActive && !springing && progress < 1) {
+        const openingProgress = glowHorizonClamp((now - openingStartedAt) / (Math.max(.05, settings.openingDuration) * 1000), 0, 1);
+        const nextProgress = glowHorizonEase(openingProgress);
+        velocity = dt > 0 ? (nextProgress - progress) / dt : 0;
+        progress = nextProgress;
+        if (openingProgress >= 1) {
+          openingActive = false;
+          springTarget = 1;
+          springMode = "return";
+        }
+      } else if (springing) {
+        const stiffness = springMode === "up" ? settings.wheelUpStiffness : settings.returnStiffness;
+        const damping = springMode === "up" ? settings.wheelUpDamping : settings.returnDamping;
+        const acceleration = (springTarget - progress) * stiffness - velocity * damping;
+        velocity += acceleration * dt;
+        progress += velocity * dt;
+        if (Math.abs(springTarget - progress) < .0008 && Math.abs(velocity) < .004) {
+          progress = springTarget;
+          velocity = 0;
+          springing = false;
+        }
+      }
+    } else {
+      progress = 1;
+      velocity = 0;
+      springing = false;
+      smoothingWheelUp = false;
+      openingActive = false;
+      springTarget = 1;
+      springMode = "return";
+      wheelTarget = 1;
+    }
+    render();
+    // A downward rewind can intentionally leave progress below 1 while the
+    // release timer is waiting. Do not spin an idle RAF loop in that state;
+    // the timer will schedule the return spring when input ends.
+    if (running && (openingActive || springing)) schedule();
+  }
+
+  const onReducedMotionChange = (event: MediaQueryListEvent): void => {
+    reducedMotion = event.matches;
+    if (reducedMotion) {
+      progress = 1;
+      velocity = 0;
+      springing = false;
+      smoothingWheelUp = false;
+      openingActive = false;
+      springTarget = 1;
+      springMode = "return";
+      wheelTarget = 1;
+    } else {
+      openingStartedAt = performance.now();
+      progress = 0;
+      velocity = 0;
+      springing = false;
+      smoothingWheelUp = false;
+      openingActive = true;
+      springTarget = 1;
+      springMode = "return";
+      wheelTarget = 1;
+    }
+    render();
+    schedule();
+  };
+
+  window.addEventListener("wheel", handleWheel, { passive: true });
+  reducedMotionQuery.addEventListener("change", onReducedMotionChange);
+  const updateSettings = (next: GlowHorizonBackgroundSettings): void => {
+    settings = normalizeGlowHorizonSettings(next);
+    render();
+    schedule();
+  };
+  const replay = (): void => {
+    if (reducedMotion) {
+      progress = 1;
+      velocity = 0;
+      springing = false;
+      smoothingWheelUp = false;
+      wheelVelocity = 0;
+      lastWheelAt = 0;
+      openingActive = false;
+      springTarget = 1;
+      springMode = "return";
+      wheelTarget = 1;
+    } else {
+      progress = 0;
+      velocity = 0;
+      springing = false;
+      smoothingWheelUp = false;
+      wheelVelocity = 0;
+      lastWheelAt = 0;
+      openingActive = true;
+      springTarget = 1;
+      springMode = "return";
+      wheelTarget = 1;
+      openingStartedAt = performance.now();
+      lastFrameAt = openingStartedAt;
+    }
+    render();
+    schedule();
+  };
+  const dispose = (): void => {
+    if (!running) return;
+    running = false;
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    animationFrame = 0;
+    if (wheelReleaseTimer !== undefined) window.clearTimeout(wheelReleaseTimer);
+    window.removeEventListener("wheel", handleWheel);
+    reducedMotionQuery.removeEventListener("change", onReducedMotionChange);
+  };
+  render();
+  schedule();
+  return { updateSettings, replay, dispose };
+}
+
+class GlowHorizonRenderer {
+  readonly #runtime: GlowHorizonRendererRuntime;
+  #settings: GlowHorizonBackgroundSettings;
+
+  constructor(layer: HTMLElement, settings: GlowHorizonBackgroundSettings) {
+    this.#settings = normalizeGlowHorizonSettings(settings);
+    this.#runtime = startGlowHorizonRenderer(layer, () => this.#settings);
+  }
+
+  updateSettings(settings: GlowHorizonBackgroundSettings): void {
+    this.#settings = normalizeGlowHorizonSettings(settings);
+    this.#runtime.updateSettings(this.#settings);
+  }
+
+  replay(): void {
+    this.#runtime.replay();
+  }
+
+  dispose(): void {
+    this.#runtime.dispose();
+  }
+}
+
+class GlowHorizonBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readGlowHorizonBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #renderer: GlowHorizonRenderer | undefined;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() {
+    window.addEventListener("pagehide", this.#onPageHide, { once: true });
+  }
+
+  get settings(): GlowHorizonBackgroundSettings { return this.#settings; }
+  get enabled(): boolean { return this.#enabled; }
+  get pending(): boolean { return this.#pending; }
+  get error(): string | undefined { return this.#error; }
+  get stoppedForExternalThemeChange(): boolean { return this.#stoppedForExternalThemeChange; }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Glow Horizon Background is unavailable");
+  }
+
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try { await operation; } finally {
+      if (this.#enableOperation === operation) this.#enableOperation = undefined;
+    }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexGlowHorizonLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      const horizon = document.createElement("div");
+      horizon.className = "code-codex-glow-horizon-horizon";
+      const arcSpecs = [
+        { color: this.#settings.rimColor, shadow: true },
+        { color: this.#settings.violetColor },
+        { color: this.#settings.blueColor },
+        { color: this.#settings.shadowColor },
+      ];
+      for (const spec of arcSpecs) {
+        const arc = document.createElement("div");
+        arc.dataset.glowHorizonArc = "";
+        arc.style.position = "absolute";
+        arc.style.inset = "0";
+        arc.style.borderRadius = "100%";
+        arc.style.pointerEvents = "none";
+        arc.style.background = spec.color;
+        if (spec.shadow) arc.style.boxShadow = `0 -4px 23px ${glowHorizonWithAlpha(spec.color, .71)}`;
+        horizon.append(arc);
+      }
+      for (let index = 0; index < 4; index += 1) {
+        const trail = document.createElement("div");
+        trail.dataset.glowHorizonTrail = "";
+        trail.style.position = "absolute";
+        trail.style.inset = "0";
+        trail.style.borderRadius = "100%";
+        trail.style.pointerEvents = "none";
+        trail.style.mixBlendMode = "screen";
+        trail.style.visibility = "hidden";
+        horizon.append(trail);
+      }
+      layer.append(horizon);
+      document.body.prepend(layer);
+      this.#layer = layer;
+      this.#renderer = new GlowHorizonRenderer(layer, this.#settings);
+      document.documentElement.toggleAttribute(GLOW_HORIZON_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY, "#050507");
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Glow Horizon Background could not be enabled";
+      this.#teardownPresentation();
+      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Keep activation error. */ }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: GlowHorizonBackgroundSettings): void {
+    this.#settings = normalizeGlowHorizonSettings(next);
+    writeGlowHorizonBackgroundSettings(this.#settings);
+    this.#renderer?.updateSettings(this.#settings);
+    this.#notify();
+  }
+
+  reset(): void { this.updateSettings(DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS); }
+  replay(): void { this.#renderer?.replay(); }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    document.documentElement.toggleAttribute(GLOW_HORIZON_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = GLOW_HORIZON_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try { current = await readCodexAppearanceTheme(); }
+    catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) throw new Error("Another Code-Codex background is still using Dark mode");
+      if (lease && !lease.owner) writeParticleThemeLease({ ...lease, owner });
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Glow Horizon Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = GLOW_HORIZON_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease || (lease.owner && lease.owner !== owner)) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) { clearParticleThemeLease(owner); return; }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  }
+
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
+    } catch { /* Transient bridge failure does not tear down presentation. */ }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Glow Horizon Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+
+  #notify(): void { for (const listener of this.#listeners) listener(); }
+  #onPageHide = (): void => { this.dispose(); };
+}
+
+const GLOW_HORIZON_BACKGROUND_CONTROLLER = Symbol.for("code-codex:glow-horizon-background-controller:v1");
+
+function getGlowHorizonBackgroundController(): GlowHorizonBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[GLOW_HORIZON_BACKGROUND_CONTROLLER];
+  if (existing instanceof GlowHorizonBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try { existing.dispose(); } catch { /* Replace stale controller. */ }
+  }
+  const controller = new GlowHorizonBackgroundController();
+  globalState[GLOW_HORIZON_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
 const BLACK_HOLE_VERTEX_SHADER = `
 attribute vec2 aPos;
 varying vec2 vUv;
@@ -4356,12 +5187,10 @@ precision highp float;
 #define MAX_STEPS __MAX_STEPS__
 #define HAS_FIXED_STEPS __HAS_FIXED_STEPS__
 #define HAS_STARS __HAS_STARS__
-#define WIND_CYCLE 46.0
 
 varying vec2 vUv;
 
 uniform vec2  uRes;
-uniform float uTime;
 uniform vec3  uCamPos;
 uniform vec3  uRight;
 uniform vec3  uUp;
@@ -4377,6 +5206,8 @@ uniform float uDiskOut;
 uniform float uThick;
 uniform float uDensity;
 uniform float uSpin;
+// x/y/z/w = first wind phase/second wind phase/blend/spin time offset.
+uniform vec4  uWind;
 uniform float uGrain;
 uniform float uBright;
 uniform float uDoppler;
@@ -4428,15 +5259,23 @@ float fbm(vec3 p, float lod) {
   return s;
 }
 
-void gasAt(vec3 p, float rd, float dt, out float dens, out vec3 tint, out float heat) {
-  float rn = clamp((rd - uDiskIn) / max(0.001, uDiskOut - uDiskIn), 0.0, 1.0);
+void gasAt(
+  vec3 p,
+  float rd,
+  float dt,
+  float diskSpanInverse,
+  out float dens,
+  out vec3 tint,
+  out float heat
+) {
+  float rn = clamp((rd - uDiskIn) * diskSpanInverse, 0.0, 1.0);
   float tk = uThick * (0.35 + 1.25 * rn);
   float v = p.y / tk;
   float sheet = exp(-v * v);
   float q = uDiskIn / rd;
   float inner = smoothstep(0.0, 0.07, rn);
   float outer = 1.0 - smoothstep(0.45, 1.0, rn);
-  float prof = inner * outer * pow(q, 2.0);
+  float prof = inner * outer * q * q;
   if (sheet * prof * uDensity * 10.0 <= 0.001) {
     dens = 0.0;
     tint = vec3(0.0);
@@ -4447,17 +5286,13 @@ void gasAt(vec3 p, float rd, float dt, out float dens, out vec3 tint, out float 
   float lod = clamp(1.0 - dt * uGrain * 14.0, 0.0, 1.0);
   float phi = atan(p.z, p.x);
   float omega = uSpin * pow(q, 1.5);
-  float lr = log(rd) * 1.1 + uSpin * uTime * 0.05;
-  float u = uTime / WIND_CYCLE;
-  float fA = fract(u);
-  float fB = fract(u + 0.5);
-  float w = abs(2.0 * fA - 1.0);
+  float lr = log(rd) * 1.1 + uWind.w;
 
-  float cloudsA = fbm(vec3(vec2(cos(phi + omega * fA * WIND_CYCLE),
-                                sin(phi + omega * fA * WIND_CYCLE)) * (rd * uGrain), lr), lod);
-  float cloudsB = fbm(vec3(vec2(cos(phi + omega * fB * WIND_CYCLE),
-                                sin(phi + omega * fB * WIND_CYCLE)) * (rd * uGrain), lr + 40.0), lod);
-  float clouds = mix(cloudsA, cloudsB, w);
+  float cloudsA = fbm(vec3(vec2(cos(phi + omega * uWind.x),
+                                sin(phi + omega * uWind.x)) * (rd * uGrain), lr), lod);
+  float cloudsB = fbm(vec3(vec2(cos(phi + omega * uWind.y),
+                                sin(phi + omega * uWind.y)) * (rd * uGrain), lr + 40.0), lod);
+  float clouds = mix(cloudsA, cloudsB, uWind.z);
   float filaments = clouds * clouds * 1.75;
   dens = max(0.0, filaments * 1.5 - 0.30) * sheet * prof * uDensity * 4.6;
 
@@ -4482,8 +5317,9 @@ vec3 starField(vec3 d) {
   else                               { uv = d.xy / a.z; face = d.z > 0.0 ? 4.0 : 5.0; }
 
   vec3 col = vec3(0.0);
+  float octaveScale = 1.0;
   for (int k = 0; k < 3; k++) {
-    float sc = 90.0 * pow(2.2, float(k));
+    float sc = 90.0 * octaveScale;
     vec2 p = uv * sc;
     vec2 id = floor(p);
     vec2 f = fract(p) - 0.5;
@@ -4495,8 +5331,9 @@ vec3 starField(vec3 d) {
       float warm = hash13(vec3(id, face + 51.0));
       col += s * (0.6 + 4.5 * fract(h * 97.0))
            * mix(vec3(0.72, 0.82, 1.0), vec3(1.0, 0.88, 0.72), warm)
-           / pow(2.2, float(k));
+           / octaveScale;
     }
+    octaveScale *= 2.2;
   }
   col += vec3(0.013, 0.017, 0.030) * fbm(d * 2.6, 1.0);
   return col;
@@ -4560,6 +5397,9 @@ void main() {
   bool captured = false;
 #endif
   float jitter = fract(sin(dot(gl_FragCoord.xy + uSeed, vec2(12.9898, 78.233))) * 43758.5453);
+  float diskSpanInverse = 1.0 / max(0.001, uDiskOut - uDiskIn);
+  float diskStepRadius = uDiskOut * 1.25;
+  float diskSampleHalfThickness = uThick * 5.0;
 
   for (int i = 0; i < MAX_STEPS; i++) {
 #if HAS_FIXED_STEPS == 0
@@ -4577,8 +5417,8 @@ void main() {
     if (transmit < 0.004) break;
 
     float dt = clamp(0.14 * (r - 1.0), 0.025, 1.1);
-    if (r < uDiskOut * 1.25) {
-      float rn = clamp((r - uDiskIn) / max(0.001, uDiskOut - uDiskIn), 0.0, 1.0);
+    if (r < diskStepRadius) {
+      float rn = clamp((r - uDiskIn) * diskSpanInverse, 0.0, 1.0);
       float tk = uThick * (0.35 + 1.25 * rn);
       dt = min(dt, max(tk * 0.38, abs(pos.y) * 0.5));
     }
@@ -4587,7 +5427,7 @@ void main() {
     jitter = fract(jitter + 0.6180339887);
     float sampleStep = dt * jitter;
     float midY = pos.y + vel.y * sampleStep;
-    if (abs(midY) < uThick * 5.0) {
+    if (abs(midY) < diskSampleHalfThickness) {
       vec2 midXZ = pos.xz + vel.xz * sampleStep;
       float rd = length(midXZ);
       if (rd > uDiskIn && rd < uDiskOut) {
@@ -4595,7 +5435,7 @@ void main() {
         float dens;
         float heat;
         vec3 tint;
-        gasAt(mid, rd, dt, dens, tint, heat);
+        gasAt(mid, rd, dt, diskSpanInverse, dens, tint, heat);
         if (dens > 0.001) {
           float deep = exp(-1.3 * max(0.0, swept - 4.6));
           vec3 tang = vec3(mid.z, 0.0, -mid.x) / rd;
@@ -4984,6 +5824,7 @@ function startBlackHoleRenderer(
   let resizePending = false;
   let stillPassesRemaining = 16;
   let lastPaused = readSettings().paused || reduced;
+  const sceneStaticSettings = new WeakMap<WebGLProgram, BlackHoleBackgroundSettings>();
 
   const effectiveSteps = (value: number): number => softwareRenderer ? 130 : Math.max(60, Math.min(460, Math.round(value)));
   const variantKey = (stars: boolean, steps: number): string => `${stars ? "stars" : "plain"}:${steps}`;
@@ -4991,6 +5832,7 @@ function startBlackHoleRenderer(
     gl.useProgram(program.program);
     gl.uniform1f(program.uniforms.uEncode ?? null, hdr ? 0 : 1);
     if (sceneWidth > 0 && sceneHeight > 0) gl.uniform2f(program.uniforms.uRes ?? null, sceneWidth, sceneHeight);
+    gl.uniform2f(program.uniforms.uFocus ?? null, BLACK_HOLE_FOCUS[0], 1 - BLACK_HOLE_FOCUS[1]);
     activeProgram = null;
   };
   const cacheStepVariant = (key: string, program: BlackHoleProgram): void => {
@@ -5328,34 +6170,46 @@ function startBlackHoleRenderer(
       const rolledUpX = -rightX * sineRoll + upX * cosineRoll;
       const rolledUpY = -rightY * sineRoll + upY * cosineRoll;
       const rolledUpZ = -rightZ * sineRoll + upZ * cosineRoll;
-      const hot = linearColor(settings.hotColor, colorCache.hot);
-      const mid = linearColor(settings.midColor, colorCache.mid);
-      const cool = linearColor(settings.coolColor, colorCache.cool);
-      const outer = Math.max(settings.diskInner + 0.5, settings.diskOuter);
-
       pass(selectedSceneProgram, sceneTarget);
       const uniforms = selectedSceneProgram.uniforms;
-      gl.uniform1f(uniforms.uTime ?? null, time);
       gl.uniform3f(uniforms.uCamPos ?? null, cameraX, cameraY, cameraZ);
       gl.uniform3f(uniforms.uRight ?? null, rolledRightX, rolledRightY, rolledRightZ);
       gl.uniform3f(uniforms.uUp ?? null, rolledUpX, rolledUpY, rolledUpZ);
       gl.uniform3f(uniforms.uFwd ?? null, forwardX, forwardY, forwardZ);
-      gl.uniform1f(uniforms.uTanHalf ?? null, Math.tan(Math.max(8, Math.min(110, settings.fov)) * 0.5 * BLACK_HOLE_RADIANS));
-      gl.uniform2f(uniforms.uFocus ?? null, BLACK_HOLE_FOCUS[0], 1 - BLACK_HOLE_FOCUS[1]);
-      if (uniforms.uSteps) gl.uniform1f(uniforms.uSteps, steps);
-      gl.uniform1f(uniforms.uSkyR ?? null, Math.max(distance * 1.35, outer * 2.4));
-      gl.uniform1f(uniforms.uDiskIn ?? null, Math.max(1.05, settings.diskInner));
-      gl.uniform1f(uniforms.uDiskOut ?? null, outer);
-      gl.uniform1f(uniforms.uThick ?? null, Math.max(0.02, settings.diskThickness));
-      gl.uniform1f(uniforms.uDensity ?? null, Math.max(0, settings.diskDensity));
-      gl.uniform1f(uniforms.uSpin ?? null, settings.spinSpeed * 6.2831853);
-      gl.uniform1f(uniforms.uGrain ?? null, Math.max(0.02, settings.grain));
-      gl.uniform1f(uniforms.uBright ?? null, Math.max(0, settings.brightness));
-      gl.uniform1f(uniforms.uDoppler ?? null, Math.max(0, Math.min(1, settings.doppler)));
-      gl.uniform3f(uniforms.uHot ?? null, hot[0], hot[1], hot[2]);
-      gl.uniform3f(uniforms.uMid ?? null, mid[0], mid[1], mid[2]);
-      gl.uniform3f(uniforms.uCool ?? null, cool[0], cool[1], cool[2]);
-      if (uniforms.uStars) gl.uniform1f(uniforms.uStars, Math.max(0, settings.starBrightness));
+      const spin = settings.spinSpeed * 6.2831853;
+      const windPhase = time / 46;
+      const firstWind = windPhase - Math.floor(windPhase);
+      const secondWindPhase = windPhase + 0.5;
+      const secondWind = secondWindPhase - Math.floor(secondWindPhase);
+      gl.uniform4f(
+        uniforms.uWind ?? null,
+        firstWind * 46,
+        secondWind * 46,
+        Math.abs(2 * firstWind - 1),
+        spin * time * 0.05,
+      );
+      if (sceneStaticSettings.get(selectedSceneProgram.program) !== settings) {
+        const hot = linearColor(settings.hotColor, colorCache.hot);
+        const mid = linearColor(settings.midColor, colorCache.mid);
+        const cool = linearColor(settings.coolColor, colorCache.cool);
+        const outer = Math.max(settings.diskInner + 0.5, settings.diskOuter);
+        gl.uniform1f(uniforms.uTanHalf ?? null, Math.tan(Math.max(8, Math.min(110, settings.fov)) * 0.5 * BLACK_HOLE_RADIANS));
+        if (uniforms.uSteps) gl.uniform1f(uniforms.uSteps, steps);
+        gl.uniform1f(uniforms.uSkyR ?? null, Math.max(distance * 1.35, outer * 2.4));
+        gl.uniform1f(uniforms.uDiskIn ?? null, Math.max(1.05, settings.diskInner));
+        gl.uniform1f(uniforms.uDiskOut ?? null, outer);
+        gl.uniform1f(uniforms.uThick ?? null, Math.max(0.02, settings.diskThickness));
+        gl.uniform1f(uniforms.uDensity ?? null, Math.max(0, settings.diskDensity));
+        gl.uniform1f(uniforms.uSpin ?? null, spin);
+        gl.uniform1f(uniforms.uGrain ?? null, Math.max(0.02, settings.grain));
+        gl.uniform1f(uniforms.uBright ?? null, Math.max(0, settings.brightness));
+        gl.uniform1f(uniforms.uDoppler ?? null, Math.max(0, Math.min(1, settings.doppler)));
+        gl.uniform3f(uniforms.uHot ?? null, hot[0], hot[1], hot[2]);
+        gl.uniform3f(uniforms.uMid ?? null, mid[0], mid[1], mid[2]);
+        gl.uniform3f(uniforms.uCool ?? null, cool[0], cool[1], cool[2]);
+        if (uniforms.uStars) gl.uniform1f(uniforms.uStars, Math.max(0, settings.starBrightness));
+        sceneStaticSettings.set(selectedSceneProgram.program, settings);
+      }
       const jitter = halton[settledFrames % halton.length] ?? halton[0];
       if (!jitter) return;
       gl.uniform2f(uniforms.uJitter ?? null, jitter[0] - 0.5, jitter[1] - 0.5);
@@ -6236,6 +7090,111 @@ function blackHoleSettingsPanelMarkup(): string {
   `;
 }
 
+function formatGlowHorizonControlValue(
+  definition: GlowHorizonNumericControlDefinition,
+  value: number,
+): string {
+  const precision = definition.precision ?? Math.max(0, (String(definition.step).split(".")[1] ?? "").length);
+  return `${value.toFixed(precision)}${definition.unit ?? ""}`;
+}
+
+function glowHorizonNumericControlsMarkup(group: GlowHorizonControlGroup): string {
+  return GLOW_HORIZON_NUMERIC_CONTROL_DEFINITIONS
+    .filter((definition) => definition.group === group)
+    .map((definition) => {
+      const value = DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS[definition.key];
+      const formatted = formatGlowHorizonControlValue(definition, value);
+      return `
+        <div class="particle-control-row">
+          <label for="${definition.id}">${bilingualLabelMarkup(definition.labelZh, definition.label)}</label>
+          <input id="${definition.id}" data-glow-horizon-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-label="${definition.labelZh}" aria-valuetext="${formatted}">
+          <span class="particle-control-value"><output for="${definition.id}">${formatted}</output></span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function glowHorizonBackgroundCardMarkup(): string {
+  const icon = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><ellipse cx="8" cy="9.5" rx="6.5" ry="3.3"/><path d="M1.8 8.5c1.8-2.4 10.6-2.4 12.4 0"/><path d="M3 6.4c1.9-1.5 8.1-1.5 10 0"/></svg>`;
+  return `
+    <article class="preview-extension appearance-extension glow-horizon-background-extension" data-appearance-plugin="${GLOW_HORIZON_BACKGROUND_PLUGIN_ID}" aria-busy="false">
+      <span class="preview-extension-icon" aria-hidden="true">${icon}</span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>Glow Horizon Background</h4>
+          <span class="preview-extension-status" id="cle-glow-horizon-background-status">Disabled</span>
+        </div>
+      </div>
+      <div class="preview-extension-actions">
+        <button class="preview-extension-action" type="button" aria-describedby="cle-glow-horizon-background-status" aria-pressed="false">Enable</button>
+        <button class="particle-settings-trigger glow-horizon-settings-trigger" type="button" title="Configure Glow Horizon Background" aria-label="Configure Glow Horizon Background" aria-haspopup="dialog" aria-controls="cle-glow-horizon-settings" aria-expanded="false">${icons.sliders}</button>
+      </div>
+    </article>
+  `;
+}
+
+function glowHorizonSettingsPanelMarkup(): string {
+  return `
+    <section class="particle-settings-panel glow-horizon-settings-panel" id="cle-glow-horizon-settings" data-glow-horizon-controls="panel" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-glow-horizon-settings-title">
+      <header class="particle-settings-header">
+        <div class="particle-settings-heading">
+          <p>${bilingualLabelMarkup("外观", "Appearance")}</p>
+          <h3 id="cle-glow-horizon-settings-title">${bilingualLabelMarkup("发光地平线设置", "Glow Horizon settings")}</h3>
+        </div>
+        <div class="particle-settings-header-actions">
+          ${backgroundLanguageSwitchMarkup("cle-glow-horizon-settings-language")}
+          <button class="particle-settings-close glow-horizon-settings-close" type="button" title="关闭发光地平线设置" aria-label="关闭发光地平线设置">${icons.close}</button>
+        </div>
+      </header>
+      <div class="particle-settings-scroll">
+        <div class="glow-horizon-direction-toolbar" role="group" aria-label="地平线方向">
+          <button type="button" data-glow-horizon-direction="top" aria-pressed="${DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS.variant === "top"}"><span class="glow-horizon-direction-symbol">↑</span>${bilingualLabelMarkup("上", "Top")}</button>
+          <button type="button" data-glow-horizon-direction="bottom" aria-pressed="${DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS.variant === "bottom"}"><span class="glow-horizon-direction-symbol">↓</span>${bilingualLabelMarkup("下", "Bottom")}</button>
+          <button type="button" data-glow-horizon-direction="left" aria-pressed="${DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS.variant === "left"}"><span class="glow-horizon-direction-symbol">←</span>${bilingualLabelMarkup("左", "Left")}</button>
+          <button type="button" data-glow-horizon-direction="right" aria-pressed="${DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS.variant === "right"}"><span class="glow-horizon-direction-symbol">→</span>${bilingualLabelMarkup("右", "Right")}</button>
+        </div>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("输入", "Input")}</legend>
+          ${glowHorizonNumericControlsMarkup("input")}
+          <label class="particle-toggle-row" for="cle-glow-inertial-wheel">
+            ${bilingualLabelMarkup("滚轮惯性", "Wheel inertia")}
+            <input id="cle-glow-inertial-wheel" type="checkbox" checked>
+          </label>
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("下滑动态", "Downward slide")}</legend>
+          ${glowHorizonNumericControlsMarkup("downward")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("上滑动态", "Upward slide")}</legend>
+          ${glowHorizonNumericControlsMarkup("upward")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("释放回弹", "Release")}</legend>
+          ${glowHorizonNumericControlsMarkup("release")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("开场画面", "Opening frame")}</legend>
+          ${glowHorizonNumericControlsMarkup("entrance")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("光效配色", "Glow palette")}</legend>
+          <label class="particle-color-row" for="cle-glow-rim-color">${bilingualLabelMarkup("亮边", "Rim")}<input id="cle-glow-rim-color" data-glow-horizon-color="rimColor" type="color" value="${DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS.rimColor}"></label>
+          <label class="particle-color-row" for="cle-glow-violet-color">${bilingualLabelMarkup("紫光", "Violet")}<input id="cle-glow-violet-color" data-glow-horizon-color="violetColor" type="color" value="${DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS.violetColor}"></label>
+          <label class="particle-color-row" for="cle-glow-blue-color">${bilingualLabelMarkup("蓝光", "Blue")}<input id="cle-glow-blue-color" data-glow-horizon-color="blueColor" type="color" value="${DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS.blueColor}"></label>
+          <label class="particle-color-row" for="cle-glow-shadow-color">${bilingualLabelMarkup("暗部", "Shadow")}<input id="cle-glow-shadow-color" data-glow-horizon-color="shadowColor" type="color" value="${DEFAULT_GLOW_HORIZON_BACKGROUND_SETTINGS.shadowColor}"></label>
+        </fieldset>
+        <div class="glow-horizon-actions">
+          <button class="glow-horizon-reset" type="button">${bilingualLabelMarkup("重置", "Reset")}</button>
+          <button class="glow-horizon-replay" type="button">${bilingualLabelMarkup("重播", "Replay")}</button>
+        </div>
+        <p class="particle-plugin-error glow-horizon-plugin-error" role="status" hidden></p>
+      </div>
+    </section>
+  `;
+}
+
 function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? path;
   const dot = name.lastIndexOf(".");
@@ -6335,6 +7294,7 @@ export class CodeCodexElement extends HTMLElement {
   #previewMarketOpen = false;
   #particleSettingsOpen = false;
   #blackHoleSettingsOpen = false;
+  #glowHorizonSettingsOpen = false;
   #backgroundSettingsLanguage: BackgroundSettingsLanguage = "zh";
   #forcedColorsQuery: MediaQueryList | undefined;
   #reducedTransparencyQuery: MediaQueryList | undefined;
@@ -6430,6 +7390,25 @@ export class CodeCodexElement extends HTMLElement {
   readonly #blackHoleResetButton: HTMLButtonElement;
   readonly #blackHolePresetButtons: readonly HTMLButtonElement[];
   readonly #blackHolePluginError: HTMLElement;
+  readonly #glowHorizonBackgroundController = getGlowHorizonBackgroundController();
+  #glowHorizonBackgroundUnsubscribe: (() => void) | undefined;
+  #glowHorizonBackgroundInitialization: Promise<void> | undefined;
+  readonly #glowHorizonBackgroundCard: HTMLElement;
+  readonly #glowHorizonBackgroundButton: HTMLButtonElement;
+  readonly #glowHorizonBackgroundStatus: HTMLElement;
+  readonly #glowHorizonSettingsPanel: HTMLElement;
+  readonly #glowHorizonSettingsTrigger: HTMLButtonElement;
+  readonly #glowHorizonSettingsCloseButton: HTMLButtonElement;
+  readonly #glowHorizonNumericControls = new Map<GlowHorizonNumericSettingKey, Readonly<{
+    definition: GlowHorizonNumericControlDefinition;
+    input: HTMLInputElement;
+    output: HTMLOutputElement;
+  }>>();
+  readonly #glowHorizonColorInputs = new Map<"rimColor" | "violetColor" | "blueColor" | "shadowColor", HTMLInputElement>();
+  readonly #glowHorizonInertialWheelInput: HTMLInputElement;
+  readonly #glowHorizonResetButton: HTMLButtonElement;
+  readonly #glowHorizonReplayButton: HTMLButtonElement;
+  readonly #glowHorizonPluginError: HTMLElement;
   readonly #liveRegion: HTMLElement;
   readonly #collapseButton: HTMLButtonElement;
   readonly #collapsedTab: HTMLButtonElement;
@@ -6487,7 +7466,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -6504,6 +7483,7 @@ export class CodeCodexElement extends HTMLElement {
       </div>
       ${particleSettingsPanelMarkup()}
       ${blackHoleSettingsPanelMarkup()}
+      ${glowHorizonSettingsPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -6597,8 +7577,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 2) {
-      throw new Error("Background settings require two synchronized language switches.");
+    if (this.#backgroundLanguageInputs.length !== 3) {
+      throw new Error("Background settings require three synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
@@ -6612,6 +7592,28 @@ export class CodeCodexElement extends HTMLElement {
     this.#blackHoleResetButton = this.#required<HTMLButtonElement>(".black-hole-reset");
     this.#blackHolePresetButtons = Array.from(this.#shadow.querySelectorAll<HTMLButtonElement>("[data-black-hole-preset]"));
     this.#blackHolePluginError = this.#required<HTMLElement>(".black-hole-plugin-error");
+    this.#glowHorizonBackgroundCard = this.#required<HTMLElement>(`[data-appearance-plugin="${GLOW_HORIZON_BACKGROUND_PLUGIN_ID}"]`);
+    this.#glowHorizonBackgroundButton = this.#required<HTMLButtonElement>(
+      `[data-appearance-plugin="${GLOW_HORIZON_BACKGROUND_PLUGIN_ID}"] .preview-extension-action`,
+    );
+    this.#glowHorizonBackgroundStatus = this.#required<HTMLElement>(
+      `[data-appearance-plugin="${GLOW_HORIZON_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
+    );
+    this.#glowHorizonSettingsPanel = this.#required<HTMLElement>(".glow-horizon-settings-panel");
+    this.#glowHorizonSettingsTrigger = this.#required<HTMLButtonElement>(".glow-horizon-settings-trigger");
+    this.#glowHorizonSettingsCloseButton = this.#required<HTMLButtonElement>(".glow-horizon-settings-close");
+    for (const definition of GLOW_HORIZON_NUMERIC_CONTROL_DEFINITIONS) {
+      const input = this.#required<HTMLInputElement>(`#${definition.id}`);
+      const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
+      this.#glowHorizonNumericControls.set(definition.key, { definition, input, output });
+    }
+    for (const key of ["rimColor", "violetColor", "blueColor", "shadowColor"] as const) {
+      this.#glowHorizonColorInputs.set(key, this.#required<HTMLInputElement>(`[data-glow-horizon-color="${key}"]`));
+    }
+    this.#glowHorizonInertialWheelInput = this.#required<HTMLInputElement>("#cle-glow-inertial-wheel");
+    this.#glowHorizonResetButton = this.#required<HTMLButtonElement>(".glow-horizon-reset");
+    this.#glowHorizonReplayButton = this.#required<HTMLButtonElement>(".glow-horizon-replay");
+    this.#glowHorizonPluginError = this.#required<HTMLElement>(".glow-horizon-plugin-error");
     this.#liveRegion = this.#required<HTMLElement>(".live-region");
     this.#collapseButton = this.#required<HTMLButtonElement>(".collapse");
     this.#collapsedTab = this.#required<HTMLButtonElement>(".collapsed-tab");
@@ -6647,7 +7649,18 @@ export class CodeCodexElement extends HTMLElement {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
     }
-    if (this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)) {
+    if (this.#glowHorizonBackgroundController.stoppedForExternalThemeChange) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    }
+    if (this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    } else if (this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)) {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
@@ -6684,6 +7697,19 @@ export class CodeCodexElement extends HTMLElement {
     });
     this.#blackHoleBackgroundInitialization = this.#particleBackgroundInitialization
       .then(() => this.#initializeBlackHoleBackground(appearanceInitializationGeneration));
+    this.#glowHorizonBackgroundUnsubscribe?.();
+    this.#glowHorizonBackgroundUnsubscribe = this.#glowHorizonBackgroundController.subscribe(() => {
+      if (!this.#connected) return;
+      if (
+        this.#glowHorizonBackgroundController.stoppedForExternalThemeChange
+        && this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+      ) {
+        this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderGlowHorizonBackgroundPlugin();
+    });
+    this.#glowHorizonBackgroundInitialization = this.#blackHoleBackgroundInitialization
+      .then(() => this.#initializeGlowHorizonBackground(appearanceInitializationGeneration));
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
@@ -6725,6 +7751,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#blackHoleBackgroundUnsubscribe?.();
     this.#blackHoleBackgroundUnsubscribe = undefined;
     this.#blackHoleBackgroundInitialization = undefined;
+    this.#glowHorizonBackgroundUnsubscribe?.();
+    this.#glowHorizonBackgroundUnsubscribe = undefined;
+    this.#glowHorizonBackgroundInitialization = undefined;
     this.#appearancePluginPending = false;
     this.#appearanceTransitionPending = false;
     this.#appearancePluginApplied = undefined;
@@ -6795,12 +7824,16 @@ export class CodeCodexElement extends HTMLElement {
     this.#appearanceTransitionPending = false;
     const particleWasEnabled = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
     const blackHoleWasEnabled = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
-    if (particleWasEnabled || blackHoleWasEnabled) this.#writeEnabledAppearancePlugins();
+    const glowHorizonWasEnabled = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled) this.#writeEnabledAppearancePlugins();
     if (particleWasEnabled || this.#particleBackgroundController.enabled) {
       await this.#particleBackgroundController.disable();
     }
     if (blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled) {
       await this.#blackHoleBackgroundController.disable();
+    }
+    if (glowHorizonWasEnabled || this.#glowHorizonBackgroundController.enabled) {
+      await this.#glowHorizonBackgroundController.disable();
     }
     await this.#reconcilePersistedWindowTransparency();
     this.#purgePreviewTabs(false);
@@ -6971,7 +8004,7 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -6982,6 +8015,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#particleSettingsCloseButton.setAttribute("aria-label", this.#particleSettingsCloseButton.title);
     this.#blackHoleSettingsCloseButton.title = this.#backgroundText("关闭黑洞设置", "Close black hole settings");
     this.#blackHoleSettingsCloseButton.setAttribute("aria-label", this.#blackHoleSettingsCloseButton.title);
+    this.#glowHorizonSettingsCloseButton.title = this.#backgroundText("关闭发光地平线设置", "Close Glow Horizon settings");
+    this.#glowHorizonSettingsCloseButton.setAttribute("aria-label", this.#glowHorizonSettingsCloseButton.title);
 
     for (const control of [...this.#particleNumericControls.values(), ...this.#particleImageTransformControls.values()]) {
       const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
@@ -7017,6 +8052,16 @@ export class CodeCodexElement extends HTMLElement {
       "aria-label",
       this.#backgroundText("黑洞场景预设", "Black hole scene presets"),
     );
+    this.#shadow.querySelector<HTMLElement>(".glow-horizon-direction-toolbar")?.setAttribute(
+      "aria-label",
+      this.#backgroundText("地平线方向", "Horizon direction"),
+    );
+    for (const control of this.#glowHorizonNumericControls.values()) {
+      const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
+      control.input.setAttribute("aria-label", label);
+      const formatted = formatGlowHorizonControlValue(control.definition, Number(control.input.value));
+      control.input.setAttribute("aria-valuetext", formatted);
+    }
   }
 
   #setBackgroundSettingsLanguage(language: BackgroundSettingsLanguage): void {
@@ -7025,8 +8070,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#syncBackgroundSettingsLanguagePresentation();
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
+    this.#renderGlowHorizonBackgroundPlugin();
     if (this.#particleSettingsOpen) requestAnimationFrame(() => this.#positionParticleSettingsPanel());
     if (this.#blackHoleSettingsOpen) requestAnimationFrame(() => this.#positionBlackHoleSettingsPanel());
+    if (this.#glowHorizonSettingsOpen) requestAnimationFrame(() => this.#positionGlowHorizonSettingsPanel());
   }
 
   #bindDomEvents(): void {
@@ -7041,10 +8088,13 @@ export class CodeCodexElement extends HTMLElement {
       this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
       this.#particleBackgroundButton.addEventListener("click", () => void this.#toggleParticleBackground());
       this.#blackHoleBackgroundButton.addEventListener("click", () => void this.#toggleBlackHoleBackground());
+      this.#glowHorizonBackgroundButton.addEventListener("click", () => void this.#toggleGlowHorizonBackground());
       this.#particleSettingsTrigger.addEventListener("click", () => this.#toggleParticleSettings());
       this.#particleSettingsCloseButton.addEventListener("click", () => this.#closeParticleSettings(true));
       this.#blackHoleSettingsTrigger.addEventListener("click", () => this.#toggleBlackHoleSettings());
       this.#blackHoleSettingsCloseButton.addEventListener("click", () => this.#closeBlackHoleSettings(true));
+      this.#glowHorizonSettingsTrigger.addEventListener("click", () => this.#toggleGlowHorizonSettings());
+      this.#glowHorizonSettingsCloseButton.addEventListener("click", () => this.#closeGlowHorizonSettings(true));
       for (const input of this.#backgroundLanguageInputs) {
         input.addEventListener("change", () => {
           this.#setBackgroundSettingsLanguage(input.checked ? "en" : "zh");
@@ -7064,9 +8114,15 @@ export class CodeCodexElement extends HTMLElement {
         this.#blackHoleSettingsOpen = false;
         this.#blackHoleSettingsTrigger.setAttribute("aria-expanded", "false");
       });
+      this.#glowHorizonSettingsPanel.addEventListener("toggle", () => {
+        if (this.#glowHorizonSettingsPanel.matches(":popover-open") || !this.#glowHorizonSettingsOpen) return;
+        this.#glowHorizonSettingsOpen = false;
+        this.#glowHorizonSettingsTrigger.setAttribute("aria-expanded", "false");
+      });
       this.#previewMarketList.addEventListener("scroll", () => {
         if (this.#particleSettingsOpen) this.#positionParticleSettingsPanel();
         if (this.#blackHoleSettingsOpen) this.#positionBlackHoleSettingsPanel();
+        if (this.#glowHorizonSettingsOpen) this.#positionGlowHorizonSettingsPanel();
       }, { passive: true });
       for (const control of this.#particleNumericControls.values()) {
         const { definition, input } = control;
@@ -7128,6 +8184,39 @@ export class CodeCodexElement extends HTMLElement {
         button.addEventListener("click", () => {
           const preset = button.dataset.blackHolePreset as BlackHolePresetName | undefined;
           if (preset && preset in BLACK_HOLE_BACKGROUND_PRESETS) this.#blackHoleBackgroundController.applyPreset(preset);
+        });
+      }
+      for (const [key, control] of this.#glowHorizonNumericControls) {
+        control.input.addEventListener("input", () => {
+          const normalized = normalizeGlowHorizonSettings({
+            ...this.#glowHorizonBackgroundController.settings,
+            [key]: control.input.value,
+          });
+          const value = normalized[key];
+          control.input.value = String(value);
+          const formatted = formatGlowHorizonControlValue(control.definition, value);
+          control.output.textContent = formatted;
+          control.input.setAttribute("aria-valuetext", formatted);
+          this.#applyGlowHorizonSettingsFromControls();
+        });
+      }
+      this.#glowHorizonInertialWheelInput.addEventListener("change", () => this.#applyGlowHorizonSettingsFromControls());
+      for (const input of this.#glowHorizonColorInputs.values()) {
+        input.addEventListener("input", () => this.#applyGlowHorizonSettingsFromControls());
+      }
+      this.#glowHorizonResetButton.addEventListener("click", () => {
+        this.#glowHorizonBackgroundController.reset();
+        this.#glowHorizonBackgroundController.replay();
+      });
+      this.#glowHorizonReplayButton.addEventListener("click", () => this.#glowHorizonBackgroundController.replay());
+      for (const button of this.#shadow.querySelectorAll<HTMLButtonElement>("[data-glow-horizon-direction]")) {
+        button.addEventListener("click", () => {
+          const variant = button.dataset.glowHorizonDirection;
+          if (variant !== "top" && variant !== "bottom" && variant !== "left" && variant !== "right") return;
+          this.#glowHorizonBackgroundController.updateSettings({
+            ...this.#glowHorizonBackgroundController.settings,
+            variant,
+          });
         });
       }
       for (const previewer of PREVIEWER_DEFINITIONS) {
@@ -7303,11 +8392,19 @@ export class CodeCodexElement extends HTMLElement {
       this.#closeBlackHoleSettings(false);
     }
     if (
+      this.#glowHorizonSettingsOpen
+      && !path.includes(this.#glowHorizonSettingsPanel)
+      && !path.includes(this.#glowHorizonSettingsTrigger)
+    ) {
+      this.#closeGlowHorizonSettings(false);
+    }
+    if (
       !this.#previewMarketPopover.hidden
       && !path.includes(this.#previewMarketPopover)
       && !path.includes(this.#previewMarketButton)
       && !path.includes(this.#particleSettingsPanel)
       && !path.includes(this.#blackHoleSettingsPanel)
+      && !path.includes(this.#glowHorizonSettingsPanel)
     ) {
       this.#closePreviewMarket(false);
     }
@@ -7357,6 +8454,12 @@ export class CodeCodexElement extends HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       this.#closeBlackHoleSettings(true);
+      return;
+    }
+    if (this.#glowHorizonSettingsOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeGlowHorizonSettings(true);
       return;
     }
     if (!this.#previewMarketOpen) return;
@@ -10584,6 +11687,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#blackHoleBackgroundInitialization ??= this.#particleBackgroundInitialization
       .then(() => this.#initializeBlackHoleBackground(generation));
     await this.#blackHoleBackgroundInitialization;
+    if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceOperation) return false;
+    this.#glowHorizonBackgroundInitialization ??= this.#blackHoleBackgroundInitialization
+      .then(() => this.#initializeGlowHorizonBackground(generation));
+    await this.#glowHorizonBackgroundInitialization;
     return this.#isCurrentBackgroundInitialization(generation) && operation === this.#appearanceOperation;
   }
 
@@ -10595,6 +11702,7 @@ export class CodeCodexElement extends HTMLElement {
       if (enabled) {
         let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
@@ -10602,7 +11710,14 @@ export class CodeCodexElement extends HTMLElement {
           await this.#blackHoleBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
         }
-        transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+        if (this.#glowHorizonBackgroundController.enabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== PARTICLE_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, PARTICLE_BACKGROUND_PLUGIN_ID);
+        }
         await this.#particleBackgroundController.enable();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#particleBackgroundController.stoppedForExternalThemeChange) {
@@ -10611,7 +11726,8 @@ export class CodeCodexElement extends HTMLElement {
           }
           return;
         }
-      } else if (!this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)) {
+      } else if (!this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        && !this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)) {
         await this.#particleBackgroundController.disable();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
       }
@@ -10626,6 +11742,7 @@ export class CodeCodexElement extends HTMLElement {
     if (
       this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -10635,6 +11752,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderPreviewMarket();
     let particleStarted = false;
     let blackHoleWasEnabled = false;
+    let glowHorizonWasEnabled = false;
     let transparentWasEnabled = false;
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
@@ -10642,7 +11760,10 @@ export class CodeCodexElement extends HTMLElement {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
-      blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+      blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || this.#blackHoleBackgroundController.enabled;
+      glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || this.#glowHorizonBackgroundController.enabled;
       previousTransparentBackground = this.#transparentBackgroundPresentation();
       const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
       const enabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
@@ -10665,7 +11786,17 @@ export class CodeCodexElement extends HTMLElement {
             return;
           }
         }
-        transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+        if (glowHorizonWasEnabled || this.#glowHorizonBackgroundController.enabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== PARTICLE_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, PARTICLE_BACKGROUND_PLUGIN_ID);
+        }
         await this.#particleBackgroundController.enable();
         particleStarted = this.#particleBackgroundController.enabled;
         if (this.#particleBackgroundController.stoppedForExternalThemeChange) {
@@ -10674,11 +11805,14 @@ export class CodeCodexElement extends HTMLElement {
         if (!particleStarted) throw new Error("Particle Image Background could not be enabled");
         if (!this.#connected || operation !== this.#appearanceOperation) {
           const reconcilePrevious = this.#connected && !this.#dismissed;
-          const preserveTheme = reconcilePrevious && blackHoleWasEnabled;
+          const preserveTheme = reconcilePrevious && (blackHoleWasEnabled || glowHorizonWasEnabled);
           await this.#particleBackgroundController.disable(preserveTheme);
           if (reconcilePrevious && blackHoleWasEnabled) {
             transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
             await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+          } else if (reconcilePrevious && glowHorizonWasEnabled) {
+            transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+            await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
           }
           return;
         }
@@ -10688,6 +11822,7 @@ export class CodeCodexElement extends HTMLElement {
           this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
         }
         this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(PARTICLE_BACKGROUND_PLUGIN_ID);
       } else {
         await this.#particleBackgroundController.disable();
@@ -10701,26 +11836,38 @@ export class CodeCodexElement extends HTMLElement {
         const reconcilePrevious = this.#connected
           && !this.#dismissed
           && !stoppedForThemeChange;
-        if (particleStarted) await this.#particleBackgroundController.disable(reconcilePrevious && blackHoleWasEnabled);
+        if (particleStarted) {
+          await this.#particleBackgroundController.disable(reconcilePrevious && (blackHoleWasEnabled || glowHorizonWasEnabled));
+        }
         if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
           let changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
           changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
           if (changed) this.#writeEnabledAppearancePlugins();
         } else if (reconcilePrevious && blackHoleWasEnabled) {
           transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
           await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+        } else if (reconcilePrevious && glowHorizonWasEnabled) {
+          transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+          await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
         }
         return;
       }
       const stoppedForThemeChange = this.#particleBackgroundController.stoppedForExternalThemeChange;
-      if (particleStarted) await this.#particleBackgroundController.disable(blackHoleWasEnabled && !stoppedForThemeChange);
+      if (particleStarted) {
+        await this.#particleBackgroundController.disable((blackHoleWasEnabled || glowHorizonWasEnabled) && !stoppedForThemeChange);
+      }
       if (stoppedForThemeChange) {
         let changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
       } else if (blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
         transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+      } else if (glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
+        transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
       }
       if (transparentWasEnabled && previousTransparentBackground) {
         if (bridge?.available) {
@@ -10756,6 +11903,7 @@ export class CodeCodexElement extends HTMLElement {
       if (enabled) {
         let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
@@ -10763,7 +11911,14 @@ export class CodeCodexElement extends HTMLElement {
           await this.#particleBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
         }
-        transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        if (this.#glowHorizonBackgroundController.enabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== BLACK_HOLE_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        }
         await this.#blackHoleBackgroundController.enable();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#blackHoleBackgroundController.stoppedForExternalThemeChange) {
@@ -10783,10 +11938,54 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  async #initializeGlowHorizonBackground(generation: number): Promise<void> {
+    try {
+      await this.#glowHorizonBackgroundController.initialize();
+      if (!this.#isCurrentBackgroundInitialization(generation)) return;
+      const enabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+      if (enabled) {
+        let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (this.#particleBackgroundController.enabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#blackHoleBackgroundController.enabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== GLOW_HORIZON_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        }
+        await this.#glowHorizonBackgroundController.enable();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        if (this.#glowHorizonBackgroundController.stoppedForExternalThemeChange) {
+          if (this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)) {
+            this.#writeEnabledAppearancePlugins();
+          }
+          return;
+        }
+      } else if (this.#glowHorizonBackgroundController.enabled) {
+        await this.#glowHorizonBackgroundController.disable();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+      }
+    } catch (error) {
+      console.error("Code-Codex could not initialize Glow Horizon Background", error);
+    } finally {
+      if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
+    }
+  }
+
   async #toggleBlackHoleBackground(): Promise<void> {
     if (
       this.#blackHoleBackgroundController.pending
       || this.#particleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -10796,6 +11995,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderPreviewMarket();
     let blackHoleStarted = false;
     let particleWasEnabled = false;
+    let glowHorizonWasEnabled = false;
     let transparentWasEnabled = false;
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
@@ -10803,7 +12003,10 @@ export class CodeCodexElement extends HTMLElement {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
-      particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
+      particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || this.#particleBackgroundController.enabled;
+      glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || this.#glowHorizonBackgroundController.enabled;
       previousTransparentBackground = this.#transparentBackgroundPresentation();
       const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
       const enabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
@@ -10826,7 +12029,17 @@ export class CodeCodexElement extends HTMLElement {
             return;
           }
         }
-        transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        if (glowHorizonWasEnabled || this.#glowHorizonBackgroundController.enabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== BLACK_HOLE_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        }
         await this.#blackHoleBackgroundController.enable();
         blackHoleStarted = this.#blackHoleBackgroundController.enabled;
         if (this.#blackHoleBackgroundController.stoppedForExternalThemeChange) {
@@ -10835,11 +12048,14 @@ export class CodeCodexElement extends HTMLElement {
         if (!blackHoleStarted) throw new Error("Black Hole Background could not be enabled");
         if (!this.#connected || operation !== this.#appearanceOperation) {
           const reconcilePrevious = this.#connected && !this.#dismissed;
-          const preserveTheme = reconcilePrevious && particleWasEnabled;
+          const preserveTheme = reconcilePrevious && (particleWasEnabled || glowHorizonWasEnabled);
           await this.#blackHoleBackgroundController.disable(preserveTheme);
           if (reconcilePrevious && particleWasEnabled) {
             transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
             await this.#particleBackgroundController.enable().catch(() => undefined);
+          } else if (reconcilePrevious && glowHorizonWasEnabled) {
+            transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+            await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
           }
           return;
         }
@@ -10849,6 +12065,7 @@ export class CodeCodexElement extends HTMLElement {
           this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
         }
         this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
       } else {
         await this.#blackHoleBackgroundController.disable();
@@ -10862,26 +12079,38 @@ export class CodeCodexElement extends HTMLElement {
         const reconcilePrevious = this.#connected
           && !this.#dismissed
           && !stoppedForThemeChange;
-        if (blackHoleStarted) await this.#blackHoleBackgroundController.disable(reconcilePrevious && particleWasEnabled);
+        if (blackHoleStarted) {
+          await this.#blackHoleBackgroundController.disable(reconcilePrevious && (particleWasEnabled || glowHorizonWasEnabled));
+        }
         if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
           let changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
           changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
           if (changed) this.#writeEnabledAppearancePlugins();
         } else if (reconcilePrevious && particleWasEnabled) {
           transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
           await this.#particleBackgroundController.enable().catch(() => undefined);
+        } else if (reconcilePrevious && glowHorizonWasEnabled) {
+          transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+          await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
         }
         return;
       }
       const stoppedForThemeChange = this.#blackHoleBackgroundController.stoppedForExternalThemeChange;
-      if (blackHoleStarted) await this.#blackHoleBackgroundController.disable(particleWasEnabled && !stoppedForThemeChange);
+      if (blackHoleStarted) {
+        await this.#blackHoleBackgroundController.disable((particleWasEnabled || glowHorizonWasEnabled) && !stoppedForThemeChange);
+      }
       if (stoppedForThemeChange) {
         let changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
       } else if (particleWasEnabled && !this.#particleBackgroundController.enabled) {
         transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
         await this.#particleBackgroundController.enable().catch(() => undefined);
+      } else if (glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
+        transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
       }
       if (transparentWasEnabled && previousTransparentBackground) {
         if (bridge?.available) {
@@ -10896,6 +12125,159 @@ export class CodeCodexElement extends HTMLElement {
         }
       }
       const message = error instanceof Error ? error.message : "Black Hole Background could not be changed";
+      this.#showActionNotice(message, "error");
+    } finally {
+      if (operation === this.#appearanceOperation) {
+        this.#appearanceTransitionPending = false;
+        this.#renderPreviewMarket();
+        if (bridge?.available) this.#flushQueuedAppearanceSync(bridge);
+        if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          this.#scheduleAppearanceHealthCheck();
+        }
+      }
+    }
+  }
+
+  #applyGlowHorizonSettingsFromControls(): void {
+    const values: Record<string, unknown> = { ...this.#glowHorizonBackgroundController.settings };
+    for (const [key, control] of this.#glowHorizonNumericControls) values[key] = control.input.value;
+    for (const [key, input] of this.#glowHorizonColorInputs) values[key] = input.value;
+    values.inertialWheel = this.#glowHorizonInertialWheelInput.checked;
+    this.#glowHorizonBackgroundController.updateSettings(normalizeGlowHorizonSettings(values));
+  }
+
+  async #toggleGlowHorizonBackground(): Promise<void> {
+    if (
+      this.#glowHorizonBackgroundController.pending
+      || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending
+    ) return;
+    const operation = ++this.#appearanceOperation;
+    this.#appearanceTransitionPending = true;
+    this.#cancelAppearanceHealthCheck();
+    this.#renderPreviewMarket();
+    let glowStarted = false;
+    let particleWasEnabled = false;
+    let blackHoleWasEnabled = false;
+    let transparentWasEnabled = false;
+    let previousTransparentBackground: string | undefined;
+    let bridge: ExplorerBridge | undefined;
+    try {
+      if (!await this.#awaitBackgroundInitializations(operation)) return;
+      bridge = this.#bridge;
+      transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || this.#particleBackgroundController.enabled;
+      blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || this.#blackHoleBackgroundController.enabled;
+      previousTransparentBackground = this.#transparentBackgroundPresentation();
+      const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
+      const enabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+      const active = this.#glowHorizonBackgroundController.enabled;
+      const nextEnabled = !enabled || !active;
+
+      if (nextEnabled) {
+        if ((transparentWasEnabled || transparentPresentationWasApplied) && bridge?.available) {
+          await this.#setWindowTransparency(bridge, false);
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        if (!this.#connected || operation !== this.#appearanceOperation) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (particleWasEnabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (blackHoleWasEnabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== GLOW_HORIZON_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        }
+        await this.#glowHorizonBackgroundController.enable();
+        glowStarted = this.#glowHorizonBackgroundController.enabled;
+        if (this.#glowHorizonBackgroundController.stoppedForExternalThemeChange) {
+          throw new Error(this.#glowHorizonBackgroundController.error
+            ?? "Glow Horizon Background stopped because Codex Appearance changed.");
+        }
+        if (!glowStarted) throw new Error("Glow Horizon Background could not be enabled");
+        if (!this.#connected || operation !== this.#appearanceOperation) {
+          const restorePrevious = this.#connected && !this.#dismissed;
+          await this.#glowHorizonBackgroundController.disable(restorePrevious && (particleWasEnabled || blackHoleWasEnabled));
+          if (restorePrevious && particleWasEnabled) {
+            transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+            await this.#particleBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && blackHoleWasEnabled) {
+            transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+            await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+          }
+          return;
+        }
+        if (transparentWasEnabled) {
+          this.#appearancePluginApplied = false;
+          this.#appearancePluginError = undefined;
+          this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        }
+        this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.add(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+      } else {
+        await this.#glowHorizonBackgroundController.disable();
+        this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+      this.#announce(`Glow Horizon Background ${nextEnabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      if (!this.#connected || operation !== this.#appearanceOperation) {
+        const stoppedForThemeChange = this.#glowHorizonBackgroundController.stoppedForExternalThemeChange;
+        const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
+        if (glowStarted) {
+          await this.#glowHorizonBackgroundController.disable(restorePrevious && (particleWasEnabled || blackHoleWasEnabled));
+        }
+        if (restorePrevious && particleWasEnabled && !this.#particleBackgroundController.enabled) {
+          transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+          await this.#particleBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+          transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+          await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+        }
+        return;
+      }
+      const stoppedForThemeChange = this.#glowHorizonBackgroundController.stoppedForExternalThemeChange;
+      if (glowStarted) {
+        await this.#glowHorizonBackgroundController.disable((particleWasEnabled || blackHoleWasEnabled) && !stoppedForThemeChange);
+      }
+      if (stoppedForThemeChange) {
+        let changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+      } else if (particleWasEnabled && !this.#particleBackgroundController.enabled) {
+        transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+        await this.#particleBackgroundController.enable().catch(() => undefined);
+      } else if (blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+        transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+      }
+      if (transparentWasEnabled && previousTransparentBackground) {
+        if (bridge?.available) {
+          try {
+            const restored = await this.#setWindowTransparency(bridge, true);
+            this.#applyTransparentBackgroundPresentation(restored.background);
+          } catch {
+            this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+          }
+        } else {
+          this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+        }
+      }
+      const message = error instanceof Error ? error.message : "Glow Horizon Background could not be changed";
       this.#showActionNotice(message, "error");
     } finally {
       if (operation === this.#appearanceOperation) {
@@ -11516,6 +12898,7 @@ export class CodeCodexElement extends HTMLElement {
     );
     this.#particleBackgroundButton.disabled = controller.pending
       || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -11718,6 +13101,7 @@ export class CodeCodexElement extends HTMLElement {
     );
     this.#blackHoleBackgroundButton.disabled = controller.pending
       || this.#particleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -11753,6 +13137,67 @@ export class CodeCodexElement extends HTMLElement {
     );
     this.#blackHoleSettingsPanel.setAttribute("aria-busy", String(controller.pending));
     if (this.#blackHoleSettingsOpen) requestAnimationFrame(() => this.#positionBlackHoleSettingsPanel());
+  }
+
+  #renderGlowHorizonBackgroundPlugin(): void {
+    const controller = this.#glowHorizonBackgroundController;
+    const enabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+    const active = enabled && controller.enabled;
+    const action = enabled && !active ? "Retry" : enabled ? "Disable" : "Enable";
+    let status = enabled ? "Enabled" : "Disabled";
+    if (controller.pending) status = enabled || controller.enabled ? "Enabled · Applying" : "Applying";
+    else if (enabled && !active) status = "Enabled · Not applied";
+    else if (active && controller.error) status = "Enabled · Notice";
+    this.#glowHorizonBackgroundStatus.textContent = status;
+    this.#glowHorizonBackgroundStatus.dataset.enabled = String(active);
+    this.#glowHorizonBackgroundStatus.dataset.pending = String(controller.pending);
+    this.#glowHorizonBackgroundCard.setAttribute("aria-busy", String(controller.pending));
+    this.#glowHorizonBackgroundButton.textContent = controller.pending ? "Applying…" : action;
+    this.#glowHorizonBackgroundButton.dataset.enabled = String(enabled);
+    this.#glowHorizonBackgroundButton.setAttribute("aria-pressed", String(enabled));
+    this.#glowHorizonBackgroundButton.setAttribute(
+      "aria-label",
+      controller.pending
+        ? "Applying Glow Horizon Background"
+        : `${action} Glow Horizon Background`,
+    );
+    this.#glowHorizonBackgroundButton.disabled = controller.pending
+      || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending;
+
+    const settings = controller.settings;
+    for (const [key, control] of this.#glowHorizonNumericControls) {
+      const value = settings[key];
+      const formatted = formatGlowHorizonControlValue(control.definition, value);
+      control.input.value = String(value);
+      control.input.disabled = controller.pending;
+      control.input.setAttribute("aria-valuetext", formatted);
+      control.output.textContent = formatted;
+    }
+    this.#glowHorizonInertialWheelInput.checked = settings.inertialWheel;
+    this.#glowHorizonInertialWheelInput.disabled = controller.pending;
+    for (const [key, input] of this.#glowHorizonColorInputs) {
+      input.value = settings[key];
+      input.disabled = controller.pending;
+    }
+    for (const button of this.#shadow.querySelectorAll<HTMLButtonElement>("[data-glow-horizon-direction]")) {
+      button.setAttribute("aria-pressed", String(button.dataset.glowHorizonDirection === settings.variant));
+      button.disabled = controller.pending;
+    }
+    this.#glowHorizonResetButton.disabled = controller.pending;
+    this.#glowHorizonReplayButton.disabled = controller.pending || !controller.enabled;
+    const error = controller.error;
+    this.#glowHorizonPluginError.hidden = !error;
+    this.#glowHorizonPluginError.textContent = backgroundSettingsError(
+      error,
+      this.#backgroundSettingsLanguage,
+      "发光地平线背景",
+      "Glow Horizon Background",
+    );
+    this.#glowHorizonSettingsPanel.setAttribute("aria-busy", String(controller.pending));
+    if (this.#glowHorizonSettingsOpen) requestAnimationFrame(() => this.#positionGlowHorizonSettingsPanel());
   }
 
   #readEnabledAppearancePlugins(): readonly string[] {
@@ -11868,6 +13313,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#appearanceTransitionPending
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
     ) return;
     const operation = ++this.#appearanceOperation;
     this.#appearanceTransitionPending = true;
@@ -11875,6 +13321,9 @@ export class CodeCodexElement extends HTMLElement {
     let bridge: ExplorerBridge | undefined;
     let nextEnabled = false;
     let previousBackground: string | undefined;
+    let particleWasActive = false;
+    let blackHoleWasActive = false;
+    let glowHorizonWasActive = false;
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       bridge = this.#bridge;
@@ -11908,8 +13357,10 @@ export class CodeCodexElement extends HTMLElement {
       if (nextEnabled) {
         const particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
         const blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
-        const particleWasActive = particleWasEnabled || this.#particleBackgroundController.enabled;
-        const blackHoleWasActive = blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled;
+        const glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        particleWasActive = particleWasEnabled || this.#particleBackgroundController.enabled;
+        blackHoleWasActive = blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled;
+        glowHorizonWasActive = glowHorizonWasEnabled || this.#glowHorizonBackgroundController.enabled;
         if (particleWasActive) {
           await this.#particleBackgroundController.disable();
           if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
@@ -11931,8 +13382,21 @@ export class CodeCodexElement extends HTMLElement {
             return;
           }
         }
+        if (glowHorizonWasActive) {
+          await this.#glowHorizonBackgroundController.disable();
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            if (this.#connected && !this.#dismissed) {
+              if (glowHorizonWasActive) await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+              else if (blackHoleWasActive) await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+              else if (particleWasActive) await this.#particleBackgroundController.enable().catch(() => undefined);
+            }
+            return;
+          }
+        }
         this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       } else {
         this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -11940,9 +13404,19 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#renderParticleBackgroundPlugin();
       this.#renderBlackHoleBackgroundPlugin();
+      this.#renderGlowHorizonBackgroundPlugin();
       this.#announce(`Transparent Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
       if (!this.#connected || operation !== this.#appearanceOperation) return;
+      if (nextEnabled) {
+        if (glowHorizonWasActive && !this.#glowHorizonBackgroundController.enabled) {
+          await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+        } else if (blackHoleWasActive && !this.#blackHoleBackgroundController.enabled) {
+          await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+        } else if (particleWasActive && !this.#particleBackgroundController.enabled) {
+          await this.#particleBackgroundController.enable().catch(() => undefined);
+        }
+      }
       if (!nextEnabled && previousBackground) this.#applyTransparentBackgroundPresentation(previousBackground);
       if (nextEnabled) this.#appearancePluginApplied = false;
       this.#appearancePluginError = transparencyActionError(error, nextEnabled);
@@ -11990,6 +13464,7 @@ export class CodeCodexElement extends HTMLElement {
         && previousBackground
         && !this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
         && !this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        && !this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
       ) {
         this.#applyTransparentBackgroundPresentation(previousBackground);
       }
@@ -12069,6 +13544,7 @@ export class CodeCodexElement extends HTMLElement {
     }
     if (!this.#previewMarketOpen) this.#togglePreviewMarket();
     this.#closeBlackHoleSettings(false);
+    this.#closeGlowHorizonSettings(false);
     this.#particleSettingsOpen = true;
     this.#particleSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderParticleBackgroundPlugin();
@@ -12130,6 +13606,7 @@ export class CodeCodexElement extends HTMLElement {
     }
     if (!this.#previewMarketOpen) this.#togglePreviewMarket();
     this.#closeParticleSettings(false);
+    this.#closeGlowHorizonSettings(false);
     this.#blackHoleSettingsOpen = true;
     this.#blackHoleSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderBlackHoleBackgroundPlugin();
@@ -12180,9 +13657,68 @@ export class CodeCodexElement extends HTMLElement {
     panel.dataset.side = side;
   }
 
+  #toggleGlowHorizonSettings(): void {
+    if (this.#glowHorizonSettingsOpen) {
+      this.#closeGlowHorizonSettings(true);
+      return;
+    }
+    if (!this.#previewMarketOpen) this.#togglePreviewMarket();
+    this.#closeParticleSettings(false);
+    this.#closeBlackHoleSettings(false);
+    this.#glowHorizonSettingsOpen = true;
+    this.#glowHorizonSettingsTrigger.setAttribute("aria-expanded", "true");
+    this.#renderGlowHorizonBackgroundPlugin();
+    if (!this.#glowHorizonSettingsPanel.matches(":popover-open")) this.#glowHorizonSettingsPanel.showPopover();
+    this.#positionGlowHorizonSettingsPanel();
+    queueMicrotask(() => {
+      if (!this.#glowHorizonSettingsOpen) return;
+      this.#positionGlowHorizonSettingsPanel();
+      this.#glowHorizonSettingsCloseButton.focus();
+    });
+  }
+
+  #closeGlowHorizonSettings(restoreFocus: boolean): void {
+    if (!this.#glowHorizonSettingsOpen && !this.#glowHorizonSettingsPanel.matches(":popover-open")) return;
+    this.#glowHorizonSettingsOpen = false;
+    this.#glowHorizonSettingsTrigger.setAttribute("aria-expanded", "false");
+    if (this.#glowHorizonSettingsPanel.matches(":popover-open")) this.#glowHorizonSettingsPanel.hidePopover();
+    if (restoreFocus && this.#glowHorizonSettingsTrigger.isConnected) this.#glowHorizonSettingsTrigger.focus();
+  }
+
+  #positionGlowHorizonSettingsPanel(): void {
+    if (!this.#glowHorizonSettingsOpen || !this.#glowHorizonSettingsPanel.matches(":popover-open")) return;
+    const panel = this.#glowHorizonSettingsPanel;
+    const cardRect = this.#glowHorizonBackgroundCard.getBoundingClientRect();
+    const edge = 12;
+    const gap = 8;
+    const preferredWidth = 344;
+    const panelWidth = Math.min(preferredWidth, Math.max(240, window.innerWidth - edge * 2));
+    let left = cardRect.right + gap;
+    let side = "right";
+    if (left + panelWidth > window.innerWidth - edge) {
+      left = Math.max(edge, window.innerWidth - edge - panelWidth);
+      side = "overlay";
+    }
+    panel.style.width = `${panelWidth}px`;
+    panel.style.maxHeight = `${Math.max(240, window.innerHeight - edge * 2)}px`;
+    const panelHeight = Math.min(panel.scrollHeight, Math.max(240, window.innerHeight - edge * 2));
+    const top = Math.min(
+      Math.max(edge, cardRect.top),
+      Math.max(edge, window.innerHeight - edge - panelHeight),
+    );
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.setProperty(
+      "--cle-particle-settings-anchor-y",
+      `${Math.round(Math.min(panelHeight - 18, Math.max(18, cardRect.top + cardRect.height * 0.5 - top)))}px`,
+    );
+    panel.dataset.side = side;
+  }
+
   #closePreviewMarket(restoreFocus: boolean): void {
     this.#closeParticleSettings(false);
     this.#closeBlackHoleSettings(false);
+    this.#closeGlowHorizonSettings(false);
     if (!this.#previewMarketOpen && this.#previewMarketPopover.hidden) return;
     this.#previewMarketOpen = false;
     this.#previewMarketPopover.hidden = true;
@@ -12208,6 +13744,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderAppearancePlugin();
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
+    this.#renderGlowHorizonBackgroundPlugin();
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const enabled = this.#enabledPreviewers.has(previewer.id);
       const status = this.#previewerStatuses.get(previewer.id);
@@ -12251,6 +13788,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#appearanceTransitionPending
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
       || !bridgeAvailable
       || (!enabled && preferenceBlocked);
 

@@ -269,15 +269,6 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         .map(PortReservation::port)
         .transpose()?;
     let main_inspector_endpoint = main_inspector_port.map(CdpEndpoint::loopback);
-    let (bridge, injection) = prepare_runtime(
-        &args.common,
-        Some(&installation),
-        &installation.version,
-        &installation.channel,
-        compatible,
-    )
-    .await?;
-
     let launch_arguments = build_launch_arguments(port, main_inspector_port, &args.codex_args);
     reservation.release();
     if let Some(reservation) = main_inspector_reservation {
@@ -335,6 +326,21 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             tracing::info!(event = "electron_main_transparency_initialized");
         }
         wait_for_endpoint(endpoint, Duration::from_secs(30)).await?;
+        tracing::info!(event = "codex_renderer_ready", resolver_start = "deferred");
+        // Start the resolver only after the official desktop has opened its
+        // renderer/CDP endpoint.  The packaged resolver is a second Codex App
+        // Server process and uses the same CODEX_HOME SQLite database as the
+        // desktop.  Starting it before desktop activation can win the startup
+        // migration/lock race and make the desktop report "database access is
+        // denied" before the file tree is rendered.
+        let (bridge, injection) = prepare_runtime(
+            &args.common,
+            Some(&installation),
+            &installation.version,
+            &installation.channel,
+            compatible,
+        )
+        .await?;
         tokio::task::spawn_blocking(move || {
             verify_listener_owner(port, launched_pid, launched_after)
         })

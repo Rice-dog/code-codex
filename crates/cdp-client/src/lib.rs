@@ -40,7 +40,7 @@ const MAX_COMPATIBLE_TARGETS: usize = 8;
 const MAX_RECENTLY_QUALIFIED_TARGETS: usize = 8;
 const MAX_REJECTED_EXECUTION_CONTEXTS: usize = 128;
 const REPLAY_WINDOW: usize = 4_096;
-const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const m=document.querySelectorAll('main.main-surface,main[data-app-shell-main-surface=\"default\"]');const p=m.length===1?m[0].parentElement:null;return Boolean(p&&p.querySelector(':scope > aside.app-shell-left-panel')&&document.querySelector('[data-app-shell-sidebar-trigger]'))})()";
+const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const m=document.querySelectorAll(s);if(m.length!==1||!document.querySelector('[data-app-shell-sidebar-trigger]'))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=shell.querySelectorAll(s);if(shellMains.length===1&&shellMains[0]===main)return true;}return false})()";
 const DOCUMENT_READY_STATE_PROBE: &str = "document.readyState";
 const INITIAL_RENDERER_QUALIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_RENDERER_QUALIFICATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -2569,8 +2569,224 @@ mod tests {
         assert!(RENDERER_LAYOUT_PROBE.contains("location.host==='-'"));
         assert!(RENDERER_LAYOUT_PROBE.contains("main.main-surface"));
         assert!(RENDERER_LAYOUT_PROBE.contains("main[data-app-shell-main-surface=\"default\"]"));
-        assert!(RENDERER_LAYOUT_PROBE.contains("m.length===1"));
+        assert!(RENDERER_LAYOUT_PROBE.contains("m.length!==1"));
         assert!(RENDERER_LAYOUT_PROBE.contains(":scope > aside.app-shell-left-panel"));
+        assert!(RENDERER_LAYOUT_PROBE.contains("let shell=mainParent"));
+        assert!(RENDERER_LAYOUT_PROBE.contains("depth<5"));
+        assert!(RENDERER_LAYOUT_PROBE.contains("asides.length!==1"));
+        assert!(RENDERER_LAYOUT_PROBE.contains("const mainParent=main.parentElement"));
+        assert!(RENDERER_LAYOUT_PROBE.contains("shell!==mainParent?.parentElement"));
+        assert!(RENDERER_LAYOUT_PROBE.contains("shellMains.length===1&&shellMains[0]===main"));
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum ProbeFixtureNodeKind {
+        Other,
+        Main,
+        Aside,
+        Trigger,
+    }
+
+    #[derive(Clone, Copy)]
+    struct ProbeFixtureNode {
+        parent: Option<usize>,
+        kind: ProbeFixtureNodeKind,
+    }
+
+    fn fixture_descends_from(nodes: &[ProbeFixtureNode], node: usize, ancestor: usize) -> bool {
+        let mut current = nodes[node].parent;
+        while let Some(index) = current {
+            if index == ancestor {
+                return true;
+            }
+            current = nodes[index].parent;
+        }
+        false
+    }
+
+    // Mirror the structural part of the browser probe in a tiny DOM-shaped
+    // model so old and current shell arrangements are regression-tested.
+    fn fixture_matches_renderer_shell(nodes: &[ProbeFixtureNode]) -> bool {
+        let mains = nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, node)| (node.kind == ProbeFixtureNodeKind::Main).then_some(index))
+            .collect::<Vec<_>>();
+        if mains.len() != 1
+            || !nodes
+                .iter()
+                .any(|node| node.kind == ProbeFixtureNodeKind::Trigger)
+        {
+            return false;
+        }
+        let main = mains[0];
+        let Some(main_parent) = nodes[main].parent else {
+            return false;
+        };
+        let mut shell = Some(main_parent);
+        for _ in 0..5 {
+            let Some(shell_index) = shell else {
+                break;
+            };
+            let direct_asides = nodes
+                .iter()
+                .filter(|node| {
+                    node.parent == Some(shell_index) && node.kind == ProbeFixtureNodeKind::Aside
+                })
+                .count();
+            let mut shell_main_count = 0;
+            let mut contains_main = false;
+            for (index, node) in nodes.iter().enumerate() {
+                if index != shell_index
+                    && node.kind == ProbeFixtureNodeKind::Main
+                    && fixture_descends_from(nodes, index, shell_index)
+                {
+                    shell_main_count += 1;
+                    contains_main |= index == main;
+                }
+            }
+            let supported_depth =
+                shell_index == main_parent || nodes[main_parent].parent == Some(shell_index);
+            if direct_asides == 1 && supported_depth && shell_main_count == 1 && contains_main {
+                return true;
+            }
+            shell = nodes[shell_index].parent;
+        }
+        false
+    }
+
+    #[test]
+    fn renderer_probe_shell_relation_covers_old_and_current_layouts() {
+        let old = [
+            ProbeFixtureNode {
+                parent: None,
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Aside,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Main,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Trigger,
+            },
+        ];
+        assert!(fixture_matches_renderer_shell(&old));
+
+        let current = [
+            ProbeFixtureNode {
+                parent: None,
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Aside,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(2),
+                kind: ProbeFixtureNodeKind::Main,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Trigger,
+            },
+        ];
+        assert!(fixture_matches_renderer_shell(&current));
+    }
+
+    #[test]
+    fn renderer_probe_shell_relation_fails_closed_for_invalid_layouts() {
+        let missing_aside = [
+            ProbeFixtureNode {
+                parent: None,
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Main,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Trigger,
+            },
+        ];
+        assert!(!fixture_matches_renderer_shell(&missing_aside));
+
+        let unrelated_shell = [
+            ProbeFixtureNode {
+                parent: None,
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Aside,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(2),
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(3),
+                kind: ProbeFixtureNodeKind::Main,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Trigger,
+            },
+        ];
+        assert!(!fixture_matches_renderer_shell(&unrelated_shell));
+
+        let multiple_mains = [
+            ProbeFixtureNode {
+                parent: None,
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Aside,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Main,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Main,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Trigger,
+            },
+        ];
+        assert!(!fixture_matches_renderer_shell(&multiple_mains));
+
+        let missing_trigger = [
+            ProbeFixtureNode {
+                parent: None,
+                kind: ProbeFixtureNodeKind::Other,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Aside,
+            },
+            ProbeFixtureNode {
+                parent: Some(0),
+                kind: ProbeFixtureNodeKind::Main,
+            },
+        ];
+        assert!(!fixture_matches_renderer_shell(&missing_trigger));
     }
 
     #[test]

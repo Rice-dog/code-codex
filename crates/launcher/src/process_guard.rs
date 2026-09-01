@@ -1099,7 +1099,17 @@ pub fn is_executable_running(executable: &Path) -> Result<bool, ProcessGuardErro
     }
     #[cfg(windows)]
     {
-        const SCRIPT: &str = "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $target=[IO.Path]::GetFullPath($env:CLE_CODEX_EXE); $count=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).Equals($target,[StringComparison]::OrdinalIgnoreCase) }).Count; [Console]::Write($count.ToString([Globalization.CultureInfo]::InvariantCulture))";
+        // `ChatGPT.exe` is an Electron executable.  Win32_Process reports the
+        // same image path for the browser process and every renderer/GPU/
+        // utility child.  Counting the image path alone therefore makes a
+        // closed window look like a running Codex instance while a child is
+        // still winding down.  Keep the query bounded to a scalar result, but
+        // only count browser/root command lines (known child processes carry
+        // an Electron `--type=` switch).  The diagnostic probe used by our
+        // compatibility checks
+        // checks has a private, recognisable user-data marker and must not
+        // block a normal launch if its parent was orphaned.
+        const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); function should_count_process([string]$commandLine) { if ([string]::IsNullOrWhiteSpace($commandLine)) { return $true }; if ($commandLine -match '(?i)CodeCodexOfficialProbe-') { return $false }; return $commandLine -notmatch '(?i)(^|\s)--type(?:=|\s+)[\"'']?(?:renderer|gpu-process|utility|crashpad-handler|zygote|sandbox-helper|broker|ppapi)[\"'']?(?=\s|$)' }; $target=[IO.Path]::GetFullPath($env:CLE_CODEX_EXE); $count=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).Equals($target,[StringComparison]::OrdinalIgnoreCase) -and (should_count_process ([string]$_.CommandLine)) }).Count; [Console]::Write($count.ToString([Globalization.CultureInfo]::InvariantCulture))"#;
         let executable = dunce::canonicalize(executable)
             .map_err(|_| ProcessGuardError::ProcessInspectionUnknown)?;
         if !executable.is_file() {
@@ -1121,6 +1131,66 @@ pub fn is_executable_running(executable: &Path) -> Result<bool, ProcessGuardErro
             .map_err(|_| ProcessGuardError::ProcessInspectionUnknown)?;
         parse_running_query_result(output.status.success(), &output.stdout)
     }
+}
+
+/// Return whether a matching executable process represents an actual browser
+/// (root) process rather than an Electron child.  The Windows query above
+/// mirrors this predicate; keeping it in Rust gives us regression coverage for
+/// command-line shapes seen across Codex Desktop releases.
+#[cfg(test)]
+fn should_count_running_process(command_line: Option<&str>) -> bool {
+    let Some(command_line) = command_line else {
+        // An unavailable command line must fail closed.  Treating it as a root
+        // process prevents a launcher from racing an uninspectable instance.
+        return true;
+    };
+    if command_line.trim().is_empty() {
+        return true;
+    }
+    if contains_ascii_case_insensitive(command_line, "CodeCodexOfficialProbe-") {
+        return false;
+    }
+    !contains_electron_type_switch(command_line)
+}
+
+#[cfg(test)]
+fn contains_electron_type_switch(command_line: &str) -> bool {
+    const CHILD_TYPES: [&str; 8] = [
+        "renderer",
+        "gpu-process",
+        "utility",
+        "crashpad-handler",
+        "zygote",
+        "sandbox-helper",
+        "broker",
+        "ppapi",
+    ];
+    let mut tokens = command_line.split_whitespace().peekable();
+    while let Some(raw_token) = tokens.next() {
+        let token = raw_token.trim_matches(['"', '\'']).to_ascii_lowercase();
+        if let Some(value) = token.strip_prefix("--type=") {
+            if CHILD_TYPES.contains(&value) {
+                return true;
+            }
+        } else if token == "--type" {
+            let Some(raw_value) = tokens.next() else {
+                continue;
+            };
+            let value = raw_value.trim_matches(['"', '\'']).to_ascii_lowercase();
+            if CHILD_TYPES.contains(&value.as_str()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 fn parse_running_query_result(
@@ -1373,6 +1443,57 @@ mod tests {
         assert!(parse_running_query_result(true, b"1\n0").is_err());
         assert!(parse_running_query_result(true, &[0xff]).is_err());
         assert!(parse_running_query_result(true, &[b'1'; 65]).is_err());
+    }
+
+    #[test]
+    fn running_process_query_counts_only_live_browser_roots() {
+        // Electron's browser process has no `--type` switch.  The root may
+        // carry the remote-debugging arguments that Code-Codex adds, so those
+        // must remain a positive match.
+        for command_line in [
+            r#"C:\Program Files\Codex\ChatGPT.exe"#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --remote-debugging-address=127.0.0.1 --remote-debugging-port=4317"#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --type=browser"#,
+        ] {
+            assert!(
+                should_count_running_process(Some(command_line)),
+                "browser root should count: {command_line}"
+            );
+        }
+
+        // Renderer, GPU, utility, and crashpad processes reuse ChatGPT.exe as
+        // their image path but are not an active desktop instance.
+        for command_line in [
+            r#""C:\Program Files\Codex\ChatGPT.exe" --type=renderer"#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --type=gpu-process"#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --type=utility"#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --type=crashpad-handler"#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --TYPE=renderer"#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --type renderer"#,
+        ] {
+            assert!(
+                !should_count_running_process(Some(command_line)),
+                "Electron child should not count: {command_line}"
+            );
+        }
+    }
+
+    #[test]
+    fn running_process_query_ignores_orphaned_compatibility_probes() {
+        for command_line in [
+            r#""C:\Program Files\Codex\ChatGPT.exe" --user-data-dir=C:\Users\user\AppData\Local\Temp\CodeCodexOfficialProbe-abc --remote-debugging-port=9338"#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --type=renderer --user-data-dir="C:\Users\user\AppData\Local\Temp\CodeCodexOfficialProbe-abc""#,
+            r#""C:\Program Files\Codex\ChatGPT.exe" --USER-DATA-DIR=C:\Temp\CODECODEXOFFICIALPROBE-ABC"#,
+        ] {
+            assert!(
+                !should_count_running_process(Some(command_line)),
+                "compatibility probe should not block launch: {command_line}"
+            );
+        }
+        // Command-line inspection failures remain conservative: an unknown
+        // process is treated as a live root rather than silently bypassed.
+        assert!(should_count_running_process(None));
+        assert!(should_count_running_process(Some("   ")));
     }
 
     #[test]

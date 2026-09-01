@@ -1,6 +1,8 @@
 import { getBootstrapConfig } from "./bridge";
 import {
   CodeCodexElement,
+  GLOW_HORIZON_BACKGROUND_ATTRIBUTE,
+  GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY,
   PARTICLE_BACKGROUND_ATTRIBUTE,
   PARTICLE_BACKGROUND_COLOR_PROPERTY,
   TRANSPARENT_BACKGROUND_ATTRIBUTE,
@@ -11,6 +13,7 @@ import {
   isTemporaryLocalThreadAlias,
   MAIN_SURFACE_SELECTOR,
   plausibleThreadId,
+  qualifiedAppShellForMain,
 } from "./adapters/codex-26.715";
 import {
   clearExplorerDismissalForSession,
@@ -23,6 +26,7 @@ const DISMISS_EVENT = "code-codex:dismiss";
 const RESELECTION_LISTENER_STATE = Symbol.for("code-codex:reselection-listener:v1");
 const SHELL_LAYOUT_STYLE_SELECTOR = 'style[data-code-codex-shell-layout="codex-26.715"]';
 const PARTICLE_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-particle-background="v1"]';
+const GLOW_HORIZON_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-glow-horizon-background="v1"]';
 const TRANSPARENT_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-transparent-background="v1"]';
 const SHELL_LAYOUT_CSS = `
 code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + ${MAIN_SURFACE_SELECTOR} > header[data-app-shell-header-edge-scroll] {
@@ -196,6 +200,102 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-black-hole-canvas[hidden] {
 }
 `;
 
+// Glow Horizon uses the same translucent Codex shell treatment as the other
+// dark appearance backgrounds, but keeps its own full-window presentation
+// attribute and layer selector so the three plugins never interfere with one
+// another's teardown.
+const GLOW_HORIZON_BACKGROUND_CSS = `
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] {
+  background-color: var(${GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY}, #050507) !important;
+  --code-codex-particle-ui-surface: rgba(11, 12, 15, .58);
+  --code-codex-particle-ui-surface-strong: rgba(16, 17, 20, .66);
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body {
+  isolation: isolate;
+  background-color: transparent !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
+  main.main-surface,
+  [data-app-shell-main-surface="default"]
+) {
+  background-color: var(--code-codex-particle-ui-surface) !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
+  main.main-surface,
+  [data-app-shell-main-surface="default"]
+):has(
+  [data-app-shell-focus-area="main"] > div > div[class*="electron\\:bg-surface"][class*="rounded-tl-lg"]
+) {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
+  main.main-surface,
+  [data-app-shell-main-surface="default"]
+) [data-app-shell-focus-area="main"] > div > div[class*="electron\\:bg-surface"][class*="rounded-tl-lg"] {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
+  aside.app-shell-left-panel,
+  aside[data-testid="app-shell-floating-left-panel"].bg-surface,
+  aside[data-app-shell-focus-area="right-panel"]
+) {
+  background-color: var(--code-codex-particle-ui-surface-strong) !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
+  aside[data-app-shell-focus-area="right-panel"] .bg-surface,
+  [data-app-shell-header-edge-scroll],
+  .thread-scroll-container[data-app-action-timeline-scroll]
+) {
+  background-color: transparent !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] > [class*="bg-gradient-to-t"],
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [class*="bg-gradient-to-t"] {
+  background-image: none !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body code-codex[data-placement="inline"] {
+  position: relative !important;
+  z-index: 3 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body code-codex[data-placement="drawer"] {
+  z-index: 2147483000 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] [data-code-codex-glow-horizon-layer] {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: -1 !important;
+  pointer-events: none !important;
+  background: var(${GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY}, #050507);
+  contain: strict;
+  overflow: hidden !important;
+}
+
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] [data-code-codex-glow-horizon-layer] > .code-codex-glow-horizon-horizon {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+}
+`;
+
 let remountObserver: MutationObserver | undefined;
 let remountFrame: number | undefined;
 let remountEnabled = !sessionDismissed();
@@ -228,8 +328,7 @@ function qualifiedMainSurface(): HTMLElement | null {
   const mains = [...document.querySelectorAll<HTMLElement>(MAIN_SURFACE_SELECTOR)];
   if (mains.length !== 1 || !codex26715Adapter.qualifiesRenderer(document)) return null;
   const main = mains[0];
-  const parent = main?.parentElement;
-  if (!main || !parent || !parent.querySelector(":scope > aside.app-shell-left-panel") || !isVisibleMount(main)) return null;
+  if (!main || !qualifiedAppShellForMain(main, document) || !isVisibleMount(main)) return null;
   return main;
 }
 
@@ -242,7 +341,7 @@ function stableInlineMount(mainSurface: HTMLElement | null): MountPoint | null {
   const verifiedMain = mainSurface;
   if (verifiedMain) {
     const parent = verifiedMain.parentElement;
-    const verifiedShell = parent?.querySelector(":scope > aside.app-shell-left-panel");
+    const verifiedShell = qualifiedAppShellForMain(verifiedMain, document);
     if (parent && verifiedShell && isVisibleMount(parent)) {
       return { parent, before: verifiedMain, placement: "inline", strategy: "known:main.main-surface", mainSurface };
     }
@@ -318,9 +417,20 @@ function installParticleBackgroundStyle(): void {
   if (style.textContent !== PARTICLE_BACKGROUND_CSS) style.textContent = PARTICLE_BACKGROUND_CSS;
 }
 
+function installGlowHorizonBackgroundStyle(): void {
+  let style = document.querySelector<HTMLStyleElement>(GLOW_HORIZON_BACKGROUND_STYLE_SELECTOR);
+  if (!style) {
+    style = document.createElement("style");
+    style.dataset.codeCodexGlowHorizonBackground = "v1";
+    (document.head ?? document.documentElement).append(style);
+  }
+  if (style.textContent !== GLOW_HORIZON_BACKGROUND_CSS) style.textContent = GLOW_HORIZON_BACKGROUND_CSS;
+}
+
 export function injectExplorer(): CodeCodexElement | null {
   installTransparentBackgroundStyle();
   installParticleBackgroundStyle();
+  installGlowHorizonBackgroundStyle();
   const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
   if (sessionDismissed()) return existing;
   const mount = chooseMount();
@@ -452,6 +562,7 @@ export function installInjector(): void {
   window.__codeCodexInject = injectExplorer;
   installTransparentBackgroundStyle();
   installParticleBackgroundStyle();
+  installGlowHorizonBackgroundStyle();
   installReselectionListener();
   const start = () => {
     const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);

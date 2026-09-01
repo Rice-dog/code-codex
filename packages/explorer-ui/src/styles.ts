@@ -222,6 +222,52 @@ export const styles = String.raw`
     backdrop-filter: none !important;
   }
 
+  :host-context(html[data-code-codex-glow-horizon-background]) .frame {
+    background-color: rgba(16, 17, 20, .68) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  :host-context(html[data-code-codex-glow-horizon-background]) :is(
+    .tree-shell,
+    .file-search-toolbar
+  ) {
+    background-color: transparent !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  :host-context(html[data-code-codex-glow-horizon-background]) :is(
+    .masthead,
+    .statusbar
+  ) {
+    background-color: rgba(24, 25, 28, .78) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  :host-context(html[data-code-codex-glow-horizon-background]) .file-filter {
+    background-color: rgba(30, 31, 35, .86) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  :host-context(html[data-code-codex-glow-horizon-background]) :is(
+    .loading-chip,
+    .context-menu,
+    .context-dialog-input,
+    .action-notice,
+    .state-action,
+    .preview-market-popover,
+    .preview-extension,
+    .collapsed-tab
+  ),
+  :host-context(html[data-code-codex-glow-horizon-background]) .preview-market-popover::after {
+    background-color: var(--cle-paper-raised) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
   *, *::before, *::after { box-sizing: border-box; }
   button { font: inherit; }
 
@@ -1210,6 +1256,18 @@ export const styles = String.raw`
     stroke-linejoin: round;
     stroke-width: 1.1;
   }
+  .glow-horizon-background-extension .preview-extension-icon {
+    color: #a558fb;
+    background: color-mix(in srgb, #a558fb 10%, var(--cle-paper));
+    border-color: color-mix(in srgb, #a558fb 24%, var(--cle-rule));
+  }
+  .glow-horizon-background-extension .preview-extension-icon svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.1;
+  }
 
   .particle-settings-panel {
     position: fixed;
@@ -1584,6 +1642,61 @@ export const styles = String.raw`
     line-height: 12px;
     text-overflow: clip;
     white-space: normal;
+  }
+  .glow-horizon-direction-toolbar {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--cle-rule);
+  }
+  .glow-horizon-direction-toolbar button {
+    min-width: 0;
+    min-height: 34px;
+    padding: 3px 5px;
+    color: var(--cle-muted);
+    background: var(--cle-paper-raised);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 12px;
+  }
+  .glow-horizon-direction-toolbar button:hover:not(:disabled),
+  .glow-horizon-direction-toolbar button[aria-pressed="true"] {
+    color: var(--cle-ink);
+    background: color-mix(in srgb, #a558fb 12%, var(--cle-paper-raised));
+    border-color: color-mix(in srgb, #a558fb 45%, var(--cle-rule-strong));
+  }
+  .glow-horizon-direction-toolbar button:disabled { cursor: default; opacity: .55; }
+  .glow-horizon-direction-toolbar .glow-horizon-direction-symbol {
+    display: block;
+    margin-bottom: 1px;
+    font-size: 14px;
+    line-height: 15px;
+  }
+  .glow-horizon-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    padding-top: 2px;
+  }
+  .glow-horizon-actions button {
+    min-height: 30px;
+    padding: 4px 8px;
+    color: var(--cle-muted);
+    background: var(--cle-subtle);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .glow-horizon-actions button:hover {
+    color: var(--cle-ink);
+    background: color-mix(in srgb, #a558fb 12%, var(--cle-subtle));
+    border-color: color-mix(in srgb, #a558fb 45%, var(--cle-rule-strong));
   }
   .particle-settings-trigger:focus-visible,
   .particle-settings-close:focus-visible,

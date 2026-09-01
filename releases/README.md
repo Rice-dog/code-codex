@@ -2,6 +2,70 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.1.110
+
+- `CodeCodex-0.1.110-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.110-x64.msi`: MSI installer.
+- `CodeCodex-0.1.110-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Sets the Glow Horizon Background default profile to the selected Bottom
+  direction and the latest wheel, release, return, and opening-frame values.
+
+## v0.1.109
+
+- `CodeCodex-0.1.109-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.109-x64.msi`: MSI installer.
+- `CodeCodex-0.1.109-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Reduces Particle Image GPU work by precomputing draw-invariant cursor and
+  damping values and replacing fixed powers with equivalent multiplication.
+- Coalesces Glow Horizon wheel rendering into one visual update per animation
+  frame while retaining every input physics update.
+- Hoists Black Hole wind and disc invariants out of the ray loop and uploads
+  unchanged scene uniforms only when settings or shader programs change.
+
+## v0.1.108
+
+- `CodeCodex-0.1.108-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.108-x64.msi`: MSI installer.
+- `CodeCodex-0.1.108-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Improves Glow Horizon animation smoothness by eliminating per-frame
+  specification allocations and redundant CSS style writes without changing
+  the animation geometry, viewing angle, or user-facing parameters.
+
+## v0.1.107
+
+- `CodeCodex-0.1.107-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.107-x64.msi`: MSI installer.
+- `CodeCodex-0.1.107-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Updates Glow Horizon Background defaults to match the latest design parameter
+  profile, including wheel input, release, return, and entrance animation values.
+
+## v0.1.106
+
+- `CodeCodex-0.1.106-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.106-x64.msi`: MSI installer.
+- `CodeCodex-0.1.106-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Fixes the launch guard so Electron renderer/GPU/utility children left during
+  Codex shutdown do not falsely report that Codex is still running.
+- Ignores only the isolated `CodeCodexOfficialProbe-*` diagnostic profile;
+  genuine Codex browser processes remain protected by the guard.
+
+## v0.1.105
+
+- `CodeCodex-0.1.105-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.1.105-x64.msi`: MSI installer.
+- `CodeCodex-0.1.105-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Fixes startup on the current stable Codex layout by recognizing the wrapped
+  main surface and mounting the file tree only in the verified app shell.
+- Starts the helper App Server after Codex's renderer is ready, avoiding the
+  shared SQLite startup-lock race that could close Codex before the file tree
+  appeared.
+
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
@@ -674,5 +738,5 @@ managed shortcut on uninstall.
 The same files can be regenerated from source with:
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.104
+./scripts/package.ps1 -Version 0.1.106
 ```
