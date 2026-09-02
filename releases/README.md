@@ -2,6 +2,19 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.0
+
+- `CodeCodex-0.2.0-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.2.0-x64.msi`: MSI installer.
+- `CodeCodex-0.2.0-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds the Glow Horizon Background plugin with four directions, wheel-driven
+  deformation, inertial release and return controls, configurable glow colors,
+  bilingual settings, and automatic Dark appearance management.
+- Uses the selected Bottom-direction parameter profile as the default.
+- Includes GPU and animation-loop optimizations for the Particle Image, Black
+  Hole, and Glow Horizon background plugins.
+
 ## v0.1.110
 
 - `CodeCodex-0.1.110-x64-setup.exe`: recommended installer.
