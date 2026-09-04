@@ -5313,6 +5313,7 @@ uniform float uIntroFeather;
 void main() {
   vec2 screenPlane = vUv * 2.0 - 1.0;
   screenPlane.x *= uResolution.x / uResolution.y;
+  float screenRadius = length(screenPlane);
 
   float intro = clamp(uIntro, 0.0, 1.0);
   float easedIntro = 1.0 - pow(1.0 - intro, 3.0);
@@ -5322,16 +5323,18 @@ void main() {
   vec3 ray = normalize(vec3(plane, mix(-1.55, -1.0, easedIntro)));
   vec3 radiance = vec3(0.0);
   float depth = 0.0;
+  float timeOffset = uTime * uSpeed;
 
   for (int step = 0; step < MAX_STEPS; step++) {
     vec3 point = depth * ray;
-    point.z -= uTime * uSpeed;
+    point.z -= timeOffset;
 
     float frequency = 1.0;
+    float depthWarp = depth * 0.2;
     for (int octave = 0; octave < 7; octave++) {
       point += cos(
         point.yzx * frequency
-        + depth * 0.2
+        + depthWarp
         + vec3(0.0, 0.35, 0.7)
       ) * (uTurbulence / frequency);
       frequency *= 1.42857143;
@@ -5344,16 +5347,15 @@ void main() {
     vec3 spectrum = 0.5 + 0.5 * cos(
       depth + uColorShift + vec3(6.0, 1.0, 2.0)
     );
-    radiance += spectrum * (uIntensity / max(1500.0 * stepDistance, 0.001));
+    radiance += spectrum * (uIntensity / (1500.0 * stepDistance));
   }
 
   vec3 color = 1.0 - exp(-radiance * 1.35);
   color = pow(color, vec3(0.82));
-  float vignette = 1.0 - smoothstep(0.52, 1.72, length(screenPlane));
+  float vignette = 1.0 - smoothstep(0.52, 1.72, screenRadius);
   color *= 0.72 + 0.28 * vignette;
   color += vec3(0.006, 0.012, 0.022);
 
-  float screenRadius = length(screenPlane);
   float edgeFeather = max(uIntroFeather, 0.002);
   float revealRadius = mix(0.06, 2.25 + edgeFeather * 0.5, easedIntro);
   float aperture = 1.0 - smoothstep(
@@ -5411,6 +5413,12 @@ function startHeavenlyCloudRenderer(
   let elapsed = 0;
   let introProgress = 0;
   let lastFrame = 0;
+  let hostBounds = host.getBoundingClientRect();
+  let uploadedResolutionWidth = -1;
+  let uploadedResolutionHeight = -1;
+  let uploadedPointerX = Number.NaN;
+  let uploadedPointerY = Number.NaN;
+  let uploadedIntro = Number.NaN;
   const pointerTarget = { x: 0, y: 0 };
   const pointer = { x: 0, y: 0 };
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -5485,20 +5493,30 @@ function startHeavenlyCloudRenderer(
       intro: requiredUniform("uIntro"),
       introFeather: requiredUniform("uIntroFeather"),
     };
+    uploadedResolutionWidth = -1;
+    uploadedResolutionHeight = -1;
+    uploadedPointerX = Number.NaN;
+    uploadedPointerY = Number.NaN;
+    uploadedIntro = Number.NaN;
     settingsDirty = true;
   };
 
   const resize = (): void => {
     resizePending = false;
-    const bounds = host.getBoundingClientRect();
     const quality = HEAVENLY_CLOUD_QUALITY[readSettings().quality];
     const dpr = Math.min(window.devicePixelRatio || 1, quality.maxDpr);
-    const width = Math.max(1, Math.round(bounds.width * dpr * quality.resolutionScale));
-    const height = Math.max(1, Math.round(bounds.height * dpr * quality.resolutionScale));
-    if (canvas.width === width && canvas.height === height) return;
-    canvas.width = width;
-    canvas.height = height;
-    gl.viewport(0, 0, width, height);
+    const width = Math.max(1, Math.round(hostBounds.width * dpr * quality.resolutionScale));
+    const height = Math.max(1, Math.round(hostBounds.height * dpr * quality.resolutionScale));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      gl.viewport(0, 0, width, height);
+    }
+    if (uniforms && (uploadedResolutionWidth !== width || uploadedResolutionHeight !== height)) {
+      gl.uniform2f(uniforms.resolution, width, height);
+      uploadedResolutionWidth = width;
+      uploadedResolutionHeight = height;
+    }
   };
 
   const stopLoop = (): void => {
@@ -5527,9 +5545,11 @@ function startHeavenlyCloudRenderer(
     pointer.y += (pointerTarget.y - pointer.y) * 0.075;
     const pointerMoving = Math.abs(pointerTarget.x - pointer.x) + Math.abs(pointerTarget.y - pointer.y) > 0.0005;
 
-    gl.useProgram(program);
-    gl.uniform2f(uniforms.resolution, canvas.width, canvas.height);
-    gl.uniform2f(uniforms.pointer, pointer.x, pointer.y);
+    if (pointer.x !== uploadedPointerX || pointer.y !== uploadedPointerY) {
+      gl.uniform2f(uniforms.pointer, pointer.x, pointer.y);
+      uploadedPointerX = pointer.x;
+      uploadedPointerY = pointer.y;
+    }
     gl.uniform1f(uniforms.time, reduced ? 5.8 : elapsed);
     if (settingsDirty) {
       gl.uniform1f(uniforms.speed, settings.speed);
@@ -5541,7 +5561,10 @@ function startHeavenlyCloudRenderer(
       gl.uniform1f(uniforms.introFeather, Math.max(settings.introFeather, 0.002));
       settingsDirty = false;
     }
-    gl.uniform1f(uniforms.intro, introProgress);
+    if (introProgress !== uploadedIntro) {
+      gl.uniform1f(uniforms.intro, introProgress);
+      uploadedIntro = introProgress;
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     if ((!settings.paused && !reduced) || introProgress < 1 || pointerMoving) schedule();
@@ -5549,10 +5572,9 @@ function startHeavenlyCloudRenderer(
   };
 
   const onPointerMove = (event: PointerEvent): void => {
-    const bounds = host.getBoundingClientRect();
-    if (bounds.width <= 0 || bounds.height <= 0) return;
-    pointerTarget.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
-    pointerTarget.y = 1 - ((event.clientY - bounds.top) / bounds.height) * 2;
+    if (hostBounds.width <= 0 || hostBounds.height <= 0) return;
+    pointerTarget.x = ((event.clientX - hostBounds.left) / hostBounds.width) * 2 - 1;
+    pointerTarget.y = 1 - ((event.clientY - hostBounds.top) / hostBounds.height) * 2;
     schedule();
   };
   const onPointerLeave = (): void => {
@@ -5591,6 +5613,7 @@ function startHeavenlyCloudRenderer(
     schedule();
   };
   const resizeObserver = new ResizeObserver(() => {
+    hostBounds = host.getBoundingClientRect();
     resizePending = true;
     schedule();
   });

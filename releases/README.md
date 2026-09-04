@@ -2,6 +2,17 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.2
+
+- `CodeCodex-0.2.2-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.2.2-x64.msi`: MSI installer.
+- `CodeCodex-0.2.2-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Optimizes Heavenly Cloud rendering by removing redundant shader calculations,
+  repeated WebGL state uploads, and forced pointer-event layout measurements.
+- Keeps the ray steps, turbulence layers, resolution, colors, timing, pointer
+  response, and visible rendering formulas unchanged.
+
 ## v0.2.1
 
 - `CodeCodex-0.2.1-x64-setup.exe`: recommended installer.
