@@ -3445,8 +3445,8 @@ mod tests {
     #[tokio::test]
     async fn update_rpc_uses_bounded_native_github_request_and_required_headers() {
         let body = serde_json::to_vec(&json!({
-            "tag_name": "v0.2.0",
-            "html_url": "https://github.com/Rice-dog/code-codex/releases/tag/v0.2.0"
+            "tag_name": "v999.0.0",
+            "html_url": "https://github.com/Rice-dog/code-codex/releases/tag/v999.0.0"
         }))
         .expect("release JSON");
         let response = http_response("200 OK", "application/json; charset=utf-8", &body);
@@ -3461,11 +3461,11 @@ mod tests {
             .await
             .expect("update result");
         assert_eq!(result["currentVersion"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(result["latestVersion"], "0.2.0");
+        assert_eq!(result["latestVersion"], "999.0.0");
         assert_eq!(result["status"], "updateAvailable");
         assert_eq!(
             result["releaseUrl"],
-            "https://github.com/Rice-dog/code-codex/releases/tag/v0.2.0"
+            "https://github.com/Rice-dog/code-codex/releases/tag/v999.0.0"
         );
 
         let request = request_receiver.await.expect("captured update request");

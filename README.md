@@ -11,7 +11,7 @@ English | [简体中文](README.zh-CN.md)
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.0"><img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.1"><img alt="Version" src="https://img.shields.io/badge/version-0.2.1-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,15 +38,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.2.0-x64-setup.exe`
-- Alternative: `CodeCodex-0.2.0-x64.msi`
-- Portable package: `CodeCodex-0.2.0-x64.zip`
+- Recommended: `CodeCodex-0.2.1-x64-setup.exe`
+- Alternative: `CodeCodex-0.2.1-x64.msi`
+- Portable package: `CodeCodex-0.2.1-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.0-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.1-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -86,7 +86,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.0
+./scripts/package.ps1 -Version 0.2.1
 ```
 
 The generated packages are written to `releases/`.
@@ -117,6 +117,7 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 - Particle Image Background appearance plugin with a persistent grayscale image library, ordered auto-switching, smooth particle morphing, per-photo framing, and adjustable particle, source, flow, pointer, and render settings.
 - Black Hole Background appearance plugin with a GPU-rendered accretion disk, bloom, quality controls, and four built-in visual presets.
 - Glow Horizon Background appearance plugin with four directions, wheel-driven motion, inertial release, adjustable glow colors, and bilingual settings.
+- Heavenly Cloud Background appearance plugin with a real-time cloud tunnel, pointer steering, a cinematic opening, three quality levels, and bilingual settings.
 - Click the version number at the bottom of the file tree to check GitHub for the latest published stable release.
 - Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
 - Local CSV table previews with quoted fields, embedded line breaks, sticky headers, and bounded rendering.
@@ -166,6 +167,13 @@ directions, wheel-driven deformation, inertia and return controls, opening
 animation settings, customizable glow colors, and Chinese/English labels.
 Enabling it switches Codex to Dark appearance and disabling it restores the
 previous appearance setting.
+
+The Heavenly Cloud Background appearance plugin adds a textureless,
+ray-marched celestial cloud tunnel across the full Codex window. It provides
+adjustable drift, light density, turbulence, tunnel radius, spectral shift,
+pointer steering, opening animation, and three render-quality levels. Its
+settings panel supports Chinese and English, and it uses the same automatic
+Dark appearance and restoration behavior as the other GPU backgrounds.
 
 ## Repository Layout
 

@@ -2,6 +2,18 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.1
+
+- `CodeCodex-0.2.1-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.2.1-x64.msi`: MSI installer.
+- `CodeCodex-0.2.1-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Adds the Heavenly Cloud Background plugin with a textureless, real-time
+  celestial cloud tunnel, pointer steering, cinematic opening controls, three
+  quality levels, and bilingual settings.
+- Reuses the existing full-window background surface and automatically switches
+  Codex to Dark appearance, restoring the previous appearance when disabled.
+
 ## v0.2.0
 
 - `CodeCodex-0.2.0-x64-setup.exe`: recommended installer.

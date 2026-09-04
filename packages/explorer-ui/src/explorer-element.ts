@@ -82,11 +82,13 @@ const TRANSPARENT_BACKGROUND_PLUGIN_ID = "code-codex.transparent-background";
 const PARTICLE_BACKGROUND_PLUGIN_ID = "code-codex.particle-image-background";
 const BLACK_HOLE_BACKGROUND_PLUGIN_ID = "code-codex.black-hole-background";
 const GLOW_HORIZON_BACKGROUND_PLUGIN_ID = "code-codex.glow-horizon-background";
+const HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID = "code-codex.heavenly-cloud-background";
 const APPEARANCE_PLUGIN_IDS = new Set([
   TRANSPARENT_BACKGROUND_PLUGIN_ID,
   PARTICLE_BACKGROUND_PLUGIN_ID,
   BLACK_HOLE_BACKGROUND_PLUGIN_ID,
   GLOW_HORIZON_BACKGROUND_PLUGIN_ID,
+  HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,
 ]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
@@ -101,6 +103,7 @@ const PARTICLE_BACKGROUND_SETTINGS_KEY = "code-codex:particle-image-background:v
 const PARTICLE_BACKGROUND_THEME_LEASE_KEY = "code-codex:particle-theme-lease:v1";
 const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1";
 const GLOW_HORIZON_BACKGROUND_SETTINGS_KEY = "code-codex:glow-horizon-background:v1";
+const HEAVENLY_CLOUD_BACKGROUND_SETTINGS_KEY = "code-codex:heavenly-cloud-background:v1";
 const BACKGROUND_SETTINGS_LANGUAGE_KEY = "code-codex:background-settings-language:v1";
 const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
 const CODEX_APPEARANCE_POLL_INTERVAL_MS = 1_500;
@@ -583,7 +586,8 @@ interface CodexAppearanceAdapter {
 type DarkBackgroundPluginId =
   | typeof PARTICLE_BACKGROUND_PLUGIN_ID
   | typeof BLACK_HOLE_BACKGROUND_PLUGIN_ID
-  | typeof GLOW_HORIZON_BACKGROUND_PLUGIN_ID;
+  | typeof GLOW_HORIZON_BACKGROUND_PLUGIN_ID
+  | typeof HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID;
 
 interface ParticleThemeLease {
   readonly owner?: DarkBackgroundPluginId;
@@ -657,6 +661,40 @@ type GlowHorizonControlGroup = "input" | "downward" | "upward" | "release" | "en
 interface GlowHorizonNumericControlDefinition {
   readonly key: GlowHorizonNumericSettingKey;
   readonly group: GlowHorizonControlGroup;
+  readonly id: string;
+  readonly label: string;
+  readonly labelZh: string;
+  readonly minimum: number;
+  readonly maximum: number;
+  readonly step: number;
+  readonly unit?: string;
+  readonly precision?: number;
+}
+
+type HeavenlyCloudQuality = "low" | "medium" | "high";
+
+interface HeavenlyCloudBackgroundSettings {
+  readonly quality: HeavenlyCloudQuality;
+  readonly speed: number;
+  readonly intensity: number;
+  readonly turbulence: number;
+  readonly radius: number;
+  readonly colorShift: number;
+  readonly pointerInfluence: number;
+  readonly introDuration: number;
+  readonly introFeather: number;
+  readonly paused: boolean;
+}
+
+type HeavenlyCloudNumericSettingKey = {
+  [Key in keyof HeavenlyCloudBackgroundSettings]: HeavenlyCloudBackgroundSettings[Key] extends number ? Key : never;
+}[keyof HeavenlyCloudBackgroundSettings];
+
+type HeavenlyCloudControlGroup = "field" | "interaction" | "opening";
+
+interface HeavenlyCloudNumericControlDefinition {
+  readonly key: HeavenlyCloudNumericSettingKey;
+  readonly group: HeavenlyCloudControlGroup;
   readonly id: string;
   readonly label: string;
   readonly labelZh: string;
@@ -1006,6 +1044,40 @@ const GLOW_HORIZON_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
   { key: "initialStretch", group: "entrance", id: "cle-glow-initial-stretch", label: "Initial stretch", labelZh: "初始拉伸", minimum: 1, maximum: 1.8, step: 0.05, unit: "×", precision: 2 },
   { key: "initialBlur", group: "entrance", id: "cle-glow-initial-blur", label: "Initial blur", labelZh: "初始模糊", minimum: 0, maximum: 30, step: 1, unit: "px", precision: 0 },
 ] satisfies readonly GlowHorizonNumericControlDefinition[]);
+
+const HEAVENLY_CLOUD_QUALITY = Object.freeze({
+  low: Object.freeze({ steps: 56, resolutionScale: 0.56, maxDpr: 1 }),
+  medium: Object.freeze({ steps: 76, resolutionScale: 0.72, maxDpr: 1.25 }),
+  high: Object.freeze({ steps: 100, resolutionScale: 0.86, maxDpr: 1.5 }),
+} satisfies Readonly<Record<HeavenlyCloudQuality, Readonly<{
+  steps: number;
+  resolutionScale: number;
+  maxDpr: number;
+}>>>);
+
+const DEFAULT_HEAVENLY_CLOUD_BACKGROUND_SETTINGS: HeavenlyCloudBackgroundSettings = Object.freeze({
+  quality: "high",
+  speed: 0.72,
+  intensity: 1.15,
+  turbulence: 1,
+  radius: 3,
+  colorShift: 0,
+  pointerInfluence: 0.45,
+  introDuration: 2.2,
+  introFeather: 0.22,
+  paused: false,
+});
+
+const HEAVENLY_CLOUD_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
+  { key: "speed", group: "field", id: "cle-heavenly-cloud-speed", label: "Forward drift", labelZh: "前进速度", minimum: 0, maximum: 2, step: 0.01, unit: "×", precision: 2 },
+  { key: "intensity", group: "field", id: "cle-heavenly-cloud-intensity", label: "Light density", labelZh: "光雾密度", minimum: 0.3, maximum: 2.4, step: 0.05, unit: "×", precision: 2 },
+  { key: "turbulence", group: "field", id: "cle-heavenly-cloud-turbulence", label: "Turbulence", labelZh: "湍流强度", minimum: 0.35, maximum: 1.65, step: 0.01, unit: "×", precision: 2 },
+  { key: "radius", group: "field", id: "cle-heavenly-cloud-radius", label: "Tunnel radius", labelZh: "隧道半径", minimum: 1.8, maximum: 4.6, step: 0.05, precision: 2 },
+  { key: "colorShift", group: "field", id: "cle-heavenly-cloud-color-shift", label: "Spectral shift", labelZh: "光谱偏移", minimum: -3.14, maximum: 3.14, step: 0.01, precision: 2 },
+  { key: "pointerInfluence", group: "interaction", id: "cle-heavenly-cloud-pointer", label: "Pointer steering", labelZh: "指针引导", minimum: 0, maximum: 1.2, step: 0.05, unit: "×", precision: 2 },
+  { key: "introDuration", group: "opening", id: "cle-heavenly-cloud-intro-duration", label: "Opening duration", labelZh: "开场时长", minimum: 0.8, maximum: 5, step: 0.1, unit: "s", precision: 1 },
+  { key: "introFeather", group: "opening", id: "cle-heavenly-cloud-intro-feather", label: "Aperture feather", labelZh: "圆形边缘羽化", minimum: 0.02, maximum: 0.8, step: 0.01, precision: 2 },
+] satisfies readonly HeavenlyCloudNumericControlDefinition[]);
 
 function calculateParticleCursorStrengthValues(cursorStrength: number): ParticleCursorStrengthValues {
   const baseStrength = Math.min(
@@ -1588,6 +1660,42 @@ function writeGlowHorizonBackgroundSettings(settings: GlowHorizonBackgroundSetti
   }
 }
 
+function normalizeHeavenlyCloudSettings(value: unknown): HeavenlyCloudBackgroundSettings {
+  const record = isObjectRecord(value) ? value : {};
+  const defaults = DEFAULT_HEAVENLY_CLOUD_BACKGROUND_SETTINGS;
+  const quality = record.quality === "low" || record.quality === "medium" || record.quality === "high"
+    ? record.quality
+    : defaults.quality;
+  return {
+    quality,
+    speed: clampParticleNumber(record.speed, 0, 2, defaults.speed),
+    intensity: clampParticleNumber(record.intensity, 0.3, 2.4, defaults.intensity),
+    turbulence: clampParticleNumber(record.turbulence, 0.35, 1.65, defaults.turbulence),
+    radius: clampParticleNumber(record.radius, 1.8, 4.6, defaults.radius),
+    colorShift: clampParticleNumber(record.colorShift, -3.14, 3.14, defaults.colorShift),
+    pointerInfluence: clampParticleNumber(record.pointerInfluence, 0, 1.2, defaults.pointerInfluence),
+    introDuration: clampParticleNumber(record.introDuration, 0.8, 5, defaults.introDuration),
+    introFeather: clampParticleNumber(record.introFeather, 0.02, 0.8, defaults.introFeather),
+    paused: typeof record.paused === "boolean" ? record.paused : defaults.paused,
+  };
+}
+
+function readHeavenlyCloudBackgroundSettings(): HeavenlyCloudBackgroundSettings {
+  try {
+    return normalizeHeavenlyCloudSettings(JSON.parse(localStorage.getItem(HEAVENLY_CLOUD_BACKGROUND_SETTINGS_KEY) || "{}"));
+  } catch {
+    return { ...DEFAULT_HEAVENLY_CLOUD_BACKGROUND_SETTINGS };
+  }
+}
+
+function writeHeavenlyCloudBackgroundSettings(settings: HeavenlyCloudBackgroundSettings): void {
+  try {
+    localStorage.setItem(HEAVENLY_CLOUD_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // The current session keeps working when DOM storage is unavailable.
+  }
+}
+
 function isCodexAppearanceTheme(value: unknown): value is CodexAppearanceTheme {
   return value === "system" || value === "light" || value === "dark";
 }
@@ -1675,6 +1783,7 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
       const owner = lease.owner === PARTICLE_BACKGROUND_PLUGIN_ID
         || lease.owner === BLACK_HOLE_BACKGROUND_PLUGIN_ID
         || lease.owner === GLOW_HORIZON_BACKGROUND_PLUGIN_ID
+        || lease.owner === HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
         ? lease.owner
         : undefined;
       return owner
@@ -5172,6 +5281,630 @@ function getGlowHorizonBackgroundController(): GlowHorizonBackgroundController {
   return controller;
 }
 
+const HEAVENLY_CLOUD_VERTEX_SHADER = `
+attribute vec2 aPosition;
+varying vec2 vUv;
+
+void main() {
+  vUv = aPosition * 0.5 + 0.5;
+  gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+`;
+
+function createHeavenlyCloudFragmentShader(stepCount: number): string {
+  return `
+precision highp float;
+
+varying vec2 vUv;
+uniform vec2 uResolution;
+uniform vec2 uPointer;
+uniform float uTime;
+uniform float uSpeed;
+uniform float uIntensity;
+uniform float uTurbulence;
+uniform float uRadius;
+uniform float uColorShift;
+uniform float uPointerInfluence;
+uniform float uIntro;
+uniform float uIntroFeather;
+
+#define MAX_STEPS ${stepCount}
+
+void main() {
+  vec2 screenPlane = vUv * 2.0 - 1.0;
+  screenPlane.x *= uResolution.x / uResolution.y;
+
+  float intro = clamp(uIntro, 0.0, 1.0);
+  float easedIntro = 1.0 - pow(1.0 - intro, 3.0);
+  vec2 plane = screenPlane * mix(0.34, 1.0, easedIntro);
+  plane += uPointer * (0.09 * uPointerInfluence);
+
+  vec3 ray = normalize(vec3(plane, mix(-1.55, -1.0, easedIntro)));
+  vec3 radiance = vec3(0.0);
+  float depth = 0.0;
+
+  for (int step = 0; step < MAX_STEPS; step++) {
+    vec3 point = depth * ray;
+    point.z -= uTime * uSpeed;
+
+    float frequency = 1.0;
+    for (int octave = 0; octave < 7; octave++) {
+      point += cos(
+        point.yzx * frequency
+        + depth * 0.2
+        + vec3(0.0, 0.35, 0.7)
+      ) * (uTurbulence / frequency);
+      frequency *= 1.42857143;
+    }
+
+    float distanceToShell = abs(uRadius - length(point.xy));
+    float stepDistance = 0.02 + 0.1 * distanceToShell;
+    depth += stepDistance;
+
+    vec3 spectrum = 0.5 + 0.5 * cos(
+      depth + uColorShift + vec3(6.0, 1.0, 2.0)
+    );
+    radiance += spectrum * (uIntensity / max(1500.0 * stepDistance, 0.001));
+  }
+
+  vec3 color = 1.0 - exp(-radiance * 1.35);
+  color = pow(color, vec3(0.82));
+  float vignette = 1.0 - smoothstep(0.52, 1.72, length(screenPlane));
+  color *= 0.72 + 0.28 * vignette;
+  color += vec3(0.006, 0.012, 0.022);
+
+  float screenRadius = length(screenPlane);
+  float edgeFeather = max(uIntroFeather, 0.002);
+  float revealRadius = mix(0.06, 2.25 + edgeFeather * 0.5, easedIntro);
+  float aperture = 1.0 - smoothstep(
+    revealRadius - edgeFeather * 0.5,
+    revealRadius + edgeFeather * 0.5,
+    screenRadius
+  );
+  float lightRise = smoothstep(0.0, 0.72, easedIntro);
+  float openingWave = exp(-abs(screenRadius - revealRadius * 0.91) * 24.0)
+    * sin(intro * 3.14159265);
+  color = mix(vec3(0.0015, 0.003, 0.007), color, aperture * lightRise);
+  color += openingWave * vec3(0.018, 0.05, 0.065);
+
+  gl_FragColor = vec4(color, 1.0);
+}
+`;
+}
+
+interface HeavenlyCloudRendererRuntime {
+  readonly invalidate: (replay?: boolean) => void;
+  readonly dispose: () => void;
+}
+
+function startHeavenlyCloudRenderer(
+  host: HTMLElement,
+  canvas: HTMLCanvasElement,
+  readSettings: () => HeavenlyCloudBackgroundSettings,
+  onError: (message?: string) => void,
+): HeavenlyCloudRendererRuntime {
+  const gl = canvas.getContext("webgl", {
+    alpha: false,
+    antialias: false,
+    depth: false,
+    stencil: false,
+    powerPreference: "high-performance",
+    preserveDrawingBuffer: false,
+  });
+  if (!gl) throw new Error("WebGL is unavailable for Heavenly Cloud Background");
+
+  let program: WebGLProgram | undefined;
+  let vertexShader: WebGLShader | undefined;
+  let fragmentShader: WebGLShader | undefined;
+  let buffer: WebGLBuffer | undefined;
+  let uniforms: Readonly<Record<
+    "resolution" | "pointer" | "time" | "speed" | "intensity" | "turbulence" | "radius"
+      | "colorShift" | "pointerInfluence" | "intro" | "introFeather",
+    WebGLUniformLocation
+  >> | undefined;
+  let animationFrame = 0;
+  let running = true;
+  let contextReady = true;
+  let documentVisible = !document.hidden;
+  let resizePending = true;
+  let settingsDirty = true;
+  let elapsed = 0;
+  let introProgress = 0;
+  let lastFrame = 0;
+  const pointerTarget = { x: 0, y: 0 };
+  const pointer = { x: 0, y: 0 };
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  const compile = (type: number, source: string): WebGLShader => {
+    const shader = gl.createShader(type);
+    if (!shader) throw new Error("The Heavenly Cloud shader could not be allocated");
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const message = gl.getShaderInfoLog(shader) || "Heavenly Cloud shader compilation failed";
+      gl.deleteShader(shader);
+      throw new Error(message);
+    }
+    return shader;
+  };
+
+  const requiredUniform = (name: string): WebGLUniformLocation => {
+    if (!program) throw new Error("The Heavenly Cloud shader program is unavailable");
+    const location = gl.getUniformLocation(program, name);
+    if (location === null) throw new Error(`Missing Heavenly Cloud shader uniform: ${name}`);
+    return location;
+  };
+
+  const destroyGpuResources = (): void => {
+    if (buffer) gl.deleteBuffer(buffer);
+    if (program) gl.deleteProgram(program);
+    if (vertexShader) gl.deleteShader(vertexShader);
+    if (fragmentShader) gl.deleteShader(fragmentShader);
+    buffer = undefined;
+    program = undefined;
+    vertexShader = undefined;
+    fragmentShader = undefined;
+    uniforms = undefined;
+  };
+
+  const build = (): void => {
+    destroyGpuResources();
+    const settings = readSettings();
+    vertexShader = compile(gl.VERTEX_SHADER, HEAVENLY_CLOUD_VERTEX_SHADER);
+    fragmentShader = compile(
+      gl.FRAGMENT_SHADER,
+      createHeavenlyCloudFragmentShader(HEAVENLY_CLOUD_QUALITY[settings.quality].steps),
+    );
+    program = gl.createProgram() ?? undefined;
+    if (!program) throw new Error("The Heavenly Cloud shader program could not be allocated");
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(program) || "Heavenly Cloud shader linking failed");
+    }
+    buffer = gl.createBuffer() ?? undefined;
+    if (!buffer) throw new Error("The Heavenly Cloud geometry buffer could not be allocated");
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    gl.useProgram(program);
+    const position = gl.getAttribLocation(program, "aPosition");
+    if (position < 0) throw new Error("The Heavenly Cloud position attribute is unavailable");
+    gl.enableVertexAttribArray(position);
+    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    uniforms = {
+      resolution: requiredUniform("uResolution"),
+      pointer: requiredUniform("uPointer"),
+      time: requiredUniform("uTime"),
+      speed: requiredUniform("uSpeed"),
+      intensity: requiredUniform("uIntensity"),
+      turbulence: requiredUniform("uTurbulence"),
+      radius: requiredUniform("uRadius"),
+      colorShift: requiredUniform("uColorShift"),
+      pointerInfluence: requiredUniform("uPointerInfluence"),
+      intro: requiredUniform("uIntro"),
+      introFeather: requiredUniform("uIntroFeather"),
+    };
+    settingsDirty = true;
+  };
+
+  const resize = (): void => {
+    resizePending = false;
+    const bounds = host.getBoundingClientRect();
+    const quality = HEAVENLY_CLOUD_QUALITY[readSettings().quality];
+    const dpr = Math.min(window.devicePixelRatio || 1, quality.maxDpr);
+    const width = Math.max(1, Math.round(bounds.width * dpr * quality.resolutionScale));
+    const height = Math.max(1, Math.round(bounds.height * dpr * quality.resolutionScale));
+    if (canvas.width === width && canvas.height === height) return;
+    canvas.width = width;
+    canvas.height = height;
+    gl.viewport(0, 0, width, height);
+  };
+
+  const stopLoop = (): void => {
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    animationFrame = 0;
+  };
+
+  const schedule = (): void => {
+    if (!animationFrame && running && contextReady && documentVisible) {
+      animationFrame = requestAnimationFrame(draw);
+    }
+  };
+
+  const draw = (now: number): void => {
+    animationFrame = 0;
+    if (!running || !contextReady || !documentVisible || !program || !uniforms) return;
+    if (resizePending) resize();
+    const settings = readSettings();
+    const reduced = reducedMotion.matches;
+    const delta = lastFrame ? Math.min((now - lastFrame) / 1000, 0.05) : 0;
+    lastFrame = now;
+    if (!settings.paused && !reduced) elapsed += delta;
+    if (!reduced) introProgress = Math.min(1, introProgress + delta / Math.max(settings.introDuration, 0.1));
+    else introProgress = 1;
+    pointer.x += (pointerTarget.x - pointer.x) * 0.075;
+    pointer.y += (pointerTarget.y - pointer.y) * 0.075;
+    const pointerMoving = Math.abs(pointerTarget.x - pointer.x) + Math.abs(pointerTarget.y - pointer.y) > 0.0005;
+
+    gl.useProgram(program);
+    gl.uniform2f(uniforms.resolution, canvas.width, canvas.height);
+    gl.uniform2f(uniforms.pointer, pointer.x, pointer.y);
+    gl.uniform1f(uniforms.time, reduced ? 5.8 : elapsed);
+    if (settingsDirty) {
+      gl.uniform1f(uniforms.speed, settings.speed);
+      gl.uniform1f(uniforms.intensity, settings.intensity);
+      gl.uniform1f(uniforms.turbulence, settings.turbulence);
+      gl.uniform1f(uniforms.radius, settings.radius);
+      gl.uniform1f(uniforms.colorShift, settings.colorShift);
+      gl.uniform1f(uniforms.pointerInfluence, reduced ? 0 : settings.pointerInfluence);
+      gl.uniform1f(uniforms.introFeather, Math.max(settings.introFeather, 0.002));
+      settingsDirty = false;
+    }
+    gl.uniform1f(uniforms.intro, introProgress);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    if ((!settings.paused && !reduced) || introProgress < 1 || pointerMoving) schedule();
+    else lastFrame = 0;
+  };
+
+  const onPointerMove = (event: PointerEvent): void => {
+    const bounds = host.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    pointerTarget.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+    pointerTarget.y = 1 - ((event.clientY - bounds.top) / bounds.height) * 2;
+    schedule();
+  };
+  const onPointerLeave = (): void => {
+    pointerTarget.x = 0;
+    pointerTarget.y = 0;
+    schedule();
+  };
+  const onVisibilityChange = (): void => {
+    documentVisible = !document.hidden;
+    lastFrame = 0;
+    if (documentVisible) schedule();
+    else stopLoop();
+  };
+  const onContextLost = (event: Event): void => {
+    event.preventDefault();
+    contextReady = false;
+    stopLoop();
+    onError("The Heavenly Cloud graphics context was lost; waiting for recovery.");
+  };
+  const onContextRestored = (): void => {
+    try {
+      contextReady = true;
+      build();
+      resizePending = true;
+      lastFrame = 0;
+      onError(undefined);
+      schedule();
+    } catch (error) {
+      contextReady = false;
+      onError(error instanceof Error ? error.message : "The Heavenly Cloud graphics context could not be restored");
+    }
+  };
+  const onReducedMotionChange = (): void => {
+    settingsDirty = true;
+    lastFrame = 0;
+    schedule();
+  };
+  const resizeObserver = new ResizeObserver(() => {
+    resizePending = true;
+    schedule();
+  });
+
+  build();
+  resizeObserver.observe(host);
+  window.addEventListener("pointermove", onPointerMove, { passive: true });
+  window.addEventListener("pointerleave", onPointerLeave);
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  canvas.addEventListener("webglcontextlost", onContextLost);
+  canvas.addEventListener("webglcontextrestored", onContextRestored);
+  reducedMotion.addEventListener("change", onReducedMotionChange);
+  schedule();
+
+  return {
+    invalidate: (replay = false): void => {
+      if (!running) return;
+      settingsDirty = true;
+      resizePending = true;
+      if (replay) {
+        introProgress = 0;
+        elapsed = 0;
+      }
+      lastFrame = 0;
+      schedule();
+    },
+    dispose: (): void => {
+      if (!running) return;
+      running = false;
+      stopLoop();
+      resizeObserver.disconnect();
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerleave", onPointerLeave);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      canvas.removeEventListener("webglcontextlost", onContextLost);
+      canvas.removeEventListener("webglcontextrestored", onContextRestored);
+      reducedMotion.removeEventListener("change", onReducedMotionChange);
+      destroyGpuResources();
+    },
+  };
+}
+
+class HeavenlyCloudRenderer {
+  #settings: HeavenlyCloudBackgroundSettings;
+  readonly #runtime: HeavenlyCloudRendererRuntime;
+
+  constructor(
+    host: HTMLElement,
+    canvas: HTMLCanvasElement,
+    settings: HeavenlyCloudBackgroundSettings,
+    onError: (message?: string) => void,
+  ) {
+    this.#settings = normalizeHeavenlyCloudSettings(settings);
+    this.#runtime = startHeavenlyCloudRenderer(host, canvas, () => this.#settings, onError);
+  }
+
+  setSettings(settings: HeavenlyCloudBackgroundSettings): void {
+    this.#settings = normalizeHeavenlyCloudSettings(settings);
+    this.#runtime.invalidate();
+  }
+
+  replay(): void { this.#runtime.invalidate(true); }
+  dispose(): void { this.#runtime.dispose(); }
+}
+
+class HeavenlyCloudBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readHeavenlyCloudBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #canvas: HTMLCanvasElement | undefined;
+  #renderer: HeavenlyCloudRenderer | undefined;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() { window.addEventListener("pagehide", this.#onPageHide, { once: true }); }
+  get settings(): HeavenlyCloudBackgroundSettings { return this.#settings; }
+  get enabled(): boolean { return this.#enabled; }
+  get pending(): boolean { return this.#pending; }
+  get error(): string | undefined { return this.#error; }
+  get stoppedForExternalThemeChange(): boolean { return this.#stoppedForExternalThemeChange; }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Heavenly Cloud Background is unavailable");
+  }
+
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try { await operation; } finally {
+      if (this.#enableOperation === operation) this.#enableOperation = undefined;
+    }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexParticleLayer = "v1";
+      layer.dataset.codeCodexHeavenlyCloudLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.backgroundColor = "#020408";
+      const canvas = document.createElement("canvas");
+      canvas.className = "code-codex-particle-canvas code-codex-heavenly-cloud-canvas";
+      layer.append(canvas);
+      document.body.prepend(layer);
+      this.#layer = layer;
+      this.#canvas = canvas;
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, "#020408");
+      this.#renderer = new HeavenlyCloudRenderer(layer, canvas, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Heavenly Cloud Background could not be enabled";
+      this.#teardownPresentation();
+      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: HeavenlyCloudBackgroundSettings): void {
+    const previousQuality = this.#settings.quality;
+    this.#settings = normalizeHeavenlyCloudSettings(next);
+    writeHeavenlyCloudBackgroundSettings(this.#settings);
+    if (this.#renderer && this.#layer && this.#canvas && previousQuality !== this.#settings.quality) {
+      this.#renderer.dispose();
+      this.#renderer = new HeavenlyCloudRenderer(this.#layer, this.#canvas, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+    } else {
+      this.#renderer?.setSettings(this.#settings);
+    }
+    this.#notify();
+  }
+
+  reset(): void { this.updateSettings(DEFAULT_HEAVENLY_CLOUD_BACKGROUND_SETTINGS); }
+  replay(): void { this.#renderer?.replay(); }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    this.#canvas = undefined;
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try { current = await readCodexAppearanceTheme(); }
+    catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) throw new Error("Another Code-Codex background is still using Dark mode");
+      if (lease && !lease.owner) writeParticleThemeLease({ ...lease, owner });
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Heavenly Cloud Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease || (lease.owner && lease.owner !== owner)) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) { clearParticleThemeLease(owner); return; }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  }
+
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
+    } catch { /* A transient read failure does not tear down the presentation. */ }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Heavenly Cloud Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+
+  #notify(): void { for (const listener of this.#listeners) listener(); }
+  #onPageHide = (): void => { this.dispose(); };
+}
+
+const HEAVENLY_CLOUD_BACKGROUND_CONTROLLER = Symbol.for("code-codex:heavenly-cloud-background-controller:v1");
+
+function getHeavenlyCloudBackgroundController(): HeavenlyCloudBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[HEAVENLY_CLOUD_BACKGROUND_CONTROLLER];
+  if (existing instanceof HeavenlyCloudBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+  }
+  const controller = new HeavenlyCloudBackgroundController();
+  globalState[HEAVENLY_CLOUD_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
 const BLACK_HOLE_VERTEX_SHADER = `
 attribute vec2 aPos;
 varying vec2 vUv;
@@ -7195,6 +7928,98 @@ function glowHorizonSettingsPanelMarkup(): string {
   `;
 }
 
+function formatHeavenlyCloudControlValue(
+  definition: HeavenlyCloudNumericControlDefinition,
+  value: number,
+): string {
+  const precision = definition.precision ?? Math.max(0, (String(definition.step).split(".")[1] ?? "").length);
+  return `${value.toFixed(precision)}${definition.unit ?? ""}`;
+}
+
+function heavenlyCloudNumericControlsMarkup(group: HeavenlyCloudControlGroup): string {
+  return HEAVENLY_CLOUD_NUMERIC_CONTROL_DEFINITIONS
+    .filter((definition) => definition.group === group)
+    .map((definition) => {
+      const value = DEFAULT_HEAVENLY_CLOUD_BACKGROUND_SETTINGS[definition.key];
+      const formatted = formatHeavenlyCloudControlValue(definition, value);
+      return `
+        <div class="particle-control-row">
+          <label for="${definition.id}">${bilingualLabelMarkup(definition.labelZh, definition.label)}</label>
+          <input id="${definition.id}" data-heavenly-cloud-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-label="${definition.labelZh}" aria-valuetext="${formatted}">
+          <span class="particle-control-value"><output for="${definition.id}">${formatted}</output></span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function heavenlyCloudBackgroundCardMarkup(): string {
+  const icon = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.1 10.9c.7-1.1 1.8-1.7 3.1-1.7.5-2 2.1-3.3 4.1-3.3 2.4 0 4.3 1.9 4.3 4.3 0 .2 0 .5-.1.7"/><path d="M1.7 12.2h12.7M3.4 14h9.1"/><path d="M6.1 8.6c.6-1.1 1.7-1.8 3-1.8"/></svg>`;
+  return `
+    <article class="preview-extension appearance-extension heavenly-cloud-background-extension" data-appearance-plugin="${HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID}" aria-busy="false">
+      <span class="preview-extension-icon" aria-hidden="true">${icon}</span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>Heavenly Cloud Background</h4>
+          <span class="preview-extension-status" id="cle-heavenly-cloud-background-status">Disabled</span>
+        </div>
+      </div>
+      <div class="preview-extension-actions">
+        <button class="preview-extension-action" type="button" aria-describedby="cle-heavenly-cloud-background-status" aria-pressed="false">Enable</button>
+        <button class="particle-settings-trigger heavenly-cloud-settings-trigger" type="button" title="Configure Heavenly Cloud Background" aria-label="Configure Heavenly Cloud Background" aria-haspopup="dialog" aria-controls="cle-heavenly-cloud-settings" aria-expanded="false">${icons.sliders}</button>
+      </div>
+    </article>
+  `;
+}
+
+function heavenlyCloudSettingsPanelMarkup(): string {
+  return `
+    <section class="particle-settings-panel heavenly-cloud-settings-panel" id="cle-heavenly-cloud-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-heavenly-cloud-settings-title">
+      <header class="particle-settings-header">
+        <div class="particle-settings-heading">
+          <p>${bilingualLabelMarkup("外观", "Appearance")}</p>
+          <h3 id="cle-heavenly-cloud-settings-title">${bilingualLabelMarkup("天境云隧道设置", "Heavenly Cloud settings")}</h3>
+        </div>
+        <div class="particle-settings-header-actions">
+          ${backgroundLanguageSwitchMarkup("cle-heavenly-cloud-settings-language")}
+          <button class="particle-settings-close heavenly-cloud-settings-close" type="button" title="关闭天境云隧道设置" aria-label="关闭天境云隧道设置">${icons.close}</button>
+        </div>
+      </header>
+      <div class="particle-settings-scroll">
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("渲染质量", "Render quality")}</legend>
+          <div class="heavenly-cloud-quality-toolbar" role="group" aria-label="光线步数">
+            <button type="button" data-heavenly-cloud-quality="low" aria-pressed="${DEFAULT_HEAVENLY_CLOUD_BACKGROUND_SETTINGS.quality === "low"}"><strong>56</strong>${bilingualLabelMarkup("低", "Low")}</button>
+            <button type="button" data-heavenly-cloud-quality="medium" aria-pressed="${DEFAULT_HEAVENLY_CLOUD_BACKGROUND_SETTINGS.quality === "medium"}"><strong>76</strong>${bilingualLabelMarkup("中", "Medium")}</button>
+            <button type="button" data-heavenly-cloud-quality="high" aria-pressed="${DEFAULT_HEAVENLY_CLOUD_BACKGROUND_SETTINGS.quality === "high"}"><strong>100</strong>${bilingualLabelMarkup("高", "High")}</button>
+          </div>
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("云场", "Cloud field")}</legend>
+          ${heavenlyCloudNumericControlsMarkup("field")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("交互", "Interaction")}</legend>
+          ${heavenlyCloudNumericControlsMarkup("interaction")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("开场画面", "Opening frame")}</legend>
+          ${heavenlyCloudNumericControlsMarkup("opening")}
+        </fieldset>
+        <label class="particle-toggle-row heavenly-cloud-paused-row" for="cle-heavenly-cloud-paused">
+          ${bilingualLabelMarkup("暂停动画", "Pause animation")}
+          <input id="cle-heavenly-cloud-paused" type="checkbox">
+        </label>
+        <div class="glow-horizon-actions heavenly-cloud-actions">
+          <button class="heavenly-cloud-reset" type="button">${bilingualLabelMarkup("重置", "Reset")}</button>
+          <button class="heavenly-cloud-replay" type="button">${bilingualLabelMarkup("重播", "Replay")}</button>
+        </div>
+        <p class="particle-plugin-error heavenly-cloud-plugin-error" role="status" hidden></p>
+      </div>
+    </section>
+  `;
+}
+
 function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? path;
   const dot = name.lastIndexOf(".");
@@ -7295,6 +8120,7 @@ export class CodeCodexElement extends HTMLElement {
   #particleSettingsOpen = false;
   #blackHoleSettingsOpen = false;
   #glowHorizonSettingsOpen = false;
+  #heavenlyCloudSettingsOpen = false;
   #backgroundSettingsLanguage: BackgroundSettingsLanguage = "zh";
   #forcedColorsQuery: MediaQueryList | undefined;
   #reducedTransparencyQuery: MediaQueryList | undefined;
@@ -7409,6 +8235,25 @@ export class CodeCodexElement extends HTMLElement {
   readonly #glowHorizonResetButton: HTMLButtonElement;
   readonly #glowHorizonReplayButton: HTMLButtonElement;
   readonly #glowHorizonPluginError: HTMLElement;
+  readonly #heavenlyCloudBackgroundController = getHeavenlyCloudBackgroundController();
+  #heavenlyCloudBackgroundUnsubscribe: (() => void) | undefined;
+  #heavenlyCloudBackgroundInitialization: Promise<void> | undefined;
+  readonly #heavenlyCloudBackgroundCard: HTMLElement;
+  readonly #heavenlyCloudBackgroundButton: HTMLButtonElement;
+  readonly #heavenlyCloudBackgroundStatus: HTMLElement;
+  readonly #heavenlyCloudSettingsPanel: HTMLElement;
+  readonly #heavenlyCloudSettingsTrigger: HTMLButtonElement;
+  readonly #heavenlyCloudSettingsCloseButton: HTMLButtonElement;
+  readonly #heavenlyCloudNumericControls = new Map<HeavenlyCloudNumericSettingKey, Readonly<{
+    definition: HeavenlyCloudNumericControlDefinition;
+    input: HTMLInputElement;
+    output: HTMLOutputElement;
+  }>>();
+  readonly #heavenlyCloudQualityButtons: readonly HTMLButtonElement[];
+  readonly #heavenlyCloudPausedInput: HTMLInputElement;
+  readonly #heavenlyCloudResetButton: HTMLButtonElement;
+  readonly #heavenlyCloudReplayButton: HTMLButtonElement;
+  readonly #heavenlyCloudPluginError: HTMLElement;
   readonly #liveRegion: HTMLElement;
   readonly #collapseButton: HTMLButtonElement;
   readonly #collapsedTab: HTMLButtonElement;
@@ -7466,7 +8311,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -7484,6 +8329,7 @@ export class CodeCodexElement extends HTMLElement {
       ${particleSettingsPanelMarkup()}
       ${blackHoleSettingsPanelMarkup()}
       ${glowHorizonSettingsPanelMarkup()}
+      ${heavenlyCloudSettingsPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -7577,8 +8423,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 3) {
-      throw new Error("Background settings require three synchronized language switches.");
+    if (this.#backgroundLanguageInputs.length !== 4) {
+      throw new Error("Background settings require four synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
@@ -7614,6 +8460,28 @@ export class CodeCodexElement extends HTMLElement {
     this.#glowHorizonResetButton = this.#required<HTMLButtonElement>(".glow-horizon-reset");
     this.#glowHorizonReplayButton = this.#required<HTMLButtonElement>(".glow-horizon-replay");
     this.#glowHorizonPluginError = this.#required<HTMLElement>(".glow-horizon-plugin-error");
+    this.#heavenlyCloudBackgroundCard = this.#required<HTMLElement>(`[data-appearance-plugin="${HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID}"]`);
+    this.#heavenlyCloudBackgroundButton = this.#required<HTMLButtonElement>(
+      `[data-appearance-plugin="${HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID}"] .preview-extension-action`,
+    );
+    this.#heavenlyCloudBackgroundStatus = this.#required<HTMLElement>(
+      `[data-appearance-plugin="${HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
+    );
+    this.#heavenlyCloudSettingsPanel = this.#required<HTMLElement>(".heavenly-cloud-settings-panel");
+    this.#heavenlyCloudSettingsTrigger = this.#required<HTMLButtonElement>(".heavenly-cloud-settings-trigger");
+    this.#heavenlyCloudSettingsCloseButton = this.#required<HTMLButtonElement>(".heavenly-cloud-settings-close");
+    for (const definition of HEAVENLY_CLOUD_NUMERIC_CONTROL_DEFINITIONS) {
+      const input = this.#required<HTMLInputElement>(`#${definition.id}`);
+      const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
+      this.#heavenlyCloudNumericControls.set(definition.key, { definition, input, output });
+    }
+    this.#heavenlyCloudQualityButtons = Array.from(
+      this.#shadow.querySelectorAll<HTMLButtonElement>("[data-heavenly-cloud-quality]"),
+    );
+    this.#heavenlyCloudPausedInput = this.#required<HTMLInputElement>("#cle-heavenly-cloud-paused");
+    this.#heavenlyCloudResetButton = this.#required<HTMLButtonElement>(".heavenly-cloud-reset");
+    this.#heavenlyCloudReplayButton = this.#required<HTMLButtonElement>(".heavenly-cloud-replay");
+    this.#heavenlyCloudPluginError = this.#required<HTMLElement>(".heavenly-cloud-plugin-error");
     this.#liveRegion = this.#required<HTMLElement>(".live-region");
     this.#collapseButton = this.#required<HTMLButtonElement>(".collapse");
     this.#collapsedTab = this.#required<HTMLButtonElement>(".collapsed-tab");
@@ -7653,7 +8521,20 @@ export class CodeCodexElement extends HTMLElement {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
     }
-    if (this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)) {
+    if (this.#heavenlyCloudBackgroundController.stoppedForExternalThemeChange) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    }
+    if (this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    } else if (this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)) {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
@@ -7710,6 +8591,19 @@ export class CodeCodexElement extends HTMLElement {
     });
     this.#glowHorizonBackgroundInitialization = this.#blackHoleBackgroundInitialization
       .then(() => this.#initializeGlowHorizonBackground(appearanceInitializationGeneration));
+    this.#heavenlyCloudBackgroundUnsubscribe?.();
+    this.#heavenlyCloudBackgroundUnsubscribe = this.#heavenlyCloudBackgroundController.subscribe(() => {
+      if (!this.#connected) return;
+      if (
+        this.#heavenlyCloudBackgroundController.stoppedForExternalThemeChange
+        && this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+      ) {
+        this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderHeavenlyCloudBackgroundPlugin();
+    });
+    this.#heavenlyCloudBackgroundInitialization = this.#glowHorizonBackgroundInitialization
+      .then(() => this.#initializeHeavenlyCloudBackground(appearanceInitializationGeneration));
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
@@ -7754,6 +8648,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#glowHorizonBackgroundUnsubscribe?.();
     this.#glowHorizonBackgroundUnsubscribe = undefined;
     this.#glowHorizonBackgroundInitialization = undefined;
+    this.#heavenlyCloudBackgroundUnsubscribe?.();
+    this.#heavenlyCloudBackgroundUnsubscribe = undefined;
+    this.#heavenlyCloudBackgroundInitialization = undefined;
     this.#appearancePluginPending = false;
     this.#appearanceTransitionPending = false;
     this.#appearancePluginApplied = undefined;
@@ -7825,7 +8722,8 @@ export class CodeCodexElement extends HTMLElement {
     const particleWasEnabled = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
     const blackHoleWasEnabled = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
     const glowHorizonWasEnabled = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
-    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled) this.#writeEnabledAppearancePlugins();
+    const heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled) this.#writeEnabledAppearancePlugins();
     if (particleWasEnabled || this.#particleBackgroundController.enabled) {
       await this.#particleBackgroundController.disable();
     }
@@ -7834,6 +8732,9 @@ export class CodeCodexElement extends HTMLElement {
     }
     if (glowHorizonWasEnabled || this.#glowHorizonBackgroundController.enabled) {
       await this.#glowHorizonBackgroundController.disable();
+    }
+    if (heavenlyCloudWasEnabled || this.#heavenlyCloudBackgroundController.enabled) {
+      await this.#heavenlyCloudBackgroundController.disable();
     }
     await this.#reconcilePersistedWindowTransparency();
     this.#purgePreviewTabs(false);
@@ -8004,7 +8905,7 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -8017,6 +8918,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#blackHoleSettingsCloseButton.setAttribute("aria-label", this.#blackHoleSettingsCloseButton.title);
     this.#glowHorizonSettingsCloseButton.title = this.#backgroundText("关闭发光地平线设置", "Close Glow Horizon settings");
     this.#glowHorizonSettingsCloseButton.setAttribute("aria-label", this.#glowHorizonSettingsCloseButton.title);
+    this.#heavenlyCloudSettingsCloseButton.title = this.#backgroundText("关闭天境云隧道设置", "Close Heavenly Cloud settings");
+    this.#heavenlyCloudSettingsCloseButton.setAttribute("aria-label", this.#heavenlyCloudSettingsCloseButton.title);
 
     for (const control of [...this.#particleNumericControls.values(), ...this.#particleImageTransformControls.values()]) {
       const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
@@ -8062,6 +8965,16 @@ export class CodeCodexElement extends HTMLElement {
       const formatted = formatGlowHorizonControlValue(control.definition, Number(control.input.value));
       control.input.setAttribute("aria-valuetext", formatted);
     }
+    for (const control of this.#heavenlyCloudNumericControls.values()) {
+      const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
+      control.input.setAttribute("aria-label", label);
+      const formatted = formatHeavenlyCloudControlValue(control.definition, Number(control.input.value));
+      control.input.setAttribute("aria-valuetext", formatted);
+    }
+    this.#shadow.querySelector<HTMLElement>(".heavenly-cloud-quality-toolbar")?.setAttribute(
+      "aria-label",
+      this.#backgroundText("光线步数", "Ray steps"),
+    );
   }
 
   #setBackgroundSettingsLanguage(language: BackgroundSettingsLanguage): void {
@@ -8071,9 +8984,11 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
     this.#renderGlowHorizonBackgroundPlugin();
+    this.#renderHeavenlyCloudBackgroundPlugin();
     if (this.#particleSettingsOpen) requestAnimationFrame(() => this.#positionParticleSettingsPanel());
     if (this.#blackHoleSettingsOpen) requestAnimationFrame(() => this.#positionBlackHoleSettingsPanel());
     if (this.#glowHorizonSettingsOpen) requestAnimationFrame(() => this.#positionGlowHorizonSettingsPanel());
+    if (this.#heavenlyCloudSettingsOpen) requestAnimationFrame(() => this.#positionHeavenlyCloudSettingsPanel());
   }
 
   #bindDomEvents(): void {
@@ -8089,12 +9004,15 @@ export class CodeCodexElement extends HTMLElement {
       this.#particleBackgroundButton.addEventListener("click", () => void this.#toggleParticleBackground());
       this.#blackHoleBackgroundButton.addEventListener("click", () => void this.#toggleBlackHoleBackground());
       this.#glowHorizonBackgroundButton.addEventListener("click", () => void this.#toggleGlowHorizonBackground());
+      this.#heavenlyCloudBackgroundButton.addEventListener("click", () => void this.#toggleHeavenlyCloudBackground());
       this.#particleSettingsTrigger.addEventListener("click", () => this.#toggleParticleSettings());
       this.#particleSettingsCloseButton.addEventListener("click", () => this.#closeParticleSettings(true));
       this.#blackHoleSettingsTrigger.addEventListener("click", () => this.#toggleBlackHoleSettings());
       this.#blackHoleSettingsCloseButton.addEventListener("click", () => this.#closeBlackHoleSettings(true));
       this.#glowHorizonSettingsTrigger.addEventListener("click", () => this.#toggleGlowHorizonSettings());
       this.#glowHorizonSettingsCloseButton.addEventListener("click", () => this.#closeGlowHorizonSettings(true));
+      this.#heavenlyCloudSettingsTrigger.addEventListener("click", () => this.#toggleHeavenlyCloudSettings());
+      this.#heavenlyCloudSettingsCloseButton.addEventListener("click", () => this.#closeHeavenlyCloudSettings(true));
       for (const input of this.#backgroundLanguageInputs) {
         input.addEventListener("change", () => {
           this.#setBackgroundSettingsLanguage(input.checked ? "en" : "zh");
@@ -8119,10 +9037,16 @@ export class CodeCodexElement extends HTMLElement {
         this.#glowHorizonSettingsOpen = false;
         this.#glowHorizonSettingsTrigger.setAttribute("aria-expanded", "false");
       });
+      this.#heavenlyCloudSettingsPanel.addEventListener("toggle", () => {
+        if (this.#heavenlyCloudSettingsPanel.matches(":popover-open") || !this.#heavenlyCloudSettingsOpen) return;
+        this.#heavenlyCloudSettingsOpen = false;
+        this.#heavenlyCloudSettingsTrigger.setAttribute("aria-expanded", "false");
+      });
       this.#previewMarketList.addEventListener("scroll", () => {
         if (this.#particleSettingsOpen) this.#positionParticleSettingsPanel();
         if (this.#blackHoleSettingsOpen) this.#positionBlackHoleSettingsPanel();
         if (this.#glowHorizonSettingsOpen) this.#positionGlowHorizonSettingsPanel();
+        if (this.#heavenlyCloudSettingsOpen) this.#positionHeavenlyCloudSettingsPanel();
       }, { passive: true });
       for (const control of this.#particleNumericControls.values()) {
         const { definition, input } = control;
@@ -8216,6 +9140,36 @@ export class CodeCodexElement extends HTMLElement {
           this.#glowHorizonBackgroundController.updateSettings({
             ...this.#glowHorizonBackgroundController.settings,
             variant,
+          });
+        });
+      }
+      for (const [key, control] of this.#heavenlyCloudNumericControls) {
+        control.input.addEventListener("input", () => {
+          const normalized = normalizeHeavenlyCloudSettings({
+            ...this.#heavenlyCloudBackgroundController.settings,
+            [key]: control.input.value,
+          });
+          const value = normalized[key];
+          control.input.value = String(value);
+          const formatted = formatHeavenlyCloudControlValue(control.definition, value);
+          control.output.textContent = formatted;
+          control.input.setAttribute("aria-valuetext", formatted);
+          this.#applyHeavenlyCloudSettingsFromControls();
+        });
+      }
+      this.#heavenlyCloudPausedInput.addEventListener("change", () => this.#applyHeavenlyCloudSettingsFromControls());
+      this.#heavenlyCloudResetButton.addEventListener("click", () => {
+        this.#heavenlyCloudBackgroundController.reset();
+        this.#heavenlyCloudBackgroundController.replay();
+      });
+      this.#heavenlyCloudReplayButton.addEventListener("click", () => this.#heavenlyCloudBackgroundController.replay());
+      for (const button of this.#heavenlyCloudQualityButtons) {
+        button.addEventListener("click", () => {
+          const quality = button.dataset.heavenlyCloudQuality;
+          if (quality !== "low" && quality !== "medium" && quality !== "high") return;
+          this.#heavenlyCloudBackgroundController.updateSettings({
+            ...this.#heavenlyCloudBackgroundController.settings,
+            quality,
           });
         });
       }
@@ -8399,12 +9353,20 @@ export class CodeCodexElement extends HTMLElement {
       this.#closeGlowHorizonSettings(false);
     }
     if (
+      this.#heavenlyCloudSettingsOpen
+      && !path.includes(this.#heavenlyCloudSettingsPanel)
+      && !path.includes(this.#heavenlyCloudSettingsTrigger)
+    ) {
+      this.#closeHeavenlyCloudSettings(false);
+    }
+    if (
       !this.#previewMarketPopover.hidden
       && !path.includes(this.#previewMarketPopover)
       && !path.includes(this.#previewMarketButton)
       && !path.includes(this.#particleSettingsPanel)
       && !path.includes(this.#blackHoleSettingsPanel)
       && !path.includes(this.#glowHorizonSettingsPanel)
+      && !path.includes(this.#heavenlyCloudSettingsPanel)
     ) {
       this.#closePreviewMarket(false);
     }
@@ -8460,6 +9422,12 @@ export class CodeCodexElement extends HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       this.#closeGlowHorizonSettings(true);
+      return;
+    }
+    if (this.#heavenlyCloudSettingsOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeHeavenlyCloudSettings(true);
       return;
     }
     if (!this.#previewMarketOpen) return;
@@ -11691,6 +12659,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#glowHorizonBackgroundInitialization ??= this.#blackHoleBackgroundInitialization
       .then(() => this.#initializeGlowHorizonBackground(generation));
     await this.#glowHorizonBackgroundInitialization;
+    if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceOperation) return false;
+    this.#heavenlyCloudBackgroundInitialization ??= this.#glowHorizonBackgroundInitialization
+      .then(() => this.#initializeHeavenlyCloudBackground(generation));
+    await this.#heavenlyCloudBackgroundInitialization;
     return this.#isCurrentBackgroundInitialization(generation) && operation === this.#appearanceOperation;
   }
 
@@ -11703,6 +12675,7 @@ export class CodeCodexElement extends HTMLElement {
         let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
         changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
@@ -11712,6 +12685,10 @@ export class CodeCodexElement extends HTMLElement {
         }
         if (this.#glowHorizonBackgroundController.enabled) {
           await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#heavenlyCloudBackgroundController.enabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
         }
         const lease = readParticleThemeLease();
@@ -11727,7 +12704,8 @@ export class CodeCodexElement extends HTMLElement {
           return;
         }
       } else if (!this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
-        && !this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)) {
+        && !this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        && !this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)) {
         await this.#particleBackgroundController.disable();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
       }
@@ -11743,6 +12721,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -11753,6 +12732,7 @@ export class CodeCodexElement extends HTMLElement {
     let particleStarted = false;
     let blackHoleWasEnabled = false;
     let glowHorizonWasEnabled = false;
+    let heavenlyCloudWasEnabled = false;
     let transparentWasEnabled = false;
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
@@ -11764,6 +12744,8 @@ export class CodeCodexElement extends HTMLElement {
         || this.#blackHoleBackgroundController.enabled;
       glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
         || this.#glowHorizonBackgroundController.enabled;
+      heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        || this.#heavenlyCloudBackgroundController.enabled;
       previousTransparentBackground = this.#transparentBackgroundPresentation();
       const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
       const enabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
@@ -11793,6 +12775,13 @@ export class CodeCodexElement extends HTMLElement {
             return;
           }
         }
+        if (heavenlyCloudWasEnabled || this.#heavenlyCloudBackgroundController.enabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
         const lease = readParticleThemeLease();
         if (lease?.owner && lease.owner !== PARTICLE_BACKGROUND_PLUGIN_ID) {
           transferParticleThemeLease(lease.owner, PARTICLE_BACKGROUND_PLUGIN_ID);
@@ -11805,7 +12794,8 @@ export class CodeCodexElement extends HTMLElement {
         if (!particleStarted) throw new Error("Particle Image Background could not be enabled");
         if (!this.#connected || operation !== this.#appearanceOperation) {
           const reconcilePrevious = this.#connected && !this.#dismissed;
-          const preserveTheme = reconcilePrevious && (blackHoleWasEnabled || glowHorizonWasEnabled);
+          const preserveTheme = reconcilePrevious
+            && (blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled);
           await this.#particleBackgroundController.disable(preserveTheme);
           if (reconcilePrevious && blackHoleWasEnabled) {
             transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
@@ -11813,6 +12803,9 @@ export class CodeCodexElement extends HTMLElement {
           } else if (reconcilePrevious && glowHorizonWasEnabled) {
             transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
             await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+          } else if (reconcilePrevious && heavenlyCloudWasEnabled) {
+            transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+            await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
           }
           return;
         }
@@ -11823,6 +12816,7 @@ export class CodeCodexElement extends HTMLElement {
         }
         this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(PARTICLE_BACKGROUND_PLUGIN_ID);
       } else {
         await this.#particleBackgroundController.disable();
@@ -11837,12 +12831,15 @@ export class CodeCodexElement extends HTMLElement {
           && !this.#dismissed
           && !stoppedForThemeChange;
         if (particleStarted) {
-          await this.#particleBackgroundController.disable(reconcilePrevious && (blackHoleWasEnabled || glowHorizonWasEnabled));
+          await this.#particleBackgroundController.disable(
+            reconcilePrevious && (blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled),
+          );
         }
         if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
           let changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
           changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
           changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
           if (changed) this.#writeEnabledAppearancePlugins();
         } else if (reconcilePrevious && blackHoleWasEnabled) {
           transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
@@ -11850,17 +12847,23 @@ export class CodeCodexElement extends HTMLElement {
         } else if (reconcilePrevious && glowHorizonWasEnabled) {
           transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
           await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+        } else if (reconcilePrevious && heavenlyCloudWasEnabled) {
+          transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+          await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
         }
         return;
       }
       const stoppedForThemeChange = this.#particleBackgroundController.stoppedForExternalThemeChange;
       if (particleStarted) {
-        await this.#particleBackgroundController.disable((blackHoleWasEnabled || glowHorizonWasEnabled) && !stoppedForThemeChange);
+        await this.#particleBackgroundController.disable(
+          (blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled) && !stoppedForThemeChange,
+        );
       }
       if (stoppedForThemeChange) {
         let changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
         changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
       } else if (blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
         transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
@@ -11868,6 +12871,9 @@ export class CodeCodexElement extends HTMLElement {
       } else if (glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
         transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+      } else if (heavenlyCloudWasEnabled && !this.#heavenlyCloudBackgroundController.enabled) {
+        transferParticleThemeLease(PARTICLE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
       }
       if (transparentWasEnabled && previousTransparentBackground) {
         if (bridge?.available) {
@@ -11904,6 +12910,7 @@ export class CodeCodexElement extends HTMLElement {
         let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
         changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
@@ -11913,6 +12920,10 @@ export class CodeCodexElement extends HTMLElement {
         }
         if (this.#glowHorizonBackgroundController.enabled) {
           await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#heavenlyCloudBackgroundController.enabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
         }
         const lease = readParticleThemeLease();
@@ -11947,6 +12958,7 @@ export class CodeCodexElement extends HTMLElement {
         let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
         changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
@@ -11956,6 +12968,10 @@ export class CodeCodexElement extends HTMLElement {
         }
         if (this.#blackHoleBackgroundController.enabled) {
           await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#heavenlyCloudBackgroundController.enabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
         }
         const lease = readParticleThemeLease();
@@ -11981,11 +12997,58 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  async #initializeHeavenlyCloudBackground(generation: number): Promise<void> {
+    try {
+      await this.#heavenlyCloudBackgroundController.initialize();
+      if (!this.#isCurrentBackgroundInitialization(generation)) return;
+      const enabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+      if (enabled) {
+        let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (this.#particleBackgroundController.enabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#blackHoleBackgroundController.enabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#glowHorizonBackgroundController.enabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        }
+        await this.#heavenlyCloudBackgroundController.enable();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        if (this.#heavenlyCloudBackgroundController.stoppedForExternalThemeChange) {
+          if (this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)) {
+            this.#writeEnabledAppearancePlugins();
+          }
+        }
+      } else if (this.#heavenlyCloudBackgroundController.enabled) {
+        await this.#heavenlyCloudBackgroundController.disable();
+      }
+    } catch (error) {
+      console.error("Code-Codex could not initialize Heavenly Cloud Background", error);
+    } finally {
+      if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
+    }
+  }
+
   async #toggleBlackHoleBackground(): Promise<void> {
     if (
       this.#blackHoleBackgroundController.pending
       || this.#particleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -11996,6 +13059,7 @@ export class CodeCodexElement extends HTMLElement {
     let blackHoleStarted = false;
     let particleWasEnabled = false;
     let glowHorizonWasEnabled = false;
+    let heavenlyCloudWasEnabled = false;
     let transparentWasEnabled = false;
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
@@ -12007,6 +13071,8 @@ export class CodeCodexElement extends HTMLElement {
         || this.#particleBackgroundController.enabled;
       glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
         || this.#glowHorizonBackgroundController.enabled;
+      heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        || this.#heavenlyCloudBackgroundController.enabled;
       previousTransparentBackground = this.#transparentBackgroundPresentation();
       const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
       const enabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
@@ -12036,6 +13102,13 @@ export class CodeCodexElement extends HTMLElement {
             return;
           }
         }
+        if (heavenlyCloudWasEnabled || this.#heavenlyCloudBackgroundController.enabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
         const lease = readParticleThemeLease();
         if (lease?.owner && lease.owner !== BLACK_HOLE_BACKGROUND_PLUGIN_ID) {
           transferParticleThemeLease(lease.owner, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
@@ -12048,7 +13121,8 @@ export class CodeCodexElement extends HTMLElement {
         if (!blackHoleStarted) throw new Error("Black Hole Background could not be enabled");
         if (!this.#connected || operation !== this.#appearanceOperation) {
           const reconcilePrevious = this.#connected && !this.#dismissed;
-          const preserveTheme = reconcilePrevious && (particleWasEnabled || glowHorizonWasEnabled);
+          const preserveTheme = reconcilePrevious
+            && (particleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled);
           await this.#blackHoleBackgroundController.disable(preserveTheme);
           if (reconcilePrevious && particleWasEnabled) {
             transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
@@ -12056,6 +13130,9 @@ export class CodeCodexElement extends HTMLElement {
           } else if (reconcilePrevious && glowHorizonWasEnabled) {
             transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
             await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+          } else if (reconcilePrevious && heavenlyCloudWasEnabled) {
+            transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+            await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
           }
           return;
         }
@@ -12066,6 +13143,7 @@ export class CodeCodexElement extends HTMLElement {
         }
         this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
       } else {
         await this.#blackHoleBackgroundController.disable();
@@ -12080,12 +13158,15 @@ export class CodeCodexElement extends HTMLElement {
           && !this.#dismissed
           && !stoppedForThemeChange;
         if (blackHoleStarted) {
-          await this.#blackHoleBackgroundController.disable(reconcilePrevious && (particleWasEnabled || glowHorizonWasEnabled));
+          await this.#blackHoleBackgroundController.disable(
+            reconcilePrevious && (particleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled),
+          );
         }
         if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
           let changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
           changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
           changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
           if (changed) this.#writeEnabledAppearancePlugins();
         } else if (reconcilePrevious && particleWasEnabled) {
           transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
@@ -12093,17 +13174,23 @@ export class CodeCodexElement extends HTMLElement {
         } else if (reconcilePrevious && glowHorizonWasEnabled) {
           transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
           await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+        } else if (reconcilePrevious && heavenlyCloudWasEnabled) {
+          transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+          await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
         }
         return;
       }
       const stoppedForThemeChange = this.#blackHoleBackgroundController.stoppedForExternalThemeChange;
       if (blackHoleStarted) {
-        await this.#blackHoleBackgroundController.disable((particleWasEnabled || glowHorizonWasEnabled) && !stoppedForThemeChange);
+        await this.#blackHoleBackgroundController.disable(
+          (particleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled) && !stoppedForThemeChange,
+        );
       }
       if (stoppedForThemeChange) {
         let changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
         changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
       } else if (particleWasEnabled && !this.#particleBackgroundController.enabled) {
         transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
@@ -12111,6 +13198,9 @@ export class CodeCodexElement extends HTMLElement {
       } else if (glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
         transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+      } else if (heavenlyCloudWasEnabled && !this.#heavenlyCloudBackgroundController.enabled) {
+        transferParticleThemeLease(BLACK_HOLE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
       }
       if (transparentWasEnabled && previousTransparentBackground) {
         if (bridge?.available) {
@@ -12146,11 +13236,19 @@ export class CodeCodexElement extends HTMLElement {
     this.#glowHorizonBackgroundController.updateSettings(normalizeGlowHorizonSettings(values));
   }
 
+  #applyHeavenlyCloudSettingsFromControls(): void {
+    const values: Record<string, unknown> = { ...this.#heavenlyCloudBackgroundController.settings };
+    for (const [key, control] of this.#heavenlyCloudNumericControls) values[key] = control.input.value;
+    values.paused = this.#heavenlyCloudPausedInput.checked;
+    this.#heavenlyCloudBackgroundController.updateSettings(normalizeHeavenlyCloudSettings(values));
+  }
+
   async #toggleGlowHorizonBackground(): Promise<void> {
     if (
       this.#glowHorizonBackgroundController.pending
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -12161,6 +13259,7 @@ export class CodeCodexElement extends HTMLElement {
     let glowStarted = false;
     let particleWasEnabled = false;
     let blackHoleWasEnabled = false;
+    let heavenlyCloudWasEnabled = false;
     let transparentWasEnabled = false;
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
@@ -12172,6 +13271,8 @@ export class CodeCodexElement extends HTMLElement {
         || this.#particleBackgroundController.enabled;
       blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
         || this.#blackHoleBackgroundController.enabled;
+      heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        || this.#heavenlyCloudBackgroundController.enabled;
       previousTransparentBackground = this.#transparentBackgroundPresentation();
       const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
       const enabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
@@ -12196,6 +13297,10 @@ export class CodeCodexElement extends HTMLElement {
           await this.#blackHoleBackgroundController.disable(true);
           if (!this.#connected || operation !== this.#appearanceOperation) return;
         }
+        if (heavenlyCloudWasEnabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
         const lease = readParticleThemeLease();
         if (lease?.owner && lease.owner !== GLOW_HORIZON_BACKGROUND_PLUGIN_ID) {
           transferParticleThemeLease(lease.owner, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
@@ -12209,13 +13314,18 @@ export class CodeCodexElement extends HTMLElement {
         if (!glowStarted) throw new Error("Glow Horizon Background could not be enabled");
         if (!this.#connected || operation !== this.#appearanceOperation) {
           const restorePrevious = this.#connected && !this.#dismissed;
-          await this.#glowHorizonBackgroundController.disable(restorePrevious && (particleWasEnabled || blackHoleWasEnabled));
+          await this.#glowHorizonBackgroundController.disable(
+            restorePrevious && (particleWasEnabled || blackHoleWasEnabled || heavenlyCloudWasEnabled),
+          );
           if (restorePrevious && particleWasEnabled) {
             transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
             await this.#particleBackgroundController.enable().catch(() => undefined);
           } else if (restorePrevious && blackHoleWasEnabled) {
             transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
             await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && heavenlyCloudWasEnabled) {
+            transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+            await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
           }
           return;
         }
@@ -12226,6 +13336,7 @@ export class CodeCodexElement extends HTMLElement {
         }
         this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
       } else {
         await this.#glowHorizonBackgroundController.disable();
@@ -12238,7 +13349,9 @@ export class CodeCodexElement extends HTMLElement {
         const stoppedForThemeChange = this.#glowHorizonBackgroundController.stoppedForExternalThemeChange;
         const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
         if (glowStarted) {
-          await this.#glowHorizonBackgroundController.disable(restorePrevious && (particleWasEnabled || blackHoleWasEnabled));
+          await this.#glowHorizonBackgroundController.disable(
+            restorePrevious && (particleWasEnabled || blackHoleWasEnabled || heavenlyCloudWasEnabled),
+          );
         }
         if (restorePrevious && particleWasEnabled && !this.#particleBackgroundController.enabled) {
           transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
@@ -12246,17 +13359,23 @@ export class CodeCodexElement extends HTMLElement {
         } else if (restorePrevious && blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
           transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
           await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && heavenlyCloudWasEnabled && !this.#heavenlyCloudBackgroundController.enabled) {
+          transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+          await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
         }
         return;
       }
       const stoppedForThemeChange = this.#glowHorizonBackgroundController.stoppedForExternalThemeChange;
       if (glowStarted) {
-        await this.#glowHorizonBackgroundController.disable((particleWasEnabled || blackHoleWasEnabled) && !stoppedForThemeChange);
+        await this.#glowHorizonBackgroundController.disable(
+          (particleWasEnabled || blackHoleWasEnabled || heavenlyCloudWasEnabled) && !stoppedForThemeChange,
+        );
       }
       if (stoppedForThemeChange) {
         let changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
         changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
         if (changed) this.#writeEnabledAppearancePlugins();
       } else if (particleWasEnabled && !this.#particleBackgroundController.enabled) {
         transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
@@ -12264,6 +13383,9 @@ export class CodeCodexElement extends HTMLElement {
       } else if (blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
         transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+      } else if (heavenlyCloudWasEnabled && !this.#heavenlyCloudBackgroundController.enabled) {
+        transferParticleThemeLease(GLOW_HORIZON_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
       }
       if (transparentWasEnabled && previousTransparentBackground) {
         if (bridge?.available) {
@@ -12278,6 +13400,182 @@ export class CodeCodexElement extends HTMLElement {
         }
       }
       const message = error instanceof Error ? error.message : "Glow Horizon Background could not be changed";
+      this.#showActionNotice(message, "error");
+    } finally {
+      if (operation === this.#appearanceOperation) {
+        this.#appearanceTransitionPending = false;
+        this.#renderPreviewMarket();
+        if (bridge?.available) this.#flushQueuedAppearanceSync(bridge);
+        if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          this.#scheduleAppearanceHealthCheck();
+        }
+      }
+    }
+  }
+
+  async #toggleHeavenlyCloudBackground(): Promise<void> {
+    if (
+      this.#heavenlyCloudBackgroundController.pending
+      || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending
+    ) return;
+    const operation = ++this.#appearanceOperation;
+    this.#appearanceTransitionPending = true;
+    this.#cancelAppearanceHealthCheck();
+    this.#renderPreviewMarket();
+    let heavenlyCloudStarted = false;
+    let particleWasEnabled = false;
+    let blackHoleWasEnabled = false;
+    let glowHorizonWasEnabled = false;
+    let transparentWasEnabled = false;
+    let previousTransparentBackground: string | undefined;
+    let bridge: ExplorerBridge | undefined;
+    try {
+      if (!await this.#awaitBackgroundInitializations(operation)) return;
+      bridge = this.#bridge;
+      transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || this.#particleBackgroundController.enabled;
+      blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || this.#blackHoleBackgroundController.enabled;
+      glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || this.#glowHorizonBackgroundController.enabled;
+      previousTransparentBackground = this.#transparentBackgroundPresentation();
+      const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
+      const enabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+      const active = this.#heavenlyCloudBackgroundController.enabled;
+      const nextEnabled = !enabled || !active;
+
+      if (nextEnabled) {
+        if ((transparentWasEnabled || transparentPresentationWasApplied) && bridge?.available) {
+          await this.#setWindowTransparency(bridge, false);
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        if (!this.#connected || operation !== this.#appearanceOperation) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (particleWasEnabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (blackHoleWasEnabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (glowHorizonWasEnabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        }
+        await this.#heavenlyCloudBackgroundController.enable();
+        heavenlyCloudStarted = this.#heavenlyCloudBackgroundController.enabled;
+        if (this.#heavenlyCloudBackgroundController.stoppedForExternalThemeChange) {
+          throw new Error(this.#heavenlyCloudBackgroundController.error
+            ?? "Heavenly Cloud Background stopped because Codex Appearance changed.");
+        }
+        if (!heavenlyCloudStarted) throw new Error("Heavenly Cloud Background could not be enabled");
+        if (!this.#connected || operation !== this.#appearanceOperation) {
+          const restorePrevious = this.#connected && !this.#dismissed;
+          const preserveTheme = restorePrevious
+            && (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled);
+          await this.#heavenlyCloudBackgroundController.disable(preserveTheme);
+          if (restorePrevious && particleWasEnabled) {
+            transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+            await this.#particleBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && blackHoleWasEnabled) {
+            transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+            await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && glowHorizonWasEnabled) {
+            transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+            await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+          }
+          return;
+        }
+        if (transparentWasEnabled) {
+          this.#appearancePluginApplied = false;
+          this.#appearancePluginError = undefined;
+          this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        }
+        this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.add(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+      } else {
+        await this.#heavenlyCloudBackgroundController.disable();
+        this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+      this.#announce(`Heavenly Cloud Background ${nextEnabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      if (!this.#connected || operation !== this.#appearanceOperation) {
+        const stoppedForThemeChange = this.#heavenlyCloudBackgroundController.stoppedForExternalThemeChange;
+        const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
+        if (heavenlyCloudStarted) {
+          await this.#heavenlyCloudBackgroundController.disable(
+            restorePrevious && (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled),
+          );
+        }
+        if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
+          let changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+          changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+          if (changed) this.#writeEnabledAppearancePlugins();
+        } else if (restorePrevious && particleWasEnabled && !this.#particleBackgroundController.enabled) {
+          transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+          await this.#particleBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+          transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+          await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
+          transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+          await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+        }
+        return;
+      }
+      const stoppedForThemeChange = this.#heavenlyCloudBackgroundController.stoppedForExternalThemeChange;
+      if (heavenlyCloudStarted) {
+        await this.#heavenlyCloudBackgroundController.disable(
+          (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled) && !stoppedForThemeChange,
+        );
+      }
+      if (stoppedForThemeChange) {
+        let changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+      } else if (particleWasEnabled && !this.#particleBackgroundController.enabled) {
+        transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+        await this.#particleBackgroundController.enable().catch(() => undefined);
+      } else if (blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+        transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+      } else if (glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
+        transferParticleThemeLease(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+      }
+      if (transparentWasEnabled && previousTransparentBackground) {
+        if (bridge?.available) {
+          try {
+            const restored = await this.#setWindowTransparency(bridge, true);
+            this.#applyTransparentBackgroundPresentation(restored.background);
+          } catch {
+            this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+          }
+        } else {
+          this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+        }
+      }
+      const message = error instanceof Error ? error.message : "Heavenly Cloud Background could not be changed";
       this.#showActionNotice(message, "error");
     } finally {
       if (operation === this.#appearanceOperation) {
@@ -12899,6 +14197,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#particleBackgroundButton.disabled = controller.pending
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -13102,6 +14401,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#blackHoleBackgroundButton.disabled = controller.pending
       || this.#particleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -13164,6 +14464,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#glowHorizonBackgroundButton.disabled = controller.pending
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -13198,6 +14499,62 @@ export class CodeCodexElement extends HTMLElement {
     );
     this.#glowHorizonSettingsPanel.setAttribute("aria-busy", String(controller.pending));
     if (this.#glowHorizonSettingsOpen) requestAnimationFrame(() => this.#positionGlowHorizonSettingsPanel());
+  }
+
+  #renderHeavenlyCloudBackgroundPlugin(): void {
+    const controller = this.#heavenlyCloudBackgroundController;
+    const enabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+    const active = enabled && controller.enabled;
+    const action = enabled && !active ? "Retry" : enabled ? "Disable" : "Enable";
+    let status = enabled ? "Enabled" : "Disabled";
+    if (controller.pending) status = enabled || controller.enabled ? "Enabled · Applying" : "Applying";
+    else if (enabled && !active) status = "Enabled · Not applied";
+    else if (active && controller.error) status = "Enabled · Notice";
+    this.#heavenlyCloudBackgroundStatus.textContent = status;
+    this.#heavenlyCloudBackgroundStatus.dataset.enabled = String(active);
+    this.#heavenlyCloudBackgroundStatus.dataset.pending = String(controller.pending);
+    this.#heavenlyCloudBackgroundCard.setAttribute("aria-busy", String(controller.pending));
+    this.#heavenlyCloudBackgroundButton.textContent = controller.pending ? "Applying…" : action;
+    this.#heavenlyCloudBackgroundButton.dataset.enabled = String(enabled);
+    this.#heavenlyCloudBackgroundButton.setAttribute("aria-pressed", String(enabled));
+    this.#heavenlyCloudBackgroundButton.setAttribute(
+      "aria-label",
+      controller.pending ? "Applying Heavenly Cloud Background" : `${action} Heavenly Cloud Background`,
+    );
+    this.#heavenlyCloudBackgroundButton.disabled = controller.pending
+      || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending;
+
+    const settings = controller.settings;
+    for (const [key, control] of this.#heavenlyCloudNumericControls) {
+      const value = settings[key];
+      const formatted = formatHeavenlyCloudControlValue(control.definition, value);
+      control.input.value = String(value);
+      control.input.disabled = controller.pending;
+      control.input.setAttribute("aria-valuetext", formatted);
+      control.output.textContent = formatted;
+    }
+    for (const button of this.#heavenlyCloudQualityButtons) {
+      button.setAttribute("aria-pressed", String(button.dataset.heavenlyCloudQuality === settings.quality));
+      button.disabled = controller.pending;
+    }
+    this.#heavenlyCloudPausedInput.checked = settings.paused;
+    this.#heavenlyCloudPausedInput.disabled = controller.pending;
+    this.#heavenlyCloudResetButton.disabled = controller.pending;
+    this.#heavenlyCloudReplayButton.disabled = controller.pending || !controller.enabled;
+    const error = controller.error;
+    this.#heavenlyCloudPluginError.hidden = !error;
+    this.#heavenlyCloudPluginError.textContent = backgroundSettingsError(
+      error,
+      this.#backgroundSettingsLanguage,
+      "天境云隧道背景",
+      "Heavenly Cloud Background",
+    );
+    this.#heavenlyCloudSettingsPanel.setAttribute("aria-busy", String(controller.pending));
+    if (this.#heavenlyCloudSettingsOpen) requestAnimationFrame(() => this.#positionHeavenlyCloudSettingsPanel());
   }
 
   #readEnabledAppearancePlugins(): readonly string[] {
@@ -13314,6 +14671,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
     ) return;
     const operation = ++this.#appearanceOperation;
     this.#appearanceTransitionPending = true;
@@ -13324,6 +14682,7 @@ export class CodeCodexElement extends HTMLElement {
     let particleWasActive = false;
     let blackHoleWasActive = false;
     let glowHorizonWasActive = false;
+    let heavenlyCloudWasActive = false;
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       bridge = this.#bridge;
@@ -13358,9 +14717,11 @@ export class CodeCodexElement extends HTMLElement {
         const particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
         const blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         const glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        const heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
         particleWasActive = particleWasEnabled || this.#particleBackgroundController.enabled;
         blackHoleWasActive = blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled;
         glowHorizonWasActive = glowHorizonWasEnabled || this.#glowHorizonBackgroundController.enabled;
+        heavenlyCloudWasActive = heavenlyCloudWasEnabled || this.#heavenlyCloudBackgroundController.enabled;
         if (particleWasActive) {
           await this.#particleBackgroundController.disable();
           if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
@@ -13394,9 +14755,23 @@ export class CodeCodexElement extends HTMLElement {
             return;
           }
         }
+        if (heavenlyCloudWasActive) {
+          await this.#heavenlyCloudBackgroundController.disable();
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            if (this.#connected && !this.#dismissed) {
+              if (heavenlyCloudWasActive) await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+              else if (glowHorizonWasActive) await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+              else if (blackHoleWasActive) await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+              else if (particleWasActive) await this.#particleBackgroundController.enable().catch(() => undefined);
+            }
+            return;
+          }
+        }
         this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       } else {
         this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -13405,11 +14780,14 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderParticleBackgroundPlugin();
       this.#renderBlackHoleBackgroundPlugin();
       this.#renderGlowHorizonBackgroundPlugin();
+      this.#renderHeavenlyCloudBackgroundPlugin();
       this.#announce(`Transparent Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
       if (!this.#connected || operation !== this.#appearanceOperation) return;
       if (nextEnabled) {
-        if (glowHorizonWasActive && !this.#glowHorizonBackgroundController.enabled) {
+        if (heavenlyCloudWasActive && !this.#heavenlyCloudBackgroundController.enabled) {
+          await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+        } else if (glowHorizonWasActive && !this.#glowHorizonBackgroundController.enabled) {
           await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
         } else if (blackHoleWasActive && !this.#blackHoleBackgroundController.enabled) {
           await this.#blackHoleBackgroundController.enable().catch(() => undefined);
@@ -13465,6 +14843,7 @@ export class CodeCodexElement extends HTMLElement {
         && !this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
         && !this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
         && !this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        && !this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
       ) {
         this.#applyTransparentBackgroundPresentation(previousBackground);
       }
@@ -13545,6 +14924,7 @@ export class CodeCodexElement extends HTMLElement {
     if (!this.#previewMarketOpen) this.#togglePreviewMarket();
     this.#closeBlackHoleSettings(false);
     this.#closeGlowHorizonSettings(false);
+    this.#closeHeavenlyCloudSettings(false);
     this.#particleSettingsOpen = true;
     this.#particleSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderParticleBackgroundPlugin();
@@ -13607,6 +14987,7 @@ export class CodeCodexElement extends HTMLElement {
     if (!this.#previewMarketOpen) this.#togglePreviewMarket();
     this.#closeParticleSettings(false);
     this.#closeGlowHorizonSettings(false);
+    this.#closeHeavenlyCloudSettings(false);
     this.#blackHoleSettingsOpen = true;
     this.#blackHoleSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderBlackHoleBackgroundPlugin();
@@ -13665,6 +15046,7 @@ export class CodeCodexElement extends HTMLElement {
     if (!this.#previewMarketOpen) this.#togglePreviewMarket();
     this.#closeParticleSettings(false);
     this.#closeBlackHoleSettings(false);
+    this.#closeHeavenlyCloudSettings(false);
     this.#glowHorizonSettingsOpen = true;
     this.#glowHorizonSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderGlowHorizonBackgroundPlugin();
@@ -13715,10 +15097,70 @@ export class CodeCodexElement extends HTMLElement {
     panel.dataset.side = side;
   }
 
+  #toggleHeavenlyCloudSettings(): void {
+    if (this.#heavenlyCloudSettingsOpen) {
+      this.#closeHeavenlyCloudSettings(true);
+      return;
+    }
+    if (!this.#previewMarketOpen) this.#togglePreviewMarket();
+    this.#closeParticleSettings(false);
+    this.#closeBlackHoleSettings(false);
+    this.#closeGlowHorizonSettings(false);
+    this.#heavenlyCloudSettingsOpen = true;
+    this.#heavenlyCloudSettingsTrigger.setAttribute("aria-expanded", "true");
+    this.#renderHeavenlyCloudBackgroundPlugin();
+    if (!this.#heavenlyCloudSettingsPanel.matches(":popover-open")) this.#heavenlyCloudSettingsPanel.showPopover();
+    this.#positionHeavenlyCloudSettingsPanel();
+    queueMicrotask(() => {
+      if (!this.#heavenlyCloudSettingsOpen) return;
+      this.#positionHeavenlyCloudSettingsPanel();
+      this.#heavenlyCloudSettingsCloseButton.focus();
+    });
+  }
+
+  #closeHeavenlyCloudSettings(restoreFocus: boolean): void {
+    if (!this.#heavenlyCloudSettingsOpen && !this.#heavenlyCloudSettingsPanel.matches(":popover-open")) return;
+    this.#heavenlyCloudSettingsOpen = false;
+    this.#heavenlyCloudSettingsTrigger.setAttribute("aria-expanded", "false");
+    if (this.#heavenlyCloudSettingsPanel.matches(":popover-open")) this.#heavenlyCloudSettingsPanel.hidePopover();
+    if (restoreFocus && this.#heavenlyCloudSettingsTrigger.isConnected) this.#heavenlyCloudSettingsTrigger.focus();
+  }
+
+  #positionHeavenlyCloudSettingsPanel(): void {
+    if (!this.#heavenlyCloudSettingsOpen || !this.#heavenlyCloudSettingsPanel.matches(":popover-open")) return;
+    const panel = this.#heavenlyCloudSettingsPanel;
+    const cardRect = this.#heavenlyCloudBackgroundCard.getBoundingClientRect();
+    const edge = 12;
+    const gap = 8;
+    const preferredWidth = 344;
+    const panelWidth = Math.min(preferredWidth, Math.max(240, window.innerWidth - edge * 2));
+    let left = cardRect.right + gap;
+    let side = "right";
+    if (left + panelWidth > window.innerWidth - edge) {
+      left = Math.max(edge, window.innerWidth - edge - panelWidth);
+      side = "overlay";
+    }
+    panel.style.width = `${panelWidth}px`;
+    panel.style.maxHeight = `${Math.max(240, window.innerHeight - edge * 2)}px`;
+    const panelHeight = Math.min(panel.scrollHeight, Math.max(240, window.innerHeight - edge * 2));
+    const top = Math.min(
+      Math.max(edge, cardRect.top),
+      Math.max(edge, window.innerHeight - edge - panelHeight),
+    );
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.setProperty(
+      "--cle-particle-settings-anchor-y",
+      `${Math.round(Math.min(panelHeight - 18, Math.max(18, cardRect.top + cardRect.height * 0.5 - top)))}px`,
+    );
+    panel.dataset.side = side;
+  }
+
   #closePreviewMarket(restoreFocus: boolean): void {
     this.#closeParticleSettings(false);
     this.#closeBlackHoleSettings(false);
     this.#closeGlowHorizonSettings(false);
+    this.#closeHeavenlyCloudSettings(false);
     if (!this.#previewMarketOpen && this.#previewMarketPopover.hidden) return;
     this.#previewMarketOpen = false;
     this.#previewMarketPopover.hidden = true;
@@ -13745,6 +15187,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
     this.#renderGlowHorizonBackgroundPlugin();
+    this.#renderHeavenlyCloudBackgroundPlugin();
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const enabled = this.#enabledPreviewers.has(previewer.id);
       const status = this.#previewerStatuses.get(previewer.id);
@@ -13789,6 +15232,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
       || !bridgeAvailable
       || (!enabled && preferenceBlocked);
 

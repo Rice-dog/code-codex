@@ -1268,6 +1268,18 @@ export const styles = String.raw`
     stroke-linejoin: round;
     stroke-width: 1.1;
   }
+  .heavenly-cloud-background-extension .preview-extension-icon {
+    color: #38e8ff;
+    background: color-mix(in srgb, #38e8ff 10%, var(--cle-paper));
+    border-color: color-mix(in srgb, #38e8ff 24%, var(--cle-rule));
+  }
+  .heavenly-cloud-background-extension .preview-extension-icon svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.1;
+  }
 
   .particle-settings-panel {
     position: fixed;
@@ -1697,6 +1709,43 @@ export const styles = String.raw`
     color: var(--cle-ink);
     background: color-mix(in srgb, #a558fb 12%, var(--cle-subtle));
     border-color: color-mix(in srgb, #a558fb 45%, var(--cle-rule-strong));
+  }
+  .heavenly-cloud-quality-toolbar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+  }
+  .heavenly-cloud-quality-toolbar button {
+    min-width: 0;
+    min-height: 40px;
+    padding: 4px 6px;
+    color: var(--cle-muted);
+    background: var(--cle-paper-raised);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 12px;
+  }
+  .heavenly-cloud-quality-toolbar button strong {
+    display: block;
+    margin-bottom: 2px;
+    color: #38e8ff;
+    font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+    font-size: 11px;
+  }
+  .heavenly-cloud-quality-toolbar button:hover:not(:disabled),
+  .heavenly-cloud-quality-toolbar button[aria-pressed="true"] {
+    color: var(--cle-ink);
+    background: color-mix(in srgb, #38e8ff 10%, var(--cle-paper-raised));
+    border-color: color-mix(in srgb, #38e8ff 42%, var(--cle-rule-strong));
+  }
+  .heavenly-cloud-quality-toolbar button:disabled { cursor: default; opacity: .55; }
+  .heavenly-cloud-paused-row { margin: 0 0 8px; }
+  .heavenly-cloud-actions button:hover {
+    background: color-mix(in srgb, #38e8ff 10%, var(--cle-subtle));
+    border-color: color-mix(in srgb, #38e8ff 42%, var(--cle-rule-strong));
   }
   .particle-settings-trigger:focus-visible,
   .particle-settings-close:focus-visible,
