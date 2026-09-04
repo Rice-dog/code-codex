@@ -2,6 +2,18 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.3
+
+- `CodeCodex-0.2.3-x64-setup.exe`: recommended installer.
+- `CodeCodex-0.2.3-x64.msi`: MSI installer.
+- `CodeCodex-0.2.3-x64.zip`: portable package, including
+  `Install-CodeCodex.exe` and `Uninstall-CodeCodex.exe`.
+- Expands the seven Heavenly Cloud turbulence octaves into compile-time shader
+  expressions and reconstructs the three-channel spectrum from one sine and
+  one cosine calculation per ray step.
+- Preserves all quality presets, ray counts, turbulence layers, parameters,
+  timing, and the perceived cloud appearance.
+
 ## v0.2.2
 
 - `CodeCodex-0.2.2-x64-setup.exe`: recommended installer.

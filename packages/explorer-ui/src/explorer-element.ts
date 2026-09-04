@@ -5311,6 +5311,9 @@ uniform float uIntroFeather;
 #define MAX_STEPS ${stepCount}
 
 void main() {
+  const vec3 turbulencePhase = vec3(0.0, 0.35, 0.7);
+  const vec3 spectrumPhaseCos = vec3(0.960170269, 0.540302277, -0.416146845);
+  const vec3 spectrumPhaseSin = vec3(-0.279415488, 0.841470957, 0.909297407);
   vec2 screenPlane = vUv * 2.0 - 1.0;
   screenPlane.x *= uResolution.x / uResolution.y;
   float screenRadius = length(screenPlane);
@@ -5329,23 +5332,31 @@ void main() {
     vec3 point = depth * ray;
     point.z -= timeOffset;
 
-    float frequency = 1.0;
     float depthWarp = depth * 0.2;
-    for (int octave = 0; octave < 7; octave++) {
-      point += cos(
-        point.yzx * frequency
-        + depthWarp
-        + vec3(0.0, 0.35, 0.7)
-      ) * (uTurbulence / frequency);
-      frequency *= 1.42857143;
-    }
+    point += cos(point.yzx + depthWarp + turbulencePhase) * uTurbulence;
+    point += cos(point.yzx * 1.42857146 + depthWarp + turbulencePhase)
+      * (uTurbulence / 1.42857146);
+    point += cos(point.yzx * 2.04081631 + depthWarp + turbulencePhase)
+      * (uTurbulence / 2.04081631);
+    point += cos(point.yzx * 2.91545200 + depthWarp + turbulencePhase)
+      * (uTurbulence / 2.91545200);
+    point += cos(point.yzx * 4.16493130 + depthWarp + turbulencePhase)
+      * (uTurbulence / 4.16493130);
+    point += cos(point.yzx * 5.94990206 + depthWarp + turbulencePhase)
+      * (uTurbulence / 5.94990206);
+    point += cos(point.yzx * 8.49985981 + depthWarp + turbulencePhase)
+      * (uTurbulence / 8.49985981);
 
     float distanceToShell = abs(uRadius - length(point.xy));
     float stepDistance = 0.02 + 0.1 * distanceToShell;
     depth += stepDistance;
 
-    vec3 spectrum = 0.5 + 0.5 * cos(
-      depth + uColorShift + vec3(6.0, 1.0, 2.0)
+    float spectrumPhase = depth + uColorShift;
+    float spectrumCosine = cos(spectrumPhase);
+    float spectrumSine = sin(spectrumPhase);
+    vec3 spectrum = 0.5 + 0.5 * (
+      spectrumCosine * spectrumPhaseCos
+      - spectrumSine * spectrumPhaseSin
     );
     radiance += spectrum * (uIntensity / (1500.0 * stepDistance));
   }
