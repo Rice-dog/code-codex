@@ -334,6 +334,11 @@ interface UpdateCheckResult {
   readonly releaseUrl: string;
 }
 
+interface UpdateInstallResult {
+  readonly latestVersion: string;
+  readonly launched: boolean;
+}
+
 interface PreviewTab {
   readonly instanceId: number;
   readonly path: string;
@@ -8126,6 +8131,9 @@ export class CodeCodexElement extends HTMLElement {
   #updateCheckOperation = 0;
   #updateCheckPresentation: UpdateCheckPresentation = "idle";
   #updateCheckSummary = `Check GitHub for updates (current version v${__CODE_CODEX_VERSION__})`;
+  #updateCandidate: UpdateCheckResult | undefined;
+  #updateDialogOpen = false;
+  #updateInstallPending = false;
   #dragSource: DragSource | undefined;
   #externalDragActive = false;
   #dropTargetPath: string | undefined;
@@ -8170,6 +8178,10 @@ export class CodeCodexElement extends HTMLElement {
   readonly #masthead: HTMLElement;
   readonly #editModeButton: HTMLButtonElement;
   readonly #statusCode: HTMLButtonElement;
+  readonly #updatePopover: HTMLElement;
+  readonly #updateMessage: HTMLElement;
+  readonly #updateLaterButton: HTMLButtonElement;
+  readonly #updateInstallButton: HTMLButtonElement;
   readonly #previewMarketButton: HTMLButtonElement;
   readonly #previewMarketPopover: HTMLElement;
   readonly #previewMarketList: HTMLElement;
@@ -8354,7 +8366,15 @@ export class CodeCodexElement extends HTMLElement {
             </div>
           </div>
           <button class="preview-market-button" type="button" aria-haspopup="dialog" aria-controls="cle-preview-market" aria-expanded="false">${icons.preview}<span>Preview Market</span></button>
-          <button class="status-code" type="button" title="Check GitHub for updates" aria-label="Check GitHub for updates">WAIT</button>
+          <div class="update-popover" id="cle-update-dialog" role="dialog" aria-modal="false" aria-labelledby="cle-update-title" aria-describedby="cle-update-message" hidden>
+            <h3 id="cle-update-title">Code-Codex update available</h3>
+            <p class="update-message" id="cle-update-message"></p>
+            <div class="update-actions">
+              <button class="update-later" type="button">Later</button>
+              <button class="update-install" type="button">Update</button>
+            </div>
+          </div>
+          <button class="status-code" type="button" title="Check GitHub for updates" aria-label="Check GitHub for updates" aria-haspopup="dialog" aria-controls="cle-update-dialog" aria-expanded="false">WAIT</button>
         </footer>
         <div class="action-notice" hidden></div>
         <div class="context-menu" role="menu" aria-label="Explorer actions" aria-busy="false" hidden></div>
@@ -8379,6 +8399,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#masthead = this.#required<HTMLElement>(".masthead");
     this.#editModeButton = this.#required<HTMLButtonElement>(".edit-mode-toggle");
     this.#statusCode = this.#required<HTMLButtonElement>(".status-code");
+    this.#updatePopover = this.#required<HTMLElement>(".update-popover");
+    this.#updateMessage = this.#required<HTMLElement>(".update-message");
+    this.#updateLaterButton = this.#required<HTMLButtonElement>(".update-later");
+    this.#updateInstallButton = this.#required<HTMLButtonElement>(".update-install");
     this.#previewMarketButton = this.#required<HTMLButtonElement>(".preview-market-button");
     this.#previewMarketPopover = this.#required<HTMLElement>(".preview-market-popover");
     this.#previewMarketList = this.#required<HTMLElement>(".preview-market-list");
@@ -8668,6 +8692,7 @@ export class CodeCodexElement extends HTMLElement {
     if (!this.#connected) return;
     this.#closeContextMenu(false);
     this.#closePreviewMarket(false);
+    this.#closeUpdateDialog(false);
     this.#clearDragState();
     this.#cancelMarquee();
     this.#preserveDetachedDraft();
@@ -8734,6 +8759,7 @@ export class CodeCodexElement extends HTMLElement {
     if (collapsed) {
       this.#closeContextMenu(false);
       this.#closePreviewMarket(false);
+      this.#closeUpdateDialog(false);
     }
     this.#applySettings();
     this.#persistSettings();
@@ -8748,6 +8774,7 @@ export class CodeCodexElement extends HTMLElement {
     if (this.#disableButton.disabled) return;
     this.#closeContextMenu(false);
     this.#closePreviewMarket(false);
+    this.#closeUpdateDialog(false);
     if (!this.#leaveEditing("Hide Code-Codex and discard your unsaved changes?")) return;
     this.#disableButton.disabled = true;
     this.#dismissed = true;
@@ -9032,6 +9059,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#collapsedTab.addEventListener("click", () => this.collapse(false));
       this.#editModeButton.addEventListener("click", () => this.#toggleEditing());
       this.#statusCode.addEventListener("click", () => void this.#checkForUpdates());
+      this.#updateLaterButton.addEventListener("click", () => this.#closeUpdateDialog(true));
+      this.#updateInstallButton.addEventListener("click", () => void this.#installUpdate());
       this.#previewMarketButton.addEventListener("click", () => this.#togglePreviewMarket());
       this.#previewMarketCloseButton.addEventListener("click", () => this.#closePreviewMarket(true));
       this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
@@ -9351,6 +9380,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#closeContextMenu(false);
     const marketHasFocus = this.#previewMarketPopover.contains(this.#shadow.activeElement);
     this.#closePreviewMarket(marketHasFocus);
+    this.#closeUpdateDialog(false);
     this.#applyResponsivePlacement();
     this.#applySettings();
     this.#renderVisible();
@@ -9403,6 +9433,13 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#heavenlyCloudSettingsPanel)
     ) {
       this.#closePreviewMarket(false);
+    }
+    if (
+      this.#updateDialogOpen
+      && !path.includes(this.#updatePopover)
+      && !path.includes(this.#statusCode)
+    ) {
+      this.#closeUpdateDialog(false);
     }
   };
 
@@ -9462,6 +9499,12 @@ export class CodeCodexElement extends HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       this.#closeHeavenlyCloudSettings(true);
+      return;
+    }
+    if (this.#updateDialogOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeUpdateDialog(true);
       return;
     }
     if (!this.#previewMarketOpen) return;
@@ -14941,6 +14984,7 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
     this.#closeContextMenu(false);
+    this.#closeUpdateDialog(false);
     this.#previewMarketOpen = true;
     this.#previewMarketPopover.hidden = false;
     this.#previewMarketButton.setAttribute("aria-expanded", "true");
@@ -15355,6 +15399,9 @@ export class CodeCodexElement extends HTMLElement {
   #cancelUpdateCheck(): void {
     this.#updateCheckOperation += 1;
     this.#updateCheckPending = false;
+    this.#updateInstallPending = false;
+    this.#updateCandidate = undefined;
+    this.#closeUpdateDialog(false);
     if (this.#updateCheckPresentation === "checking") {
       this.#updateCheckPresentation = "idle";
       this.#updateCheckSummary = `Check GitHub for updates (current version v${__CODE_CODEX_VERSION__})`;
@@ -15375,6 +15422,8 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
 
+    this.#closeUpdateDialog(false);
+    this.#updateCandidate = undefined;
     const operation = ++this.#updateCheckOperation;
     this.#updateCheckPending = true;
     this.#updateCheckPresentation = "checking";
@@ -15388,13 +15437,16 @@ export class CodeCodexElement extends HTMLElement {
 
       this.#updateCheckPresentation = result.status;
       if (result.status === "updateAvailable") {
-        this.#updateCheckSummary = `Code-Codex v${result.latestVersion} is available on GitHub.`;
+        this.#updateCheckSummary = `Code-Codex v${result.latestVersion} is available. You are using v${result.currentVersion}.`;
+        this.#hideActionNotice();
+        this.#openUpdateDialog(result);
       } else if (result.status === "ahead") {
         this.#updateCheckSummary = `This build (v${result.currentVersion}) is newer than GitHub’s latest published release (v${result.latestVersion}).`;
+        this.#showActionNotice(this.#updateCheckSummary);
       } else {
         this.#updateCheckSummary = `Code-Codex v${result.currentVersion} is up to date.`;
+        this.#showActionNotice(this.#updateCheckSummary);
       }
-      this.#showActionNotice(this.#updateCheckSummary);
     } catch (error) {
       if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
       this.#updateCheckPresentation = "error";
@@ -15408,12 +15460,76 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  #openUpdateDialog(result: UpdateCheckResult): void {
+    this.#closePreviewMarket(false);
+    this.#updateCandidate = result;
+    this.#updateDialogOpen = true;
+    this.#updateMessage.textContent = `v${result.latestVersion} is available. You are using v${result.currentVersion}.`;
+    this.#updatePopover.hidden = false;
+    this.#statusCode.setAttribute("aria-expanded", "true");
+    this.#renderUpdateDialog();
+    queueMicrotask(() => {
+      if (this.#updateDialogOpen && !this.#updateInstallPending) this.#updateInstallButton.focus();
+    });
+  }
+
+  #closeUpdateDialog(restoreFocus: boolean): void {
+    if (this.#updateInstallPending) return;
+    if (!this.#updateDialogOpen && this.#updatePopover.hidden) return;
+    this.#updateDialogOpen = false;
+    this.#updatePopover.hidden = true;
+    this.#statusCode.setAttribute("aria-expanded", "false");
+    if (restoreFocus && this.#statusCode.isConnected) this.#statusCode.focus();
+  }
+
+  #renderUpdateDialog(): void {
+    this.#updateLaterButton.disabled = this.#updateInstallPending;
+    this.#updateInstallButton.disabled = this.#updateInstallPending;
+    this.#updateInstallButton.textContent = this.#updateInstallPending ? "Preparing…" : "Update";
+    this.#updatePopover.setAttribute("aria-busy", String(this.#updateInstallPending));
+  }
+
+  async #installUpdate(): Promise<void> {
+    const candidate = this.#updateCandidate;
+    const bridge = this.#bridge;
+    if (!candidate || !bridge?.available || this.#updateInstallPending) return;
+
+    const operation = this.#updateCheckOperation;
+    this.#updateInstallPending = true;
+    this.#renderUpdateDialog();
+    this.#renderStatus();
+    this.#showActionProgress(`Downloading and verifying Code-Codex v${candidate.latestVersion}…`);
+    try {
+      const result = normalizeUpdateInstallResult(await bridge.request<unknown>("explorer.update.install", {
+        latestVersion: candidate.latestVersion,
+      }));
+      if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
+      if (result.latestVersion !== candidate.latestVersion || !result.launched) {
+        throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The update installer response was not valid." });
+      }
+      this.#updateInstallPending = false;
+      this.#closeUpdateDialog(false);
+      this.#updateCheckSummary = `Code-Codex v${result.latestVersion} setup is open. Finish installation, then restart Codex.`;
+      this.#showActionNotice(this.#updateCheckSummary);
+    } catch (error) {
+      if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
+      this.#updateCheckSummary = updateInstallError(error);
+      this.#showActionNotice(this.#updateCheckSummary, "error");
+    } finally {
+      if (operation === this.#updateCheckOperation) {
+        this.#updateInstallPending = false;
+        this.#renderUpdateDialog();
+        this.#renderStatus();
+      }
+    }
+  }
+
   #renderStatus(): void {
     const versionVisible = this.#state === "ready" || this.#state === "empty" || this.#state === "no-project";
     this.#statusCode.textContent = versionVisible ? `v${__CODE_CODEX_VERSION__}` : this.#state.toUpperCase().slice(0, 8);
-    this.#statusCode.disabled = !versionVisible || this.#updateCheckPending;
+    this.#statusCode.disabled = !versionVisible || this.#updateCheckPending || this.#updateInstallPending;
     this.#statusCode.dataset.updateState = versionVisible ? this.#updateCheckPresentation : "idle";
-    this.#statusCode.setAttribute("aria-busy", String(versionVisible && this.#updateCheckPending));
+    this.#statusCode.setAttribute("aria-busy", String(versionVisible && (this.#updateCheckPending || this.#updateInstallPending)));
     if (versionVisible) {
       this.#statusCode.title = this.#updateCheckSummary;
       this.#statusCode.setAttribute("aria-label", this.#updateCheckSummary);
@@ -15889,6 +16005,20 @@ function normalizeUpdateCheckResult(raw: unknown): UpdateCheckResult {
   };
 }
 
+function normalizeUpdateInstallResult(raw: unknown): UpdateInstallResult {
+  const object = asRecord(raw);
+  if (
+    !object
+    || Object.keys(object).length !== 2
+    || typeof object.latestVersion !== "string"
+    || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(object.latestVersion)
+    || object.launched !== true
+  ) {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The update installer response was not valid." });
+  }
+  return { latestVersion: object.latestVersion, launched: true };
+}
+
 function updateCheckError(error: unknown): string {
   const code = errorCode(error);
   if (code === "UPDATE_CHECK_RATE_LIMITED") return "GitHub’s update-check limit was reached. Try again later.";
@@ -15898,6 +16028,20 @@ function updateCheckError(error: unknown): string {
   }
   if (code === "NO_BRIDGE") return "Could not check GitHub because Code-Codex is disconnected.";
   return "Could not reach GitHub. Check your internet connection and try again.";
+}
+
+function updateInstallError(error: unknown): string {
+  const code = errorCode(error);
+  if (code === "UPDATE_NO_LONGER_AVAILABLE") return "The selected update is no longer the latest. Check again.";
+  if (code === "UPDATE_ASSET_UNAVAILABLE") return "The latest GitHub release does not contain a verified Windows setup program.";
+  if (code === "UPDATE_DOWNLOAD_FAILED") return "The update could not be downloaded from GitHub. Check your connection and try again.";
+  if (code === "UPDATE_VERIFY_FAILED") return "The downloaded update failed integrity verification and was not opened.";
+  if (code === "UPDATE_LAUNCH_FAILED") return "The update was verified, but Windows could not open the setup program.";
+  if (code === "UPDATE_INSTALL_BUSY") return "Another Code-Codex update is already being prepared.";
+  if (code === "UPDATE_INSTALL_UNSUPPORTED") return "Automatic updates are supported on Windows only.";
+  if (code === "UPDATE_CHECK_RATE_LIMITED") return "GitHub’s update-check limit was reached. Try again later.";
+  if (code === "NO_BRIDGE" || code === "CANCELLED") return "Code-Codex disconnected before the update was ready.";
+  return "The Code-Codex update could not be prepared. Try again later.";
 }
 
 function isTransientBootstrapError(error: unknown): boolean {

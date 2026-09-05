@@ -1,8 +1,11 @@
 #[cfg(windows)]
 use std::ffi::OsString;
+use std::io::Write as _;
 #[cfg(windows)]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
+#[cfg(windows)]
+use std::process::Command;
 #[cfg(windows)]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,6 +26,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::Digest as _;
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 #[cfg(windows)]
@@ -77,8 +81,11 @@ const GITHUB_LATEST_RELEASE_ENDPOINT: &str =
 const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "2022-11-28";
 const MAX_UPDATE_RESPONSE_BYTES: usize = 256 * 1024;
+const MAX_UPDATE_ASSET_BYTES: u64 = 128 * 1024 * 1024;
+const MIN_UPDATE_ASSET_BYTES: u64 = 256 * 1024;
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Clone)]
 pub struct NativeBridge {
@@ -99,17 +106,29 @@ struct BridgeInner {
     notification_sender: RwLock<Option<broadcast::Sender<BridgeNotification>>>,
     window_transparency: WindowTransparencyController,
     update_checker: UpdateChecker,
+    update_install_lock: Mutex<()>,
 }
 
 struct UpdateChecker {
     client: Option<reqwest::Client>,
+    download_client: Option<reqwest::Client>,
     endpoint: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct GithubLatestRelease {
     tag_name: String,
     html_url: String,
+    #[serde(default)]
+    assets: Vec<GithubReleaseAsset>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GithubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+    size: u64,
+    digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -130,6 +149,19 @@ struct UpdateCheckResult {
     release_url: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateInstallParams {
+    latest_version: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInstallResult {
+    latest_version: String,
+    launched: bool,
+}
+
 impl UpdateChecker {
     fn github() -> Self {
         Self::new(GITHUB_LATEST_RELEASE_ENDPOINT)
@@ -142,13 +174,33 @@ impl UpdateChecker {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .ok();
+        let download_client = reqwest::Client::builder()
+            .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+            .timeout(UPDATE_DOWNLOAD_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 || !trusted_update_download_host(attempt.url()) {
+                    attempt.stop()
+                } else {
+                    attempt.follow()
+                }
+            }))
+            .build()
+            .ok();
         Self {
             client,
+            download_client,
             endpoint: endpoint.into(),
         }
     }
 
     async fn check(&self, current_version: &str) -> Result<UpdateCheckResult, BridgeError> {
+        classify_update(current_version, self.fetch_release(current_version).await?)
+    }
+
+    async fn fetch_release(
+        &self,
+        current_version: &str,
+    ) -> Result<GithubLatestRelease, BridgeError> {
         let client = self.client.as_ref().ok_or_else(update_unavailable_error)?;
         let mut response = client
             .get(&self.endpoint)
@@ -193,10 +245,86 @@ impl UpdateChecker {
             }
             body.extend_from_slice(&chunk);
         }
-        let release: GithubLatestRelease =
-            serde_json::from_slice(&body).map_err(|_| update_invalid_response_error())?;
-        classify_update(current_version, release)
+        serde_json::from_slice(&body).map_err(|_| update_invalid_response_error())
     }
+
+    async fn download_installer(
+        &self,
+        current_version: &str,
+        expected_latest_version: &str,
+    ) -> Result<DownloadedUpdate, BridgeError> {
+        let release = self.fetch_release(current_version).await?;
+        let update = classify_update(current_version, release.clone())?;
+        if update.status != UpdateAvailability::UpdateAvailable
+            || update.latest_version != expected_latest_version
+        {
+            return Err(update_no_longer_available_error());
+        }
+        let asset = select_update_asset(&release, &update.latest_version)?;
+        let expected_digest =
+            validate_update_asset(asset, &release.tag_name, &update.latest_version)?;
+        let download_client = self
+            .download_client
+            .as_ref()
+            .ok_or_else(update_download_error)?;
+        let mut response = download_client
+            .get(&asset.browser_download_url)
+            .header(ACCEPT, "application/octet-stream")
+            .header(USER_AGENT, format!("Code-Codex/{current_version}"))
+            .send()
+            .await
+            .map_err(|_| update_download_error())?;
+        if !response.status().is_success()
+            || !trusted_update_download_host(response.url())
+            || response
+                .content_length()
+                .is_some_and(|length| length != asset.size || length > MAX_UPDATE_ASSET_BYTES)
+        {
+            return Err(update_download_error());
+        }
+
+        let directory = tempfile::Builder::new()
+            .prefix("CodeCodex-Update-")
+            .tempdir()
+            .map_err(|_| update_download_error())?;
+        let installer_path = directory.path().join(&asset.name);
+        let mut file =
+            std::fs::File::create(&installer_path).map_err(|_| update_download_error())?;
+        let mut digest = sha2::Sha256::new();
+        let mut downloaded = 0_u64;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| update_download_error())?
+        {
+            downloaded = downloaded.saturating_add(chunk.len() as u64);
+            if downloaded > asset.size || downloaded > MAX_UPDATE_ASSET_BYTES {
+                return Err(update_download_error());
+            }
+            file.write_all(&chunk)
+                .map_err(|_| update_download_error())?;
+            sha2::Digest::update(&mut digest, &chunk);
+        }
+        file.sync_all().map_err(|_| update_download_error())?;
+        drop(file);
+        if downloaded != asset.size
+            || format!("{:x}", sha2::Digest::finalize(digest)) != expected_digest
+        {
+            return Err(update_verification_error());
+        }
+
+        Ok(DownloadedUpdate {
+            installer_path,
+            directory,
+            latest_version: update.latest_version,
+        })
+    }
+}
+
+struct DownloadedUpdate {
+    installer_path: std::path::PathBuf,
+    directory: tempfile::TempDir,
+    latest_version: String,
 }
 
 fn response_is_json(response: &reqwest::Response) -> bool {
@@ -260,6 +388,96 @@ fn validate_release_url(release_url: &str, tag_name: &str) -> Result<(), BridgeE
     Ok(())
 }
 
+fn select_update_asset<'a>(
+    release: &'a GithubLatestRelease,
+    latest_version: &str,
+) -> Result<&'a GithubReleaseAsset, BridgeError> {
+    let expected_name = format!("CodeCodex-{latest_version}-x64-setup.exe");
+    let mut matches = release
+        .assets
+        .iter()
+        .filter(|asset| asset.name == expected_name);
+    let asset = matches.next().ok_or_else(update_asset_error)?;
+    if matches.next().is_some() {
+        return Err(update_asset_error());
+    }
+    Ok(asset)
+}
+
+fn validate_update_asset(
+    asset: &GithubReleaseAsset,
+    tag_name: &str,
+    latest_version: &str,
+) -> Result<String, BridgeError> {
+    let expected_name = format!("CodeCodex-{latest_version}-x64-setup.exe");
+    if asset.name != expected_name
+        || asset.size < MIN_UPDATE_ASSET_BYTES
+        || asset.size > MAX_UPDATE_ASSET_BYTES
+        || asset.browser_download_url.len() > 1_024
+    {
+        return Err(update_asset_error());
+    }
+    let parsed = url::Url::parse(&asset.browser_download_url).map_err(|_| update_asset_error())?;
+    let expected_path =
+        format!("/Rice-dog/code-codex/releases/download/{tag_name}/{expected_name}");
+    if parsed.scheme() != "https"
+        || parsed.host_str() != Some("github.com")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.path() != expected_path
+    {
+        return Err(update_asset_error());
+    }
+    let digest = asset
+        .digest
+        .as_deref()
+        .and_then(|digest| digest.strip_prefix("sha256:"))
+        .filter(|digest| digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(update_asset_error)?;
+    Ok(digest)
+}
+
+fn trusted_update_download_host(url: &url::Url) -> bool {
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && matches!(
+            url.host_str(),
+            Some("github.com" | "release-assets.githubusercontent.com")
+        )
+}
+
+#[cfg(windows)]
+fn launch_downloaded_update(update: DownloadedUpdate) -> Result<UpdateInstallResult, BridgeError> {
+    let mut child = Command::new(&update.installer_path)
+        .spawn()
+        .map_err(|_| update_launch_error())?;
+    let retained_directory = update.directory.keep();
+    let installer_path = update.installer_path;
+    thread::spawn(move || {
+        let _ = child.wait();
+        let _ = std::fs::remove_file(installer_path);
+        let _ = std::fs::remove_dir(retained_directory);
+    });
+    Ok(UpdateInstallResult {
+        latest_version: update.latest_version,
+        launched: true,
+    })
+}
+
+#[cfg(not(windows))]
+fn launch_downloaded_update(_update: DownloadedUpdate) -> Result<UpdateInstallResult, BridgeError> {
+    Err(BridgeError::new(
+        "UPDATE_INSTALL_UNSUPPORTED",
+        "Automatic Code-Codex updates are supported on Windows only.",
+    ))
+}
+
 fn update_unavailable_error() -> BridgeError {
     BridgeError::new(
         "UPDATE_CHECK_UNAVAILABLE",
@@ -285,6 +503,48 @@ fn update_internal_error() -> BridgeError {
     BridgeError::new(
         "UPDATE_CHECK_FAILED",
         "The installed Code-Codex version could not be checked.",
+    )
+}
+
+fn update_no_longer_available_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_NO_LONGER_AVAILABLE",
+        "The selected Code-Codex update is no longer the latest release.",
+    )
+}
+
+fn update_asset_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_ASSET_UNAVAILABLE",
+        "The latest release does not contain a verified Code-Codex setup program.",
+    )
+}
+
+fn update_download_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_DOWNLOAD_FAILED",
+        "The Code-Codex update could not be downloaded from GitHub.",
+    )
+}
+
+fn update_verification_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_VERIFY_FAILED",
+        "The downloaded Code-Codex update did not pass integrity verification.",
+    )
+}
+
+fn update_launch_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_LAUNCH_FAILED",
+        "The verified Code-Codex setup program could not be opened.",
+    )
+}
+
+fn update_busy_error() -> BridgeError {
+    BridgeError::new(
+        "UPDATE_INSTALL_BUSY",
+        "Another Code-Codex update is already being prepared.",
     )
 }
 
@@ -1755,6 +2015,7 @@ impl NativeBridge {
                 notification_sender: RwLock::new(None),
                 window_transparency: WindowTransparencyController::new(),
                 update_checker: UpdateChecker::github(),
+                update_install_lock: Mutex::new(()),
             }),
         }
     }
@@ -2536,6 +2797,33 @@ impl NativeBridge {
         serde_json::to_value(result).map_err(|_| update_internal_error())
     }
 
+    async fn update_install(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        self.ensure_epoch(epoch)?;
+        let params: UpdateInstallParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let requested =
+            Version::parse(&params.latest_version).map_err(|_| BridgeError::invalid_request())?;
+        if requested.to_string() != params.latest_version
+            || !requested.pre.is_empty()
+            || !requested.build.is_empty()
+        {
+            return Err(BridgeError::invalid_request());
+        }
+        let _guard = self
+            .inner
+            .update_install_lock
+            .try_lock()
+            .map_err(|_| update_busy_error())?;
+        let update = self
+            .inner
+            .update_checker
+            .download_installer(env!("CARGO_PKG_VERSION"), &params.latest_version)
+            .await?;
+        self.ensure_epoch(epoch)?;
+        let result = launch_downloaded_update(update)?;
+        serde_json::to_value(result).map_err(|_| update_internal_error())
+    }
+
     fn window_transparency_set(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         self.ensure_epoch(epoch)?;
         let params: WindowTransparencyParams =
@@ -2859,6 +3147,7 @@ impl BridgeHandler for NativeBridge {
             "explorer.settings.get" => self.settings_get(request.params).await,
             "explorer.settings.set" => self.settings_set(request.params, epoch).await,
             "explorer.update.check" => self.update_check(request.params, epoch).await,
+            "explorer.update.install" => self.update_install(request.params, epoch).await,
             "explorer.window.transparency.set" => {
                 self.window_transparency_set(request.params, epoch)
             }
@@ -3402,6 +3691,19 @@ mod tests {
         GithubLatestRelease {
             tag_name: tag_name.to_owned(),
             html_url: format!("https://github.com/Rice-dog/code-codex/releases/tag/{tag_name}"),
+            assets: Vec::new(),
+        }
+    }
+
+    fn github_setup_asset(version: &str) -> GithubReleaseAsset {
+        let name = format!("CodeCodex-{version}-x64-setup.exe");
+        GithubReleaseAsset {
+            browser_download_url: format!(
+                "https://github.com/Rice-dog/code-codex/releases/download/v{version}/{name}"
+            ),
+            name,
+            size: MIN_UPDATE_ASSET_BYTES,
+            digest: Some(format!("sha256:{}", "a".repeat(64))),
         }
     }
 
@@ -3436,10 +3738,35 @@ mod tests {
             GithubLatestRelease {
                 tag_name: "v0.2.0".to_owned(),
                 html_url: "https://example.com/Rice-dog/code-codex/releases/tag/v0.2.0".to_owned(),
+                assets: Vec::new(),
             },
         )
         .expect_err("untrusted release URL");
         assert_eq!(untrusted.code, "UPDATE_CHECK_INVALID_RESPONSE");
+    }
+
+    #[test]
+    fn automatic_update_accepts_only_the_exact_hashed_setup_asset() {
+        let mut release = github_release("v0.2.0");
+        release.assets.push(github_setup_asset("0.2.0"));
+        let asset = select_update_asset(&release, "0.2.0").expect("setup asset");
+        assert_eq!(
+            validate_update_asset(asset, &release.tag_name, "0.2.0")
+                .expect("verified asset metadata"),
+            "a".repeat(64)
+        );
+
+        release.assets[0].browser_download_url =
+            "https://example.com/CodeCodex-0.2.0-x64-setup.exe".to_owned();
+        let untrusted = validate_update_asset(&release.assets[0], "v0.2.0", "0.2.0")
+            .expect_err("untrusted download URL");
+        assert_eq!(untrusted.code, "UPDATE_ASSET_UNAVAILABLE");
+
+        release.assets[0] = github_setup_asset("0.2.0");
+        release.assets[0].digest = None;
+        let missing_digest = validate_update_asset(&release.assets[0], "v0.2.0", "0.2.0")
+            .expect_err("missing digest");
+        assert_eq!(missing_digest.code, "UPDATE_ASSET_UNAVAILABLE");
     }
 
     #[tokio::test]
@@ -3491,6 +3818,41 @@ mod tests {
             .await
             .expect_err("update endpoint cannot be supplied by the renderer");
         assert_eq!(error.code, "INVALID_REQUEST");
+    }
+
+    #[tokio::test]
+    async fn update_install_rechecks_github_and_requires_the_setup_asset() {
+        let body = serde_json::to_vec(&json!({
+            "tag_name": "v999.0.0",
+            "html_url": "https://github.com/Rice-dog/code-codex/releases/tag/v999.0.0",
+            "assets": []
+        }))
+        .expect("release JSON");
+        let response = http_response("200 OK", "application/json", &body);
+        let (endpoint, _request_receiver, server) = mock_update_server(response).await;
+        let (_directory, mut bridge) = manual_bridge().await;
+        Arc::get_mut(&mut bridge.inner)
+            .expect("exclusive bridge")
+            .update_checker = UpdateChecker::new(endpoint);
+
+        let error = bridge
+            .handle(request(
+                "explorer.update.install",
+                json!({ "latestVersion": "999.0.0" }),
+            ))
+            .await
+            .expect_err("the exact setup asset is required");
+        assert_eq!(error.code, "UPDATE_ASSET_UNAVAILABLE");
+        server.await.expect("mock update server");
+
+        let invalid = bridge
+            .handle(request(
+                "explorer.update.install",
+                json!({ "latestVersion": "v999.0.0" }),
+            ))
+            .await
+            .expect_err("renderer version must be canonical");
+        assert_eq!(invalid.code, "INVALID_REQUEST");
     }
 
     #[tokio::test]

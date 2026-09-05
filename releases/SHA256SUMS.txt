@@ -1,4 +1,4 @@
-a3bf8b8c2ad293d63a5e06ca4af41b9002b662d87e040bfe302bc37c7270948c  CodeCodex-0.2.3-x64.zip
-1848efffb987ce211a57ac4c6d5261184e0d10ca5c85a2046a9e6bbe69b7c49a  CodeCodex-0.2.3-x64-setup.exe
-3d5f02bf940a9ecc39c2b3a2cdb2e5d6eda643cc22e5d3c40971030a20f2d51f  CodeCodex-0.2.3-x64.msi
-c9b9a8332e63681a2722d60088c8363cc197d3b7261bbe63212f73e87e9ffd33  Uninstall-CodeCodex.exe
+fdeff6b27d499750b0cdff08fccb4be6191d007327b97d0a2ca8252477a4bdf5  CodeCodex-0.2.4-x64.zip
+507ba5640d17a04dc20dbbd5e6aeb01c3d6aef6ab9097ae50d863ae06d4a1b33  CodeCodex-0.2.4-x64-setup.exe
+d9fd53f8ccdca581a07bfbce89375df9bc248739acd88344a80a07f1af627439  CodeCodex-0.2.4-x64.msi
+60108829c73dfe60f1f8b43a80c16adf20c65b81e22be5329ade727a43b0ab28  Uninstall-CodeCodex.exe

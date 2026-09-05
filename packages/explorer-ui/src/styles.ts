@@ -1007,6 +1007,73 @@ export const styles = String.raw`
     outline-offset: 0;
   }
 
+  .update-popover {
+    position: absolute;
+    right: 8px;
+    bottom: calc(100% + 8px);
+    z-index: 21;
+    width: min(276px, calc(100% - 16px));
+    padding: 13px;
+    color: var(--cle-ink);
+    background: var(--cle-paper-raised);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 10px;
+    box-shadow: 0 14px 34px rgba(12, 18, 28, .2), 0 3px 10px rgba(12, 18, 28, .12);
+    animation: cle-market-in 130ms cubic-bezier(.2, .8, .2, 1) both;
+  }
+  .update-popover[hidden] { display: none; }
+  .update-popover::after {
+    content: "";
+    position: absolute;
+    right: 18px;
+    bottom: -6px;
+    width: 10px;
+    height: 10px;
+    background: var(--cle-paper-raised);
+    border-right: 1px solid var(--cle-rule-strong);
+    border-bottom: 1px solid var(--cle-rule-strong);
+    transform: rotate(45deg);
+  }
+  .update-popover h3 {
+    margin: 0;
+    color: var(--cle-ink);
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 18px;
+  }
+  .update-message {
+    margin: 4px 0 12px;
+    color: var(--cle-muted);
+    font-size: 11px;
+    line-height: 16px;
+  }
+  .update-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 7px;
+  }
+  .update-actions button {
+    min-width: 58px;
+    min-height: 27px;
+    padding: 4px 10px;
+    color: var(--cle-ink);
+    background: var(--cle-paper);
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .update-actions .update-install {
+    color: #fff;
+    background: var(--cle-focus);
+    border-color: var(--cle-focus);
+  }
+  .update-actions button:hover:not(:disabled) { filter: brightness(.96); }
+  .update-actions button:focus-visible { outline: 2px solid var(--cle-focus); outline-offset: 2px; }
+  .update-actions button:disabled { cursor: default; opacity: .65; }
+
   .preview-market-popover {
     position: absolute;
     z-index: 20;
@@ -2592,6 +2659,7 @@ export const styles = String.raw`
     :host,
     :host([data-busy="true"]) .activity-bus,
     .preview-market-popover,
+    .update-popover,
     .particle-settings-panel,
     .status-code[data-update-state="checking"]::after { animation: none !important; }
     .activity-bus,
