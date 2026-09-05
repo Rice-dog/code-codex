@@ -168,6 +168,8 @@ animation settings, customizable glow colors, and Chinese/English labels.
 Enabling it switches Codex to Dark appearance and disabling it restores the
 previous appearance setting.
 
+![Code-Codex Heavenly Cloud Background appearance plugin](docs/screenshots/heavenly-cloud-background.png)
+
 The Heavenly Cloud Background appearance plugin adds a textureless,
 ray-marched celestial cloud tunnel across the full Codex window. It provides
 adjustable drift, light density, turbulence, tunnel radius, spectral shift,
