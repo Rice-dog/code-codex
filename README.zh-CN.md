@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.4"><img alt="版本" src="https://img.shields.io/badge/version-0.2.4-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.5"><img alt="版本" src="https://img.shields.io/badge/version-0.2.5-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,15 +35,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.2.4-x64-setup.exe`
-- 备选：`CodeCodex-0.2.4-x64.msi`
-- 便携包：`CodeCodex-0.2.4-x64.zip`
+- 推荐：`CodeCodex-0.2.5-x64-setup.exe`
+- 备选：`CodeCodex-0.2.5-x64.msi`
+- 便携包：`CodeCodex-0.2.5-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.4-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.5-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -82,7 +82,7 @@ Get-FileHash .\CodeCodex-0.2.4-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.4
+./scripts/package.ps1 -Version 0.2.5
 ```
 
 生成结果会写入 `releases/`。
@@ -114,6 +114,7 @@ Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创
 - “黑洞背景”外观插件提供 GPU 渲染的吸积盘、辉光、质量控制和四套内置视觉预设。
 - “发光地平线背景”外观插件提供四个方向、滚轮驱动动画、惯性释放、可调辉光颜色和中英文设置面板。
 - “天境云隧道背景”外观插件提供实时云隧道、指针引导、电影式开场、三档渲染质量和中英文设置面板。
+- “极光电离层背景”外观插件提供体积光幕、程序化星空、自适应渲染质量、电影式揭示控制和中英文设置面板。
 - 点击文件树底部的版本号，可通过 GitHub 检查最新发布的稳定版本。
 - Codex 软件包版本仅作为诊断信息；未来版本不再受固定版本白名单限制，而是通过实时协议和 DOM 结构检查。
 - 在本地以表格形式预览 CSV，支持引号字段、字段内换行、固定表头和受限渲染。
@@ -159,6 +160,12 @@ Codex 配置中。
 “天境云隧道背景”外观插件可在整个 Codex 窗口中显示无需纹理的实时光线步进云隧道，支持调节
 前进速度、光雾密度、湍流强度、隧道半径、光谱偏移、指针引导、开场动画和三档渲染质量。
 设置面板支持中文与英文切换，并复用其他 GPU 背景插件的自动深色外观与停用恢复机制。
+
+![Code-Codex 极光电离层背景外观插件](docs/screenshots/aurora-ionosphere-background.png)
+
+“极光电离层背景”外观插件可在整个 Codex 窗口中显示运行时生成的体积极光光幕和程序化星空。
+插件保留原效果的三阶段 WebGL 渲染、自适应质量和电影式揭示，并在中英文二级设置面板中提供
+电离层场、开场顺序、渲染质量和动画状态等参数。
 
 ## 仓库结构
 
