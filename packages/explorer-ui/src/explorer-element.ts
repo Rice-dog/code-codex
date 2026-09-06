@@ -83,12 +83,14 @@ const PARTICLE_BACKGROUND_PLUGIN_ID = "code-codex.particle-image-background";
 const BLACK_HOLE_BACKGROUND_PLUGIN_ID = "code-codex.black-hole-background";
 const GLOW_HORIZON_BACKGROUND_PLUGIN_ID = "code-codex.glow-horizon-background";
 const HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID = "code-codex.heavenly-cloud-background";
+const AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID = "code-codex.aurora-ionosphere-background";
 const APPEARANCE_PLUGIN_IDS = new Set([
   TRANSPARENT_BACKGROUND_PLUGIN_ID,
   PARTICLE_BACKGROUND_PLUGIN_ID,
   BLACK_HOLE_BACKGROUND_PLUGIN_ID,
   GLOW_HORIZON_BACKGROUND_PLUGIN_ID,
   HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,
+  AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,
 ]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
@@ -104,6 +106,7 @@ const PARTICLE_BACKGROUND_THEME_LEASE_KEY = "code-codex:particle-theme-lease:v1"
 const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1";
 const GLOW_HORIZON_BACKGROUND_SETTINGS_KEY = "code-codex:glow-horizon-background:v1";
 const HEAVENLY_CLOUD_BACKGROUND_SETTINGS_KEY = "code-codex:heavenly-cloud-background:v1";
+const AURORA_IONOSPHERE_BACKGROUND_SETTINGS_KEY = "code-codex:aurora-ionosphere-background:v1";
 const BACKGROUND_SETTINGS_LANGUAGE_KEY = "code-codex:background-settings-language:v1";
 const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
 const CODEX_APPEARANCE_POLL_INTERVAL_MS = 1_500;
@@ -592,7 +595,8 @@ type DarkBackgroundPluginId =
   | typeof PARTICLE_BACKGROUND_PLUGIN_ID
   | typeof BLACK_HOLE_BACKGROUND_PLUGIN_ID
   | typeof GLOW_HORIZON_BACKGROUND_PLUGIN_ID
-  | typeof HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID;
+  | typeof HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
+  | typeof AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID;
 
 interface ParticleThemeLease {
   readonly owner?: DarkBackgroundPluginId;
@@ -700,6 +704,44 @@ type HeavenlyCloudControlGroup = "field" | "interaction" | "opening";
 interface HeavenlyCloudNumericControlDefinition {
   readonly key: HeavenlyCloudNumericSettingKey;
   readonly group: HeavenlyCloudControlGroup;
+  readonly id: string;
+  readonly label: string;
+  readonly labelZh: string;
+  readonly minimum: number;
+  readonly maximum: number;
+  readonly step: number;
+  readonly unit?: string;
+  readonly precision?: number;
+}
+
+type AuroraIonosphereQuality = "low" | "medium" | "high";
+
+interface AuroraIonosphereBackgroundSettings {
+  readonly quality: AuroraIonosphereQuality;
+  readonly speed: number;
+  readonly intensity: number;
+  readonly curtainScale: number;
+  readonly turbulence: number;
+  readonly glow: number;
+  readonly starDensity: number;
+  readonly introDuration: number;
+  readonly introFeather: number;
+  readonly introStart: number;
+  readonly introEnd: number;
+  readonly introSkyEnd: number;
+  readonly introStarStart: number;
+  readonly paused: boolean;
+}
+
+type AuroraIonosphereNumericSettingKey = {
+  [Key in keyof AuroraIonosphereBackgroundSettings]: AuroraIonosphereBackgroundSettings[Key] extends number ? Key : never;
+}[keyof AuroraIonosphereBackgroundSettings];
+
+type AuroraIonosphereControlGroup = "field" | "opening";
+
+interface AuroraIonosphereNumericControlDefinition {
+  readonly key: AuroraIonosphereNumericSettingKey;
+  readonly group: AuroraIonosphereControlGroup;
   readonly id: string;
   readonly label: string;
   readonly labelZh: string;
@@ -1083,6 +1125,50 @@ const HEAVENLY_CLOUD_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
   { key: "introDuration", group: "opening", id: "cle-heavenly-cloud-intro-duration", label: "Opening duration", labelZh: "开场时长", minimum: 0.8, maximum: 5, step: 0.1, unit: "s", precision: 1 },
   { key: "introFeather", group: "opening", id: "cle-heavenly-cloud-intro-feather", label: "Aperture feather", labelZh: "圆形边缘羽化", minimum: 0.02, maximum: 0.8, step: 0.01, precision: 2 },
 ] satisfies readonly HeavenlyCloudNumericControlDefinition[]);
+
+const AURORA_IONOSPHERE_QUALITY = Object.freeze({
+  low: Object.freeze({ steps: 32, rayScale: 0.72, maxDpr: 1.1, minAdaptiveScale: 0.92, noiseAtlasSize: 512 }),
+  medium: Object.freeze({ steps: 50, rayScale: 0.76, maxDpr: 1.25, minAdaptiveScale: 0.9, noiseAtlasSize: 768 }),
+  high: Object.freeze({ steps: 72, rayScale: 0.82, maxDpr: 1.4, minAdaptiveScale: 0.9, noiseAtlasSize: 1024 }),
+} satisfies Readonly<Record<AuroraIonosphereQuality, Readonly<{
+  steps: 32 | 50 | 72;
+  rayScale: number;
+  maxDpr: number;
+  minAdaptiveScale: number;
+  noiseAtlasSize: number;
+}>>>);
+
+const DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS: AuroraIonosphereBackgroundSettings = Object.freeze({
+  quality: "medium",
+  speed: 1,
+  intensity: 1,
+  curtainScale: 0.5,
+  turbulence: 0.58,
+  glow: 0.72,
+  starDensity: 0.56,
+  introDuration: 2.4,
+  introFeather: 0.16,
+  introStart: -0.22,
+  introEnd: 1.32,
+  introSkyEnd: 0.48,
+  introStarStart: 0.34,
+  paused: false,
+});
+
+const AURORA_IONOSPHERE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
+  { key: "speed", group: "field", id: "cle-aurora-ionosphere-speed", label: "Drift speed", labelZh: "漂移速度", minimum: 0, maximum: 3, step: 0.01, unit: "×", precision: 2 },
+  { key: "intensity", group: "field", id: "cle-aurora-ionosphere-intensity", label: "Aurora intensity", labelZh: "极光强度", minimum: 0, maximum: 3, step: 0.01, unit: "×", precision: 2 },
+  { key: "curtainScale", group: "field", id: "cle-aurora-ionosphere-curtain-scale", label: "Curtain density", labelZh: "光幕密度", minimum: 0.05, maximum: 2, step: 0.01, precision: 2 },
+  { key: "turbulence", group: "field", id: "cle-aurora-ionosphere-turbulence", label: "Turbulence", labelZh: "湍流扰动", minimum: 0, maximum: 1.8, step: 0.01, precision: 2 },
+  { key: "glow", group: "field", id: "cle-aurora-ionosphere-glow", label: "Ion glow", labelZh: "离子辉光", minimum: 0, maximum: 2.4, step: 0.01, precision: 2 },
+  { key: "starDensity", group: "field", id: "cle-aurora-ionosphere-star-density", label: "Star field", labelZh: "星尘数量", minimum: 0, maximum: 1.5, step: 0.01, precision: 2 },
+  { key: "introDuration", group: "opening", id: "cle-aurora-ionosphere-intro-duration", label: "Opening duration", labelZh: "开场时长", minimum: 0.6, maximum: 6, step: 0.05, unit: "s", precision: 2 },
+  { key: "introFeather", group: "opening", id: "cle-aurora-ionosphere-intro-feather", label: "Reveal feather", labelZh: "揭示羽化", minimum: 0.03, maximum: 0.4, step: 0.01, precision: 2 },
+  { key: "introStart", group: "opening", id: "cle-aurora-ionosphere-intro-start", label: "Curtain origin", labelZh: "光幕起点", minimum: -0.5, maximum: 0.25, step: 0.01, precision: 2 },
+  { key: "introEnd", group: "opening", id: "cle-aurora-ionosphere-intro-end", label: "Curtain finish", labelZh: "光幕终点", minimum: 0.8, maximum: 1.8, step: 0.01, precision: 2 },
+  { key: "introSkyEnd", group: "opening", id: "cle-aurora-ionosphere-intro-sky-end", label: "Sky reveal", labelZh: "天空显现", minimum: 0.1, maximum: 0.9, step: 0.01, precision: 2 },
+  { key: "introStarStart", group: "opening", id: "cle-aurora-ionosphere-intro-star-start", label: "Star delay", labelZh: "星尘延迟", minimum: 0, maximum: 0.8, step: 0.01, precision: 2 },
+] satisfies readonly AuroraIonosphereNumericControlDefinition[]);
 
 function calculateParticleCursorStrengthValues(cursorStrength: number): ParticleCursorStrengthValues {
   const baseStrength = Math.min(
@@ -1701,6 +1787,46 @@ function writeHeavenlyCloudBackgroundSettings(settings: HeavenlyCloudBackgroundS
   }
 }
 
+function normalizeAuroraIonosphereSettings(value: unknown): AuroraIonosphereBackgroundSettings {
+  const record = isObjectRecord(value) ? value : {};
+  const defaults = DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS;
+  const quality = record.quality === "low" || record.quality === "medium" || record.quality === "high"
+    ? record.quality
+    : defaults.quality;
+  return {
+    quality,
+    speed: clampParticleNumber(record.speed, 0, 3, defaults.speed),
+    intensity: clampParticleNumber(record.intensity, 0, 3, defaults.intensity),
+    curtainScale: clampParticleNumber(record.curtainScale, 0.05, 2, defaults.curtainScale),
+    turbulence: clampParticleNumber(record.turbulence, 0, 1.8, defaults.turbulence),
+    glow: clampParticleNumber(record.glow, 0, 2.4, defaults.glow),
+    starDensity: clampParticleNumber(record.starDensity, 0, 1.5, defaults.starDensity),
+    introDuration: clampParticleNumber(record.introDuration, 0.6, 6, defaults.introDuration),
+    introFeather: clampParticleNumber(record.introFeather, 0.03, 0.4, defaults.introFeather),
+    introStart: clampParticleNumber(record.introStart, -0.5, 0.25, defaults.introStart),
+    introEnd: clampParticleNumber(record.introEnd, 0.8, 1.8, defaults.introEnd),
+    introSkyEnd: clampParticleNumber(record.introSkyEnd, 0.1, 0.9, defaults.introSkyEnd),
+    introStarStart: clampParticleNumber(record.introStarStart, 0, 0.8, defaults.introStarStart),
+    paused: typeof record.paused === "boolean" ? record.paused : defaults.paused,
+  };
+}
+
+function readAuroraIonosphereBackgroundSettings(): AuroraIonosphereBackgroundSettings {
+  try {
+    return normalizeAuroraIonosphereSettings(JSON.parse(localStorage.getItem(AURORA_IONOSPHERE_BACKGROUND_SETTINGS_KEY) || "{}"));
+  } catch {
+    return { ...DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS };
+  }
+}
+
+function writeAuroraIonosphereBackgroundSettings(settings: AuroraIonosphereBackgroundSettings): void {
+  try {
+    localStorage.setItem(AURORA_IONOSPHERE_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // The current session keeps working when DOM storage is unavailable.
+  }
+}
+
 function isCodexAppearanceTheme(value: unknown): value is CodexAppearanceTheme {
   return value === "system" || value === "light" || value === "dark";
 }
@@ -1789,6 +1915,7 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
         || lease.owner === BLACK_HOLE_BACKGROUND_PLUGIN_ID
         || lease.owner === GLOW_HORIZON_BACKGROUND_PLUGIN_ID
         || lease.owner === HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
+        || lease.owner === AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
         ? lease.owner
         : undefined;
       return owner
@@ -1835,7 +1962,13 @@ function clearParticleThemeLease(owner?: DarkBackgroundPluginId): void {
 
 function codexDarkThemeApplied(): boolean {
   const root = document.documentElement;
-  return root.classList.contains("electron-dark") && !root.classList.contains("electron-light");
+  const dark = root.classList.contains("electron-dark")
+    || root.classList.contains("dark")
+    || root.dataset.theme === "dark";
+  const light = root.classList.contains("electron-light")
+    || root.classList.contains("light")
+    || root.dataset.theme === "light";
+  return dark && !light;
 }
 
 function waitForCodexDarkTheme(): Promise<void> {
@@ -5944,6 +6077,929 @@ function getHeavenlyCloudBackgroundController(): HeavenlyCloudBackgroundControll
   return controller;
 }
 
+const AURORA_IONOSPHERE_VERTEX_SHADER = `
+attribute vec2 aPosition;
+void main() { gl_Position = vec4(aPosition, 0.0, 1.0); }
+`;
+
+/*
+ * Adapted from “Auroras” by nimitz (@stormoid), Shadertoy XtGGRt.
+ * The runtime noise atlas, volumetric height planes, spectral emission, and
+ * four procedural star layers are preserved from the standalone effect.
+ */
+const AURORA_IONOSPHERE_NOISE_SHADER = `
+precision highp float;
+uniform vec2 uResolution;
+uniform vec2 uNoiseDomainMin;
+uniform vec2 uNoiseDomainSize;
+uniform vec2 uFlowRotation;
+uniform float uNoiseScale;
+uniform float uNoiseTurbulence;
+
+mat2 rotateNoiseDomain(float angle) {
+  float angle2 = angle * angle;
+  float c = 1.0 - angle2 * (0.5 - angle2 * 0.041666667);
+  float s = angle * (1.0 - angle2 * (0.166666667 - angle2 * 0.008333333));
+  return mat2(c, s, -s, c);
+}
+float tri(float x) { return clamp(abs(fract(x) - 0.5), 0.01, 0.49); }
+vec2 tri2(vec2 p) { return vec2(tri(p.x) + tri(p.y), tri(p.y + tri(p.x))); }
+float triNoise2d(vec2 p, mat2 flowRotation) {
+  float rz = 0.0;
+  p *= uNoiseScale;
+  p = p * rotateNoiseDomain(p.x * 0.06);
+  vec2 bp = p;
+  vec2 dg = tri2(bp * 1.85) * 0.75 * flowRotation;
+  p -= dg * 0.4 * uNoiseTurbulence;
+  p *= 1.21 + (rz - 1.0) * 0.02;
+  rz += tri(p.x + tri(p.y)) * 0.756;
+  p = p * mat2(-1.0, 0.0, 0.0, -1.0);
+  dg = tri2(bp * 2.405) * 0.75 * flowRotation;
+  p -= dg * 0.888888889 * uNoiseTurbulence;
+  p *= 1.21 + (rz - 1.0) * 0.02;
+  rz += tri(p.x + tri(p.y)) * 0.31752;
+  p = p * mat2(0.757322769, -0.653040752, 0.653040752, 0.757322769);
+  dg = tri2(bp * 3.1265) * 0.75 * flowRotation;
+  p -= dg * 1.97530864 * uNoiseTurbulence;
+  p *= 1.21 + (rz - 1.0) * 0.02;
+  rz += tri(p.x + tri(p.y)) * 0.1333584;
+  p = p * mat2(-0.147075554, 0.989125261, -0.989125261, -0.147075554);
+  dg = tri2(bp * 4.06445) * 0.75 * flowRotation;
+  p -= dg * 4.38957476 * uNoiseTurbulence;
+  p *= 1.21 + (rz - 1.0) * 0.02;
+  rz += tri(p.x + tri(p.y)) * 0.056010528;
+  p = p * mat2(-0.534555438, -0.845133412, 0.845133412, -0.534555438);
+  dg = tri2(bp * 5.283785) * 0.75 * flowRotation;
+  p -= dg * 9.75461058 * uNoiseTurbulence;
+  p *= 1.21 + (rz - 1.0) * 0.02;
+  rz += tri(p.x + tri(p.y)) * 0.0235244218;
+  return clamp(1.0 / pow(max(rz * 29.0, 0.0001), 1.3), 0.0, 0.55);
+}
+void main() {
+  vec2 atlasUv = gl_FragCoord.xy / uResolution;
+  vec2 worldPosition = uNoiseDomainMin + atlasUv * uNoiseDomainSize;
+  mat2 flowRotation = mat2(uFlowRotation.x, uFlowRotation.y, -uFlowRotation.y, uFlowRotation.x);
+  float density = triNoise2d(worldPosition, flowRotation);
+  gl_FragColor = vec4(density, density, density, 1.0);
+}
+`;
+
+function createAuroraIonosphereFieldShader(stepCount: number): string {
+  return `
+precision highp float;
+#define AURORA_STEPS ${stepCount}
+uniform vec2 uResolution;
+uniform float uIntensity;
+uniform float uGlow;
+uniform float uIntro;
+uniform float uIntroFeather;
+uniform float uIntroStart;
+uniform float uIntroEnd;
+uniform sampler2D uLayerLut;
+uniform float uLayerLutStep;
+uniform sampler2D uNoiseAtlas;
+uniform vec2 uNoiseDomainMin;
+uniform vec2 uNoiseDomainInverseSize;
+float hash21(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 4.1414))) * 43758.5453); }
+float decode16(vec2 encoded) { return dot(encoded, vec2(65280.0, 255.0)) / 65535.0; }
+void sampleAuroraLayer(vec3 ro, vec3 rd, float inverseRayHeight, float pixelJitter,
+  float planeHeight, float jitterAmount, vec3 spectralColor, float layerWeight,
+  inout vec4 color, inout vec4 averageColor) {
+  float planeDistance = (planeHeight - ro.y) * inverseRayHeight - pixelJitter * jitterAmount;
+  vec3 position = ro + planeDistance * rd;
+  vec2 noiseUv = (position.zx - uNoiseDomainMin) * uNoiseDomainInverseSize;
+  float density = texture2D(uNoiseAtlas, noiseUv).r;
+  vec4 layerColor = vec4(spectralColor * density, density);
+  averageColor = mix(averageColor, layerColor, 0.5);
+  color += averageColor * layerWeight;
+}
+vec4 aurora(vec3 ro, vec3 rd) {
+  vec4 color = vec4(0.0);
+  vec4 averageColor = vec4(0.0);
+  float pixelJitter = 0.006 * hash21(gl_FragCoord.xy);
+  float inverseRayHeight = 1.0 / (rd.y * 2.0 + 0.4);
+  for (int index = 0; index < AURORA_STEPS; index++) {
+    float lookupX = (float(index) + 0.5) * uLayerLutStep;
+    vec4 spectralAndWeightHigh = texture2D(uLayerLut, vec2(lookupX, 0.25));
+    vec4 geometryAndWeightLow = texture2D(uLayerLut, vec2(lookupX, 0.75));
+    sampleAuroraLayer(ro, rd, inverseRayHeight, pixelJitter,
+      decode16(geometryAndWeightLow.rg) * 1.6, geometryAndWeightLow.b,
+      spectralAndWeightHigh.rgb,
+      decode16(vec2(spectralAndWeightHigh.a, geometryAndWeightLow.a)) * 0.15,
+      color, averageColor);
+  }
+  color *= clamp(rd.y * 15.0 + 0.4, 0.0, 1.0);
+  color.rgb *= uIntensity * mix(0.55, 1.175, uGlow);
+  color.a *= clamp(uIntensity, 0.0, 2.0);
+  return color * 1.8;
+}
+void main() {
+  vec2 screenUv = gl_FragCoord.xy / uResolution;
+  vec2 p = vec2(screenUv.x - 0.5, screenUv.y * 0.55 + 0.015);
+  p.x *= uResolution.x / uResolution.y;
+  vec3 ro = vec3(0.0, 0.0, -6.7);
+  vec3 rd = normalize(vec3(p, 1.3));
+  float curtainProgress = smoothstep(0.06, 0.94, uIntro);
+  float revealEdge = mix(uIntroStart, uIntroEnd, curtainProgress);
+  float revealFeather = max(0.001, uIntroFeather);
+  float curtainReveal = 1.0 - smoothstep(revealEdge - revealFeather, revealEdge + revealFeather, screenUv.y);
+  curtainReveal = mix(curtainReveal, 1.0, smoothstep(0.92, 1.0, uIntro));
+  float curtainIgnition = smoothstep(0.02, 0.22, uIntro);
+  float horizonFade = smoothstep(0.0, 0.01, abs(rd.y)) * 0.1 + 0.9;
+  vec4 field = smoothstep(vec4(0.0), vec4(1.5), aurora(ro, rd))
+    * horizonFade * curtainReveal * curtainIgnition;
+  gl_FragColor = field;
+}
+`;
+}
+
+const AURORA_IONOSPHERE_COMPOSITE_SHADER = `
+precision highp float;
+#define STAR_LAYERS 4
+uniform vec2 uResolution;
+uniform float uStarResolution;
+uniform float uStarDensity;
+uniform float uIntro;
+uniform float uIntroSkyEnd;
+uniform float uIntroStarStart;
+uniform sampler2D uAuroraTexture;
+uniform vec2 uAuroraUvScale;
+uniform vec2 uAuroraUvOffset;
+vec3 hash33(vec3 p) {
+  p = fract(p * vec3(443.8975, 397.2973, 491.1871));
+  p += dot(p.zxy, p.yxz + 19.27);
+  return fract(vec3(p.x * p.y, p.z * p.x, p.y * p.z));
+}
+vec3 stars(vec3 p) {
+  if (uStarDensity <= 0.0) return vec3(0.0);
+  vec3 color = vec3(0.0);
+  float densityScale = 1.51 * uStarDensity;
+  vec3 starPoint = p * (0.15 * uStarResolution);
+  for (int index = 0; index < STAR_LAYERS; index++) {
+    float fi = float(index);
+    vec3 q = fract(starPoint) - 0.5;
+    vec3 id = floor(starPoint);
+    vec2 random = hash33(id).xy;
+    float star = 1.0 - smoothstep(0.0, 0.6, length(q));
+    star *= step(random.x, (0.0005 + fi * fi * 0.001) * densityScale);
+    vec3 tint = mix(vec3(1.0, 0.49, 0.1), vec3(0.75, 0.9, 1.0), random.y);
+    color += star * (tint * 0.1 + 0.9);
+    starPoint *= 1.3;
+  }
+  return color * color * 0.8;
+}
+vec3 sky(vec3 rd) {
+  float sunDisk = dot(normalize(vec3(-0.5, -0.6, 0.9)), rd) * 0.5 + 0.5;
+  float sunDisk2 = sunDisk * sunDisk;
+  sunDisk = sunDisk2 * sunDisk2 * sunDisk;
+  vec3 color = mix(vec3(0.05, 0.1, 0.2), vec3(0.1, 0.05, 0.2), rd.y * 0.5 + 0.5);
+  color += sunDisk * vec3(1.0, 0.9, 0.7) * 0.63;
+  return color * 0.63;
+}
+void main() {
+  vec2 screenUv = gl_FragCoord.xy / uResolution;
+  vec2 p = vec2(screenUv.x - 0.5, screenUv.y * 0.55 + 0.015);
+  p.x *= uResolution.x / uResolution.y;
+  vec3 rd = normalize(vec3(p, 1.3));
+  float horizonFade = smoothstep(0.0, 0.01, abs(rd.y)) * 0.1 + 0.9;
+  float skyIntro = smoothstep(0.0, max(0.001, uIntroSkyEnd), uIntro);
+  float starIntro = smoothstep(uIntroStarStart, min(1.0, uIntroStarStart + 0.56), uIntro);
+  vec3 color = sky(rd) * horizonFade * skyIntro;
+  vec4 field = texture2D(uAuroraTexture, uAuroraUvOffset + screenUv * uAuroraUvScale);
+  color += stars(rd) * starIntro;
+  color = color * (1.0 - field.a) + field.rgb;
+  gl_FragColor = vec4(color, 1.0);
+}
+`;
+
+interface AuroraIonosphereNoiseDomain {
+  readonly minX: number;
+  readonly minY: number;
+  readonly sizeX: number;
+  readonly sizeY: number;
+}
+
+function auroraIonosphereSmoothstep(edge0: number, edge1: number, value: number): number {
+  const amount = Math.min(1, Math.max(0, (value - edge0) / Math.max(0.000001, edge1 - edge0)));
+  return amount * amount * (3 - 2 * amount);
+}
+
+function auroraIonosphereWritePacked16(data: Uint8Array, highIndex: number, lowIndex: number, value: number): void {
+  const packed = Math.round(Math.min(1, Math.max(0, value)) * 65535);
+  data[highIndex] = packed >> 8;
+  data[lowIndex] = packed & 255;
+}
+
+function calculateAuroraIonosphereNoiseDomain(width: number, height: number, steps: number): AuroraIonosphereNoiseDomain {
+  const aspect = width / Math.max(1, height);
+  const planeHeights = [0.8, 0.8 + Math.pow(steps - 1, 1.4) * 0.002];
+  let minimumZ = Number.POSITIVE_INFINITY;
+  let maximumZ = Number.NEGATIVE_INFINITY;
+  let minimumX = Number.POSITIVE_INFINITY;
+  let maximumX = Number.NEGATIVE_INFINITY;
+  for (let yIndex = 0; yIndex <= 16; yIndex += 1) {
+    const pY = (yIndex / 16) * 0.55 + 0.015;
+    for (let xIndex = 0; xIndex <= 16; xIndex += 1) {
+      const pX = (xIndex / 16 - 0.5) * aspect;
+      const length = Math.hypot(pX, pY, 1.3);
+      const directionX = pX / length;
+      const directionY = pY / length;
+      const directionZ = 1.3 / length;
+      const inverseRayHeight = 1 / (directionY * 2 + 0.4);
+      for (const planeHeight of planeHeights) {
+        for (const jitterDistance of [0, 0.006]) {
+          const distance = planeHeight * inverseRayHeight - jitterDistance;
+          const worldX = distance * directionX;
+          const worldZ = -6.7 + distance * directionZ;
+          minimumZ = Math.min(minimumZ, worldZ);
+          maximumZ = Math.max(maximumZ, worldZ);
+          minimumX = Math.min(minimumX, worldX);
+          maximumX = Math.max(maximumX, worldX);
+        }
+      }
+    }
+  }
+  const zPadding = Math.max(0.08, (maximumZ - minimumZ) * 0.035);
+  const xPadding = Math.max(0.08, (maximumX - minimumX) * 0.035);
+  return {
+    minX: minimumZ - zPadding,
+    minY: minimumX - xPadding,
+    sizeX: maximumZ - minimumZ + zPadding * 2,
+    sizeY: maximumX - minimumX + xPadding * 2,
+  };
+}
+
+class AuroraIonosphereRenderer {
+  #settings: AuroraIonosphereBackgroundSettings;
+  readonly #gl: WebGLRenderingContext;
+  readonly #host: HTMLElement;
+  readonly #canvas: HTMLCanvasElement;
+  readonly #onError: (message?: string) => void;
+  #noiseProgram!: WebGLProgram;
+  #fieldProgram!: WebGLProgram;
+  #compositeProgram!: WebGLProgram;
+  #buffer!: WebGLBuffer;
+  #layerTexture!: WebGLTexture;
+  #noiseTexture!: WebGLTexture;
+  #fieldTexture!: WebGLTexture;
+  #noiseFramebuffer!: WebGLFramebuffer;
+  #fieldFramebuffer!: WebGLFramebuffer;
+  #noiseUniforms!: Readonly<Record<"resolution" | "domainMin" | "domainSize" | "flowRotation" | "scale" | "turbulence", WebGLUniformLocation>>;
+  #fieldUniforms!: Readonly<Record<"resolution" | "intensity" | "glow" | "intro" | "introFeather" | "introStart" | "introEnd" | "layerLut" | "layerLutStep" | "noiseAtlas" | "domainMin" | "inverseDomainSize", WebGLUniformLocation>>;
+  #compositeUniforms!: Readonly<Record<"resolution" | "starResolution" | "starDensity" | "intro" | "introSkyEnd" | "introStarStart" | "fieldTexture" | "uvScale" | "uvOffset", WebGLUniformLocation>>;
+  #animationFrame = 0;
+  #running = true;
+  #contextReady = true;
+  #documentVisible = !document.hidden;
+  #resizePending = true;
+  #settingsDirty = true;
+  #elapsed = 0;
+  #introProgress = 0;
+  #lastFrame = 0;
+  #hostBounds: DOMRect;
+  #rayTextureWidth = 1;
+  #rayTextureHeight = 1;
+  #rayWidth = 1;
+  #rayHeight = 1;
+  #atlasWidth = 1;
+  #atlasHeight = 1;
+  #starResolution = 1;
+  #noiseDomain: AuroraIonosphereNoiseDomain;
+  #adaptiveScale = 1;
+  #sampleDuration = 0;
+  #sampledFrames = 0;
+  readonly #uvScale = { x: 0, y: 0 };
+  readonly #uvOffset = { x: 0.5, y: 0.5 };
+  readonly #reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  readonly #resizeObserver: ResizeObserver;
+
+  constructor(
+    host: HTMLElement,
+    canvas: HTMLCanvasElement,
+    settings: AuroraIonosphereBackgroundSettings,
+    onError: (message?: string) => void,
+  ) {
+    this.#host = host;
+    this.#canvas = canvas;
+    this.#settings = normalizeAuroraIonosphereSettings(settings);
+    this.#onError = onError;
+    this.#hostBounds = host.getBoundingClientRect();
+    this.#noiseDomain = calculateAuroraIonosphereNoiseDomain(1, 1, AURORA_IONOSPHERE_QUALITY[this.#settings.quality].steps);
+    const gl = canvas.getContext("webgl", {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      powerPreference: "high-performance",
+      preserveDrawingBuffer: false,
+    });
+    if (!gl) throw new Error("WebGL is unavailable for Aurora Ionosphere Background");
+    this.#gl = gl;
+    this.#build();
+    this.#resizeObserver = new ResizeObserver(() => {
+      this.#hostBounds = this.#host.getBoundingClientRect();
+      this.#resizePending = true;
+      this.#schedule();
+    });
+    this.#resizeObserver.observe(host);
+    document.addEventListener("visibilitychange", this.#onVisibilityChange);
+    canvas.addEventListener("webglcontextlost", this.#onContextLost);
+    canvas.addEventListener("webglcontextrestored", this.#onContextRestored);
+    this.#reducedMotion.addEventListener("change", this.#onReducedMotionChange);
+    this.#schedule();
+  }
+
+  setSettings(settings: AuroraIonosphereBackgroundSettings): void {
+    const next = normalizeAuroraIonosphereSettings(settings);
+    if (next.quality !== this.#settings.quality) {
+      this.#settings = next;
+      this.#build();
+      this.#adaptiveScale = 1;
+      this.#resizePending = true;
+    } else {
+      this.#settings = next;
+      this.#settingsDirty = true;
+    }
+    this.#schedule();
+  }
+
+  replay(): void {
+    this.#introProgress = 0;
+    this.#elapsed = 0;
+    this.#lastFrame = 0;
+    this.#schedule();
+  }
+
+  dispose(): void {
+    if (!this.#running) return;
+    this.#running = false;
+    this.#stopLoop();
+    this.#resizeObserver.disconnect();
+    document.removeEventListener("visibilitychange", this.#onVisibilityChange);
+    this.#canvas.removeEventListener("webglcontextlost", this.#onContextLost);
+    this.#canvas.removeEventListener("webglcontextrestored", this.#onContextRestored);
+    this.#reducedMotion.removeEventListener("change", this.#onReducedMotionChange);
+    this.#destroyGpuResources();
+  }
+
+  #compile(type: number, source: string): WebGLShader {
+    const shader = this.#gl.createShader(type);
+    if (!shader) throw new Error("The Aurora Ionosphere shader could not be allocated");
+    this.#gl.shaderSource(shader, source);
+    this.#gl.compileShader(shader);
+    if (!this.#gl.getShaderParameter(shader, this.#gl.COMPILE_STATUS)) {
+      const message = this.#gl.getShaderInfoLog(shader) || "Aurora Ionosphere shader compilation failed";
+      this.#gl.deleteShader(shader);
+      throw new Error(message);
+    }
+    return shader;
+  }
+
+  #link(fragmentSource: string): WebGLProgram {
+    const vertex = this.#compile(this.#gl.VERTEX_SHADER, AURORA_IONOSPHERE_VERTEX_SHADER);
+    const fragment = this.#compile(this.#gl.FRAGMENT_SHADER, fragmentSource);
+    const program = this.#gl.createProgram();
+    if (!program) throw new Error("The Aurora Ionosphere shader program could not be allocated");
+    this.#gl.attachShader(program, vertex);
+    this.#gl.attachShader(program, fragment);
+    this.#gl.linkProgram(program);
+    this.#gl.deleteShader(vertex);
+    this.#gl.deleteShader(fragment);
+    if (!this.#gl.getProgramParameter(program, this.#gl.LINK_STATUS)) {
+      const message = this.#gl.getProgramInfoLog(program) || "Aurora Ionosphere shader linking failed";
+      this.#gl.deleteProgram(program);
+      throw new Error(message);
+    }
+    return program;
+  }
+
+  #requiredUniform(program: WebGLProgram, name: string): WebGLUniformLocation {
+    const location = this.#gl.getUniformLocation(program, name);
+    if (location === null) throw new Error(`Missing Aurora Ionosphere shader uniform: ${name}`);
+    return location;
+  }
+
+  #createTexture(unit: number, filter: number): WebGLTexture {
+    const texture = this.#gl.createTexture();
+    if (!texture) throw new Error("The Aurora Ionosphere texture could not be allocated");
+    this.#gl.activeTexture(this.#gl.TEXTURE0 + unit);
+    this.#gl.bindTexture(this.#gl.TEXTURE_2D, texture);
+    this.#gl.texParameteri(this.#gl.TEXTURE_2D, this.#gl.TEXTURE_MIN_FILTER, filter);
+    this.#gl.texParameteri(this.#gl.TEXTURE_2D, this.#gl.TEXTURE_MAG_FILTER, filter);
+    this.#gl.texParameteri(this.#gl.TEXTURE_2D, this.#gl.TEXTURE_WRAP_S, this.#gl.CLAMP_TO_EDGE);
+    this.#gl.texParameteri(this.#gl.TEXTURE_2D, this.#gl.TEXTURE_WRAP_T, this.#gl.CLAMP_TO_EDGE);
+    this.#gl.texImage2D(this.#gl.TEXTURE_2D, 0, this.#gl.RGBA, 1, 1, 0, this.#gl.RGBA, this.#gl.UNSIGNED_BYTE, null);
+    return texture;
+  }
+
+  #createFramebuffer(texture: WebGLTexture): WebGLFramebuffer {
+    const framebuffer = this.#gl.createFramebuffer();
+    if (!framebuffer) throw new Error("The Aurora Ionosphere framebuffer could not be allocated");
+    this.#gl.bindFramebuffer(this.#gl.FRAMEBUFFER, framebuffer);
+    this.#gl.framebufferTexture2D(this.#gl.FRAMEBUFFER, this.#gl.COLOR_ATTACHMENT0, this.#gl.TEXTURE_2D, texture, 0);
+    return framebuffer;
+  }
+
+  #createLayerTexture(steps: number): WebGLTexture {
+    const data = new Uint8Array(steps * 2 * 4);
+    for (let index = 0; index < steps; index += 1) {
+      const phase = index * 0.043;
+      const planeHeight = 0.8 + Math.pow(index, 1.4) * 0.002;
+      const jitterAmount = auroraIonosphereSmoothstep(0, 15, index);
+      const spectralColor = [-1.15, 1.5, -0.2].map((offset) => Math.sin(offset + phase) * 0.5 + 0.5);
+      const layerWeight = Math.pow(2, -index * 0.065 - 2.5) * auroraIonosphereSmoothstep(0, 5, index);
+      const spectralOffset = index * 4;
+      const geometryOffset = (steps + index) * 4;
+      data[spectralOffset] = Math.round((spectralColor[0] ?? 0) * 255);
+      data[spectralOffset + 1] = Math.round((spectralColor[1] ?? 0) * 255);
+      data[spectralOffset + 2] = Math.round((spectralColor[2] ?? 0) * 255);
+      auroraIonosphereWritePacked16(data, geometryOffset, geometryOffset + 1, planeHeight / 1.6);
+      data[geometryOffset + 2] = Math.round(jitterAmount * 255);
+      auroraIonosphereWritePacked16(data, spectralOffset + 3, geometryOffset + 3, layerWeight / 0.15);
+    }
+    const texture = this.#createTexture(0, this.#gl.NEAREST);
+    this.#gl.texImage2D(this.#gl.TEXTURE_2D, 0, this.#gl.RGBA, steps, 2, 0, this.#gl.RGBA, this.#gl.UNSIGNED_BYTE, data);
+    return texture;
+  }
+
+  #destroyGpuResources(): void {
+    if (this.#buffer) this.#gl.deleteBuffer(this.#buffer);
+    if (this.#noiseProgram) this.#gl.deleteProgram(this.#noiseProgram);
+    if (this.#fieldProgram) this.#gl.deleteProgram(this.#fieldProgram);
+    if (this.#compositeProgram) this.#gl.deleteProgram(this.#compositeProgram);
+    if (this.#layerTexture) this.#gl.deleteTexture(this.#layerTexture);
+    if (this.#noiseTexture) this.#gl.deleteTexture(this.#noiseTexture);
+    if (this.#fieldTexture) this.#gl.deleteTexture(this.#fieldTexture);
+    if (this.#noiseFramebuffer) this.#gl.deleteFramebuffer(this.#noiseFramebuffer);
+    if (this.#fieldFramebuffer) this.#gl.deleteFramebuffer(this.#fieldFramebuffer);
+  }
+
+  #build(): void {
+    this.#destroyGpuResources();
+    const quality = AURORA_IONOSPHERE_QUALITY[this.#settings.quality];
+    this.#noiseProgram = this.#link(AURORA_IONOSPHERE_NOISE_SHADER);
+    this.#fieldProgram = this.#link(createAuroraIonosphereFieldShader(quality.steps));
+    this.#compositeProgram = this.#link(AURORA_IONOSPHERE_COMPOSITE_SHADER);
+    this.#buffer = this.#gl.createBuffer() ?? (() => { throw new Error("The Aurora Ionosphere geometry buffer could not be allocated"); })();
+    this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, this.#buffer);
+    this.#gl.bufferData(this.#gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), this.#gl.STATIC_DRAW);
+    for (const program of [this.#noiseProgram, this.#fieldProgram, this.#compositeProgram]) {
+      this.#gl.useProgram(program);
+      const position = this.#gl.getAttribLocation(program, "aPosition");
+      if (position < 0) throw new Error("The Aurora Ionosphere position attribute is unavailable");
+      this.#gl.enableVertexAttribArray(position);
+      this.#gl.vertexAttribPointer(position, 2, this.#gl.FLOAT, false, 0, 0);
+    }
+    this.#layerTexture = this.#createLayerTexture(quality.steps);
+    this.#noiseTexture = this.#createTexture(2, this.#gl.LINEAR);
+    this.#noiseFramebuffer = this.#createFramebuffer(this.#noiseTexture);
+    this.#fieldTexture = this.#createTexture(1, this.#gl.LINEAR);
+    this.#fieldFramebuffer = this.#createFramebuffer(this.#fieldTexture);
+    this.#gl.bindFramebuffer(this.#gl.FRAMEBUFFER, null);
+    this.#noiseUniforms = {
+      resolution: this.#requiredUniform(this.#noiseProgram, "uResolution"),
+      domainMin: this.#requiredUniform(this.#noiseProgram, "uNoiseDomainMin"),
+      domainSize: this.#requiredUniform(this.#noiseProgram, "uNoiseDomainSize"),
+      flowRotation: this.#requiredUniform(this.#noiseProgram, "uFlowRotation"),
+      scale: this.#requiredUniform(this.#noiseProgram, "uNoiseScale"),
+      turbulence: this.#requiredUniform(this.#noiseProgram, "uNoiseTurbulence"),
+    };
+    this.#fieldUniforms = {
+      resolution: this.#requiredUniform(this.#fieldProgram, "uResolution"),
+      intensity: this.#requiredUniform(this.#fieldProgram, "uIntensity"),
+      glow: this.#requiredUniform(this.#fieldProgram, "uGlow"),
+      intro: this.#requiredUniform(this.#fieldProgram, "uIntro"),
+      introFeather: this.#requiredUniform(this.#fieldProgram, "uIntroFeather"),
+      introStart: this.#requiredUniform(this.#fieldProgram, "uIntroStart"),
+      introEnd: this.#requiredUniform(this.#fieldProgram, "uIntroEnd"),
+      layerLut: this.#requiredUniform(this.#fieldProgram, "uLayerLut"),
+      layerLutStep: this.#requiredUniform(this.#fieldProgram, "uLayerLutStep"),
+      noiseAtlas: this.#requiredUniform(this.#fieldProgram, "uNoiseAtlas"),
+      domainMin: this.#requiredUniform(this.#fieldProgram, "uNoiseDomainMin"),
+      inverseDomainSize: this.#requiredUniform(this.#fieldProgram, "uNoiseDomainInverseSize"),
+    };
+    this.#compositeUniforms = {
+      resolution: this.#requiredUniform(this.#compositeProgram, "uResolution"),
+      starResolution: this.#requiredUniform(this.#compositeProgram, "uStarResolution"),
+      starDensity: this.#requiredUniform(this.#compositeProgram, "uStarDensity"),
+      intro: this.#requiredUniform(this.#compositeProgram, "uIntro"),
+      introSkyEnd: this.#requiredUniform(this.#compositeProgram, "uIntroSkyEnd"),
+      introStarStart: this.#requiredUniform(this.#compositeProgram, "uIntroStarStart"),
+      fieldTexture: this.#requiredUniform(this.#compositeProgram, "uAuroraTexture"),
+      uvScale: this.#requiredUniform(this.#compositeProgram, "uAuroraUvScale"),
+      uvOffset: this.#requiredUniform(this.#compositeProgram, "uAuroraUvOffset"),
+    };
+    this.#gl.useProgram(this.#fieldProgram);
+    this.#gl.uniform1i(this.#fieldUniforms.layerLut, 0);
+    this.#gl.uniform1i(this.#fieldUniforms.noiseAtlas, 2);
+    this.#gl.uniform1f(this.#fieldUniforms.layerLutStep, 1 / quality.steps);
+    this.#gl.useProgram(this.#compositeProgram);
+    this.#gl.uniform1i(this.#compositeUniforms.fieldTexture, 1);
+    this.#settingsDirty = true;
+    this.#resizePending = true;
+    this.#onError(undefined);
+  }
+
+  #resize(): void {
+    this.#resizePending = false;
+    const quality = AURORA_IONOSPHERE_QUALITY[this.#settings.quality];
+    const dpr = Math.min(window.devicePixelRatio || 1, quality.maxDpr);
+    const width = Math.max(1, Math.floor(this.#hostBounds.width * dpr));
+    const height = Math.max(1, Math.floor(this.#hostBounds.height * dpr));
+    if (this.#canvas.width !== width || this.#canvas.height !== height) {
+      this.#canvas.width = width;
+      this.#canvas.height = height;
+    }
+    this.#starResolution = Math.max(1, width);
+    const nextRayTextureWidth = Math.max(1, Math.floor(width * quality.rayScale));
+    const nextRayTextureHeight = Math.max(1, Math.floor(height * quality.rayScale));
+    if (nextRayTextureWidth !== this.#rayTextureWidth || nextRayTextureHeight !== this.#rayTextureHeight) {
+      this.#rayTextureWidth = nextRayTextureWidth;
+      this.#rayTextureHeight = nextRayTextureHeight;
+      this.#gl.activeTexture(this.#gl.TEXTURE1);
+      this.#gl.bindTexture(this.#gl.TEXTURE_2D, this.#fieldTexture);
+      this.#gl.texImage2D(this.#gl.TEXTURE_2D, 0, this.#gl.RGBA, this.#rayTextureWidth, this.#rayTextureHeight, 0, this.#gl.RGBA, this.#gl.UNSIGNED_BYTE, null);
+    }
+    this.#noiseDomain = calculateAuroraIonosphereNoiseDomain(width, height, quality.steps);
+    const longestDomainEdge = Math.max(this.#noiseDomain.sizeX, this.#noiseDomain.sizeY);
+    const atlasLongEdge = Math.min(quality.noiseAtlasSize, this.#gl.getParameter(this.#gl.MAX_TEXTURE_SIZE) as number);
+    const nextAtlasWidth = Math.max(256, Math.round(atlasLongEdge * this.#noiseDomain.sizeX / longestDomainEdge));
+    const nextAtlasHeight = Math.max(256, Math.round(atlasLongEdge * this.#noiseDomain.sizeY / longestDomainEdge));
+    if (nextAtlasWidth !== this.#atlasWidth || nextAtlasHeight !== this.#atlasHeight) {
+      this.#atlasWidth = nextAtlasWidth;
+      this.#atlasHeight = nextAtlasHeight;
+      this.#gl.activeTexture(this.#gl.TEXTURE2);
+      this.#gl.bindTexture(this.#gl.TEXTURE_2D, this.#noiseTexture);
+      this.#gl.texImage2D(this.#gl.TEXTURE_2D, 0, this.#gl.RGBA, this.#atlasWidth, this.#atlasHeight, 0, this.#gl.RGBA, this.#gl.UNSIGNED_BYTE, null);
+    }
+    this.#rayWidth = Math.max(1, Math.floor(this.#rayTextureWidth * this.#adaptiveScale));
+    this.#rayHeight = Math.max(1, Math.floor(this.#rayTextureHeight * this.#adaptiveScale));
+    this.#uvScale.x = Math.max(0, this.#rayWidth - 1) / this.#rayTextureWidth;
+    this.#uvScale.y = Math.max(0, this.#rayHeight - 1) / this.#rayTextureHeight;
+    this.#uvOffset.x = 0.5 / this.#rayTextureWidth;
+    this.#uvOffset.y = 0.5 / this.#rayTextureHeight;
+  }
+
+  #stopLoop(): void {
+    if (this.#animationFrame) cancelAnimationFrame(this.#animationFrame);
+    this.#animationFrame = 0;
+  }
+
+  #schedule(): void {
+    if (!this.#animationFrame && this.#running && this.#contextReady && this.#documentVisible) {
+      this.#animationFrame = requestAnimationFrame(this.#draw);
+    }
+  }
+
+  #draw = (now: number): void => {
+    this.#animationFrame = 0;
+    if (!this.#running || !this.#contextReady || !this.#documentVisible) return;
+    if (this.#resizePending) this.#resize();
+    const settings = this.#settings;
+    const reduced = this.#reducedMotion.matches;
+    const delta = this.#lastFrame ? Math.min((now - this.#lastFrame) / 1000, 0.05) : 0;
+    this.#lastFrame = now;
+    if (!settings.paused) this.#elapsed += delta * (reduced ? 0.16 : 1);
+    this.#introProgress = reduced
+      ? 1
+      : Math.min(1, this.#introProgress + delta / Math.max(0.1, settings.introDuration));
+
+    if (!settings.paused && !reduced) {
+      this.#sampleDuration += delta;
+      this.#sampledFrames += 1;
+      if (this.#sampledFrames >= 30) {
+        const quality = AURORA_IONOSPHERE_QUALITY[settings.quality];
+        const averageFrameTime = this.#sampleDuration / this.#sampledFrames;
+        const previousScale = this.#adaptiveScale;
+        if (averageFrameTime > 1 / 52) this.#adaptiveScale = Math.max(quality.minAdaptiveScale, this.#adaptiveScale - 0.04);
+        else if (averageFrameTime < 1 / 58) this.#adaptiveScale = Math.min(1, this.#adaptiveScale + 0.02);
+        this.#sampleDuration = 0;
+        this.#sampledFrames = 0;
+        if (this.#adaptiveScale !== previousScale) this.#resizePending = true;
+      }
+    }
+
+    const intro = auroraIonosphereSmoothstep(0, 1, this.#introProgress);
+    const flowAngle = this.#elapsed * 0.06 * settings.speed;
+    const gl = this.#gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.#noiseFramebuffer);
+    gl.viewport(0, 0, this.#atlasWidth, this.#atlasHeight);
+    gl.useProgram(this.#noiseProgram);
+    gl.uniform2f(this.#noiseUniforms.resolution, this.#atlasWidth, this.#atlasHeight);
+    gl.uniform2f(this.#noiseUniforms.domainMin, this.#noiseDomain.minX, this.#noiseDomain.minY);
+    gl.uniform2f(this.#noiseUniforms.domainSize, this.#noiseDomain.sizeX, this.#noiseDomain.sizeY);
+    gl.uniform2f(this.#noiseUniforms.flowRotation, Math.cos(flowAngle), Math.sin(flowAngle));
+    if (this.#settingsDirty) {
+      gl.uniform1f(this.#noiseUniforms.scale, 0.6 + 0.8 * settings.curtainScale);
+      gl.uniform1f(this.#noiseUniforms.turbulence, 0.3 + 1.2 * settings.turbulence);
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.#fieldFramebuffer);
+    gl.viewport(0, 0, this.#rayWidth, this.#rayHeight);
+    gl.useProgram(this.#fieldProgram);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.#layerTexture);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.#noiseTexture);
+    gl.uniform2f(this.#fieldUniforms.resolution, this.#rayWidth, this.#rayHeight);
+    gl.uniform2f(this.#fieldUniforms.domainMin, this.#noiseDomain.minX, this.#noiseDomain.minY);
+    gl.uniform2f(this.#fieldUniforms.inverseDomainSize, 1 / this.#noiseDomain.sizeX, 1 / this.#noiseDomain.sizeY);
+    gl.uniform1f(this.#fieldUniforms.intro, intro);
+    if (this.#settingsDirty) {
+      gl.uniform1f(this.#fieldUniforms.intensity, settings.intensity);
+      gl.uniform1f(this.#fieldUniforms.glow, settings.glow);
+      gl.uniform1f(this.#fieldUniforms.introFeather, settings.introFeather);
+      gl.uniform1f(this.#fieldUniforms.introStart, settings.introStart);
+      gl.uniform1f(this.#fieldUniforms.introEnd, settings.introEnd);
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.#canvas.width, this.#canvas.height);
+    gl.useProgram(this.#compositeProgram);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.#fieldTexture);
+    gl.uniform2f(this.#compositeUniforms.resolution, this.#canvas.width, this.#canvas.height);
+    gl.uniform1f(this.#compositeUniforms.starResolution, this.#starResolution);
+    gl.uniform1f(this.#compositeUniforms.intro, intro);
+    gl.uniform2f(this.#compositeUniforms.uvScale, this.#uvScale.x, this.#uvScale.y);
+    gl.uniform2f(this.#compositeUniforms.uvOffset, this.#uvOffset.x, this.#uvOffset.y);
+    if (this.#settingsDirty) {
+      gl.uniform1f(this.#compositeUniforms.starDensity, settings.starDensity);
+      gl.uniform1f(this.#compositeUniforms.introSkyEnd, settings.introSkyEnd);
+      gl.uniform1f(this.#compositeUniforms.introStarStart, settings.introStarStart);
+      this.#settingsDirty = false;
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    if (!settings.paused || this.#introProgress < 1) this.#schedule();
+    else this.#lastFrame = 0;
+  };
+
+  #onVisibilityChange = (): void => {
+    this.#documentVisible = !document.hidden;
+    this.#lastFrame = 0;
+    if (this.#documentVisible) this.#schedule();
+    else this.#stopLoop();
+  };
+
+  #onContextLost = (event: Event): void => {
+    event.preventDefault();
+    this.#contextReady = false;
+    this.#stopLoop();
+    this.#onError("The Aurora Ionosphere graphics context was lost; waiting for recovery.");
+  };
+
+  #onContextRestored = (): void => {
+    try {
+      this.#contextReady = true;
+      this.#build();
+      this.#adaptiveScale = 1;
+      this.#lastFrame = 0;
+      this.#schedule();
+    } catch (error) {
+      this.#contextReady = false;
+      this.#onError(error instanceof Error ? error.message : "The Aurora Ionosphere graphics context could not be restored");
+    }
+  };
+
+  #onReducedMotionChange = (): void => {
+    this.#settingsDirty = true;
+    this.#lastFrame = 0;
+    this.#schedule();
+  };
+}
+
+class AuroraIonosphereBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readAuroraIonosphereBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #canvas: HTMLCanvasElement | undefined;
+  #renderer: AuroraIonosphereRenderer | undefined;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() { window.addEventListener("pagehide", this.#onPageHide, { once: true }); }
+  get settings(): AuroraIonosphereBackgroundSettings { return this.#settings; }
+  get enabled(): boolean { return this.#enabled; }
+  get pending(): boolean { return this.#pending; }
+  get error(): string | undefined { return this.#error; }
+  get stoppedForExternalThemeChange(): boolean { return this.#stoppedForExternalThemeChange; }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Aurora Ionosphere Background is unavailable");
+  }
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try { await operation; } finally { if (this.#enableOperation === operation) this.#enableOperation = undefined; }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexParticleLayer = "v1";
+      layer.dataset.codeCodexAuroraIonosphereLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.backgroundColor = "#02090d";
+      const canvas = document.createElement("canvas");
+      canvas.className = "code-codex-particle-canvas code-codex-aurora-ionosphere-canvas";
+      layer.append(canvas);
+      document.body.prepend(layer);
+      this.#layer = layer;
+      this.#canvas = canvas;
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, "#02090d");
+      this.#renderer = new AuroraIonosphereRenderer(layer, canvas, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Aurora Ionosphere Background could not be enabled";
+      this.#teardownPresentation();
+      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: AuroraIonosphereBackgroundSettings): void {
+    this.#settings = normalizeAuroraIonosphereSettings(next);
+    writeAuroraIonosphereBackgroundSettings(this.#settings);
+    this.#renderer?.setSettings(this.#settings);
+    this.#notify();
+  }
+  reset(): void { this.updateSettings(DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS); }
+  replay(): void { this.#renderer?.replay(); }
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    this.#canvas = undefined;
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try { current = await readCodexAppearanceTheme(); }
+    catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) throw new Error("Another Code-Codex background is still using Dark mode");
+      if (lease && !lease.owner) writeParticleThemeLease({ ...lease, owner });
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Aurora Ionosphere Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease || (lease.owner && lease.owner !== owner)) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) { clearParticleThemeLease(owner); return; }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  }
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
+    } catch { /* A transient read failure does not tear down the presentation. */ }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Aurora Ionosphere Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+  #notify(): void { for (const listener of this.#listeners) listener(); }
+  #onPageHide = (): void => { this.dispose(); };
+}
+
+const AURORA_IONOSPHERE_BACKGROUND_CONTROLLER = Symbol.for("code-codex:aurora-ionosphere-background-controller:v1");
+
+function getAuroraIonosphereBackgroundController(): AuroraIonosphereBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[AURORA_IONOSPHERE_BACKGROUND_CONTROLLER];
+  if (existing instanceof AuroraIonosphereBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+  }
+  const controller = new AuroraIonosphereBackgroundController();
+  globalState[AURORA_IONOSPHERE_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
 const BLACK_HOLE_VERTEX_SHADER = `
 attribute vec2 aPos;
 varying vec2 vUv;
@@ -8059,6 +9115,94 @@ function heavenlyCloudSettingsPanelMarkup(): string {
   `;
 }
 
+function formatAuroraIonosphereControlValue(
+  definition: AuroraIonosphereNumericControlDefinition,
+  value: number,
+): string {
+  const precision = definition.precision ?? Math.max(0, (String(definition.step).split(".")[1] ?? "").length);
+  return `${value.toFixed(precision)}${definition.unit ?? ""}`;
+}
+
+function auroraIonosphereNumericControlsMarkup(group: AuroraIonosphereControlGroup): string {
+  return AURORA_IONOSPHERE_NUMERIC_CONTROL_DEFINITIONS
+    .filter((definition) => definition.group === group)
+    .map((definition) => {
+      const value = DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS[definition.key];
+      const formatted = formatAuroraIonosphereControlValue(definition, value);
+      return `
+        <div class="particle-control-row">
+          <label for="${definition.id}">${bilingualLabelMarkup(definition.labelZh, definition.label)}</label>
+          <input id="${definition.id}" data-aurora-ionosphere-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-label="${definition.labelZh}" aria-valuetext="${formatted}">
+          <span class="particle-control-value"><output for="${definition.id}">${formatted}</output></span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function auroraIonosphereBackgroundCardMarkup(): string {
+  const icon = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M1.8 11.9c1.3-4 2.8-6.1 4.2-6.1 1.5 0 1.6 4.4 3 4.4 1.2 0 2.1-2.7 3.3-5.9"/><path d="M3.1 13.6c1.4-2.5 2.6-3.7 3.7-3.7 1.2 0 1.8 2.1 3 2.1 1 0 1.9-1.2 2.8-3.4"/><path d="M3.4 3.3h.01M10.3 2.3h.01M13.5 7h.01"/></svg>`;
+  return `
+    <article class="preview-extension appearance-extension aurora-ionosphere-background-extension" data-appearance-plugin="${AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID}" aria-busy="false">
+      <span class="preview-extension-icon" aria-hidden="true">${icon}</span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>Aurora Ionosphere Background</h4>
+          <span class="preview-extension-status" id="cle-aurora-ionosphere-background-status">Disabled</span>
+        </div>
+      </div>
+      <div class="preview-extension-actions">
+        <button class="preview-extension-action" type="button" aria-describedby="cle-aurora-ionosphere-background-status" aria-pressed="false">Enable</button>
+        <button class="particle-settings-trigger aurora-ionosphere-settings-trigger" type="button" title="Configure Aurora Ionosphere Background" aria-label="Configure Aurora Ionosphere Background" aria-haspopup="dialog" aria-controls="cle-aurora-ionosphere-settings" aria-expanded="false">${icons.sliders}</button>
+      </div>
+    </article>
+  `;
+}
+
+function auroraIonosphereSettingsPanelMarkup(): string {
+  return `
+    <section class="particle-settings-panel aurora-ionosphere-settings-panel" id="cle-aurora-ionosphere-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-aurora-ionosphere-settings-title">
+      <header class="particle-settings-header">
+        <div class="particle-settings-heading">
+          <p>${bilingualLabelMarkup("外观", "Appearance")}</p>
+          <h3 id="cle-aurora-ionosphere-settings-title">${bilingualLabelMarkup("极光电离层设置", "Aurora Ionosphere settings")}</h3>
+        </div>
+        <div class="particle-settings-header-actions">
+          ${backgroundLanguageSwitchMarkup("cle-aurora-ionosphere-settings-language")}
+          <button class="particle-settings-close aurora-ionosphere-settings-close" type="button" title="关闭极光电离层设置" aria-label="关闭极光电离层设置">${icons.close}</button>
+        </div>
+      </header>
+      <div class="particle-settings-scroll">
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("渲染质量", "Render quality")}</legend>
+          <div class="heavenly-cloud-quality-toolbar aurora-ionosphere-quality-toolbar" role="group" aria-label="光幕采样">
+            <button type="button" data-aurora-ionosphere-quality="low" aria-pressed="${DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS.quality === "low"}"><strong>32</strong>${bilingualLabelMarkup("轻量", "Light")}</button>
+            <button type="button" data-aurora-ionosphere-quality="medium" aria-pressed="${DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS.quality === "medium"}"><strong>50</strong>${bilingualLabelMarkup("均衡", "Balanced")}</button>
+            <button type="button" data-aurora-ionosphere-quality="high" aria-pressed="${DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS.quality === "high"}"><strong>72</strong>${bilingualLabelMarkup("精细", "Fine")}</button>
+          </div>
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("电离层", "Ionosphere field")}</legend>
+          ${auroraIonosphereNumericControlsMarkup("field")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("开场画面", "Opening frame")}</legend>
+          ${auroraIonosphereNumericControlsMarkup("opening")}
+        </fieldset>
+        <label class="particle-toggle-row aurora-ionosphere-paused-row" for="cle-aurora-ionosphere-paused">
+          ${bilingualLabelMarkup("暂停动画", "Pause animation")}
+          <input id="cle-aurora-ionosphere-paused" type="checkbox">
+        </label>
+        <div class="glow-horizon-actions aurora-ionosphere-actions">
+          <button class="aurora-ionosphere-reset" type="button">${bilingualLabelMarkup("重置", "Reset")}</button>
+          <button class="aurora-ionosphere-replay" type="button">${bilingualLabelMarkup("重播", "Replay")}</button>
+        </div>
+        <p class="particle-plugin-error aurora-ionosphere-plugin-error" role="status" hidden></p>
+      </div>
+    </section>
+  `;
+}
+
 function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? path;
   const dot = name.lastIndexOf(".");
@@ -8163,6 +9307,7 @@ export class CodeCodexElement extends HTMLElement {
   #blackHoleSettingsOpen = false;
   #glowHorizonSettingsOpen = false;
   #heavenlyCloudSettingsOpen = false;
+  #auroraIonosphereSettingsOpen = false;
   #backgroundSettingsLanguage: BackgroundSettingsLanguage = "zh";
   #forcedColorsQuery: MediaQueryList | undefined;
   #reducedTransparencyQuery: MediaQueryList | undefined;
@@ -8300,6 +9445,25 @@ export class CodeCodexElement extends HTMLElement {
   readonly #heavenlyCloudResetButton: HTMLButtonElement;
   readonly #heavenlyCloudReplayButton: HTMLButtonElement;
   readonly #heavenlyCloudPluginError: HTMLElement;
+  readonly #auroraIonosphereBackgroundController = getAuroraIonosphereBackgroundController();
+  #auroraIonosphereBackgroundUnsubscribe: (() => void) | undefined;
+  #auroraIonosphereBackgroundInitialization: Promise<void> | undefined;
+  readonly #auroraIonosphereBackgroundCard: HTMLElement;
+  readonly #auroraIonosphereBackgroundButton: HTMLButtonElement;
+  readonly #auroraIonosphereBackgroundStatus: HTMLElement;
+  readonly #auroraIonosphereSettingsPanel: HTMLElement;
+  readonly #auroraIonosphereSettingsTrigger: HTMLButtonElement;
+  readonly #auroraIonosphereSettingsCloseButton: HTMLButtonElement;
+  readonly #auroraIonosphereNumericControls = new Map<AuroraIonosphereNumericSettingKey, Readonly<{
+    definition: AuroraIonosphereNumericControlDefinition;
+    input: HTMLInputElement;
+    output: HTMLOutputElement;
+  }>>();
+  readonly #auroraIonosphereQualityButtons: readonly HTMLButtonElement[];
+  readonly #auroraIonospherePausedInput: HTMLInputElement;
+  readonly #auroraIonosphereResetButton: HTMLButtonElement;
+  readonly #auroraIonosphereReplayButton: HTMLButtonElement;
+  readonly #auroraIonospherePluginError: HTMLElement;
   readonly #liveRegion: HTMLElement;
   readonly #collapseButton: HTMLButtonElement;
   readonly #collapsedTab: HTMLButtonElement;
@@ -8357,7 +9521,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -8384,6 +9548,7 @@ export class CodeCodexElement extends HTMLElement {
       ${blackHoleSettingsPanelMarkup()}
       ${glowHorizonSettingsPanelMarkup()}
       ${heavenlyCloudSettingsPanelMarkup()}
+      ${auroraIonosphereSettingsPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -8481,8 +9646,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 4) {
-      throw new Error("Background settings require four synchronized language switches.");
+    if (this.#backgroundLanguageInputs.length !== 5) {
+      throw new Error("Background settings require five synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
@@ -8540,6 +9705,28 @@ export class CodeCodexElement extends HTMLElement {
     this.#heavenlyCloudResetButton = this.#required<HTMLButtonElement>(".heavenly-cloud-reset");
     this.#heavenlyCloudReplayButton = this.#required<HTMLButtonElement>(".heavenly-cloud-replay");
     this.#heavenlyCloudPluginError = this.#required<HTMLElement>(".heavenly-cloud-plugin-error");
+    this.#auroraIonosphereBackgroundCard = this.#required<HTMLElement>(`[data-appearance-plugin="${AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID}"]`);
+    this.#auroraIonosphereBackgroundButton = this.#required<HTMLButtonElement>(
+      `[data-appearance-plugin="${AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID}"] .preview-extension-action`,
+    );
+    this.#auroraIonosphereBackgroundStatus = this.#required<HTMLElement>(
+      `[data-appearance-plugin="${AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
+    );
+    this.#auroraIonosphereSettingsPanel = this.#required<HTMLElement>(".aurora-ionosphere-settings-panel");
+    this.#auroraIonosphereSettingsTrigger = this.#required<HTMLButtonElement>(".aurora-ionosphere-settings-trigger");
+    this.#auroraIonosphereSettingsCloseButton = this.#required<HTMLButtonElement>(".aurora-ionosphere-settings-close");
+    for (const definition of AURORA_IONOSPHERE_NUMERIC_CONTROL_DEFINITIONS) {
+      const input = this.#required<HTMLInputElement>(`#${definition.id}`);
+      const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
+      this.#auroraIonosphereNumericControls.set(definition.key, { definition, input, output });
+    }
+    this.#auroraIonosphereQualityButtons = Array.from(
+      this.#shadow.querySelectorAll<HTMLButtonElement>("[data-aurora-ionosphere-quality]"),
+    );
+    this.#auroraIonospherePausedInput = this.#required<HTMLInputElement>("#cle-aurora-ionosphere-paused");
+    this.#auroraIonosphereResetButton = this.#required<HTMLButtonElement>(".aurora-ionosphere-reset");
+    this.#auroraIonosphereReplayButton = this.#required<HTMLButtonElement>(".aurora-ionosphere-replay");
+    this.#auroraIonospherePluginError = this.#required<HTMLElement>(".aurora-ionosphere-plugin-error");
     this.#liveRegion = this.#required<HTMLElement>(".live-region");
     this.#collapseButton = this.#required<HTMLButtonElement>(".collapse");
     this.#collapsedTab = this.#required<HTMLButtonElement>(".collapsed-tab");
@@ -8583,7 +9770,22 @@ export class CodeCodexElement extends HTMLElement {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
     }
-    if (this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)) {
+    if (this.#auroraIonosphereBackgroundController.stoppedForExternalThemeChange) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    }
+    if (this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    } else if (this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)) {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
@@ -8662,6 +9864,19 @@ export class CodeCodexElement extends HTMLElement {
     });
     this.#heavenlyCloudBackgroundInitialization = this.#glowHorizonBackgroundInitialization
       .then(() => this.#initializeHeavenlyCloudBackground(appearanceInitializationGeneration));
+    this.#auroraIonosphereBackgroundUnsubscribe?.();
+    this.#auroraIonosphereBackgroundUnsubscribe = this.#auroraIonosphereBackgroundController.subscribe(() => {
+      if (!this.#connected) return;
+      if (
+        this.#auroraIonosphereBackgroundController.stoppedForExternalThemeChange
+        && this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)
+      ) {
+        this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderAuroraIonosphereBackgroundPlugin();
+    });
+    this.#auroraIonosphereBackgroundInitialization = this.#heavenlyCloudBackgroundInitialization
+      .then(() => this.#initializeAuroraIonosphereBackground(appearanceInitializationGeneration));
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
@@ -8710,6 +9925,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#heavenlyCloudBackgroundUnsubscribe?.();
     this.#heavenlyCloudBackgroundUnsubscribe = undefined;
     this.#heavenlyCloudBackgroundInitialization = undefined;
+    this.#auroraIonosphereBackgroundUnsubscribe?.();
+    this.#auroraIonosphereBackgroundUnsubscribe = undefined;
+    this.#auroraIonosphereBackgroundInitialization = undefined;
     this.#appearancePluginPending = false;
     this.#appearanceTransitionPending = false;
     this.#appearancePluginApplied = undefined;
@@ -8784,7 +10002,8 @@ export class CodeCodexElement extends HTMLElement {
     const blackHoleWasEnabled = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
     const glowHorizonWasEnabled = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
     const heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
-    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled) this.#writeEnabledAppearancePlugins();
+    const auroraIonosphereWasEnabled = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled) this.#writeEnabledAppearancePlugins();
     if (particleWasEnabled || this.#particleBackgroundController.enabled) {
       await this.#particleBackgroundController.disable();
     }
@@ -8796,6 +10015,9 @@ export class CodeCodexElement extends HTMLElement {
     }
     if (heavenlyCloudWasEnabled || this.#heavenlyCloudBackgroundController.enabled) {
       await this.#heavenlyCloudBackgroundController.disable();
+    }
+    if (auroraIonosphereWasEnabled || this.#auroraIonosphereBackgroundController.enabled) {
+      await this.#auroraIonosphereBackgroundController.disable();
     }
     await this.#reconcilePersistedWindowTransparency();
     this.#purgePreviewTabs(false);
@@ -8966,7 +10188,7 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -8981,6 +10203,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#glowHorizonSettingsCloseButton.setAttribute("aria-label", this.#glowHorizonSettingsCloseButton.title);
     this.#heavenlyCloudSettingsCloseButton.title = this.#backgroundText("关闭天境云隧道设置", "Close Heavenly Cloud settings");
     this.#heavenlyCloudSettingsCloseButton.setAttribute("aria-label", this.#heavenlyCloudSettingsCloseButton.title);
+    this.#auroraIonosphereSettingsCloseButton.title = this.#backgroundText("关闭极光电离层设置", "Close Aurora Ionosphere settings");
+    this.#auroraIonosphereSettingsCloseButton.setAttribute("aria-label", this.#auroraIonosphereSettingsCloseButton.title);
 
     for (const control of [...this.#particleNumericControls.values(), ...this.#particleImageTransformControls.values()]) {
       const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
@@ -9036,6 +10260,16 @@ export class CodeCodexElement extends HTMLElement {
       "aria-label",
       this.#backgroundText("光线步数", "Ray steps"),
     );
+    for (const control of this.#auroraIonosphereNumericControls.values()) {
+      const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
+      control.input.setAttribute("aria-label", label);
+      const formatted = formatAuroraIonosphereControlValue(control.definition, Number(control.input.value));
+      control.input.setAttribute("aria-valuetext", formatted);
+    }
+    this.#shadow.querySelector<HTMLElement>(".aurora-ionosphere-quality-toolbar")?.setAttribute(
+      "aria-label",
+      this.#backgroundText("光幕采样", "Curtain samples"),
+    );
   }
 
   #setBackgroundSettingsLanguage(language: BackgroundSettingsLanguage): void {
@@ -9046,10 +10280,12 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderBlackHoleBackgroundPlugin();
     this.#renderGlowHorizonBackgroundPlugin();
     this.#renderHeavenlyCloudBackgroundPlugin();
+    this.#renderAuroraIonosphereBackgroundPlugin();
     if (this.#particleSettingsOpen) requestAnimationFrame(() => this.#positionParticleSettingsPanel());
     if (this.#blackHoleSettingsOpen) requestAnimationFrame(() => this.#positionBlackHoleSettingsPanel());
     if (this.#glowHorizonSettingsOpen) requestAnimationFrame(() => this.#positionGlowHorizonSettingsPanel());
     if (this.#heavenlyCloudSettingsOpen) requestAnimationFrame(() => this.#positionHeavenlyCloudSettingsPanel());
+    if (this.#auroraIonosphereSettingsOpen) requestAnimationFrame(() => this.#positionAuroraIonosphereSettingsPanel());
   }
 
   #bindDomEvents(): void {
@@ -9068,6 +10304,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#blackHoleBackgroundButton.addEventListener("click", () => void this.#toggleBlackHoleBackground());
       this.#glowHorizonBackgroundButton.addEventListener("click", () => void this.#toggleGlowHorizonBackground());
       this.#heavenlyCloudBackgroundButton.addEventListener("click", () => void this.#toggleHeavenlyCloudBackground());
+      this.#auroraIonosphereBackgroundButton.addEventListener("click", () => void this.#toggleAuroraIonosphereBackground());
       this.#particleSettingsTrigger.addEventListener("click", () => this.#toggleParticleSettings());
       this.#particleSettingsCloseButton.addEventListener("click", () => this.#closeParticleSettings(true));
       this.#blackHoleSettingsTrigger.addEventListener("click", () => this.#toggleBlackHoleSettings());
@@ -9076,6 +10313,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#glowHorizonSettingsCloseButton.addEventListener("click", () => this.#closeGlowHorizonSettings(true));
       this.#heavenlyCloudSettingsTrigger.addEventListener("click", () => this.#toggleHeavenlyCloudSettings());
       this.#heavenlyCloudSettingsCloseButton.addEventListener("click", () => this.#closeHeavenlyCloudSettings(true));
+      this.#auroraIonosphereSettingsTrigger.addEventListener("click", () => this.#toggleAuroraIonosphereSettings());
+      this.#auroraIonosphereSettingsCloseButton.addEventListener("click", () => this.#closeAuroraIonosphereSettings(true));
       for (const input of this.#backgroundLanguageInputs) {
         input.addEventListener("change", () => {
           this.#setBackgroundSettingsLanguage(input.checked ? "en" : "zh");
@@ -9105,11 +10344,17 @@ export class CodeCodexElement extends HTMLElement {
         this.#heavenlyCloudSettingsOpen = false;
         this.#heavenlyCloudSettingsTrigger.setAttribute("aria-expanded", "false");
       });
+      this.#auroraIonosphereSettingsPanel.addEventListener("toggle", () => {
+        if (this.#auroraIonosphereSettingsPanel.matches(":popover-open") || !this.#auroraIonosphereSettingsOpen) return;
+        this.#auroraIonosphereSettingsOpen = false;
+        this.#auroraIonosphereSettingsTrigger.setAttribute("aria-expanded", "false");
+      });
       this.#previewMarketList.addEventListener("scroll", () => {
         if (this.#particleSettingsOpen) this.#positionParticleSettingsPanel();
         if (this.#blackHoleSettingsOpen) this.#positionBlackHoleSettingsPanel();
         if (this.#glowHorizonSettingsOpen) this.#positionGlowHorizonSettingsPanel();
         if (this.#heavenlyCloudSettingsOpen) this.#positionHeavenlyCloudSettingsPanel();
+        if (this.#auroraIonosphereSettingsOpen) this.#positionAuroraIonosphereSettingsPanel();
       }, { passive: true });
       for (const control of this.#particleNumericControls.values()) {
         const { definition, input } = control;
@@ -9232,6 +10477,36 @@ export class CodeCodexElement extends HTMLElement {
           if (quality !== "low" && quality !== "medium" && quality !== "high") return;
           this.#heavenlyCloudBackgroundController.updateSettings({
             ...this.#heavenlyCloudBackgroundController.settings,
+            quality,
+          });
+        });
+      }
+      for (const [key, control] of this.#auroraIonosphereNumericControls) {
+        control.input.addEventListener("input", () => {
+          const normalized = normalizeAuroraIonosphereSettings({
+            ...this.#auroraIonosphereBackgroundController.settings,
+            [key]: control.input.value,
+          });
+          const value = normalized[key];
+          control.input.value = String(value);
+          const formatted = formatAuroraIonosphereControlValue(control.definition, value);
+          control.output.textContent = formatted;
+          control.input.setAttribute("aria-valuetext", formatted);
+          this.#applyAuroraIonosphereSettingsFromControls();
+        });
+      }
+      this.#auroraIonospherePausedInput.addEventListener("change", () => this.#applyAuroraIonosphereSettingsFromControls());
+      this.#auroraIonosphereResetButton.addEventListener("click", () => {
+        this.#auroraIonosphereBackgroundController.reset();
+        this.#auroraIonosphereBackgroundController.replay();
+      });
+      this.#auroraIonosphereReplayButton.addEventListener("click", () => this.#auroraIonosphereBackgroundController.replay());
+      for (const button of this.#auroraIonosphereQualityButtons) {
+        button.addEventListener("click", () => {
+          const quality = button.dataset.auroraIonosphereQuality;
+          if (quality !== "low" && quality !== "medium" && quality !== "high") return;
+          this.#auroraIonosphereBackgroundController.updateSettings({
+            ...this.#auroraIonosphereBackgroundController.settings,
             quality,
           });
         });
@@ -9424,6 +10699,13 @@ export class CodeCodexElement extends HTMLElement {
       this.#closeHeavenlyCloudSettings(false);
     }
     if (
+      this.#auroraIonosphereSettingsOpen
+      && !path.includes(this.#auroraIonosphereSettingsPanel)
+      && !path.includes(this.#auroraIonosphereSettingsTrigger)
+    ) {
+      this.#closeAuroraIonosphereSettings(false);
+    }
+    if (
       !this.#previewMarketPopover.hidden
       && !path.includes(this.#previewMarketPopover)
       && !path.includes(this.#previewMarketButton)
@@ -9431,6 +10713,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#blackHoleSettingsPanel)
       && !path.includes(this.#glowHorizonSettingsPanel)
       && !path.includes(this.#heavenlyCloudSettingsPanel)
+      && !path.includes(this.#auroraIonosphereSettingsPanel)
     ) {
       this.#closePreviewMarket(false);
     }
@@ -9499,6 +10782,12 @@ export class CodeCodexElement extends HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       this.#closeHeavenlyCloudSettings(true);
+      return;
+    }
+    if (this.#auroraIonosphereSettingsOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeAuroraIonosphereSettings(true);
       return;
     }
     if (this.#updateDialogOpen) {
@@ -12724,6 +14013,14 @@ export class CodeCodexElement extends HTMLElement {
     return this.#connected && generation === this.#appearanceInitializationGeneration;
   }
 
+  async #deactivateAuroraIonosphereForBackgroundSwitch(): Promise<void> {
+    const persisted = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+    if (persisted) this.#writeEnabledAppearancePlugins();
+    if (persisted || this.#auroraIonosphereBackgroundController.enabled) {
+      await this.#auroraIonosphereBackgroundController.disable(true);
+    }
+  }
+
   async #awaitBackgroundInitializations(operation: number): Promise<boolean> {
     const generation = this.#appearanceInitializationGeneration;
     this.#particleBackgroundInitialization ??= this.#initializeParticleBackground(generation);
@@ -12740,6 +14037,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#heavenlyCloudBackgroundInitialization ??= this.#glowHorizonBackgroundInitialization
       .then(() => this.#initializeHeavenlyCloudBackground(generation));
     await this.#heavenlyCloudBackgroundInitialization;
+    if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceOperation) return false;
+    this.#auroraIonosphereBackgroundInitialization ??= this.#heavenlyCloudBackgroundInitialization
+      .then(() => this.#initializeAuroraIonosphereBackground(generation));
+    await this.#auroraIonosphereBackgroundInitialization;
     return this.#isCurrentBackgroundInitialization(generation) && operation === this.#appearanceOperation;
   }
 
@@ -12756,6 +14057,8 @@ export class CodeCodexElement extends HTMLElement {
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
+        await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#blackHoleBackgroundController.enabled) {
           await this.#blackHoleBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
@@ -12799,6 +14102,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -12815,6 +14119,8 @@ export class CodeCodexElement extends HTMLElement {
     let bridge: ExplorerBridge | undefined;
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
+      await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+      if (!this.#connected || operation !== this.#appearanceOperation) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
@@ -12991,6 +14297,8 @@ export class CodeCodexElement extends HTMLElement {
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
+        await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#particleBackgroundController.enabled) {
           await this.#particleBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
@@ -13039,6 +14347,8 @@ export class CodeCodexElement extends HTMLElement {
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
+        await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#particleBackgroundController.enabled) {
           await this.#particleBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
@@ -13087,6 +14397,8 @@ export class CodeCodexElement extends HTMLElement {
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
+        await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#particleBackgroundController.enabled) {
           await this.#particleBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
@@ -13120,12 +14432,64 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  async #initializeAuroraIonosphereBackground(generation: number): Promise<void> {
+    try {
+      await this.#auroraIonosphereBackgroundController.initialize();
+      if (!this.#isCurrentBackgroundInitialization(generation)) return;
+      const enabled = this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+      if (enabled) {
+        let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (this.#particleBackgroundController.enabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#blackHoleBackgroundController.enabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#glowHorizonBackgroundController.enabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#heavenlyCloudBackgroundController.enabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+        }
+        await this.#auroraIonosphereBackgroundController.enable();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        if (this.#auroraIonosphereBackgroundController.stoppedForExternalThemeChange) {
+          if (this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)) {
+            this.#writeEnabledAppearancePlugins();
+          }
+        }
+      } else if (this.#auroraIonosphereBackgroundController.enabled) {
+        await this.#auroraIonosphereBackgroundController.disable();
+      }
+    } catch (error) {
+      console.error("Code-Codex could not initialize Aurora Ionosphere Background", error);
+    } finally {
+      if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
+    }
+  }
+
   async #toggleBlackHoleBackground(): Promise<void> {
     if (
       this.#blackHoleBackgroundController.pending
       || this.#particleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -13142,6 +14506,8 @@ export class CodeCodexElement extends HTMLElement {
     let bridge: ExplorerBridge | undefined;
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
+      await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+      if (!this.#connected || operation !== this.#appearanceOperation) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
@@ -13320,12 +14686,20 @@ export class CodeCodexElement extends HTMLElement {
     this.#heavenlyCloudBackgroundController.updateSettings(normalizeHeavenlyCloudSettings(values));
   }
 
+  #applyAuroraIonosphereSettingsFromControls(): void {
+    const values: Record<string, unknown> = { ...this.#auroraIonosphereBackgroundController.settings };
+    for (const [key, control] of this.#auroraIonosphereNumericControls) values[key] = control.input.value;
+    values.paused = this.#auroraIonospherePausedInput.checked;
+    this.#auroraIonosphereBackgroundController.updateSettings(normalizeAuroraIonosphereSettings(values));
+  }
+
   async #toggleGlowHorizonBackground(): Promise<void> {
     if (
       this.#glowHorizonBackgroundController.pending
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -13342,6 +14716,8 @@ export class CodeCodexElement extends HTMLElement {
     let bridge: ExplorerBridge | undefined;
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
+      await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+      if (!this.#connected || operation !== this.#appearanceOperation) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
@@ -13496,6 +14872,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -13512,6 +14889,8 @@ export class CodeCodexElement extends HTMLElement {
     let bridge: ExplorerBridge | undefined;
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
+      await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+      if (!this.#connected || operation !== this.#appearanceOperation) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
@@ -13653,6 +15032,203 @@ export class CodeCodexElement extends HTMLElement {
         }
       }
       const message = error instanceof Error ? error.message : "Heavenly Cloud Background could not be changed";
+      this.#showActionNotice(message, "error");
+    } finally {
+      if (operation === this.#appearanceOperation) {
+        this.#appearanceTransitionPending = false;
+        this.#renderPreviewMarket();
+        if (bridge?.available) this.#flushQueuedAppearanceSync(bridge);
+        if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          this.#scheduleAppearanceHealthCheck();
+        }
+      }
+    }
+  }
+
+  async #toggleAuroraIonosphereBackground(): Promise<void> {
+    if (
+      this.#auroraIonosphereBackgroundController.pending
+      || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending
+    ) return;
+    const operation = ++this.#appearanceOperation;
+    this.#appearanceTransitionPending = true;
+    this.#cancelAppearanceHealthCheck();
+    this.#renderPreviewMarket();
+    let auroraStarted = false;
+    let particleWasEnabled = false;
+    let blackHoleWasEnabled = false;
+    let glowHorizonWasEnabled = false;
+    let heavenlyCloudWasEnabled = false;
+    let transparentWasEnabled = false;
+    let previousTransparentBackground: string | undefined;
+    let bridge: ExplorerBridge | undefined;
+    try {
+      if (!await this.#awaitBackgroundInitializations(operation)) return;
+      bridge = this.#bridge;
+      transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || this.#particleBackgroundController.enabled;
+      blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || this.#blackHoleBackgroundController.enabled;
+      glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || this.#glowHorizonBackgroundController.enabled;
+      heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        || this.#heavenlyCloudBackgroundController.enabled;
+      previousTransparentBackground = this.#transparentBackgroundPresentation();
+      const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
+      const enabled = this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+      const active = this.#auroraIonosphereBackgroundController.enabled;
+      const nextEnabled = !enabled || !active;
+
+      if (nextEnabled) {
+        if ((transparentWasEnabled || transparentPresentationWasApplied) && bridge?.available) {
+          await this.#setWindowTransparency(bridge, false);
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        if (!this.#connected || operation !== this.#appearanceOperation) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (particleWasEnabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (blackHoleWasEnabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (glowHorizonWasEnabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (heavenlyCloudWasEnabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+        }
+        await this.#auroraIonosphereBackgroundController.enable();
+        auroraStarted = this.#auroraIonosphereBackgroundController.enabled;
+        if (this.#auroraIonosphereBackgroundController.stoppedForExternalThemeChange) {
+          throw new Error(this.#auroraIonosphereBackgroundController.error
+            ?? "Aurora Ionosphere Background stopped because Codex Appearance changed.");
+        }
+        if (!auroraStarted) throw new Error("Aurora Ionosphere Background could not be enabled");
+        if (!this.#connected || operation !== this.#appearanceOperation) {
+          const restorePrevious = this.#connected && !this.#dismissed;
+          const preserveTheme = restorePrevious
+            && (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled);
+          await this.#auroraIonosphereBackgroundController.disable(preserveTheme);
+          if (restorePrevious && particleWasEnabled) {
+            transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+            await this.#particleBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && blackHoleWasEnabled) {
+            transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+            await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && glowHorizonWasEnabled) {
+            transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+            await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && heavenlyCloudWasEnabled) {
+            transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+            await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+          }
+          return;
+        }
+        if (transparentWasEnabled) {
+          this.#appearancePluginApplied = false;
+          this.#appearancePluginError = undefined;
+          this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        }
+        this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.add(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+      } else {
+        await this.#auroraIonosphereBackgroundController.disable();
+        this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+      this.#announce(`Aurora Ionosphere Background ${nextEnabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      if (!this.#connected || operation !== this.#appearanceOperation) {
+        const stoppedForThemeChange = this.#auroraIonosphereBackgroundController.stoppedForExternalThemeChange;
+        const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
+        if (auroraStarted) {
+          await this.#auroraIonosphereBackgroundController.disable(
+            restorePrevious && (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled),
+          );
+        }
+        if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
+          let changed = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+          changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
+          if (changed) this.#writeEnabledAppearancePlugins();
+        } else if (restorePrevious && particleWasEnabled && !this.#particleBackgroundController.enabled) {
+          transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+          await this.#particleBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+          transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+          await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
+          transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+          await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && heavenlyCloudWasEnabled && !this.#heavenlyCloudBackgroundController.enabled) {
+          transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+          await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+        }
+        return;
+      }
+      const stoppedForThemeChange = this.#auroraIonosphereBackgroundController.stoppedForExternalThemeChange;
+      if (auroraStarted) {
+        await this.#auroraIonosphereBackgroundController.disable(
+          (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled)
+            && !stoppedForThemeChange,
+        );
+      }
+      if (stoppedForThemeChange) {
+        let changed = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+      } else if (particleWasEnabled && !this.#particleBackgroundController.enabled) {
+        transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+        await this.#particleBackgroundController.enable().catch(() => undefined);
+      } else if (blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+        transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+      } else if (glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
+        transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+      } else if (heavenlyCloudWasEnabled && !this.#heavenlyCloudBackgroundController.enabled) {
+        transferParticleThemeLease(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+      }
+      if (transparentWasEnabled && previousTransparentBackground) {
+        if (bridge?.available) {
+          try {
+            const restored = await this.#setWindowTransparency(bridge, true);
+            this.#applyTransparentBackgroundPresentation(restored.background);
+          } catch {
+            this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+          }
+        } else {
+          this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+        }
+      }
+      const message = error instanceof Error ? error.message : "Aurora Ionosphere Background could not be changed";
       this.#showActionNotice(message, "error");
     } finally {
       if (operation === this.#appearanceOperation) {
@@ -14275,6 +15851,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -14479,6 +16056,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#particleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -14542,6 +16120,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -14602,6 +16181,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#particleBackgroundController.pending
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -14632,6 +16212,62 @@ export class CodeCodexElement extends HTMLElement {
     );
     this.#heavenlyCloudSettingsPanel.setAttribute("aria-busy", String(controller.pending));
     if (this.#heavenlyCloudSettingsOpen) requestAnimationFrame(() => this.#positionHeavenlyCloudSettingsPanel());
+  }
+
+  #renderAuroraIonosphereBackgroundPlugin(): void {
+    const controller = this.#auroraIonosphereBackgroundController;
+    const enabled = this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+    const active = enabled && controller.enabled;
+    const action = enabled && !active ? "Retry" : enabled ? "Disable" : "Enable";
+    let status = enabled ? "Enabled" : "Disabled";
+    if (controller.pending) status = enabled || controller.enabled ? "Enabled · Applying" : "Applying";
+    else if (enabled && !active) status = "Enabled · Not applied";
+    else if (active && controller.error) status = "Enabled · Notice";
+    this.#auroraIonosphereBackgroundStatus.textContent = status;
+    this.#auroraIonosphereBackgroundStatus.dataset.enabled = String(active);
+    this.#auroraIonosphereBackgroundStatus.dataset.pending = String(controller.pending);
+    this.#auroraIonosphereBackgroundCard.setAttribute("aria-busy", String(controller.pending));
+    this.#auroraIonosphereBackgroundButton.textContent = controller.pending ? "Applying…" : action;
+    this.#auroraIonosphereBackgroundButton.dataset.enabled = String(enabled);
+    this.#auroraIonosphereBackgroundButton.setAttribute("aria-pressed", String(enabled));
+    this.#auroraIonosphereBackgroundButton.setAttribute(
+      "aria-label",
+      controller.pending ? "Applying Aurora Ionosphere Background" : `${action} Aurora Ionosphere Background`,
+    );
+    this.#auroraIonosphereBackgroundButton.disabled = controller.pending
+      || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending;
+    const settings = controller.settings;
+    for (const [key, control] of this.#auroraIonosphereNumericControls) {
+      const value = settings[key];
+      const formatted = formatAuroraIonosphereControlValue(control.definition, value);
+      control.input.value = String(value);
+      control.input.disabled = controller.pending;
+      control.input.setAttribute("aria-valuetext", formatted);
+      control.output.textContent = formatted;
+    }
+    for (const button of this.#auroraIonosphereQualityButtons) {
+      button.setAttribute("aria-pressed", String(button.dataset.auroraIonosphereQuality === settings.quality));
+      button.disabled = controller.pending;
+    }
+    this.#auroraIonospherePausedInput.checked = settings.paused;
+    this.#auroraIonospherePausedInput.disabled = controller.pending;
+    this.#auroraIonosphereResetButton.disabled = controller.pending;
+    this.#auroraIonosphereReplayButton.disabled = controller.pending || !controller.enabled;
+    const error = controller.error;
+    this.#auroraIonospherePluginError.hidden = !error;
+    this.#auroraIonospherePluginError.textContent = backgroundSettingsError(
+      error,
+      this.#backgroundSettingsLanguage,
+      "极光电离层背景",
+      "Aurora Ionosphere Background",
+    );
+    this.#auroraIonosphereSettingsPanel.setAttribute("aria-busy", String(controller.pending));
+    if (this.#auroraIonosphereSettingsOpen) requestAnimationFrame(() => this.#positionAuroraIonosphereSettingsPanel());
   }
 
   #readEnabledAppearancePlugins(): readonly string[] {
@@ -14749,6 +16385,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
     ) return;
     const operation = ++this.#appearanceOperation;
     this.#appearanceTransitionPending = true;
@@ -14760,6 +16397,7 @@ export class CodeCodexElement extends HTMLElement {
     let blackHoleWasActive = false;
     let glowHorizonWasActive = false;
     let heavenlyCloudWasActive = false;
+    let auroraIonosphereWasActive = false;
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       bridge = this.#bridge;
@@ -14795,10 +16433,12 @@ export class CodeCodexElement extends HTMLElement {
         const blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         const glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         const heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        const auroraIonosphereWasEnabled = this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
         particleWasActive = particleWasEnabled || this.#particleBackgroundController.enabled;
         blackHoleWasActive = blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled;
         glowHorizonWasActive = glowHorizonWasEnabled || this.#glowHorizonBackgroundController.enabled;
         heavenlyCloudWasActive = heavenlyCloudWasEnabled || this.#heavenlyCloudBackgroundController.enabled;
+        auroraIonosphereWasActive = auroraIonosphereWasEnabled || this.#auroraIonosphereBackgroundController.enabled;
         if (particleWasActive) {
           await this.#particleBackgroundController.disable();
           if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
@@ -14845,10 +16485,25 @@ export class CodeCodexElement extends HTMLElement {
             return;
           }
         }
+        if (auroraIonosphereWasActive) {
+          await this.#auroraIonosphereBackgroundController.disable();
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            if (this.#connected && !this.#dismissed) {
+              if (auroraIonosphereWasActive) await this.#auroraIonosphereBackgroundController.enable().catch(() => undefined);
+              else if (heavenlyCloudWasActive) await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+              else if (glowHorizonWasActive) await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+              else if (blackHoleWasActive) await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+              else if (particleWasActive) await this.#particleBackgroundController.enable().catch(() => undefined);
+            }
+            return;
+          }
+        }
         this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       } else {
         this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -14858,11 +16513,14 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderBlackHoleBackgroundPlugin();
       this.#renderGlowHorizonBackgroundPlugin();
       this.#renderHeavenlyCloudBackgroundPlugin();
+      this.#renderAuroraIonosphereBackgroundPlugin();
       this.#announce(`Transparent Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
       if (!this.#connected || operation !== this.#appearanceOperation) return;
       if (nextEnabled) {
-        if (heavenlyCloudWasActive && !this.#heavenlyCloudBackgroundController.enabled) {
+        if (auroraIonosphereWasActive && !this.#auroraIonosphereBackgroundController.enabled) {
+          await this.#auroraIonosphereBackgroundController.enable().catch(() => undefined);
+        } else if (heavenlyCloudWasActive && !this.#heavenlyCloudBackgroundController.enabled) {
           await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
         } else if (glowHorizonWasActive && !this.#glowHorizonBackgroundController.enabled) {
           await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
@@ -14921,6 +16579,7 @@ export class CodeCodexElement extends HTMLElement {
         && !this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
         && !this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
         && !this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        && !this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)
       ) {
         this.#applyTransparentBackgroundPresentation(previousBackground);
       }
@@ -15003,6 +16662,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#closeBlackHoleSettings(false);
     this.#closeGlowHorizonSettings(false);
     this.#closeHeavenlyCloudSettings(false);
+    this.#closeAuroraIonosphereSettings(false);
     this.#particleSettingsOpen = true;
     this.#particleSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderParticleBackgroundPlugin();
@@ -15066,6 +16726,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#closeParticleSettings(false);
     this.#closeGlowHorizonSettings(false);
     this.#closeHeavenlyCloudSettings(false);
+    this.#closeAuroraIonosphereSettings(false);
     this.#blackHoleSettingsOpen = true;
     this.#blackHoleSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderBlackHoleBackgroundPlugin();
@@ -15125,6 +16786,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#closeParticleSettings(false);
     this.#closeBlackHoleSettings(false);
     this.#closeHeavenlyCloudSettings(false);
+    this.#closeAuroraIonosphereSettings(false);
     this.#glowHorizonSettingsOpen = true;
     this.#glowHorizonSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderGlowHorizonBackgroundPlugin();
@@ -15184,6 +16846,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#closeParticleSettings(false);
     this.#closeBlackHoleSettings(false);
     this.#closeGlowHorizonSettings(false);
+    this.#closeAuroraIonosphereSettings(false);
     this.#heavenlyCloudSettingsOpen = true;
     this.#heavenlyCloudSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderHeavenlyCloudBackgroundPlugin();
@@ -15234,11 +16897,72 @@ export class CodeCodexElement extends HTMLElement {
     panel.dataset.side = side;
   }
 
+  #toggleAuroraIonosphereSettings(): void {
+    if (this.#auroraIonosphereSettingsOpen) {
+      this.#closeAuroraIonosphereSettings(true);
+      return;
+    }
+    if (!this.#previewMarketOpen) this.#togglePreviewMarket();
+    this.#closeParticleSettings(false);
+    this.#closeBlackHoleSettings(false);
+    this.#closeGlowHorizonSettings(false);
+    this.#closeHeavenlyCloudSettings(false);
+    this.#auroraIonosphereSettingsOpen = true;
+    this.#auroraIonosphereSettingsTrigger.setAttribute("aria-expanded", "true");
+    this.#renderAuroraIonosphereBackgroundPlugin();
+    if (!this.#auroraIonosphereSettingsPanel.matches(":popover-open")) this.#auroraIonosphereSettingsPanel.showPopover();
+    this.#positionAuroraIonosphereSettingsPanel();
+    queueMicrotask(() => {
+      if (!this.#auroraIonosphereSettingsOpen) return;
+      this.#positionAuroraIonosphereSettingsPanel();
+      this.#auroraIonosphereSettingsCloseButton.focus();
+    });
+  }
+
+  #closeAuroraIonosphereSettings(restoreFocus: boolean): void {
+    if (!this.#auroraIonosphereSettingsOpen && !this.#auroraIonosphereSettingsPanel.matches(":popover-open")) return;
+    this.#auroraIonosphereSettingsOpen = false;
+    this.#auroraIonosphereSettingsTrigger.setAttribute("aria-expanded", "false");
+    if (this.#auroraIonosphereSettingsPanel.matches(":popover-open")) this.#auroraIonosphereSettingsPanel.hidePopover();
+    if (restoreFocus && this.#auroraIonosphereSettingsTrigger.isConnected) this.#auroraIonosphereSettingsTrigger.focus();
+  }
+
+  #positionAuroraIonosphereSettingsPanel(): void {
+    if (!this.#auroraIonosphereSettingsOpen || !this.#auroraIonosphereSettingsPanel.matches(":popover-open")) return;
+    const panel = this.#auroraIonosphereSettingsPanel;
+    const cardRect = this.#auroraIonosphereBackgroundCard.getBoundingClientRect();
+    const edge = 12;
+    const gap = 8;
+    const preferredWidth = 344;
+    const panelWidth = Math.min(preferredWidth, Math.max(240, window.innerWidth - edge * 2));
+    let left = cardRect.right + gap;
+    let side = "right";
+    if (left + panelWidth > window.innerWidth - edge) {
+      left = Math.max(edge, window.innerWidth - edge - panelWidth);
+      side = "overlay";
+    }
+    panel.style.width = `${panelWidth}px`;
+    panel.style.maxHeight = `${Math.max(240, window.innerHeight - edge * 2)}px`;
+    const panelHeight = Math.min(panel.scrollHeight, Math.max(240, window.innerHeight - edge * 2));
+    const top = Math.min(
+      Math.max(edge, cardRect.top),
+      Math.max(edge, window.innerHeight - edge - panelHeight),
+    );
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.setProperty(
+      "--cle-particle-settings-anchor-y",
+      `${Math.round(Math.min(panelHeight - 18, Math.max(18, cardRect.top + cardRect.height * 0.5 - top)))}px`,
+    );
+    panel.dataset.side = side;
+  }
+
   #closePreviewMarket(restoreFocus: boolean): void {
     this.#closeParticleSettings(false);
     this.#closeBlackHoleSettings(false);
     this.#closeGlowHorizonSettings(false);
     this.#closeHeavenlyCloudSettings(false);
+    this.#closeAuroraIonosphereSettings(false);
     if (!this.#previewMarketOpen && this.#previewMarketPopover.hidden) return;
     this.#previewMarketOpen = false;
     this.#previewMarketPopover.hidden = true;
@@ -15266,6 +16990,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderBlackHoleBackgroundPlugin();
     this.#renderGlowHorizonBackgroundPlugin();
     this.#renderHeavenlyCloudBackgroundPlugin();
+    this.#renderAuroraIonosphereBackgroundPlugin();
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const enabled = this.#enabledPreviewers.has(previewer.id);
       const status = this.#previewerStatuses.get(previewer.id);
@@ -15311,6 +17036,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
       || !bridgeAvailable
       || (!enabled && preferenceBlocked);
 
