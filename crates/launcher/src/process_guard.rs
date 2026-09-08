@@ -19,9 +19,17 @@ use process_wrap::tokio::JobObject;
 use process_wrap::tokio::TokioCommandWrapper;
 use process_wrap::tokio::{KillOnDrop, TokioChildWrapper, TokioCommandWrap};
 #[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+#[cfg(windows)]
 use std::sync::Arc;
 #[cfg(windows)]
 use win32job::{ExtendedLimitInfo, Job};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+};
 
 #[derive(Debug, Error)]
 pub enum ProcessGuardError {
@@ -347,16 +355,27 @@ impl CodexProcessGuard {
         match self {
             Self::Child(child) => child.wait_for_exit().await,
             #[cfg(windows)]
-            Self::Package(package) => {
-                let status = package.helper.wait().await?;
-                if status.success() {
-                    Ok(())
-                } else {
-                    Err(io::Error::other(format!(
-                        "package activation helper exited with {status}"
-                    )))
+            Self::Package(package) => match package.helper.wait().await {
+                Ok(status) if status.success() => Ok(()),
+                Ok(status) => {
+                    tracing::warn!(
+                        event = "package_activation_helper_failed",
+                        pid = package.pid,
+                        %status,
+                        recovery = "wait_for_activated_process"
+                    );
+                    wait_for_process_exit(package.pid).await
                 }
-            }
+                Err(error) => {
+                    tracing::warn!(
+                        event = "package_activation_helper_wait_failed",
+                        pid = package.pid,
+                        %error,
+                        recovery = "wait_for_activated_process"
+                    );
+                    wait_for_process_exit(package.pid).await
+                }
+            },
         }
     }
 
@@ -365,6 +384,28 @@ impl CodexProcessGuard {
             Self::Child(child) => child.terminate().await,
             #[cfg(windows)]
             Self::Package(package) => package.terminate().await,
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn wait_for_process_exit(pid: u32) -> io::Result<()> {
+    let raw_handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if raw_handle.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let handle = unsafe { OwnedHandle::from_raw_handle(raw_handle.cast()) };
+
+    loop {
+        match unsafe { WaitForSingleObject(handle.as_raw_handle().cast(), 0) } {
+            WAIT_OBJECT_0 => return Ok(()),
+            WAIT_TIMEOUT => tokio::time::sleep(Duration::from_millis(100)).await,
+            WAIT_FAILED => return Err(io::Error::last_os_error()),
+            status => {
+                return Err(io::Error::other(format!(
+                    "unexpected process wait status {status}"
+                )));
+            }
         }
     }
 }
@@ -1540,6 +1581,62 @@ mod tests {
         assert!(!guard.has_exited());
         guard.terminate().await;
         assert!(guard.has_exited());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn package_guard_survives_helper_failure_while_activated_process_is_alive() {
+        let powershell = trusted_powershell().expect("trusted PowerShell");
+        let mut activated_command = TokioCommand::new(&powershell);
+        activated_command
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Milliseconds 350",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut activated_process = activated_command.spawn().expect("spawn activated process");
+        let activated_pid = activated_process.id().expect("activated process ID");
+
+        let mut helper_command = TokioCommand::new(&powershell);
+        helper_command
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "exit 2",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut helper = helper_command.spawn().expect("spawn failing helper");
+        let control = helper.stdin.take();
+        let mut guard = CodexProcessGuard::Package(Box::new(CodexPackageGuard {
+            helper,
+            control,
+            pid: activated_pid,
+            armed: true,
+        }));
+
+        let started = std::time::Instant::now();
+        let wait_result = guard.wait_for_exit().await;
+        let elapsed = started.elapsed();
+        let _ = activated_process.kill().await;
+        let _ = activated_process.wait().await;
+
+        assert!(
+            wait_result.is_ok(),
+            "a failed helper must not end supervision while the activated process is alive"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(200),
+            "the guard returned before the activated process exited"
+        );
     }
 
     #[cfg(windows)]
