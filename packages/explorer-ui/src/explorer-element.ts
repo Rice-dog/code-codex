@@ -84,6 +84,7 @@ const BLACK_HOLE_BACKGROUND_PLUGIN_ID = "code-codex.black-hole-background";
 const GLOW_HORIZON_BACKGROUND_PLUGIN_ID = "code-codex.glow-horizon-background";
 const HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID = "code-codex.heavenly-cloud-background";
 const AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID = "code-codex.aurora-ionosphere-background";
+const MILKY_WAY_BACKGROUND_PLUGIN_ID = "code-codex.milky-way-background";
 const APPEARANCE_PLUGIN_IDS = new Set([
   TRANSPARENT_BACKGROUND_PLUGIN_ID,
   PARTICLE_BACKGROUND_PLUGIN_ID,
@@ -91,6 +92,7 @@ const APPEARANCE_PLUGIN_IDS = new Set([
   GLOW_HORIZON_BACKGROUND_PLUGIN_ID,
   HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,
   AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,
+  MILKY_WAY_BACKGROUND_PLUGIN_ID,
 ]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
@@ -107,6 +109,7 @@ const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1"
 const GLOW_HORIZON_BACKGROUND_SETTINGS_KEY = "code-codex:glow-horizon-background:v1";
 const HEAVENLY_CLOUD_BACKGROUND_SETTINGS_KEY = "code-codex:heavenly-cloud-background:v1";
 const AURORA_IONOSPHERE_BACKGROUND_SETTINGS_KEY = "code-codex:aurora-ionosphere-background:v1";
+const MILKY_WAY_BACKGROUND_SETTINGS_KEY = "code-codex:milky-way-background:v1";
 const BACKGROUND_SETTINGS_LANGUAGE_KEY = "code-codex:background-settings-language:v1";
 const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
 const CODEX_APPEARANCE_POLL_INTERVAL_MS = 1_500;
@@ -596,7 +599,8 @@ type DarkBackgroundPluginId =
   | typeof BLACK_HOLE_BACKGROUND_PLUGIN_ID
   | typeof GLOW_HORIZON_BACKGROUND_PLUGIN_ID
   | typeof HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
-  | typeof AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID;
+  | typeof AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
+  | typeof MILKY_WAY_BACKGROUND_PLUGIN_ID;
 
 interface ParticleThemeLease {
   readonly owner?: DarkBackgroundPluginId;
@@ -1916,6 +1920,7 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
         || lease.owner === GLOW_HORIZON_BACKGROUND_PLUGIN_ID
         || lease.owner === HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
         || lease.owner === AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
+        || lease.owner === MILKY_WAY_BACKGROUND_PLUGIN_ID
         ? lease.owner
         : undefined;
       return owner
@@ -6999,6 +7004,481 @@ function getAuroraIonosphereBackgroundController(): AuroraIonosphereBackgroundCo
   globalState[AURORA_IONOSPHERE_BACKGROUND_CONTROLLER] = controller;
   return controller;
 }
+type MilkyWayQuality = "low" | "medium" | "high";
+interface MilkyWayBackgroundSettings {
+  quality: MilkyWayQuality;
+  speed: number;
+  amplitude: number;
+  frequency: number;
+  zoom: number;
+  rotation: number;
+  exposure: number;
+  timeOffset: number;
+  introDuration: number;
+  introFeather: number;
+  introAngle: number;
+  introZoom: number;
+  introEnabled: boolean;
+  paused: boolean;
+  colors: readonly string[];
+}
+type MilkyWayNumericSettingKey = { [K in keyof MilkyWayBackgroundSettings]: MilkyWayBackgroundSettings[K] extends number ? K : never }[keyof MilkyWayBackgroundSettings];
+type MilkyWayControlGroup = "field" | "opening";
+type MilkyWayNumericControlDefinition = Omit<AuroraIonosphereNumericControlDefinition, "key"> & { key: MilkyWayNumericSettingKey };
+const DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS: MilkyWayBackgroundSettings = Object.freeze({
+  quality: "medium", speed: .35, amplitude: 1, frequency: 1, zoom: 1, rotation: 0, exposure: 1,
+  timeOffset: 5.07, introDuration: 2.8, introFeather: .18, introAngle: 32, introZoom: .16,
+  introEnabled: true, paused: false,
+  colors: Object.freeze(["#d81159", "#8f2d56", "#218380", "#fbb13c", "#73d2de"]),
+});
+const MILKY_WAY_NUMERIC_CONTROL_DEFINITIONS: readonly MilkyWayNumericControlDefinition[] = [
+  { key: "speed", group: "field", id: "cle-milky-way-speed", label: "Flow speed", labelZh: "流动速度", minimum: 0, maximum: 3, step: .01 },
+  { key: "amplitude", group: "field", id: "cle-milky-way-amplitude", label: "Wave amplitude", labelZh: "波动幅度", minimum: 0, maximum: 2, step: .01 },
+  { key: "frequency", group: "field", id: "cle-milky-way-frequency", label: "Wave frequency", labelZh: "波动频率", minimum: .1, maximum: 3, step: .01 },
+  { key: "zoom", group: "field", id: "cle-milky-way-zoom", label: "Scale", labelZh: "画面缩放", minimum: .3, maximum: 3, step: .01 },
+  { key: "rotation", group: "field", id: "cle-milky-way-rotation", label: "Rotation", labelZh: "画面旋转", minimum: -180, maximum: 180, step: 1, unit: "°" },
+  { key: "exposure", group: "field", id: "cle-milky-way-exposure", label: "Brightness", labelZh: "画面亮度", minimum: 0, maximum: 2, step: .01 },
+  { key: "timeOffset", group: "field", id: "cle-milky-way-time-offset", label: "Initial phase", labelZh: "初始相位", minimum: 0, maximum: 120, step: .01, unit: "s" },
+  { key: "introDuration", group: "opening", id: "cle-milky-way-intro-duration", label: "Opening duration", labelZh: "开场时长", minimum: .5, maximum: 8, step: .1, unit: "s" },
+  { key: "introFeather", group: "opening", id: "cle-milky-way-intro-feather", label: "Edge feathering", labelZh: "边缘羽化", minimum: .01, maximum: .5, step: .01 },
+  { key: "introAngle", group: "opening", id: "cle-milky-way-intro-angle", label: "Reveal angle", labelZh: "展开角度", minimum: -180, maximum: 180, step: 1, unit: "°" },
+  { key: "introZoom", group: "opening", id: "cle-milky-way-intro-zoom", label: "Zoom strength", labelZh: "缩放强度", minimum: 0, maximum: .6, step: .01 },
+];
+function normalizeMilkyWaySettings(value: unknown): MilkyWayBackgroundSettings {
+  const record = isObjectRecord(value) ? value : {};
+  const defaults = DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS;
+  const result = { ...defaults };
+  for (const control of MILKY_WAY_NUMERIC_CONTROL_DEFINITIONS) result[control.key] = clampParticleNumber(record[control.key], control.minimum, control.maximum, defaults[control.key]);
+  result.quality = record.quality === "low" || record.quality === "medium" || record.quality === "high" ? record.quality : defaults.quality;
+  result.paused = typeof record.paused === "boolean" ? record.paused : defaults.paused;
+  result.introEnabled = typeof record.introEnabled === "boolean" ? record.introEnabled : defaults.introEnabled;
+  const colors = Array.isArray(record.colors) ? record.colors : [];
+  result.colors = defaults.colors.map((fallback, i) => typeof colors[i] === "string" && /^#[\da-f]{6}$/i.test(colors[i]) ? colors[i] : fallback);
+  return result;
+}
+function readMilkyWayBackgroundSettings(): MilkyWayBackgroundSettings {
+  try { return normalizeMilkyWaySettings(JSON.parse(localStorage.getItem(MILKY_WAY_BACKGROUND_SETTINGS_KEY) || "{}")); }
+  catch { return { ...DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS }; }
+}
+function writeMilkyWayBackgroundSettings(settings: MilkyWayBackgroundSettings): void {
+  try { localStorage.setItem(MILKY_WAY_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings)); } catch { /* Session settings remain usable. */ }
+}
+
+// Reconstructed source reference: “Milky way”, Almina (@Code4_11).
+// The source project reconstructs missing stages; it is not a verified copy of the original artwork.
+const MILKY_WAY_FRAGMENT_SHADER = `precision highp float;
+uniform vec2 uResolution;
+uniform float uTime, uAmplitude, uFrequency, uZoom, uRotation, uExposure;
+uniform vec3 uColors[5];
+uniform float uIntro, uIntroFeather, uIntroAngle, uIntroZoom;
+float phase(vec2 p) {
+  // atan(0, 0) is undefined in GLSL; select a stable value at the singularity.
+  return dot(p,p) < 1e-12 ? 0.0 : atan(p.x, p.y);
+}
+void main() {
+  vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution.xy) / min(uResolution.x, uResolution.y);
+  vec2 screen = uv;
+  uv /= 1.0 + uIntroZoom * (1.0 - uIntro);
+  float c = cos(uRotation), s = sin(uRotation);
+  uv = mat2(c, -s, s, c) * uv / uZoom;
+  vec3 color = vec3(0.0);
+  uv.x += sin(uv.y * uFrequency + uTime) * uAmplitude;
+  uv.y += sin(uv.x * uFrequency + uTime) * uAmplitude;
+  color += sin(phase(uv)) * uColors[0];
+  uv.x += sin(uv.y * uFrequency + uTime * 1.2) * uAmplitude;
+  uv.y += sin(uv.x * uFrequency + uTime * 1.2) * uAmplitude;
+  color += sin(phase(uv) * 2.0) * uColors[1];
+  uv.x += sin(uv.y * uFrequency + uTime * 1.4) * uAmplitude;
+  uv.y += sin(uv.x * uFrequency + uTime * 1.4) * uAmplitude;
+  color += sin(phase(uv) * 3.0) * uColors[2];
+  uv.x += sin(uv.y * uFrequency + uTime * 1.6) * uAmplitude;
+  uv.y += sin(uv.x * uFrequency + uTime * 1.6) * uAmplitude;
+  color += sin(phase(uv) * 4.0) * uColors[3];
+  uv.x += sin(uv.y * uFrequency + uTime * 1.8) * uAmplitude;
+  uv.y += sin(uv.x * uFrequency + uTime * 1.8) * uAmplitude;
+  color += sin(phase(uv) * 5.0) * uColors[4];
+  vec3 finalColor = clamp((color / 2.0 + 0.5) * uExposure, 0.0, 1.0);
+  // A feathered slit expands to every corner. At progress 1 this is exactly
+  // the original image; there is no persistent overlay, blur, or color shift.
+  if (uIntro < 1.0) {
+    vec2 normal = vec2(-sin(uIntroAngle), cos(uIntroAngle));
+    vec2 halfSize = uResolution / min(uResolution.x, uResolution.y);
+    float distance = abs(dot(screen, normal)) / dot(halfSize, abs(normal));
+    float edge = mix(-uIntroFeather, 1.0 + uIntroFeather, uIntro);
+    float reveal = 1.0 - smoothstep(edge - uIntroFeather, edge + uIntroFeather, distance);
+    finalColor *= reveal;
+  }
+  gl_FragColor = vec4(finalColor, 1.0);
+}`;
+
+class MilkyWayRenderer {
+  #settings: MilkyWayBackgroundSettings;
+  readonly #canvas: HTMLCanvasElement;
+  readonly #gl: WebGLRenderingContext;
+  readonly #onError: (message: string | undefined) => void;
+  readonly #motion = matchMedia("(prefers-reduced-motion: reduce)");
+  readonly #resize: ResizeObserver;
+  readonly #intersection: IntersectionObserver;
+  #program: WebGLProgram | undefined;
+  #buffer: WebGLBuffer | undefined;
+  #uniforms: Record<string, WebGLUniformLocation | null> = {};
+  #palette = new Float32Array(15);
+  #maxViewport: Int32Array = new Int32Array([16384, 16384]);
+  #frame = 0;
+  #last = 0;
+  #time = 5.07;
+  #intro = 0;
+  #width = 1;
+  #height = 1;
+  #dirty = true;
+  #visible = true;
+  #lost = false;
+  #disposed = false;
+  constructor(layer: HTMLElement, canvas: HTMLCanvasElement, settings: MilkyWayBackgroundSettings, onError: (message: string | undefined) => void) {
+    this.#canvas = canvas;
+    this.#settings = normalizeMilkyWaySettings(settings);
+    this.#time = this.#settings.timeOffset;
+    this.#onError = onError;
+    const gl = canvas.getContext("webgl", { alpha: false, antialias: false, depth: false, stencil: false, powerPreference: "high-performance" });
+    if (!gl) throw new Error("WebGL is unavailable for Milky Way Background");
+    this.#gl = gl;
+    this.#updatePalette();
+    try { this.#initGpu(); } catch (error) { this.#cleanupGpu(); throw error; }
+    this.#resize = new ResizeObserver(entries => {
+      const rect = entries[0]?.contentRect;
+      if (rect) { this.#width = rect.width; this.#height = rect.height; this.#request(); }
+    });
+    this.#resize.observe(layer);
+    this.#intersection = new IntersectionObserver(entries => { this.#visible = entries[0]?.isIntersecting ?? true; this.#resetClock(); });
+    this.#intersection.observe(layer);
+    document.addEventListener("visibilitychange", this.#resetClock);
+    window.addEventListener("resize", this.#resetClock);
+    this.#motion.addEventListener("change", this.#resetClock);
+    canvas.addEventListener("webglcontextlost", this.#contextLost);
+    canvas.addEventListener("webglcontextrestored", this.#contextRestored);
+    this.#request();
+  }
+  #initGpu(): void {
+    const gl = this.#gl;
+    this.#maxViewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
+    const shaders: WebGLShader[] = [];
+    const compile = (type: number, source: string) => {
+      const shader = gl.createShader(type);
+      if (!shader) throw new Error("Milky Way shader allocation failed");
+      shaders.push(shader); gl.shaderSource(shader, source); gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader) || "Milky Way shader compilation failed");
+      return shader;
+    };
+    try {
+      const program = gl.createProgram();
+      if (!program) throw new Error("Milky Way program allocation failed");
+      this.#program = program;
+      gl.attachShader(program, compile(gl.VERTEX_SHADER, "attribute vec2 aPosition; void main(){gl_Position=vec4(aPosition,0.,1.);}"));
+      const precision = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+      gl.attachShader(program, compile(gl.FRAGMENT_SHADER, precision?.precision ? MILKY_WAY_FRAGMENT_SHADER : MILKY_WAY_FRAGMENT_SHADER.replace("precision highp", "precision mediump")));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || "Milky Way shader link failed");
+      gl.useProgram(program);
+      this.#buffer = gl.createBuffer() ?? undefined;
+      if (!this.#buffer) throw new Error("Milky Way geometry allocation failed");
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.#buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,3,-1,-1,3]), gl.STATIC_DRAW);
+      const position = gl.getAttribLocation(program, "aPosition");
+      gl.enableVertexAttribArray(position); gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
+      this.#uniforms = Object.fromEntries(["Resolution","Time","Amplitude","Frequency","Zoom","Rotation","Exposure","Colors[0]","Intro","IntroFeather","IntroAngle","IntroZoom"].map(name => [name, gl.getUniformLocation(program,"u"+name)]));
+      this.#dirty = true;
+    } finally { for (const shader of shaders) gl.deleteShader(shader); }
+  }
+  #updatePalette(): void {
+    this.#palette = new Float32Array(this.#settings.colors.flatMap(hex => [1,3,5].map(start => parseInt(hex.slice(start,start+2),16)/255)));
+  }
+  setSettings(settings: MilkyWayBackgroundSettings): void {
+    const next = normalizeMilkyWaySettings(settings);
+    if (next.timeOffset !== this.#settings.timeOffset) this.#time = next.timeOffset;
+    if (!next.introEnabled) this.#intro = 1;
+    this.#settings = next;
+    this.#updatePalette(); this.#dirty = true; this.#request();
+  }
+  replay(): void {
+    this.#time = this.#settings.timeOffset;
+    this.#intro = this.#settings.introEnabled ? 0 : 1;
+    this.#resetClock();
+  }
+  #request = (): void => {
+    if (!this.#disposed && !this.#lost && this.#visible && !document.hidden && !this.#frame) this.#frame = requestAnimationFrame(this.#draw);
+  };
+  #resetClock = (): void => { cancelAnimationFrame(this.#frame); this.#frame=0; this.#last=0; this.#request(); };
+  #draw = (now: number): void => {
+    this.#frame = 0;
+    if (this.#disposed || this.#lost || !this.#visible || document.hidden) { this.#last=0; return; }
+    const s=this.#settings, gl=this.#gl, u=this.#uniforms;
+    const delta=this.#last ? Math.min((now-this.#last)/1000,.05) : 0;
+    const moving=!s.paused && s.speed>0 && !this.#motion.matches;
+    if (moving) this.#time+=delta*s.speed;
+    this.#intro = this.#motion.matches || !s.introEnabled ? 1 : Math.min(1,this.#intro+delta/s.introDuration);
+    const p=this.#intro, eased=p*p*p*(p*(p*6-15)+10);
+    const running=moving || p<1;
+    this.#last=running ? now : 0;
+    const ratio=Math.min(devicePixelRatio || 1, {low:1,medium:2,high:3}[s.quality]);
+    const maxSize=this.#maxViewport;
+    const width=Math.max(1,Math.min(maxSize[0]!,Math.round(this.#width*ratio)));
+    const height=Math.max(1,Math.min(maxSize[1]!,Math.round(this.#height*ratio)));
+    if (this.#canvas.width!==width || this.#canvas.height!==height) {
+      this.#canvas.width=width; this.#canvas.height=height; gl.viewport(0,0,width,height); this.#dirty=true;
+    }
+    if (this.#dirty) {
+      gl.uniform2f(u.Resolution!,width,height);
+      gl.uniform1f(u.Amplitude!,s.amplitude); gl.uniform1f(u.Frequency!,s.frequency);
+      gl.uniform1f(u.Zoom!,s.zoom); gl.uniform1f(u.Rotation!,s.rotation*Math.PI/180);
+      gl.uniform1f(u.Exposure!,s.exposure); gl.uniform3fv(u["Colors[0]"]!,this.#palette);
+      gl.uniform1f(u.IntroFeather!,s.introFeather); gl.uniform1f(u.IntroAngle!,s.introAngle*Math.PI/180);
+      gl.uniform1f(u.IntroZoom!,s.introZoom); this.#dirty=false;
+    }
+    gl.uniform1f(u.Time!,this.#time); gl.uniform1f(u.Intro!,eased); gl.drawArrays(gl.TRIANGLES,0,3);
+    if (running) this.#request();
+  };
+  #cleanupGpu(): void { if(this.#buffer)this.#gl.deleteBuffer(this.#buffer); if(this.#program)this.#gl.deleteProgram(this.#program); this.#buffer=undefined; this.#program=undefined; }
+  #contextLost = (event: Event): void => { event.preventDefault(); this.#lost=true; cancelAnimationFrame(this.#frame); this.#frame=0; this.#last=0; this.#onError("Milky Way graphics context interrupted. Waiting to restore…"); };
+  #contextRestored = (): void => { if(this.#disposed)return; try { this.#cleanupGpu(); this.#initGpu(); this.#lost=false; this.#onError(undefined); this.#resetClock(); } catch(error) { this.#cleanupGpu(); this.#onError(error instanceof Error ? error.message : "Milky Way graphics recovery failed"); } };
+  dispose(): void {
+    this.#disposed=true; cancelAnimationFrame(this.#frame);
+    this.#resize.disconnect(); this.#intersection.disconnect();
+    document.removeEventListener("visibilitychange",this.#resetClock); window.removeEventListener("resize",this.#resetClock);
+    this.#motion.removeEventListener("change",this.#resetClock);
+    this.#canvas.removeEventListener("webglcontextlost",this.#contextLost); this.#canvas.removeEventListener("webglcontextrestored",this.#contextRestored);
+    this.#cleanupGpu();
+  }
+}
+
+
+class MilkyWayBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readMilkyWayBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #canvas: HTMLCanvasElement | undefined;
+  #renderer: MilkyWayRenderer | undefined;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() { window.addEventListener("pagehide", this.#onPageHide, { once: true }); }
+  get settings(): MilkyWayBackgroundSettings { return this.#settings; }
+  get enabled(): boolean { return this.#enabled; }
+  get pending(): boolean { return this.#pending; }
+  get error(): string | undefined { return this.#error; }
+  get stoppedForExternalThemeChange(): boolean { return this.#stoppedForExternalThemeChange; }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Milky Way Background is unavailable");
+  }
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try { await operation; } finally { if (this.#enableOperation === operation) this.#enableOperation = undefined; }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexParticleLayer = "v1";
+      layer.dataset.codeCodexMilkyWayLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.backgroundColor = "#02090d";
+      const canvas = document.createElement("canvas");
+      canvas.className = "code-codex-particle-canvas code-codex-milky-way-canvas";
+      layer.append(canvas);
+      document.body.prepend(layer);
+      this.#layer = layer;
+      this.#canvas = canvas;
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, "#02090d");
+      this.#renderer = new MilkyWayRenderer(layer, canvas, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Milky Way Background could not be enabled";
+      this.#teardownPresentation();
+      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: MilkyWayBackgroundSettings): void {
+    this.#settings = normalizeMilkyWaySettings(next);
+    writeMilkyWayBackgroundSettings(this.#settings);
+    this.#renderer?.setSettings(this.#settings);
+    this.#notify();
+  }
+  reset(): void { this.updateSettings(DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS); }
+  replay(): void { this.#renderer?.replay(); }
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    this.#canvas = undefined;
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = MILKY_WAY_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try { current = await readCodexAppearanceTheme(); }
+    catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) throw new Error("Another Code-Codex background is still using Dark mode");
+      if (lease && !lease.owner) writeParticleThemeLease({ ...lease, owner });
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Milky Way Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = MILKY_WAY_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease || (lease.owner && lease.owner !== owner)) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) { clearParticleThemeLease(owner); return; }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  }
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
+    } catch { /* A transient read failure does not tear down the presentation. */ }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Milky Way Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+  #notify(): void { for (const listener of this.#listeners) listener(); }
+  #onPageHide = (): void => { this.dispose(); };
+}
+
+const MILKY_WAY_BACKGROUND_CONTROLLER = Symbol.for("code-codex:milky-way-background-controller:v1");
+
+function getMilkyWayBackgroundController(): MilkyWayBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[MILKY_WAY_BACKGROUND_CONTROLLER];
+  if (existing instanceof MilkyWayBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+  }
+  const controller = new MilkyWayBackgroundController();
+  globalState[MILKY_WAY_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
 
 const BLACK_HOLE_VERTEX_SHADER = `
 attribute vec2 aPos;
@@ -9202,6 +9682,99 @@ function auroraIonosphereSettingsPanelMarkup(): string {
     </section>
   `;
 }
+function formatMilkyWayControlValue(
+  definition: MilkyWayNumericControlDefinition,
+  value: number,
+): string {
+  const precision = definition.precision ?? Math.max(0, (String(definition.step).split(".")[1] ?? "").length);
+  return `${value.toFixed(precision)}${definition.unit ?? ""}`;
+}
+
+function milkyWayNumericControlsMarkup(group: MilkyWayControlGroup): string {
+  return MILKY_WAY_NUMERIC_CONTROL_DEFINITIONS
+    .filter((definition) => definition.group === group)
+    .map((definition) => {
+      const value = DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS[definition.key];
+      const formatted = formatMilkyWayControlValue(definition, value);
+      return `
+        <div class="particle-control-row">
+          <label for="${definition.id}">${bilingualLabelMarkup(definition.labelZh, definition.label)}</label>
+          <input id="${definition.id}" data-milky-way-setting="${definition.key}" type="range" min="${definition.minimum}" max="${definition.maximum}" step="${definition.step}" value="${value}" aria-label="${definition.labelZh}" aria-valuetext="${formatted}">
+          <span class="particle-control-value"><output for="${definition.id}">${formatted}</output></span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function milkyWayBackgroundCardMarkup(): string {
+  const icon = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M1.8 11.9c1.3-4 2.8-6.1 4.2-6.1 1.5 0 1.6 4.4 3 4.4 1.2 0 2.1-2.7 3.3-5.9"/><path d="M3.1 13.6c1.4-2.5 2.6-3.7 3.7-3.7 1.2 0 1.8 2.1 3 2.1 1 0 1.9-1.2 2.8-3.4"/><path d="M3.4 3.3h.01M10.3 2.3h.01M13.5 7h.01"/></svg>`;
+  return `
+    <article class="preview-extension appearance-extension milky-way-background-extension" data-appearance-plugin="${MILKY_WAY_BACKGROUND_PLUGIN_ID}" aria-busy="false">
+      <span class="preview-extension-icon" aria-hidden="true">${icon}</span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>Milky Way Background</h4>
+          <span class="preview-extension-status" id="cle-milky-way-background-status">Disabled</span>
+        </div>
+      </div>
+      <div class="preview-extension-actions">
+        <button class="preview-extension-action" type="button" aria-describedby="cle-milky-way-background-status" aria-pressed="false">Enable</button>
+        <button class="particle-settings-trigger milky-way-settings-trigger" type="button" title="Configure Milky Way Background" aria-label="Configure Milky Way Background" aria-haspopup="dialog" aria-controls="cle-milky-way-settings" aria-expanded="false">${icons.sliders}</button>
+      </div>
+    </article>
+  `;
+}
+
+function milkyWaySettingsPanelMarkup(): string {
+  return `
+    <section class="particle-settings-panel milky-way-settings-panel" id="cle-milky-way-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-milky-way-settings-title">
+      <header class="particle-settings-header">
+        <div class="particle-settings-heading">
+          <p>${bilingualLabelMarkup("外观", "Appearance")}</p>
+          <h3 id="cle-milky-way-settings-title">${bilingualLabelMarkup("银河光场设置", "Milky Way settings")}</h3>
+        </div>
+        <div class="particle-settings-header-actions">
+          ${backgroundLanguageSwitchMarkup("cle-milky-way-settings-language")}
+          <button class="particle-settings-close milky-way-settings-close" type="button" title="关闭银河光场设置" aria-label="关闭银河光场设置">${icons.close}</button>
+        </div>
+      </header>
+      <div class="particle-settings-scroll">
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("渲染质量", "Render quality")}</legend>
+          <div class="heavenly-cloud-quality-toolbar milky-way-quality-toolbar" role="group" aria-label="像素密度上限">
+            <button type="button" data-milky-way-quality="low" aria-pressed="${DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS.quality === "low"}"><strong>1×</strong>${bilingualLabelMarkup("轻量", "Light")}</button>
+            <button type="button" data-milky-way-quality="medium" aria-pressed="${DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS.quality === "medium"}"><strong>2×</strong>${bilingualLabelMarkup("均衡", "Balanced")}</button>
+            <button type="button" data-milky-way-quality="high" aria-pressed="${DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS.quality === "high"}"><strong>3×</strong>${bilingualLabelMarkup("精细", "Fine")}</button>
+          </div>
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("运动与形态", "Movement and form")}</legend>
+          ${milkyWayNumericControlsMarkup("field")}
+        </fieldset>
+        <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("开场画面", "Opening frame")}</legend>
+          ${milkyWayNumericControlsMarkup("opening")}
+        </fieldset>
+        <label class="particle-toggle-row milky-way-paused-row" for="cle-milky-way-paused">
+          ${bilingualLabelMarkup("暂停动画", "Pause animation")}
+          <input id="cle-milky-way-paused" type="checkbox">
+        </label>
+        <label class="particle-toggle-row" for="cle-milky-way-intro-enabled">
+          ${bilingualLabelMarkup("启用开场", "Enable opening")}<input id="cle-milky-way-intro-enabled" type="checkbox">
+        </label>
+        <fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("五色调色板", "Five-color palette")}</legend>
+          ${DEFAULT_MILKY_WAY_BACKGROUND_SETTINGS.colors.map((color, i) => `<label class="particle-toggle-row">${bilingualLabelMarkup("颜色 " + (i + 1), "Color " + (i + 1))}<input type="color" data-milky-way-color="${i}" value="${color}" aria-label="Color ${i + 1}"></label>`).join("")}
+        </fieldset>
+        <div class="glow-horizon-actions milky-way-actions">
+          <button class="milky-way-reset" type="button">${bilingualLabelMarkup("重置", "Reset")}</button>
+          <button class="milky-way-replay" type="button">${bilingualLabelMarkup("重播", "Replay")}</button>
+        </div>
+        <p class="particle-plugin-error milky-way-plugin-error" role="status" hidden></p>
+      </div>
+    </section>
+  `;
+}
 
 function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? path;
@@ -9308,6 +9881,7 @@ export class CodeCodexElement extends HTMLElement {
   #glowHorizonSettingsOpen = false;
   #heavenlyCloudSettingsOpen = false;
   #auroraIonosphereSettingsOpen = false;
+  #milkyWaySettingsOpen = false;
   #backgroundSettingsLanguage: BackgroundSettingsLanguage = "zh";
   #forcedColorsQuery: MediaQueryList | undefined;
   #reducedTransparencyQuery: MediaQueryList | undefined;
@@ -9464,6 +10038,25 @@ export class CodeCodexElement extends HTMLElement {
   readonly #auroraIonosphereResetButton: HTMLButtonElement;
   readonly #auroraIonosphereReplayButton: HTMLButtonElement;
   readonly #auroraIonospherePluginError: HTMLElement;
+  readonly #milkyWayBackgroundController = getMilkyWayBackgroundController();
+  #milkyWayBackgroundUnsubscribe: (() => void) | undefined;
+  #milkyWayBackgroundInitialization: Promise<void> | undefined;
+  readonly #milkyWayBackgroundCard: HTMLElement;
+  readonly #milkyWayBackgroundButton: HTMLButtonElement;
+  readonly #milkyWayBackgroundStatus: HTMLElement;
+  readonly #milkyWaySettingsPanel: HTMLElement;
+  readonly #milkyWaySettingsTrigger: HTMLButtonElement;
+  readonly #milkyWaySettingsCloseButton: HTMLButtonElement;
+  readonly #milkyWayNumericControls = new Map<MilkyWayNumericSettingKey, Readonly<{
+    definition: MilkyWayNumericControlDefinition;
+    input: HTMLInputElement;
+    output: HTMLOutputElement;
+  }>>();
+  readonly #milkyWayQualityButtons: readonly HTMLButtonElement[];
+  readonly #milkyWayPausedInput: HTMLInputElement;
+  readonly #milkyWayResetButton: HTMLButtonElement;
+  readonly #milkyWayReplayButton: HTMLButtonElement;
+  readonly #milkyWayPluginError: HTMLElement;
   readonly #liveRegion: HTMLElement;
   readonly #collapseButton: HTMLButtonElement;
   readonly #collapsedTab: HTMLButtonElement;
@@ -9521,7 +10114,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -9549,6 +10142,7 @@ export class CodeCodexElement extends HTMLElement {
       ${glowHorizonSettingsPanelMarkup()}
       ${heavenlyCloudSettingsPanelMarkup()}
       ${auroraIonosphereSettingsPanelMarkup()}
+      ${milkyWaySettingsPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -9646,8 +10240,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 5) {
-      throw new Error("Background settings require five synchronized language switches.");
+    if (this.#backgroundLanguageInputs.length !== 6) {
+      throw new Error("Background settings require six synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
@@ -9727,6 +10321,28 @@ export class CodeCodexElement extends HTMLElement {
     this.#auroraIonosphereResetButton = this.#required<HTMLButtonElement>(".aurora-ionosphere-reset");
     this.#auroraIonosphereReplayButton = this.#required<HTMLButtonElement>(".aurora-ionosphere-replay");
     this.#auroraIonospherePluginError = this.#required<HTMLElement>(".aurora-ionosphere-plugin-error");
+    this.#milkyWayBackgroundCard = this.#required<HTMLElement>(`[data-appearance-plugin="${MILKY_WAY_BACKGROUND_PLUGIN_ID}"]`);
+    this.#milkyWayBackgroundButton = this.#required<HTMLButtonElement>(
+      `[data-appearance-plugin="${MILKY_WAY_BACKGROUND_PLUGIN_ID}"] .preview-extension-action`,
+    );
+    this.#milkyWayBackgroundStatus = this.#required<HTMLElement>(
+      `[data-appearance-plugin="${MILKY_WAY_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
+    );
+    this.#milkyWaySettingsPanel = this.#required<HTMLElement>(".milky-way-settings-panel");
+    this.#milkyWaySettingsTrigger = this.#required<HTMLButtonElement>(".milky-way-settings-trigger");
+    this.#milkyWaySettingsCloseButton = this.#required<HTMLButtonElement>(".milky-way-settings-close");
+    for (const definition of MILKY_WAY_NUMERIC_CONTROL_DEFINITIONS) {
+      const input = this.#required<HTMLInputElement>(`#${definition.id}`);
+      const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
+      this.#milkyWayNumericControls.set(definition.key, { definition, input, output });
+    }
+    this.#milkyWayQualityButtons = Array.from(
+      this.#shadow.querySelectorAll<HTMLButtonElement>("[data-milky-way-quality]"),
+    );
+    this.#milkyWayPausedInput = this.#required<HTMLInputElement>("#cle-milky-way-paused");
+    this.#milkyWayResetButton = this.#required<HTMLButtonElement>(".milky-way-reset");
+    this.#milkyWayReplayButton = this.#required<HTMLButtonElement>(".milky-way-replay");
+    this.#milkyWayPluginError = this.#required<HTMLElement>(".milky-way-plugin-error");
     this.#liveRegion = this.#required<HTMLElement>(".live-region");
     this.#collapseButton = this.#required<HTMLButtonElement>(".collapse");
     this.#collapsedTab = this.#required<HTMLButtonElement>(".collapsed-tab");
@@ -9774,7 +10390,23 @@ export class CodeCodexElement extends HTMLElement {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
     }
-    if (this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)) {
+    if (this.#milkyWayBackgroundController.stoppedForExternalThemeChange) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+    }
+    if (this.#enabledAppearancePlugins.has(MILKY_WAY_BACKGROUND_PLUGIN_ID)) {
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        || normalizedAppearancePlugins;
+      normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID) || normalizedAppearancePlugins;
+    } else if (this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)) {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
@@ -9874,9 +10506,23 @@ export class CodeCodexElement extends HTMLElement {
         this.#writeEnabledAppearancePlugins();
       }
       this.#renderAuroraIonosphereBackgroundPlugin();
+      this.#renderMilkyWayBackgroundPlugin();
     });
     this.#auroraIonosphereBackgroundInitialization = this.#heavenlyCloudBackgroundInitialization
       .then(() => this.#initializeAuroraIonosphereBackground(appearanceInitializationGeneration));
+    this.#milkyWayBackgroundUnsubscribe?.();
+    this.#milkyWayBackgroundUnsubscribe = this.#milkyWayBackgroundController.subscribe(() => {
+      if (!this.#connected) return;
+      if (
+        this.#milkyWayBackgroundController.stoppedForExternalThemeChange
+        && this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID)
+      ) {
+        this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderMilkyWayBackgroundPlugin();
+    });
+    this.#milkyWayBackgroundInitialization = this.#auroraIonosphereBackgroundInitialization
+      .then(() => this.#initializeMilkyWayBackground(appearanceInitializationGeneration));
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
@@ -9928,6 +10574,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#auroraIonosphereBackgroundUnsubscribe?.();
     this.#auroraIonosphereBackgroundUnsubscribe = undefined;
     this.#auroraIonosphereBackgroundInitialization = undefined;
+    this.#milkyWayBackgroundUnsubscribe?.();
+    this.#milkyWayBackgroundUnsubscribe = undefined;
+    this.#milkyWayBackgroundInitialization = undefined;
     this.#appearancePluginPending = false;
     this.#appearanceTransitionPending = false;
     this.#appearancePluginApplied = undefined;
@@ -10003,7 +10652,8 @@ export class CodeCodexElement extends HTMLElement {
     const glowHorizonWasEnabled = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
     const heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
     const auroraIonosphereWasEnabled = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
-    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled) this.#writeEnabledAppearancePlugins();
+    const milkyWayWasEnabled = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled || milkyWayWasEnabled) this.#writeEnabledAppearancePlugins();
     if (particleWasEnabled || this.#particleBackgroundController.enabled) {
       await this.#particleBackgroundController.disable();
     }
@@ -10018,6 +10668,9 @@ export class CodeCodexElement extends HTMLElement {
     }
     if (auroraIonosphereWasEnabled || this.#auroraIonosphereBackgroundController.enabled) {
       await this.#auroraIonosphereBackgroundController.disable();
+    }
+    if (milkyWayWasEnabled || this.#milkyWayBackgroundController.enabled) {
+      await this.#milkyWayBackgroundController.disable();
     }
     await this.#reconcilePersistedWindowTransparency();
     this.#purgePreviewTabs(false);
@@ -10188,7 +10841,7 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -10205,6 +10858,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#heavenlyCloudSettingsCloseButton.setAttribute("aria-label", this.#heavenlyCloudSettingsCloseButton.title);
     this.#auroraIonosphereSettingsCloseButton.title = this.#backgroundText("关闭极光电离层设置", "Close Aurora Ionosphere settings");
     this.#auroraIonosphereSettingsCloseButton.setAttribute("aria-label", this.#auroraIonosphereSettingsCloseButton.title);
+    this.#milkyWaySettingsCloseButton.title = this.#backgroundText("关闭银河光场设置", "Close Milky Way settings");
+    this.#milkyWaySettingsCloseButton.setAttribute("aria-label", this.#milkyWaySettingsCloseButton.title);
 
     for (const control of [...this.#particleNumericControls.values(), ...this.#particleImageTransformControls.values()]) {
       const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
@@ -10270,6 +10925,16 @@ export class CodeCodexElement extends HTMLElement {
       "aria-label",
       this.#backgroundText("光幕采样", "Curtain samples"),
     );
+    for (const control of this.#milkyWayNumericControls.values()) {
+      const label = this.#backgroundText(control.definition.labelZh, control.definition.label);
+      control.input.setAttribute("aria-label", label);
+      const formatted = formatMilkyWayControlValue(control.definition, Number(control.input.value));
+      control.input.setAttribute("aria-valuetext", formatted);
+    }
+    this.#shadow.querySelector<HTMLElement>(".milky-way-quality-toolbar")?.setAttribute(
+      "aria-label",
+      this.#backgroundText("像素密度上限", "Pixel density limit"),
+    );
   }
 
   #setBackgroundSettingsLanguage(language: BackgroundSettingsLanguage): void {
@@ -10281,11 +10946,13 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderGlowHorizonBackgroundPlugin();
     this.#renderHeavenlyCloudBackgroundPlugin();
     this.#renderAuroraIonosphereBackgroundPlugin();
+    this.#renderMilkyWayBackgroundPlugin();
     if (this.#particleSettingsOpen) requestAnimationFrame(() => this.#positionParticleSettingsPanel());
     if (this.#blackHoleSettingsOpen) requestAnimationFrame(() => this.#positionBlackHoleSettingsPanel());
     if (this.#glowHorizonSettingsOpen) requestAnimationFrame(() => this.#positionGlowHorizonSettingsPanel());
     if (this.#heavenlyCloudSettingsOpen) requestAnimationFrame(() => this.#positionHeavenlyCloudSettingsPanel());
     if (this.#auroraIonosphereSettingsOpen) requestAnimationFrame(() => this.#positionAuroraIonosphereSettingsPanel());
+    if (this.#milkyWaySettingsOpen) requestAnimationFrame(() => this.#positionMilkyWaySettingsPanel());
   }
 
   #bindDomEvents(): void {
@@ -10305,6 +10972,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#glowHorizonBackgroundButton.addEventListener("click", () => void this.#toggleGlowHorizonBackground());
       this.#heavenlyCloudBackgroundButton.addEventListener("click", () => void this.#toggleHeavenlyCloudBackground());
       this.#auroraIonosphereBackgroundButton.addEventListener("click", () => void this.#toggleAuroraIonosphereBackground());
+      this.#milkyWayBackgroundButton.addEventListener("click", () => void this.#toggleMilkyWayBackground());
       this.#particleSettingsTrigger.addEventListener("click", () => this.#toggleParticleSettings());
       this.#particleSettingsCloseButton.addEventListener("click", () => this.#closeParticleSettings(true));
       this.#blackHoleSettingsTrigger.addEventListener("click", () => this.#toggleBlackHoleSettings());
@@ -10315,6 +10983,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#heavenlyCloudSettingsCloseButton.addEventListener("click", () => this.#closeHeavenlyCloudSettings(true));
       this.#auroraIonosphereSettingsTrigger.addEventListener("click", () => this.#toggleAuroraIonosphereSettings());
       this.#auroraIonosphereSettingsCloseButton.addEventListener("click", () => this.#closeAuroraIonosphereSettings(true));
+      this.#milkyWaySettingsTrigger.addEventListener("click", () => this.#toggleMilkyWaySettings());
+      this.#milkyWaySettingsCloseButton.addEventListener("click", () => this.#closeMilkyWaySettings(true));
       for (const input of this.#backgroundLanguageInputs) {
         input.addEventListener("change", () => {
           this.#setBackgroundSettingsLanguage(input.checked ? "en" : "zh");
@@ -10349,12 +11019,18 @@ export class CodeCodexElement extends HTMLElement {
         this.#auroraIonosphereSettingsOpen = false;
         this.#auroraIonosphereSettingsTrigger.setAttribute("aria-expanded", "false");
       });
+      this.#milkyWaySettingsPanel.addEventListener("toggle", () => {
+        if (this.#milkyWaySettingsPanel.matches(":popover-open") || !this.#milkyWaySettingsOpen) return;
+        this.#milkyWaySettingsOpen = false;
+        this.#milkyWaySettingsTrigger.setAttribute("aria-expanded", "false");
+      });
       this.#previewMarketList.addEventListener("scroll", () => {
         if (this.#particleSettingsOpen) this.#positionParticleSettingsPanel();
         if (this.#blackHoleSettingsOpen) this.#positionBlackHoleSettingsPanel();
         if (this.#glowHorizonSettingsOpen) this.#positionGlowHorizonSettingsPanel();
         if (this.#heavenlyCloudSettingsOpen) this.#positionHeavenlyCloudSettingsPanel();
         if (this.#auroraIonosphereSettingsOpen) this.#positionAuroraIonosphereSettingsPanel();
+        if (this.#milkyWaySettingsOpen) this.#positionMilkyWaySettingsPanel();
       }, { passive: true });
       for (const control of this.#particleNumericControls.values()) {
         const { definition, input } = control;
@@ -10507,6 +11183,39 @@ export class CodeCodexElement extends HTMLElement {
           if (quality !== "low" && quality !== "medium" && quality !== "high") return;
           this.#auroraIonosphereBackgroundController.updateSettings({
             ...this.#auroraIonosphereBackgroundController.settings,
+            quality,
+          });
+        });
+      }
+      for (const [key, control] of this.#milkyWayNumericControls) {
+        control.input.addEventListener("input", () => {
+          const normalized = normalizeMilkyWaySettings({
+            ...this.#milkyWayBackgroundController.settings,
+            [key]: control.input.value,
+          });
+          const value = normalized[key];
+          control.input.value = String(value);
+          const formatted = formatMilkyWayControlValue(control.definition, value);
+          control.output.textContent = formatted;
+          control.input.setAttribute("aria-valuetext", formatted);
+          this.#applyMilkyWaySettingsFromControls();
+        });
+      }
+      for (const input of this.#shadow.querySelectorAll<HTMLInputElement>("[data-milky-way-color], #cle-milky-way-intro-enabled")) {
+        input.addEventListener("input", () => this.#applyMilkyWaySettingsFromControls());
+      }
+      this.#milkyWayPausedInput.addEventListener("change", () => this.#applyMilkyWaySettingsFromControls());
+      this.#milkyWayResetButton.addEventListener("click", () => {
+        this.#milkyWayBackgroundController.reset();
+        this.#milkyWayBackgroundController.replay();
+      });
+      this.#milkyWayReplayButton.addEventListener("click", () => this.#milkyWayBackgroundController.replay());
+      for (const button of this.#milkyWayQualityButtons) {
+        button.addEventListener("click", () => {
+          const quality = button.dataset.milkyWayQuality;
+          if (quality !== "low" && quality !== "medium" && quality !== "high") return;
+          this.#milkyWayBackgroundController.updateSettings({
+            ...this.#milkyWayBackgroundController.settings,
             quality,
           });
         });
@@ -10701,9 +11410,17 @@ export class CodeCodexElement extends HTMLElement {
     if (
       this.#auroraIonosphereSettingsOpen
       && !path.includes(this.#auroraIonosphereSettingsPanel)
+      && !path.includes(this.#milkyWaySettingsPanel)
       && !path.includes(this.#auroraIonosphereSettingsTrigger)
     ) {
       this.#closeAuroraIonosphereSettings(false);
+    }
+    if (
+      this.#milkyWaySettingsOpen
+      && !path.includes(this.#milkyWaySettingsPanel)
+      && !path.includes(this.#milkyWaySettingsTrigger)
+    ) {
+      this.#closeMilkyWaySettings(false);
     }
     if (
       !this.#previewMarketPopover.hidden
@@ -10714,6 +11431,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#glowHorizonSettingsPanel)
       && !path.includes(this.#heavenlyCloudSettingsPanel)
       && !path.includes(this.#auroraIonosphereSettingsPanel)
+      && !path.includes(this.#milkyWaySettingsPanel)
     ) {
       this.#closePreviewMarket(false);
     }
@@ -10788,6 +11506,12 @@ export class CodeCodexElement extends HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       this.#closeAuroraIonosphereSettings(true);
+      return;
+    }
+    if (this.#milkyWaySettingsOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeMilkyWaySettings(true);
       return;
     }
     if (this.#updateDialogOpen) {
@@ -14021,6 +14745,14 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  async #deactivateMilkyWayForBackgroundSwitch(): Promise<void> {
+    const persisted = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+    if (persisted) this.#writeEnabledAppearancePlugins();
+    if (persisted || this.#milkyWayBackgroundController.enabled) {
+      await this.#milkyWayBackgroundController.disable(true);
+    }
+  }
+
   async #awaitBackgroundInitializations(operation: number): Promise<boolean> {
     const generation = this.#appearanceInitializationGeneration;
     this.#particleBackgroundInitialization ??= this.#initializeParticleBackground(generation);
@@ -14041,6 +14773,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#auroraIonosphereBackgroundInitialization ??= this.#heavenlyCloudBackgroundInitialization
       .then(() => this.#initializeAuroraIonosphereBackground(generation));
     await this.#auroraIonosphereBackgroundInitialization;
+    this.#milkyWayBackgroundInitialization ??= this.#auroraIonosphereBackgroundInitialization.then(() => this.#initializeMilkyWayBackground(generation));
+    await this.#milkyWayBackgroundInitialization;
     return this.#isCurrentBackgroundInitialization(generation) && operation === this.#appearanceOperation;
   }
 
@@ -14058,6 +14792,7 @@ export class CodeCodexElement extends HTMLElement {
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
         await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#blackHoleBackgroundController.enabled) {
           await this.#blackHoleBackgroundController.disable(true);
@@ -14103,6 +14838,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -14120,6 +14856,7 @@ export class CodeCodexElement extends HTMLElement {
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
       if (!this.#connected || operation !== this.#appearanceOperation) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -14298,6 +15035,7 @@ export class CodeCodexElement extends HTMLElement {
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
         await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#particleBackgroundController.enabled) {
           await this.#particleBackgroundController.disable(true);
@@ -14348,6 +15086,7 @@ export class CodeCodexElement extends HTMLElement {
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
         await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#particleBackgroundController.enabled) {
           await this.#particleBackgroundController.disable(true);
@@ -14398,6 +15137,7 @@ export class CodeCodexElement extends HTMLElement {
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
         await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         if (this.#particleBackgroundController.enabled) {
           await this.#particleBackgroundController.disable(true);
@@ -14446,6 +15186,7 @@ export class CodeCodexElement extends HTMLElement {
         if (changed) this.#writeEnabledAppearancePlugins();
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
         this.#clearTransparentBackgroundPresentation();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
         if (this.#particleBackgroundController.enabled) {
           await this.#particleBackgroundController.disable(true);
           if (!this.#isCurrentBackgroundInitialization(generation)) return;
@@ -14483,6 +15224,58 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  async #initializeMilkyWayBackground(generation: number): Promise<void> {
+    try {
+      await this.#milkyWayBackgroundController.initialize();
+      if (!this.#isCurrentBackgroundInitialization(generation)) return;
+      const enabled = this.#enabledAppearancePlugins.has(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+      if (enabled) {
+        await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        let changed = this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (this.#particleBackgroundController.enabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#blackHoleBackgroundController.enabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#glowHorizonBackgroundController.enabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        if (this.#heavenlyCloudBackgroundController.enabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
+          if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== MILKY_WAY_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, MILKY_WAY_BACKGROUND_PLUGIN_ID);
+        }
+        await this.#milkyWayBackgroundController.enable();
+        if (!this.#isCurrentBackgroundInitialization(generation)) return;
+        if (this.#milkyWayBackgroundController.stoppedForExternalThemeChange) {
+          if (this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID)) {
+            this.#writeEnabledAppearancePlugins();
+          }
+        }
+      } else if (this.#milkyWayBackgroundController.enabled) {
+        await this.#milkyWayBackgroundController.disable();
+      }
+    } catch (error) {
+      console.error("Code-Codex could not initialize Milky Way Background", error);
+    } finally {
+      if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
+    }
+  }
+
   async #toggleBlackHoleBackground(): Promise<void> {
     if (
       this.#blackHoleBackgroundController.pending
@@ -14490,6 +15283,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -14507,6 +15301,7 @@ export class CodeCodexElement extends HTMLElement {
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
       if (!this.#connected || operation !== this.#appearanceOperation) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -14693,6 +15488,15 @@ export class CodeCodexElement extends HTMLElement {
     this.#auroraIonosphereBackgroundController.updateSettings(normalizeAuroraIonosphereSettings(values));
   }
 
+  #applyMilkyWaySettingsFromControls(): void {
+    const values: Record<string, unknown> = { ...this.#milkyWayBackgroundController.settings };
+    for (const [key, control] of this.#milkyWayNumericControls) values[key] = control.input.value;
+    values.colors = Array.from(this.#shadow.querySelectorAll<HTMLInputElement>("[data-milky-way-color]"), input => input.value);
+    values.introEnabled = this.#required<HTMLInputElement>("#cle-milky-way-intro-enabled").checked;
+    values.paused = this.#milkyWayPausedInput.checked;
+    this.#milkyWayBackgroundController.updateSettings(normalizeMilkyWaySettings(values));
+  }
+
   async #toggleGlowHorizonBackground(): Promise<void> {
     if (
       this.#glowHorizonBackgroundController.pending
@@ -14700,6 +15504,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#blackHoleBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -14717,6 +15522,7 @@ export class CodeCodexElement extends HTMLElement {
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
       if (!this.#connected || operation !== this.#appearanceOperation) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -14873,6 +15679,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending
     ) return;
@@ -14890,6 +15697,7 @@ export class CodeCodexElement extends HTMLElement {
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       await this.#deactivateAuroraIonosphereForBackgroundSwitch();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
       if (!this.#connected || operation !== this.#appearanceOperation) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -15095,6 +15903,7 @@ export class CodeCodexElement extends HTMLElement {
         }
         if (!this.#connected || operation !== this.#appearanceOperation) return;
         this.#clearTransparentBackgroundPresentation();
+        await this.#deactivateMilkyWayForBackgroundSwitch();
         if (particleWasEnabled) {
           await this.#particleBackgroundController.disable(true);
           if (!this.#connected || operation !== this.#appearanceOperation) return;
@@ -15229,6 +16038,219 @@ export class CodeCodexElement extends HTMLElement {
         }
       }
       const message = error instanceof Error ? error.message : "Aurora Ionosphere Background could not be changed";
+      this.#showActionNotice(message, "error");
+    } finally {
+      if (operation === this.#appearanceOperation) {
+        this.#appearanceTransitionPending = false;
+        this.#renderPreviewMarket();
+        if (bridge?.available) this.#flushQueuedAppearanceSync(bridge);
+        if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          this.#scheduleAppearanceHealthCheck();
+        }
+      }
+    }
+  }
+
+  async #toggleMilkyWayBackground(): Promise<void> {
+    if (
+      this.#milkyWayBackgroundController.pending
+      || this.#auroraIonosphereBackgroundController.pending
+      || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending
+    ) return;
+    const operation = ++this.#appearanceOperation;
+    this.#appearanceTransitionPending = true;
+    this.#cancelAppearanceHealthCheck();
+    this.#renderPreviewMarket();
+    let milkyStarted = false;
+    let particleWasEnabled = false;
+    let blackHoleWasEnabled = false;
+    let glowHorizonWasEnabled = false;
+    let heavenlyCloudWasEnabled = false;
+    let auroraIonosphereWasEnabled = false;
+    let transparentWasEnabled = false;
+    let previousTransparentBackground: string | undefined;
+    let bridge: ExplorerBridge | undefined;
+    try {
+      if (!await this.#awaitBackgroundInitializations(operation)) return;
+      bridge = this.#bridge;
+      transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+      particleWasEnabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)
+        || this.#particleBackgroundController.enabled;
+      blackHoleWasEnabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)
+        || this.#blackHoleBackgroundController.enabled;
+      glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
+        || this.#glowHorizonBackgroundController.enabled;
+      heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
+        || this.#heavenlyCloudBackgroundController.enabled;
+      auroraIonosphereWasEnabled = this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID) || this.#auroraIonosphereBackgroundController.enabled;
+      previousTransparentBackground = this.#transparentBackgroundPresentation();
+      const transparentPresentationWasApplied = document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
+      const enabled = this.#enabledAppearancePlugins.has(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+      const active = this.#milkyWayBackgroundController.enabled;
+      const nextEnabled = !enabled || !active;
+
+      if (nextEnabled) {
+        if ((transparentWasEnabled || transparentPresentationWasApplied) && bridge?.available) {
+          await this.#setWindowTransparency(bridge, false);
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            return;
+          }
+        }
+        if (!this.#connected || operation !== this.#appearanceOperation) return;
+        this.#clearTransparentBackgroundPresentation();
+        if (auroraIonosphereWasEnabled) await this.#auroraIonosphereBackgroundController.disable(true);
+        if (particleWasEnabled) {
+          await this.#particleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (blackHoleWasEnabled) {
+          await this.#blackHoleBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (glowHorizonWasEnabled) {
+          await this.#glowHorizonBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        if (heavenlyCloudWasEnabled) {
+          await this.#heavenlyCloudBackgroundController.disable(true);
+          if (!this.#connected || operation !== this.#appearanceOperation) return;
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner && lease.owner !== MILKY_WAY_BACKGROUND_PLUGIN_ID) {
+          transferParticleThemeLease(lease.owner, MILKY_WAY_BACKGROUND_PLUGIN_ID);
+        }
+        await this.#milkyWayBackgroundController.enable();
+        milkyStarted = this.#milkyWayBackgroundController.enabled;
+        if (this.#milkyWayBackgroundController.stoppedForExternalThemeChange) {
+          throw new Error(this.#milkyWayBackgroundController.error
+            ?? "Milky Way Background stopped because Codex Appearance changed.");
+        }
+        if (!milkyStarted) throw new Error("Milky Way Background could not be enabled");
+        if (!this.#connected || operation !== this.#appearanceOperation) {
+          const restorePrevious = this.#connected && !this.#dismissed;
+          const preserveTheme = restorePrevious
+            && (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled);
+          await this.#milkyWayBackgroundController.disable(preserveTheme);
+          if (restorePrevious && particleWasEnabled) {
+            transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+            await this.#particleBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && blackHoleWasEnabled) {
+            transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+            await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && glowHorizonWasEnabled) {
+            transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+            await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && heavenlyCloudWasEnabled) {
+            transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+            await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+          } else if (restorePrevious && auroraIonosphereWasEnabled) {
+            transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+            await this.#auroraIonosphereBackgroundController.enable().catch(() => undefined);
+          }
+          return;
+        }
+        if (transparentWasEnabled) {
+          this.#appearancePluginApplied = false;
+          this.#appearancePluginError = undefined;
+          this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+        }
+        this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.add(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+      } else {
+        await this.#milkyWayBackgroundController.disable();
+        this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+      this.#announce(`Milky Way Background ${nextEnabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      if (!this.#connected || operation !== this.#appearanceOperation) {
+        const stoppedForThemeChange = this.#milkyWayBackgroundController.stoppedForExternalThemeChange;
+        const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
+        if (milkyStarted) {
+          await this.#milkyWayBackgroundController.disable(
+            restorePrevious && (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled),
+          );
+        }
+        if (this.#connected && !this.#dismissed && stoppedForThemeChange) {
+          let changed = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+          changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID) || changed;
+          if (changed) this.#writeEnabledAppearancePlugins();
+        } else if (restorePrevious && particleWasEnabled && !this.#particleBackgroundController.enabled) {
+          transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+          await this.#particleBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+          transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+          await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
+          transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+          await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && heavenlyCloudWasEnabled && !this.#heavenlyCloudBackgroundController.enabled) {
+          transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+          await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+        } else if (restorePrevious && auroraIonosphereWasEnabled && !this.#auroraIonosphereBackgroundController.enabled) {
+          transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+          await this.#auroraIonosphereBackgroundController.enable().catch(() => undefined);
+        }
+        return;
+      }
+      const stoppedForThemeChange = this.#milkyWayBackgroundController.stoppedForExternalThemeChange;
+      if (milkyStarted) {
+        await this.#milkyWayBackgroundController.disable(
+          (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled)
+            && !stoppedForThemeChange,
+        );
+      }
+      if (stoppedForThemeChange) {
+        let changed = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+        changed = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID) || changed;
+        changed = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID) || changed;
+          changed = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID) || changed;
+        if (changed) this.#writeEnabledAppearancePlugins();
+      } else if (particleWasEnabled && !this.#particleBackgroundController.enabled) {
+        transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, PARTICLE_BACKGROUND_PLUGIN_ID);
+        await this.#particleBackgroundController.enable().catch(() => undefined);
+      } else if (blackHoleWasEnabled && !this.#blackHoleBackgroundController.enabled) {
+        transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID);
+        await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+      } else if (glowHorizonWasEnabled && !this.#glowHorizonBackgroundController.enabled) {
+        transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
+        await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+      } else if (heavenlyCloudWasEnabled && !this.#heavenlyCloudBackgroundController.enabled) {
+        transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
+        await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+      } else if (auroraIonosphereWasEnabled && !this.#auroraIonosphereBackgroundController.enabled) {
+        transferParticleThemeLease(MILKY_WAY_BACKGROUND_PLUGIN_ID, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+        await this.#auroraIonosphereBackgroundController.enable().catch(() => undefined);
+      }
+      if (transparentWasEnabled && previousTransparentBackground) {
+        if (bridge?.available) {
+          try {
+            const restored = await this.#setWindowTransparency(bridge, true);
+            this.#applyTransparentBackgroundPresentation(restored.background);
+          } catch {
+            this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+          }
+        } else {
+          this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
+        }
+      }
+      const message = error instanceof Error ? error.message : "Milky Way Background could not be changed";
       this.#showActionNotice(message, "error");
     } finally {
       if (operation === this.#appearanceOperation) {
@@ -15852,6 +16874,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -16057,6 +17080,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -16121,6 +17145,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#blackHoleBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -16182,6 +17207,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#blackHoleBackgroundController.pending
       || this.#glowHorizonBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || this.#appearancePluginPending
       || this.#appearanceTransitionPending;
 
@@ -16268,6 +17294,65 @@ export class CodeCodexElement extends HTMLElement {
     );
     this.#auroraIonosphereSettingsPanel.setAttribute("aria-busy", String(controller.pending));
     if (this.#auroraIonosphereSettingsOpen) requestAnimationFrame(() => this.#positionAuroraIonosphereSettingsPanel());
+    if (this.#milkyWaySettingsOpen) requestAnimationFrame(() => this.#positionMilkyWaySettingsPanel());
+  }
+
+  #renderMilkyWayBackgroundPlugin(): void {
+    const controller = this.#milkyWayBackgroundController;
+    const enabled = this.#enabledAppearancePlugins.has(MILKY_WAY_BACKGROUND_PLUGIN_ID);
+    const active = enabled && controller.enabled;
+    const action = enabled && !active ? "Retry" : enabled ? "Disable" : "Enable";
+    let status = enabled ? "Enabled" : "Disabled";
+    if (controller.pending) status = enabled || controller.enabled ? "Enabled · Applying" : "Applying";
+    else if (enabled && !active) status = "Enabled · Not applied";
+    else if (active && controller.error) status = "Enabled · Notice";
+    this.#milkyWayBackgroundStatus.textContent = status;
+    this.#milkyWayBackgroundStatus.dataset.enabled = String(active);
+    this.#milkyWayBackgroundStatus.dataset.pending = String(controller.pending);
+    this.#milkyWayBackgroundCard.setAttribute("aria-busy", String(controller.pending));
+    this.#milkyWayBackgroundButton.textContent = controller.pending ? "Applying…" : action;
+    this.#milkyWayBackgroundButton.dataset.enabled = String(enabled);
+    this.#milkyWayBackgroundButton.setAttribute("aria-pressed", String(enabled));
+    this.#milkyWayBackgroundButton.setAttribute(
+      "aria-label",
+      controller.pending ? "Applying Milky Way Background" : `${action} Milky Way Background`,
+    );
+    this.#milkyWayBackgroundButton.disabled = controller.pending
+      || this.#particleBackgroundController.pending
+      || this.#blackHoleBackgroundController.pending
+      || this.#glowHorizonBackgroundController.pending
+      || this.#heavenlyCloudBackgroundController.pending
+      || this.#appearancePluginPending
+      || this.#appearanceTransitionPending;
+    const settings = controller.settings;
+    this.#required<HTMLInputElement>("#cle-milky-way-intro-enabled").checked = settings.introEnabled;
+    this.#shadow.querySelectorAll<HTMLInputElement>("[data-milky-way-color]").forEach((input, i) => { input.value = settings.colors[i]!; input.disabled = controller.pending; });
+    for (const [key, control] of this.#milkyWayNumericControls) {
+      const value = settings[key];
+      const formatted = formatMilkyWayControlValue(control.definition, value);
+      control.input.value = String(value);
+      control.input.disabled = controller.pending;
+      control.input.setAttribute("aria-valuetext", formatted);
+      control.output.textContent = formatted;
+    }
+    for (const button of this.#milkyWayQualityButtons) {
+      button.setAttribute("aria-pressed", String(button.dataset.milkyWayQuality === settings.quality));
+      button.disabled = controller.pending;
+    }
+    this.#milkyWayPausedInput.checked = settings.paused;
+    this.#milkyWayPausedInput.disabled = controller.pending;
+    this.#milkyWayResetButton.disabled = controller.pending;
+    this.#milkyWayReplayButton.disabled = controller.pending || !controller.enabled;
+    const error = controller.error;
+    this.#milkyWayPluginError.hidden = !error;
+    this.#milkyWayPluginError.textContent = backgroundSettingsError(
+      error,
+      this.#backgroundSettingsLanguage,
+      "银河光场背景",
+      "Milky Way Background",
+    );
+    this.#milkyWaySettingsPanel.setAttribute("aria-busy", String(controller.pending));
+    if (this.#milkyWaySettingsOpen) requestAnimationFrame(() => this.#positionMilkyWaySettingsPanel());
   }
 
   #readEnabledAppearancePlugins(): readonly string[] {
@@ -16386,6 +17471,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
     ) return;
     const operation = ++this.#appearanceOperation;
     this.#appearanceTransitionPending = true;
@@ -16398,6 +17484,7 @@ export class CodeCodexElement extends HTMLElement {
     let glowHorizonWasActive = false;
     let heavenlyCloudWasActive = false;
     let auroraIonosphereWasActive = false;
+    let milkyWayWasActive = false;
     try {
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       bridge = this.#bridge;
@@ -16434,11 +17521,13 @@ export class CodeCodexElement extends HTMLElement {
         const glowHorizonWasEnabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         const heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
         const auroraIonosphereWasEnabled = this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+        const milkyWayWasEnabled = this.#enabledAppearancePlugins.has(MILKY_WAY_BACKGROUND_PLUGIN_ID);
         particleWasActive = particleWasEnabled || this.#particleBackgroundController.enabled;
         blackHoleWasActive = blackHoleWasEnabled || this.#blackHoleBackgroundController.enabled;
         glowHorizonWasActive = glowHorizonWasEnabled || this.#glowHorizonBackgroundController.enabled;
         heavenlyCloudWasActive = heavenlyCloudWasEnabled || this.#heavenlyCloudBackgroundController.enabled;
         auroraIonosphereWasActive = auroraIonosphereWasEnabled || this.#auroraIonosphereBackgroundController.enabled;
+        milkyWayWasActive = milkyWayWasEnabled || this.#milkyWayBackgroundController.enabled;
         if (particleWasActive) {
           await this.#particleBackgroundController.disable();
           if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
@@ -16499,11 +17588,26 @@ export class CodeCodexElement extends HTMLElement {
             return;
           }
         }
+        if (milkyWayWasActive) {
+          await this.#milkyWayBackgroundController.disable();
+          if (!this.#isCurrentAppearanceOperation(bridge, operation)) {
+            await this.#reconcilePersistedWindowTransparency();
+            if (this.#connected && !this.#dismissed) {
+              if (milkyWayWasActive) await this.#milkyWayBackgroundController.enable().catch(() => undefined);
+              else if (heavenlyCloudWasActive) await this.#heavenlyCloudBackgroundController.enable().catch(() => undefined);
+              else if (glowHorizonWasActive) await this.#glowHorizonBackgroundController.enable().catch(() => undefined);
+              else if (blackHoleWasActive) await this.#blackHoleBackgroundController.enable().catch(() => undefined);
+              else if (particleWasActive) await this.#particleBackgroundController.enable().catch(() => undefined);
+            }
+            return;
+          }
+        }
         this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.add(TRANSPARENT_BACKGROUND_PLUGIN_ID);
       } else {
         this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -16514,10 +17618,12 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderGlowHorizonBackgroundPlugin();
       this.#renderHeavenlyCloudBackgroundPlugin();
       this.#renderAuroraIonosphereBackgroundPlugin();
+      this.#renderMilkyWayBackgroundPlugin();
       this.#announce(`Transparent Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
       if (!this.#connected || operation !== this.#appearanceOperation) return;
       if (nextEnabled) {
+        if (milkyWayWasActive && !this.#milkyWayBackgroundController.enabled) await this.#milkyWayBackgroundController.enable().catch(() => undefined);
         if (auroraIonosphereWasActive && !this.#auroraIonosphereBackgroundController.enabled) {
           await this.#auroraIonosphereBackgroundController.enable().catch(() => undefined);
         } else if (heavenlyCloudWasActive && !this.#heavenlyCloudBackgroundController.enabled) {
@@ -16580,6 +17686,7 @@ export class CodeCodexElement extends HTMLElement {
         && !this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)
         && !this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)
         && !this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)
+        && !this.#enabledAppearancePlugins.has(MILKY_WAY_BACKGROUND_PLUGIN_ID)
       ) {
         this.#applyTransparentBackgroundPresentation(previousBackground);
       }
@@ -16654,6 +17761,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #toggleParticleSettings(): void {
+    this.#closeMilkyWaySettings(false);
     if (this.#particleSettingsOpen) {
       this.#closeParticleSettings(true);
       return;
@@ -16718,6 +17826,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #toggleBlackHoleSettings(): void {
+    this.#closeMilkyWaySettings(false);
     if (this.#blackHoleSettingsOpen) {
       this.#closeBlackHoleSettings(true);
       return;
@@ -16778,6 +17887,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #toggleGlowHorizonSettings(): void {
+    this.#closeMilkyWaySettings(false);
     if (this.#glowHorizonSettingsOpen) {
       this.#closeGlowHorizonSettings(true);
       return;
@@ -16838,6 +17948,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #toggleHeavenlyCloudSettings(): void {
+    this.#closeMilkyWaySettings(false);
     if (this.#heavenlyCloudSettingsOpen) {
       this.#closeHeavenlyCloudSettings(true);
       return;
@@ -16898,6 +18009,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #toggleAuroraIonosphereSettings(): void {
+    this.#closeMilkyWaySettings(false);
     if (this.#auroraIonosphereSettingsOpen) {
       this.#closeAuroraIonosphereSettings(true);
       return;
@@ -16910,6 +18022,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#auroraIonosphereSettingsOpen = true;
     this.#auroraIonosphereSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderAuroraIonosphereBackgroundPlugin();
+    this.#renderMilkyWayBackgroundPlugin();
     if (!this.#auroraIonosphereSettingsPanel.matches(":popover-open")) this.#auroraIonosphereSettingsPanel.showPopover();
     this.#positionAuroraIonosphereSettingsPanel();
     queueMicrotask(() => {
@@ -16919,12 +18032,43 @@ export class CodeCodexElement extends HTMLElement {
     });
   }
 
+  #toggleMilkyWaySettings(): void {
+    if (this.#milkyWaySettingsOpen) {
+      this.#closeMilkyWaySettings(true);
+      return;
+    }
+    if (!this.#previewMarketOpen) this.#togglePreviewMarket();
+    this.#closeParticleSettings(false);
+    this.#closeBlackHoleSettings(false);
+    this.#closeGlowHorizonSettings(false);
+    this.#closeHeavenlyCloudSettings(false);
+    this.#closeAuroraIonosphereSettings(false);
+    this.#milkyWaySettingsOpen = true;
+    this.#milkyWaySettingsTrigger.setAttribute("aria-expanded", "true");
+    this.#renderMilkyWayBackgroundPlugin();
+    if (!this.#milkyWaySettingsPanel.matches(":popover-open")) this.#milkyWaySettingsPanel.showPopover();
+    this.#positionMilkyWaySettingsPanel();
+    queueMicrotask(() => {
+      if (!this.#milkyWaySettingsOpen) return;
+      this.#positionMilkyWaySettingsPanel();
+      this.#milkyWaySettingsCloseButton.focus();
+    });
+  }
+
   #closeAuroraIonosphereSettings(restoreFocus: boolean): void {
     if (!this.#auroraIonosphereSettingsOpen && !this.#auroraIonosphereSettingsPanel.matches(":popover-open")) return;
     this.#auroraIonosphereSettingsOpen = false;
     this.#auroraIonosphereSettingsTrigger.setAttribute("aria-expanded", "false");
     if (this.#auroraIonosphereSettingsPanel.matches(":popover-open")) this.#auroraIonosphereSettingsPanel.hidePopover();
     if (restoreFocus && this.#auroraIonosphereSettingsTrigger.isConnected) this.#auroraIonosphereSettingsTrigger.focus();
+  }
+
+  #closeMilkyWaySettings(restoreFocus: boolean): void {
+    if (!this.#milkyWaySettingsOpen && !this.#milkyWaySettingsPanel.matches(":popover-open")) return;
+    this.#milkyWaySettingsOpen = false;
+    this.#milkyWaySettingsTrigger.setAttribute("aria-expanded", "false");
+    if (this.#milkyWaySettingsPanel.matches(":popover-open")) this.#milkyWaySettingsPanel.hidePopover();
+    if (restoreFocus && this.#milkyWaySettingsTrigger.isConnected) this.#milkyWaySettingsTrigger.focus();
   }
 
   #positionAuroraIonosphereSettingsPanel(): void {
@@ -16957,7 +18101,38 @@ export class CodeCodexElement extends HTMLElement {
     panel.dataset.side = side;
   }
 
+  #positionMilkyWaySettingsPanel(): void {
+    if (!this.#milkyWaySettingsOpen || !this.#milkyWaySettingsPanel.matches(":popover-open")) return;
+    const panel = this.#milkyWaySettingsPanel;
+    const cardRect = this.#milkyWayBackgroundCard.getBoundingClientRect();
+    const edge = 12;
+    const gap = 8;
+    const preferredWidth = 344;
+    const panelWidth = Math.min(preferredWidth, Math.max(240, window.innerWidth - edge * 2));
+    let left = cardRect.right + gap;
+    let side = "right";
+    if (left + panelWidth > window.innerWidth - edge) {
+      left = Math.max(edge, window.innerWidth - edge - panelWidth);
+      side = "overlay";
+    }
+    panel.style.width = `${panelWidth}px`;
+    panel.style.maxHeight = `${Math.max(240, window.innerHeight - edge * 2)}px`;
+    const panelHeight = Math.min(panel.scrollHeight, Math.max(240, window.innerHeight - edge * 2));
+    const top = Math.min(
+      Math.max(edge, cardRect.top),
+      Math.max(edge, window.innerHeight - edge - panelHeight),
+    );
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.setProperty(
+      "--cle-particle-settings-anchor-y",
+      `${Math.round(Math.min(panelHeight - 18, Math.max(18, cardRect.top + cardRect.height * 0.5 - top)))}px`,
+    );
+    panel.dataset.side = side;
+  }
+
   #closePreviewMarket(restoreFocus: boolean): void {
+    this.#closeMilkyWaySettings(false);
     this.#closeParticleSettings(false);
     this.#closeBlackHoleSettings(false);
     this.#closeGlowHorizonSettings(false);
@@ -16991,6 +18166,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderGlowHorizonBackgroundPlugin();
     this.#renderHeavenlyCloudBackgroundPlugin();
     this.#renderAuroraIonosphereBackgroundPlugin();
+    this.#renderMilkyWayBackgroundPlugin();
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const enabled = this.#enabledPreviewers.has(previewer.id);
       const status = this.#previewerStatuses.get(previewer.id);
@@ -17037,6 +18213,7 @@ export class CodeCodexElement extends HTMLElement {
       || this.#glowHorizonBackgroundController.pending
       || this.#heavenlyCloudBackgroundController.pending
       || this.#auroraIonosphereBackgroundController.pending
+      || this.#milkyWayBackgroundController.pending
       || !bridgeAvailable
       || (!enabled && preferenceBlocked);
 

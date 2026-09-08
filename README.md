@@ -11,7 +11,7 @@ English | [简体中文](README.zh-CN.md)
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.5"><img alt="Version" src="https://img.shields.io/badge/version-0.2.5-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.6"><img alt="Version" src="https://img.shields.io/badge/version-0.2.6-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,15 +38,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.2.5-x64-setup.exe`
-- Alternative: `CodeCodex-0.2.5-x64.msi`
-- Portable package: `CodeCodex-0.2.5-x64.zip`
+- Recommended: `CodeCodex-0.2.6-x64-setup.exe`
+- Alternative: `CodeCodex-0.2.6-x64.msi`
+- Portable package: `CodeCodex-0.2.6-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.5-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.6-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -86,7 +86,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.5
+./scripts/package.ps1 -Version 0.2.6
 ```
 
 The generated packages are written to `releases/`.
@@ -119,6 +119,7 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 - Glow Horizon Background appearance plugin with four directions, wheel-driven motion, inertial release, adjustable glow colors, and bilingual settings.
 - Heavenly Cloud Background appearance plugin with a real-time cloud tunnel, pointer steering, a cinematic opening, three quality levels, and bilingual settings.
 - Aurora Ionosphere Background appearance plugin with volumetric light curtains, a procedural star field, adaptive quality, cinematic reveal controls, and bilingual settings.
+- Milky Way Background appearance plugin with five flowing colors, adjustable wave motion, a soft opening animation, and bilingual settings.
 - Click the version number at the bottom of the file tree to check GitHub for the latest published stable release.
 - Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
 - Local CSV table previews with quoted fields, embedded line breaks, sticky headers, and bounded rendering.
@@ -185,6 +186,16 @@ volumetric aurora curtains and a procedural star field across the full Codex
 window. It preserves the source effect's three-pass WebGL pipeline, adaptive
 quality, and cinematic reveal while exposing bilingual controls for the ion
 field, opening sequence, quality, and animation state.
+
+![Milky Way Background](docs/screenshots/milky-way-background.png)
+
+The Milky Way Background appearance plugin fills the Codex window with five-color
+harmonic light. Its bilingual settings panel provides individual colors, flow
+speed, amplitude, frequency, scale, rotation, brightness, and opening controls.
+It uses one WebGL pass, pauses rendering while hidden, and supports pause, replay,
+and reduced motion. Like the other GPU backgrounds, it activates Dark appearance
+and restores the previous preference when disabled. The supplied effect project
+reconstructs a partial reference to “Milky way” by Almina (@Code4_11).
 
 ## Repository Layout
 
