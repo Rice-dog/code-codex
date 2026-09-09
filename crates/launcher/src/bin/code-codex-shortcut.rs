@@ -235,6 +235,9 @@ struct OfficialPackageIconReport {
     package_family_name: String,
     application_id: String,
     install_location: PathBuf,
+    package_full_name: String,
+    publisher: String,
+    package_store_paths: Vec<PathBuf>,
     assets: Vec<PathBuf>,
 }
 
@@ -2054,6 +2057,37 @@ fn canonical_safe_directory(path: &Path) -> Result<PathBuf, IntegrationError> {
     dunce::canonicalize(path).map_err(|source| io_error(path, source))
 }
 
+// Only for identity-verified AppX roots. Never use this for writable installer state.
+#[cfg(windows)]
+fn canonical_package_directory(
+    path: &Path,
+    full_name: &str,
+    stores: &[PathBuf],
+) -> Result<PathBuf, IntegrationError> {
+    if path.file_name().and_then(|name| name.to_str()) != Some(full_name) {
+        return Err(IntegrationError::UnsafePath(path.to_path_buf()));
+    }
+    let resolved = dunce::canonicalize(path).map_err(|source| io_error(path, source))?;
+    ensure_safe_directory(&resolved, false)?;
+    if resolved.file_name().and_then(|name| name.to_str()) != Some(full_name) {
+        return Err(IntegrationError::UnsafePath(resolved));
+    }
+    // WindowsApps itself may deny opening even when this user's package is readable.
+    // Resolve the exact registered package child; do not enumerate/open its parent.
+    let trusted = stores.iter().any(|store| {
+        let expected = store.join(full_name);
+        ensure_safe_directory(&expected, false).is_ok()
+            && dunce::canonicalize(&expected)
+                .is_ok_and(|expected| paths_equal(&resolved, &expected))
+    });
+    if !trusted {
+        return Err(IntegrationError::OfficialIcon(
+            "the package root is not a direct child of a registered AppX package volume".to_owned(),
+        ));
+    }
+    Ok(resolved)
+}
+
 fn canonical_safe_directory_or_missing(path: &Path) -> Result<PathBuf, IntegrationError> {
     if !path.is_absolute() {
         return Err(IntegrationError::InvalidArgument(
@@ -2443,6 +2477,13 @@ $packages = @(
 )
 if ($packages.Count -ne 1) { throw 'Exactly one official stable Codex AppX package was not found.' }
 $package = $packages[0]
+if ([string]$package.Publisher -cne 'CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B' -or
+    [string]$package.Status -ne 'Ok') { throw 'The official Codex publisher or package status is invalid.' }
+$entry = Get-Item -LiteralPath ([string]$package.InstallLocation) -Force
+if (-not $entry.PSIsContainer) { throw 'The registered Codex package root is not a directory.' }
+if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -and
+    [string]$entry.LinkType -ne 'Junction') { throw 'Only a directory Junction is permitted for the registered Codex package root.' }
+$stores = @(Get-AppxVolume | Where-Object { -not $_.IsOffline } | ForEach-Object { [string]$_.PackageStorePath })
 $manifest = Get-AppxPackageManifest -Package $package
 $applications = @(
     $manifest.Package.Applications.Application |
@@ -2460,6 +2501,9 @@ $assets = @(
     packageFamilyName = [string]$package.PackageFamilyName
     applicationId = [string]$applications[0].Id
     installLocation = [string]$package.InstallLocation
+    packageFullName = [string]$package.PackageFullName
+    publisher = [string]$package.Publisher
+    packageStorePaths = $stores
     assets = $assets
 } | ConvertTo-Json -Compress
 "#;
@@ -2485,6 +2529,7 @@ $assets = @(
         let report: OfficialPackageIconReport =
             serde_json::from_str(text.trim_start_matches('\u{feff}').trim())?;
         if report.name != CODEX_PACKAGE_NAME
+            || report.publisher != "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B"
             || report.package_family_name != CODEX_PACKAGE_FAMILY
             || report.application_id != CODEX_APPLICATION_ID
             || format!("{}!{}", report.package_family_name, report.application_id) != CODEX_AUMID
@@ -2494,7 +2539,11 @@ $assets = @(
             ));
         }
 
-        let package_root = canonical_safe_directory(&report.install_location)?;
+        let package_root = canonical_package_directory(
+            &report.install_location,
+            &report.package_full_name,
+            &report.package_store_paths,
+        )?;
         let assets_root = canonical_safe_directory(&package_root.join("assets"))?;
         if !path_starts_with(&assets_root, &package_root) {
             return Err(IntegrationError::OfficialIcon(
@@ -2512,6 +2561,10 @@ $assets = @(
                         "the package returned an unexpected icon asset name".to_owned(),
                     )
                 })?;
+            // Read via the verified physical root, not the Junction entrance again.
+            let asset = assets_root.join(asset.file_name().ok_or_else(|| {
+                IntegrationError::OfficialIcon("missing icon asset filename".to_owned())
+            })?);
             let asset = canonical_safe_file_under(&asset, &assets_root)?;
             let png = read_file(&asset)?;
             let (width, height) = png_dimensions(&png)?;
@@ -2555,6 +2608,38 @@ impl ShortcutShell for PlatformShortcutShell {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn package_root_junction_is_scoped_to_registered_store_and_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = temp.path().join("store");
+        let entrance = temp.path().join("entrance");
+        let name = "OpenAI.Codex_26.903.8094.0_x64__2p2nqsd0c76g0";
+        let target = store.join(name);
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&entrance).unwrap();
+        let link = entrance.join(name);
+        let status = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command",
+                "New-Item -ItemType Junction -Path $env:CLE_TEST_LINK -Target $env:CLE_TEST_TARGET | Out-Null"])
+            .env("CLE_TEST_LINK", &link).env("CLE_TEST_TARGET", &target)
+            .status().unwrap();
+        assert!(status.success());
+        let stores = vec![store];
+        assert!(super::canonical_safe_directory(&link).is_err());
+        assert_eq!(
+            super::canonical_package_directory(&link, name, &stores).unwrap(),
+            dunce::canonicalize(&target).unwrap()
+        );
+        assert!(super::canonical_package_directory(&target, name, &stores).is_ok());
+        assert!(super::canonical_package_directory(&link, "wrong-package", &stores).is_err());
+        assert!(super::canonical_package_directory(&link, name, &[entrance]).is_err());
+        assert!(super::canonical_package_directory(&link, name, &[]).is_err());
+        // Remove only the Junction itself before TempDir cleans its owned fixture.
+        std::fs::remove_dir(&link).unwrap();
+        std::fs::remove_dir(&target).unwrap();
+        assert!(super::canonical_package_directory(&target, name, &stores).is_err());
+    }
     use super::*;
     use std::cell::Cell;
 
