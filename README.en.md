@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.9"><img alt="Version" src="https://img.shields.io/badge/version-0.2.9-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.11"><img alt="Version" src="https://img.shields.io/badge/version-0.2.11-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,15 +38,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.2.9-x64-setup.exe`
-- Alternative: `CodeCodex-0.2.9-x64.msi`
-- Portable package: `CodeCodex-0.2.9-x64.zip`
+- Recommended: `CodeCodex-0.2.11-x64-setup.exe`
+- Alternative: `CodeCodex-0.2.11-x64.msi`
+- Portable package: `CodeCodex-0.2.11-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.9-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.11-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -86,7 +86,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.9
+./scripts/package.ps1 -Version 0.2.11
 ```
 
 The generated packages are written to `releases/`.
@@ -198,7 +198,13 @@ and restores the previous preference when disabled. The supplied effect project
 reconstructs a partial reference to “Milky way” by Almina (@Code4_11).
 
 Layered Mountain Background adds animated atmospheric ridges, warm backlight,
-mist, and depth across the Codex window. Open Preview Market and use its settings
+mist, and depth across the Codex window. A gentle three-second opening reveals
+distant ridges before the foreground settles into place. Replay restarts the opening;
+reduced-motion preferences skip it.
+
+![Layered Mountain Background](docs/screenshots/layered-mountain-background.png)
+
+Open Preview Market and use its settings
 button for bilingual controls, reverse drift, mountain shape, exposure, render
 scale, quality presets, and pause/reset. It uses the supplied two-pass WebGL 2
 reconstruction with a compact ridge atlas, and the same automatic Dark appearance

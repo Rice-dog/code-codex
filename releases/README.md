@@ -2,6 +2,19 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.11 — 极光颜色调节
+
+- Aurora Ionosphere 新增极光色相（−180°～180°）与饱和度（0～2 倍）参数。
+- 支持中英文标签、手动输入、保存及重置；默认配色不变，天空和星尘不受影响。
+- 本地安装包：`CodeCodex-0.2.11-x64-setup.exe`（另提供 MSI、ZIP 和独立卸载程序）。
+
+## v0.2.10 — 山峦开场动画
+
+- Layered Mountain Background 新增约 3 秒的由远及近开场动画，可通过“重播”再次播放。
+- 开场结束后恢复原有山峦画面，系统减少动态效果模式会跳过开场。
+- 中英文 README 新增山峦背景截图。
+- 本地安装包：`CodeCodex-0.2.10-x64-setup.exe`（另提供 MSI、ZIP 和独立卸载程序）。
+
 ## v0.2.9 — Layered Mountain Background
 
 - 新增 Layered Mountain Background：动态层叠山峦、暖色逆光与雾气背景。
