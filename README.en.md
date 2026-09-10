@@ -1,0 +1,234 @@
+# Code-Codex
+
+[简体中文](README.md) | English
+
+<p align="center">
+  <img src="crates/launcher/resources/code-codex.ico" alt="Code-Codex icon" width="96">
+</p>
+
+<p align="center">
+  <em>Add a local project file tree, preview tabs, and bounded editing to Codex Desktop.</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.9"><img alt="Version" src="https://img.shields.io/badge/version-0.2.9-blue"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
+  <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
+  <img alt="Status" src="https://img.shields.io/badge/status-preview-yellow">
+</p>
+
+Code-Codex is an unofficial community project that adds a local project file tree
+to Codex Desktop. It demonstrates a local Windows companion app, a bounded
+workspace bridge, and an injected TypeScript explorer UI for file preview,
+editing, navigation, and file operations.
+
+> [!IMPORTANT]
+> Code-Codex is not affiliated with OpenAI.
+
+![Code-Codex file tree in Codex](docs/screenshots/file-tree-conversation.png)
+
+![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
+
+## Install Option 1: Download EXE
+
+Download the ready-made installer from [`releases`](releases/):
+
+Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
+with the official stable Codex/ChatGPT Desktop app installed.
+
+- Recommended: `CodeCodex-0.2.9-x64-setup.exe`
+- Alternative: `CodeCodex-0.2.9-x64.msi`
+- Portable package: `CodeCodex-0.2.9-x64.zip`
+- Standalone uninstaller: `Uninstall-CodeCodex.exe`
+
+You can verify downloads with:
+
+```powershell
+Get-FileHash .\CodeCodex-0.2.9-x64-setup.exe -Algorithm SHA256
+```
+
+Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
+
+If the official Codex/ChatGPT Desktop app is installed, the installer checks
+for a desktop `Codex` shortcut first and a desktop `ChatGPT` shortcut second.
+Only when neither shortcut exists does it create a new managed `Code-Codex`
+desktop shortcut.
+
+## Install Option 2: Build EXEs From Source
+
+Requirements:
+
+- Windows 11 x64.
+- Rust with the MSVC toolchain.
+- Node.js 20.19 or newer.
+- Visual Studio Build Tools with Desktop C++.
+- .NET SDK if you want to build the MSI package.
+
+Build the release EXE files:
+
+```powershell
+./scripts/build.ps1 -Configuration Release
+```
+
+The generated EXE files are written to `target/release/`, including:
+
+- `code-codex.exe`
+- `code-codex-launcher.exe`
+- `Install-CodeCodex.exe`
+- `Uninstall-CodeCodex.exe`
+- `code-codex-setup.exe`
+- `code-codex-shim.exe`
+- `code-codex-shortcut.exe`
+- `code-codex-uninstall.exe`
+
+Generate the downloadable setup EXE, MSI, and ZIP:
+
+```powershell
+./scripts/package.ps1 -Version 0.2.9
+```
+
+The generated packages are written to `releases/`.
+
+## Uninstall
+
+Every install path includes a source-built uninstaller program:
+
+- Downloaded setup/ZIP installs place `Uninstall-CodeCodex.exe` under
+  `%LOCALAPPDATA%\Programs\Code-Codex`.
+- Source builds place `Uninstall-CodeCodex.exe`,
+  `Uninstall-CodeCodex.ps1`, and `Finalize-Uninstall.ps1` in `target/release/`.
+
+Run `Uninstall-CodeCodex.exe` to restore the original Codex or ChatGPT shortcut
+and remove Code-Codex files. If installation created a standalone `Code-Codex`
+desktop shortcut because both official shortcuts were missing, uninstall removes
+that shortcut. MSI installs can also be removed from Windows **Installed apps**.
+
+## Features
+
+- File tree in the Codex sidebar for local workspaces.
+- Drag files and folders from Windows File Explorer into the workspace root or a file-tree folder.
+- Main-window file tabs beside the conversation.
+- Text preview and editing, including multilingual Markdown content.
+- Independently enabled Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews from Preview Market.
+- Optional Transparent Background appearance plugin with a reversible Windows compositor surface that reveals content behind Codex while keeping the full Codex window input-active.
+- When Particle Image Background is active, the native Codex Settings surface can remain transparent while its settings cards stay readable; conversation surfaces are unchanged.
+- Particle Image Background appearance plugin with a persistent grayscale image library, ordered auto-switching, smooth particle morphing, per-photo framing, and adjustable particle, source, flow, pointer, and render settings.
+- Black Hole Background appearance plugin with a GPU-rendered accretion disk, bloom, quality controls, and four built-in visual presets.
+- Glow Horizon Background appearance plugin with four directions, wheel-driven motion, inertial release, adjustable glow colors, and bilingual settings.
+- Heavenly Cloud Background appearance plugin with a real-time cloud tunnel, pointer steering, a cinematic opening, three quality levels, and bilingual settings.
+- Aurora Ionosphere Background appearance plugin with volumetric light curtains, a procedural star field, adaptive quality, cinematic reveal controls, and bilingual settings.
+- Milky Way Background appearance plugin with five flowing colors, adjustable wave motion, a soft opening animation, and bilingual settings.
+- Click the version number at the bottom of the file tree to check GitHub for the latest published stable release.
+- Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
+- Local CSV table previews with quoted fields, embedded line breaks, sticky headers, and bounded rendering.
+- Local, bounded Diagram Preview rendering for `.drawio` files and common `.plantuml` activity syntax without uploading source code.
+- Local, read-only Jupyter Notebook previews for Markdown and code cells with saved outputs.
+- Local, read-only previews for DOCX documents, XLSX workbooks, and PPT/PPTX presentations.
+- Local, interactive glTF 2.0 previews for `.gltf` and `.glb`, including orbit, pan, zoom, fit/reset, a reference grid, and animation playback.
+- Context menu actions for create, rename, delete, copy path, reveal, and refresh.
+- Drag and drop file movement.
+- Local bridge code for bounded workspace operations.
+
+## Preview Plugins
+
+![Code-Codex interactive glTF and GLB 3D model preview](docs/screenshots/gltf-preview.png)
+
+Preview Market is located at the bottom of the Code-Codex file tree. Click it
+to open the plugin panel and independently enable previews for Markdown, CSV,
+diagrams, images, video, PDF, audio, Jupyter Notebook, Office documents, and
+glTF 3D models. Preview processing runs locally on the user's computer.
+
+The 3D Model Preview plugin provides an interactive view for `.gltf` and `.glb`
+files with orbit, pan, zoom, fit/reset, reference-grid, and animation controls.
+
+![Code-Codex Particle Image Background appearance plugin](docs/screenshots/particle-image-background.png)
+
+The Particle Image Background appearance plugin transforms locally selected
+images into an animated grayscale particle field across Codex. Its image
+library supports ordered auto-switching, smooth morphing, per-photo position
+and zoom, direct numeric values, and adjustable flow, pointer, source, and
+render settings. Transparent Background is available separately. Particle
+images and settings remain local to the user's Codex profile.
+
+![Code-Codex Black Hole Background appearance plugin](docs/screenshots/black-hole-background.png)
+
+The Black Hole Background appearance plugin reuses the same full-window
+background surface and adds an adjustable ray-marched black hole with temporal
+accumulation and bloom. Its renderer quality values are fixed internally for a
+consistent experience and are intentionally hidden from users. Enabling it
+switches the real Codex Appearance setting to Dark; disabling it restores the
+user's previous Appearance setting.
+
+![Code-Codex Glow Horizon Background appearance plugin](docs/screenshots/glow-horizon-background.png)
+
+The Glow Horizon Background appearance plugin adds an interactive luminous
+horizon across the full Codex window. It supports top, bottom, left, and right
+directions, wheel-driven deformation, inertia and return controls, opening
+animation settings, customizable glow colors, and Chinese/English labels.
+Enabling it switches Codex to Dark appearance and disabling it restores the
+previous appearance setting.
+
+![Code-Codex Heavenly Cloud Background appearance plugin](docs/screenshots/heavenly-cloud-background.png)
+
+The Heavenly Cloud Background appearance plugin adds a textureless,
+ray-marched celestial cloud tunnel across the full Codex window. It provides
+adjustable drift, light density, turbulence, tunnel radius, spectral shift,
+pointer steering, opening animation, and three render-quality levels. Its
+settings panel supports Chinese and English, and it uses the same automatic
+Dark appearance and restoration behavior as the other GPU backgrounds.
+
+![Code-Codex Aurora Ionosphere Background appearance plugin](docs/screenshots/aurora-ionosphere-background.png)
+
+The Aurora Ionosphere Background appearance plugin adds runtime-generated
+volumetric aurora curtains and a procedural star field across the full Codex
+window. It preserves the source effect's three-pass WebGL pipeline, adaptive
+quality, and cinematic reveal while exposing bilingual controls for the ion
+field, opening sequence, quality, and animation state.
+
+![Milky Way Background](docs/screenshots/milky-way-background.png)
+
+The Milky Way Background appearance plugin fills the Codex window with five-color
+harmonic light. Its bilingual settings panel provides individual colors, flow
+speed, amplitude, frequency, scale, rotation, brightness, and opening controls.
+It uses one WebGL pass, pauses rendering while hidden, and supports pause, replay,
+and reduced motion. Like the other GPU backgrounds, it activates Dark appearance
+and restores the previous preference when disabled. The supplied effect project
+reconstructs a partial reference to “Milky way” by Almina (@Code4_11).
+
+Layered Mountain Background adds animated atmospheric ridges, warm backlight,
+mist, and depth across the Codex window. Open Preview Market and use its settings
+button for bilingual controls, reverse drift, mountain shape, exposure, render
+scale, quality presets, and pause/reset. It uses the supplied two-pass WebGL 2
+reconstruction with a compact ridge atlas, and the same automatic Dark appearance
+and preference restoration as the other backgrounds. The supplied project credits
+a partial visual reference to Yohei Nishitsuji; the reference image does not establish
+the original work's redistribution license.
+
+## Repository Layout
+
+```text
+crates/
+  cdp-client/          Chrome DevTools Protocol client
+  context-resolver/    Codex task/workspace context resolution
+  launcher/            Windows launcher and Codex integration logic
+  workspace-service/   File listing, preview, mutation, settings, and watcher code
+
+packages/
+  explorer-ui/         Injected TypeScript explorer UI
+
+installer/             Windows installer source files
+scripts/               Build and packaging helper scripts
+releases/              Ready-made downloadable packages
+```
+
+## Notes
+
+Generated build folders such as `target/`, `node_modules/`, `dist/`, and
+`artifacts/` are intentionally ignored by Git. Standalone test suites and CI
+workflows are not included in this public source package.
+
+## License
+
+[MIT](LICENSE).

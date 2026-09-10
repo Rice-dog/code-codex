@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.2.8"
+    [string]$Version = "0.2.9"
 )
 
 $ErrorActionPreference = "Stop"
@@ -240,7 +240,7 @@ if ($null -ne $existingInstall -and
 $documentCopies = @()
 foreach ($document in @(
     "README.md",
-    "README.zh-CN.md",
+    "README.en.md",
     "LICENSE",
     "THIRD_PARTY_LICENSES.txt",
     "sbom.spdx.json"

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.2.8"
+    [string]$Version = "0.2.9"
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,7 +71,7 @@ Copy-Item -LiteralPath $uninstallBinary -Destination $StageFullPath
 Copy-Item -LiteralPath $installProgram -Destination $StageFullPath
 Copy-Item -LiteralPath $uninstallProgram -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.md") -Destination $StageFullPath
-Copy-Item -LiteralPath (Join-Path $RepoRoot "README.zh-CN.md") -Destination $StageFullPath
+Copy-Item -LiteralPath (Join-Path $RepoRoot "README.en.md") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination $StageFullPath
 $docsPath = Join-Path $RepoRoot "docs"
 if (Test-Path -LiteralPath $docsPath -PathType Container) {
