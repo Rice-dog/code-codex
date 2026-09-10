@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.9"><img alt="版本" src="https://img.shields.io/badge/version-0.2.9-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.11"><img alt="版本" src="https://img.shields.io/badge/version-0.2.11-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,15 +35,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.2.9-x64-setup.exe`
-- 备选：`CodeCodex-0.2.9-x64.msi`
-- 便携包：`CodeCodex-0.2.9-x64.zip`
+- 推荐：`CodeCodex-0.2.11-x64-setup.exe`
+- 备选：`CodeCodex-0.2.11-x64.msi`
+- 便携包：`CodeCodex-0.2.11-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.9-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.11-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -82,7 +82,7 @@ Get-FileHash .\CodeCodex-0.2.9-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.9
+./scripts/package.ps1 -Version 0.2.11
 ```
 
 生成结果会写入 `releases/`。
@@ -177,6 +177,10 @@ Milky Way Background 外观插件可在整个 Codex 窗口中显示五色谐波�
 Almina（@Code4_11）的“Milky way”部分参考片段重建。
 
 Layered Mountain Background 在整个 Codex 窗口中显示动态层叠山峦、暖色逆光和雾气。
+启用时以约 3 秒的柔和开场由远及近显现山峦，随后进入正常漂移；点击“重播”可再次观看。系统开启减少动态效果时跳过开场。
+
+![Layered Mountain Background 层叠山峦背景](docs/screenshots/layered-mountain-background.png)
+
 在 Preview Market 中启用后，点击右侧设置按钮可打开中英文二级面板，调整反向漂移、
 山体形态、曝光、渲染比例与质量，并支持暂停和重置。复用所提供项目的双阶段 WebGL 2
 渲染和紧凑山脊图集，沿用其他背景的自动深色外观与停用恢复机制。所提供项目注明

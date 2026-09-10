@@ -724,6 +724,8 @@ interface HeavenlyCloudNumericControlDefinition {
 type AuroraIonosphereQuality = "low" | "medium" | "high";
 
 interface AuroraIonosphereBackgroundSettings {
+  readonly hue: number;
+  readonly saturation: number;
   readonly quality: AuroraIonosphereQuality;
   readonly speed: number;
   readonly intensity: number;
@@ -1146,6 +1148,8 @@ const AURORA_IONOSPHERE_QUALITY = Object.freeze({
 }>>>);
 
 const DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS: AuroraIonosphereBackgroundSettings = Object.freeze({
+  hue: 0,
+  saturation: 1,
   quality: "medium",
   speed: 1,
   intensity: 1,
@@ -1163,6 +1167,8 @@ const DEFAULT_AURORA_IONOSPHERE_BACKGROUND_SETTINGS: AuroraIonosphereBackgroundS
 });
 
 const AURORA_IONOSPHERE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
+  { key: "hue", group: "field", id: "cle-aurora-ionosphere-hue", label: "Aurora hue", labelZh: "极光色相", minimum: -180, maximum: 180, step: 1, unit: "°", precision: 0 },
+  { key: "saturation", group: "field", id: "cle-aurora-ionosphere-saturation", label: "Aurora saturation", labelZh: "极光饱和度", minimum: 0, maximum: 2, step: 0.01, unit: "×", precision: 2 },
   { key: "speed", group: "field", id: "cle-aurora-ionosphere-speed", label: "Drift speed", labelZh: "漂移速度", minimum: 0, maximum: 3, step: 0.01, unit: "×", precision: 2 },
   { key: "intensity", group: "field", id: "cle-aurora-ionosphere-intensity", label: "Aurora intensity", labelZh: "极光强度", minimum: 0, maximum: 3, step: 0.01, unit: "×", precision: 2 },
   { key: "curtainScale", group: "field", id: "cle-aurora-ionosphere-curtain-scale", label: "Curtain density", labelZh: "光幕密度", minimum: 0.05, maximum: 2, step: 0.01, precision: 2 },
@@ -1801,6 +1807,8 @@ function normalizeAuroraIonosphereSettings(value: unknown): AuroraIonosphereBack
     ? record.quality
     : defaults.quality;
   return {
+    hue: clampParticleNumber(record.hue, -180, 180, defaults.hue),
+    saturation: clampParticleNumber(record.saturation, 0, 2, defaults.saturation),
     quality,
     speed: clampParticleNumber(record.speed, 0, 3, defaults.speed),
     intensity: clampParticleNumber(record.intensity, 0, 3, defaults.intensity),
@@ -6232,6 +6240,7 @@ uniform float uIntro;
 uniform float uIntroSkyEnd;
 uniform float uIntroStarStart;
 uniform sampler2D uAuroraTexture;
+uniform mat3 uAuroraColor;
 uniform vec2 uAuroraUvScale;
 uniform vec2 uAuroraUvOffset;
 vec3 hash33(vec3 p) {
@@ -6276,7 +6285,7 @@ void main() {
   vec3 color = sky(rd) * horizonFade * skyIntro;
   vec4 field = texture2D(uAuroraTexture, uAuroraUvOffset + screenUv * uAuroraUvScale);
   color += stars(rd) * starIntro;
-  color = color * (1.0 - field.a) + field.rgb;
+  color = color * (1.0 - field.a) + max(vec3(0.0), uAuroraColor * field.rgb);
   gl_FragColor = vec4(color, 1.0);
 }
 `;
@@ -6355,7 +6364,7 @@ class AuroraIonosphereRenderer {
   #fieldFramebuffer!: WebGLFramebuffer;
   #noiseUniforms!: Readonly<Record<"resolution" | "domainMin" | "domainSize" | "flowRotation" | "scale" | "turbulence", WebGLUniformLocation>>;
   #fieldUniforms!: Readonly<Record<"resolution" | "intensity" | "glow" | "intro" | "introFeather" | "introStart" | "introEnd" | "layerLut" | "layerLutStep" | "noiseAtlas" | "domainMin" | "inverseDomainSize", WebGLUniformLocation>>;
-  #compositeUniforms!: Readonly<Record<"resolution" | "starResolution" | "starDensity" | "intro" | "introSkyEnd" | "introStarStart" | "fieldTexture" | "uvScale" | "uvOffset", WebGLUniformLocation>>;
+  #compositeUniforms!: Readonly<Record<"resolution" | "starResolution" | "starDensity" | "intro" | "introSkyEnd" | "introStarStart" | "fieldTexture" | "color" | "uvScale" | "uvOffset", WebGLUniformLocation>>;
   #animationFrame = 0;
   #running = true;
   #contextReady = true;
@@ -6595,6 +6604,7 @@ class AuroraIonosphereRenderer {
       introSkyEnd: this.#requiredUniform(this.#compositeProgram, "uIntroSkyEnd"),
       introStarStart: this.#requiredUniform(this.#compositeProgram, "uIntroStarStart"),
       fieldTexture: this.#requiredUniform(this.#compositeProgram, "uAuroraTexture"),
+      color: this.#requiredUniform(this.#compositeProgram, "uAuroraColor"),
       uvScale: this.#requiredUniform(this.#compositeProgram, "uAuroraUvScale"),
       uvOffset: this.#requiredUniform(this.#compositeProgram, "uAuroraUvOffset"),
     };
@@ -6736,6 +6746,14 @@ class AuroraIonosphereRenderer {
     gl.uniform2f(this.#compositeUniforms.uvOffset, this.#uvOffset.x, this.#uvOffset.y);
     if (this.#settingsDirty) {
       gl.uniform1f(this.#compositeUniforms.starDensity, settings.starDensity);
+      // Rotate around the neutral RGB axis; compute only when settings change.
+      const angle = settings.hue * Math.PI / 180;
+      const c = Math.cos(angle) * settings.saturation;
+      const t = (1 - c) / 3;
+      const k = Math.sin(angle) * settings.saturation / Math.sqrt(3);
+      gl.uniformMatrix3fv(this.#compositeUniforms.color, false, new Float32Array([
+        c+t, t+k, t-k, t-k, c+t, t+k, t+k, t-k, c+t,
+      ]));
       gl.uniform1f(this.#compositeUniforms.introSkyEnd, settings.introSkyEnd);
       gl.uniform1f(this.#compositeUniforms.introStarStart, settings.introStarStart);
       this.#settingsDirty = false;
@@ -7569,6 +7587,7 @@ uniform vec2 resolution;
 uniform sampler2D ridgeAtlas;
 uniform float time, depth, haze, light, warmth;
 uniform float mountainHeight, zoom, horizon, softness, exposure, saturation, vignette;
+uniform float intro;
 uniform int steps;
 out vec4 outColor;
 float hash21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}
@@ -7596,12 +7615,15 @@ void main(){
     float profile=(texture(ridgeAtlas,atlasUv).r-.5)/.8;
     float baseline=mix(.36,-.58,pow(z,.78));
     float mountain=baseline+profile*(.5+.38*z)*depth*mountainHeight;
+    // Reveal distant ridges first; settle each layer gently into its final position.
+    float reveal=smoothstep(z*.48,z*.48+.52,intro);
+    mountain-=(1.-reveal)*(.035+.065*z);
     float edge=1.-smoothstep(mountain-(.006+.008*z)*softness,mountain+.003*softness,uv.y);
     float atmosphere=(1.-z)/(1.+haze*z*1.5);
     vec3 mountainColor=mix(nearColor,farColor,atmosphere);
     float rim=exp(-abs(uv.y-mountain)*85.)*(1.-z)*light;
     mountainColor+=mix(vec3(.2,.25,.27),vec3(.9,.48,.2),warmth)*rim*.13;
-    col=mix(col,mountainColor,edge);
+    col=mix(col,mountainColor,edge*reveal);
   }
 
   float mist=exp(-abs(uv.y+.03)*2.4)*haze*.045;
@@ -7609,7 +7631,8 @@ void main(){
   col+=(hash21(gl_FragCoord.xy+floor(time*12.))-.5)/255.*2.2;
   col*=max(0.,1.-vignette*.18*dot(uv,uv));
   col=mix(vec3(dot(col,vec3(.2126,.7152,.0722))),col,saturation)*exposure;
-  outColor=vec4(pow(max(col,0.),vec3(.86)),1.);
+  col=mix(vec3(.035,.04,.045),pow(max(col,0.),vec3(.86)),smoothstep(0.,.32,intro));
+  outColor=vec4(col,1.);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string) {
@@ -7644,7 +7667,7 @@ function link(gl: WebGL2RenderingContext, fragment: string) {
     if (!gl) { throw new Error("WebGL 2 unavailable"); }
     let atlasProgram: WebGLProgram | null = null, sceneProgram: WebGLProgram | null = null;
     let buffer: WebGLBuffer | null = null, atlasTexture: WebGLTexture | null = null, framebuffer: WebGLFramebuffer | null = null;
-    let frame=0,last=0,elapsed=0,drift=0,width=1,height=1,visible=true,disposed=false;
+    let frame=0,last=0,elapsed=0,drift=0,introElapsed=0,width=1,height=1,visible=true,disposed=false;
     const media=matchMedia("(prefers-reduced-motion: reduce)");
     try {
       atlasProgram=link(gl,atlasFragment); sceneProgram=link(gl,sceneFragment);
@@ -7662,11 +7685,14 @@ function link(gl: WebGL2RenderingContext, fragment: string) {
       const atlasUniforms={resolution:gl.getUniformLocation(atlasProgram,"atlasResolution"),time:gl.getUniformLocation(atlasProgram,"time"),detail:gl.getUniformLocation(atlasProgram,"detail")};
       const driftUniform=gl.getUniformLocation(atlasProgram,"drift");
       const appearance = ["mountainHeight","zoom","horizon","softness","exposure","saturation","vignette"] as const;
-      const sceneUniforms=Object.fromEntries(["resolution","ridgeAtlas","time","depth","haze","light","warmth","steps",...appearance].map(name=>[name,gl.getUniformLocation(sceneProgram!,name)]));
+      const sceneUniforms=Object.fromEntries(["resolution","ridgeAtlas","time","intro","depth","haze","light","warmth","steps",...appearance].map(name=>[name,gl.getUniformLocation(sceneProgram!,name)]));
       const maxViewport=gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
       const request=()=>{if(!frame&&!disposed&&visible&&!document.hidden)frame=requestAnimationFrame(draw);};
       const draw=(now:number)=>{
         frame=0; const s=settings.current;
+        const introDt=Math.min((now-(last||now))/1000,.1);
+        // Independent of drift speed; static/reduced-motion users see the completed scene.
+        introElapsed=s.paused||media.matches ? 3 : Math.min(3,introElapsed+introDt);
         if(!s.paused&&!media.matches){
           const dt=Math.min((now-(last||now))/1000,.1);
           elapsed+=dt*s.speed;
@@ -7683,11 +7709,12 @@ function link(gl: WebGL2RenderingContext, fragment: string) {
         gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.viewport(0,0,rw,rh); gl.useProgram(sceneProgram);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,atlasTexture); gl.uniform1i(sceneUniforms.ridgeAtlas!,0);
         gl.uniform2f(sceneUniforms.resolution!,rw,rh); gl.uniform1f(sceneUniforms.time!,elapsed);
+        gl.uniform1f(sceneUniforms.intro!,introElapsed/3);
         gl.uniform1f(sceneUniforms.depth!,s.depth); gl.uniform1f(sceneUniforms.haze!,s.haze); gl.uniform1f(sceneUniforms.light!,s.light);
         gl.uniform1f(sceneUniforms.warmth!,s.warmth); gl.uniform1i(sceneUniforms.steps!,Math.round(s.steps));
         for(const key of appearance)gl.uniform1f(sceneUniforms[key]!,s[key]);
         gl.drawArrays(gl.TRIANGLES,0,3);
-        if(!s.paused&&!media.matches&&s.speed!==0)request();
+        if(!s.paused&&!media.matches&&(s.speed!==0||introElapsed<3))request();
       };
       const reset=()=>{cancelAnimationFrame(frame);frame=0;last=0;request();};
       const resize=new ResizeObserver(([entry])=>{if(!entry)return;width=entry.contentRect.width;height=entry.contentRect.height;request();});
