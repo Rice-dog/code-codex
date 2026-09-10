@@ -1,78 +1,74 @@
 # Code-Codex
 
-English | [简体中文](README.zh-CN.md)
+简体中文 | [English](README.en.md)
 
 <p align="center">
-  <img src="crates/launcher/resources/code-codex.ico" alt="Code-Codex icon" width="96">
+  <img src="crates/launcher/resources/code-codex.ico" alt="Code-Codex 图标" width="96">
 </p>
 
 <p align="center">
-  <em>Add a local project file tree, preview tabs, and bounded editing to Codex Desktop.</em>
+  <em>为 Codex Desktop 添加本地项目文件树、预览标签页和受限编辑能力。</em>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.8"><img alt="Version" src="https://img.shields.io/badge/version-0.2.8-blue"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
-  <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.9"><img alt="版本" src="https://img.shields.io/badge/version-0.2.9-blue"></a>
+  <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
-  <img alt="Status" src="https://img.shields.io/badge/status-preview-yellow">
+  <img alt="状态" src="https://img.shields.io/badge/status-preview-yellow">
 </p>
 
-Code-Codex is an unofficial community project that adds a local project file tree
-to Codex Desktop. It demonstrates a local Windows companion app, a bounded
-workspace bridge, and an injected TypeScript explorer UI for file preview,
-editing, navigation, and file operations.
+Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地项目文件树。它展示了一个 Windows 本地辅助程序、受限工作区 bridge，以及注入式 TypeScript explorer UI，用于文件预览、编辑、导航和文件操作。
 
 > [!IMPORTANT]
-> Code-Codex is not affiliated with OpenAI.
+> Code-Codex 与 OpenAI 无关
 
-![Code-Codex file tree in Codex](docs/screenshots/file-tree-conversation.png)
+![Codex 中的 Code-Codex 文件树](docs/screenshots/file-tree-conversation.png)
 
-![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
+![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-## Install Option 1: Download EXE
+## 安装方式一：直接下载 EXE
 
-Download the ready-made installer from [`releases`](releases/):
+可以从 [`releases`](releases/) 下载已经生成好的安装包：
 
-Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
-with the official stable Codex/ChatGPT Desktop app installed.
+运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
+并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- Recommended: `CodeCodex-0.2.8-x64-setup.exe`
-- Alternative: `CodeCodex-0.2.8-x64.msi`
-- Portable package: `CodeCodex-0.2.8-x64.zip`
-- Standalone uninstaller: `Uninstall-CodeCodex.exe`
+- 推荐：`CodeCodex-0.2.9-x64-setup.exe`
+- 备选：`CodeCodex-0.2.9-x64.msi`
+- 便携包：`CodeCodex-0.2.9-x64.zip`
+- 独立卸载程序：`Uninstall-CodeCodex.exe`
 
-You can verify downloads with:
+可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.8-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.9-x64-setup.exe -Algorithm SHA256
 ```
 
-Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
+然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
 
-If the official Codex/ChatGPT Desktop app is installed, the installer checks
-for a desktop `Codex` shortcut first and a desktop `ChatGPT` shortcut second.
-Only when neither shortcut exists does it create a new managed `Code-Codex`
-desktop shortcut.
+如果已经安装官方 Codex/ChatGPT Desktop，安装器会先检查桌面上的 `Codex` 快捷方式，
+再检查 `ChatGPT` 快捷方式。只有这两个官方快捷方式都不存在时，才会创建新的托管
+`Code-Codex` 桌面快捷方式。
 
-## Install Option 2: Build EXEs From Source
+## 安装方式二：从源码生成 EXE
 
-Requirements:
+环境要求：
 
-- Windows 11 x64.
-- Rust with the MSVC toolchain.
-- Node.js 20.19 or newer.
-- Visual Studio Build Tools with Desktop C++.
-- .NET SDK if you want to build the MSI package.
+- Windows 11 x64。
+- Rust，并安装 MSVC toolchain。
+- Node.js 20.19 或更高版本。
+- Visual Studio Build Tools，包含 Desktop C++。
+- 如果要生成 MSI，还需要 .NET SDK。
 
-Build the release EXE files:
+生成 release EXE 文件：
 
 ```powershell
 ./scripts/build.ps1 -Configuration Release
 ```
 
-The generated EXE files are written to `target/release/`, including:
+生成结果会写入 `target/release/`，包括：
 
 - `code-codex.exe`
 - `code-codex-launcher.exe`
@@ -83,143 +79,130 @@ The generated EXE files are written to `target/release/`, including:
 - `code-codex-shortcut.exe`
 - `code-codex-uninstall.exe`
 
-Generate the downloadable setup EXE, MSI, and ZIP:
+生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.8
+./scripts/package.ps1 -Version 0.2.9
 ```
 
-The generated packages are written to `releases/`.
+生成结果会写入 `releases/`。
 
-## Uninstall
+## 卸载
 
-Every install path includes a source-built uninstaller program:
+每一种安装方式都会包含由源码构建出的卸载程序：
 
-- Downloaded setup/ZIP installs place `Uninstall-CodeCodex.exe` under
-  `%LOCALAPPDATA%\Programs\Code-Codex`.
-- Source builds place `Uninstall-CodeCodex.exe`,
-  `Uninstall-CodeCodex.ps1`, and `Finalize-Uninstall.ps1` in `target/release/`.
+- 下载安装包或 ZIP 安装后，`Uninstall-CodeCodex.exe` 会位于
+  `%LOCALAPPDATA%\Programs\Code-Codex`。
+- 从源码构建时，`Uninstall-CodeCodex.exe`、`Uninstall-CodeCodex.ps1` 和
+  `Finalize-Uninstall.ps1` 会位于 `target/release/`。
 
-Run `Uninstall-CodeCodex.exe` to restore the original Codex or ChatGPT shortcut
-and remove Code-Codex files. If installation created a standalone `Code-Codex`
-desktop shortcut because both official shortcuts were missing, uninstall removes
-that shortcut. MSI installs can also be removed from Windows **Installed apps**.
+运行 `Uninstall-CodeCodex.exe` 即可恢复原来的 Codex 或 ChatGPT 快捷方式，并移除
+Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创建了独立的
+`Code-Codex` 桌面快捷方式，卸载时会删除这个快捷方式。MSI 安装也可以从 Windows
+**已安装的应用** 中卸载。
 
-## Features
+## 功能
 
-- File tree in the Codex sidebar for local workspaces.
-- Drag files and folders from Windows File Explorer into the workspace root or a file-tree folder.
-- Main-window file tabs beside the conversation.
-- Text preview and editing, including multilingual Markdown content.
-- Independently enabled Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews from Preview Market.
-- Optional Transparent Background appearance plugin with a reversible Windows compositor surface that reveals content behind Codex while keeping the full Codex window input-active.
-- When Particle Image Background is active, the native Codex Settings surface can remain transparent while its settings cards stay readable; conversation surfaces are unchanged.
-- Particle Image Background appearance plugin with a persistent grayscale image library, ordered auto-switching, smooth particle morphing, per-photo framing, and adjustable particle, source, flow, pointer, and render settings.
-- Black Hole Background appearance plugin with a GPU-rendered accretion disk, bloom, quality controls, and four built-in visual presets.
-- Glow Horizon Background appearance plugin with four directions, wheel-driven motion, inertial release, adjustable glow colors, and bilingual settings.
-- Heavenly Cloud Background appearance plugin with a real-time cloud tunnel, pointer steering, a cinematic opening, three quality levels, and bilingual settings.
-- Aurora Ionosphere Background appearance plugin with volumetric light curtains, a procedural star field, adaptive quality, cinematic reveal controls, and bilingual settings.
-- Milky Way Background appearance plugin with five flowing colors, adjustable wave motion, a soft opening animation, and bilingual settings.
-- Click the version number at the bottom of the file tree to check GitHub for the latest published stable release.
-- Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
-- Local CSV table previews with quoted fields, embedded line breaks, sticky headers, and bounded rendering.
-- Local, bounded Diagram Preview rendering for `.drawio` files and common `.plantuml` activity syntax without uploading source code.
-- Local, read-only Jupyter Notebook previews for Markdown and code cells with saved outputs.
-- Local, read-only previews for DOCX documents, XLSX workbooks, and PPT/PPTX presentations.
-- Local, interactive glTF 2.0 previews for `.gltf` and `.glb`, including orbit, pan, zoom, fit/reset, a reference grid, and animation playback.
-- Context menu actions for create, rename, delete, copy path, reveal, and refresh.
-- Drag and drop file movement.
-- Local bridge code for bounded workspace operations.
+- Codex 侧边栏中的本地工作区文件树。
+- 支持从 Windows 文件资源管理器将文件和文件夹复制拖入工作区根目录或文件树中的文件夹。
+- 位于对话旁边的主窗口文件标签页。
+- 文本预览与编辑，包括多语言 Markdown 内容。
+- 可在预览市场中独立启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 和 3D 模型预览。
+- 可选的“透明背景”外观插件，通过可恢复的 Windows 合成器透明表面显示 Codex 后方内容，同时保持整个 Codex 窗口接收输入，避免点击穿透到后方应用。
+- 启用“粒子图像背景”时，Codex 原生设置主面板可保持透明，而设置卡片仍保持清晰可读；对话页面的表面不受影响。
+- “粒子图像背景”外观插件提供持久化的灰度图片库、按顺序自动切换、流畅的粒子变形、逐图构图，以及可调的粒子、Source、流动、指针和渲染参数。
+- “黑洞背景”外观插件提供 GPU 渲染的吸积盘、辉光、质量控制和四套内置视觉预设。
+- “发光地平线背景”外观插件提供四个方向、滚轮驱动动画、惯性释放、可调辉光颜色和中英文设置面板。
+- “天境云隧道背景”外观插件提供实时云隧道、指针引导、电影式开场、三档渲染质量和中英文设置面板。
+- “极光电离层背景”外观插件提供体积光幕、程序化星空、自适应渲染质量、电影式揭示控制和中英文设置面板。
+- Milky Way Background 外观插件提供五色流动光场、可调波动形态、柔和开场动画和中英文设置面板。
+- 点击文件树底部的版本号，可通过 GitHub 检查最新发布的稳定版本。
+- Codex 软件包版本仅作为诊断信息；未来版本不再受固定版本白名单限制，而是通过实时协议和 DOM 结构检查。
+- 在本地以表格形式预览 CSV，支持引号字段、字段内换行、固定表头和受限渲染。
+- 在本地以受限方式预览 `.drawio` 文件和常用 `.plantuml` 活动图语法，不会上传源代码。
+- 在本地以只读方式预览 Jupyter Notebook 的 Markdown、代码单元格和已保存输出。
+- 在本地以只读方式预览 DOCX 文档、XLSX 工作簿和 PPT/PPTX 演示文稿。
+- 在本地交互式预览 glTF 2.0 `.gltf` 和 `.glb` 模型，支持旋转、平移、缩放、适配/重置视图、参考网格和动画播放。
+- 右键菜单：新建、重命名、删除、复制路径、在资源管理器中显示、刷新。
+- 文件和文件夹拖拽移动。
+- 用于受限工作区操作的本地 bridge 代码。
 
-## Preview Plugins
+## 预览插件
 
-![Code-Codex interactive glTF and GLB 3D model preview](docs/screenshots/gltf-preview.png)
+![Code-Codex 交互式 glTF 和 GLB 3D 模型预览](docs/screenshots/gltf-preview.png)
 
-Preview Market is located at the bottom of the Code-Codex file tree. Click it
-to open the plugin panel and independently enable previews for Markdown, CSV,
-diagrams, images, video, PDF, audio, Jupyter Notebook, Office documents, and
-glTF 3D models. Preview processing runs locally on the user's computer.
+“预览市场”入口位于 Code-Codex 文件树底部。点击该入口即可打开插件面板，并按需独立启用
+Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 文档和 glTF 3D
+模型预览插件。预览处理在用户电脑本地完成。
 
-The 3D Model Preview plugin provides an interactive view for `.gltf` and `.glb`
-files with orbit, pan, zoom, fit/reset, reference-grid, and animation controls.
+3D 模型预览插件为 `.gltf` 和 `.glb` 文件提供交互式视图，支持旋转、平移、缩放、
+适配/重置视图、参考网格和动画控制。
 
-![Code-Codex Particle Image Background appearance plugin](docs/screenshots/particle-image-background.png)
+![Code-Codex 粒子图像背景外观插件](docs/screenshots/particle-image-background.png)
 
-The Particle Image Background appearance plugin transforms locally selected
-images into an animated grayscale particle field across Codex. Its image
-library supports ordered auto-switching, smooth morphing, per-photo position
-and zoom, direct numeric values, and adjustable flow, pointer, source, and
-render settings. Transparent Background is available separately. Particle
-images and settings remain local to the user's Codex profile.
+“粒子图像背景”外观插件可将本地选择的图片转换为覆盖 Codex 的动态灰度粒子场。图片库支持
+按顺序自动切换、流畅变形、逐图位置与缩放、直接输入数值，以及可调的流动、指针、Source
+和渲染参数。“透明背景”作为另一个独立的外观插件提供。粒子图片及设置仅保存在用户本机的
+Codex 配置中。
 
-![Code-Codex Black Hole Background appearance plugin](docs/screenshots/black-hole-background.png)
+![Code-Codex 黑洞背景外观插件](docs/screenshots/black-hole-background.png)
 
-The Black Hole Background appearance plugin reuses the same full-window
-background surface and adds an adjustable ray-marched black hole with temporal
-accumulation and bloom. Its renderer quality values are fixed internally for a
-consistent experience and are intentionally hidden from users. Enabling it
-switches the real Codex Appearance setting to Dark; disabling it restores the
-user's previous Appearance setting.
+“黑洞背景”外观插件复用同一套全窗口背景表面，并提供可调的光线步进黑洞、时间累积和辉光效果。
+渲染质量参数已固定在程序内部并对用户隐藏，以保证一致的使用体验。启用时会将 Codex 的真实外观设置自动切换为深色；停用时会恢复用户之前的外观设置。
 
-![Code-Codex Glow Horizon Background appearance plugin](docs/screenshots/glow-horizon-background.png)
+![Code-Codex 发光地平线背景外观插件](docs/screenshots/glow-horizon-background.png)
 
-The Glow Horizon Background appearance plugin adds an interactive luminous
-horizon across the full Codex window. It supports top, bottom, left, and right
-directions, wheel-driven deformation, inertia and return controls, opening
-animation settings, customizable glow colors, and Chinese/English labels.
-Enabling it switches Codex to Dark appearance and disabling it restores the
-previous appearance setting.
+“发光地平线背景”外观插件可在整个 Codex 窗口中显示交互式发光地平线，支持上、下、左、右
+四个方向，以及滚轮变形、惯性与回弹、开场动画和辉光颜色调节。设置面板支持中文与英文切换。
+启用插件时会自动将 Codex 切换为深色外观，停用时会恢复此前的外观设置。
 
-![Code-Codex Heavenly Cloud Background appearance plugin](docs/screenshots/heavenly-cloud-background.png)
+![Code-Codex 天境云隧道背景外观插件](docs/screenshots/heavenly-cloud-background.png)
 
-The Heavenly Cloud Background appearance plugin adds a textureless,
-ray-marched celestial cloud tunnel across the full Codex window. It provides
-adjustable drift, light density, turbulence, tunnel radius, spectral shift,
-pointer steering, opening animation, and three render-quality levels. Its
-settings panel supports Chinese and English, and it uses the same automatic
-Dark appearance and restoration behavior as the other GPU backgrounds.
+“天境云隧道背景”外观插件可在整个 Codex 窗口中显示无需纹理的实时光线步进云隧道，支持调节
+前进速度、光雾密度、湍流强度、隧道半径、光谱偏移、指针引导、开场动画和三档渲染质量。
+设置面板支持中文与英文切换，并复用其他 GPU 背景插件的自动深色外观与停用恢复机制。
 
-![Code-Codex Aurora Ionosphere Background appearance plugin](docs/screenshots/aurora-ionosphere-background.png)
+![Code-Codex 极光电离层背景外观插件](docs/screenshots/aurora-ionosphere-background.png)
 
-The Aurora Ionosphere Background appearance plugin adds runtime-generated
-volumetric aurora curtains and a procedural star field across the full Codex
-window. It preserves the source effect's three-pass WebGL pipeline, adaptive
-quality, and cinematic reveal while exposing bilingual controls for the ion
-field, opening sequence, quality, and animation state.
+“极光电离层背景”外观插件可在整个 Codex 窗口中显示运行时生成的体积极光光幕和程序化星空。
+插件保留原效果的三阶段 WebGL 渲染、自适应质量和电影式揭示，并在中英文二级设置面板中提供
+电离层场、开场顺序、渲染质量和动画状态等参数。
 
-![Milky Way Background](docs/screenshots/milky-way-background.png)
+![银河光场背景](docs/screenshots/milky-way-background.png)
 
-The Milky Way Background appearance plugin fills the Codex window with five-color
-harmonic light. Its bilingual settings panel provides individual colors, flow
-speed, amplitude, frequency, scale, rotation, brightness, and opening controls.
-It uses one WebGL pass, pauses rendering while hidden, and supports pause, replay,
-and reduced motion. Like the other GPU backgrounds, it activates Dark appearance
-and restores the previous preference when disabled. The supplied effect project
-reconstructs a partial reference to “Milky way” by Almina (@Code4_11).
+Milky Way Background 外观插件可在整个 Codex 窗口中显示五色谐波光场。中英文二级设置面板
+支持分别调节五种颜色，以及流动速度、波动幅度、频率、缩放、旋转、亮度和开场动画。
+插件采用单阶段 WebGL 渲染，隐藏时暂停绘制，支持暂停、重播和减少动态效果。
+启用时自动切换为 Codex 深色外观，停用时恢复此前设置。所提供的效果项目根据
+Almina（@Code4_11）的“Milky way”部分参考片段重建。
 
-## Repository Layout
+Layered Mountain Background 在整个 Codex 窗口中显示动态层叠山峦、暖色逆光和雾气。
+在 Preview Market 中启用后，点击右侧设置按钮可打开中英文二级面板，调整反向漂移、
+山体形态、曝光、渲染比例与质量，并支持暂停和重置。复用所提供项目的双阶段 WebGL 2
+渲染和紧凑山脊图集，沿用其他背景的自动深色外观与停用恢复机制。所提供项目注明
+部分视觉参考来自 Yohei Nishitsuji；参考图片本身不构成原作品的再分发许可。
+
+## 仓库结构
 
 ```text
 crates/
-  cdp-client/          Chrome DevTools Protocol client
-  context-resolver/    Codex task/workspace context resolution
-  launcher/            Windows launcher and Codex integration logic
-  workspace-service/   File listing, preview, mutation, settings, and watcher code
+  cdp-client/          Chrome DevTools Protocol 客户端
+  context-resolver/    Codex task / workspace 上下文解析
+  launcher/            Windows 启动器和 Codex 集成逻辑
+  workspace-service/   文件列表、预览、修改、设置和 watcher 代码
 
 packages/
-  explorer-ui/         Injected TypeScript explorer UI
+  explorer-ui/         注入式 TypeScript explorer UI
 
-installer/             Windows installer source files
-scripts/               Build and packaging helper scripts
-releases/              Ready-made downloadable packages
+installer/             Windows 安装器源码文件
+scripts/               构建和打包辅助脚本
+releases/              已生成的可下载安装包
 ```
 
-## Notes
+## 说明
 
-Generated build folders such as `target/`, `node_modules/`, `dist/`, and
-`artifacts/` are intentionally ignored by Git. Standalone test suites and CI
-workflows are not included in this public source package.
+`target/`、`node_modules/`、`dist/`、`artifacts/` 等生成目录会被 Git 忽略。这个公开源码包不包含独立测试套件和 CI workflow。
 
-## License
+## 许可证
 
-[MIT](LICENSE).
+[MIT](LICENSE)。

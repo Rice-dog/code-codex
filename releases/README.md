@@ -2,6 +2,15 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.9 — Layered Mountain Background
+
+- 新增 Layered Mountain Background：动态层叠山峦、暖色逆光与雾气背景。
+- 提供中英文参数面板、质量预设、暂停与重置，沿用自动深色外观及停用恢复机制。
+- GitHub 默认首页改为中文，英文说明通过首页顶部 English 链接访问。
+- 推荐安装包：`CodeCodex-0.2.9-x64-setup.exe`。
+- 同时提供 `CodeCodex-0.2.9-x64.msi`、`CodeCodex-0.2.9-x64.zip` 和 `Uninstall-CodeCodex.exe`。
+- 本目录仅保留最新安装包；历史版本请访问 [GitHub Releases](https://github.com/Rice-dog/code-codex/releases)。
+
 ## v0.2.3
 
 - `CodeCodex-0.2.3-x64-setup.exe`: recommended installer.

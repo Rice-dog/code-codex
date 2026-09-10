@@ -84,6 +84,7 @@ const BLACK_HOLE_BACKGROUND_PLUGIN_ID = "code-codex.black-hole-background";
 const GLOW_HORIZON_BACKGROUND_PLUGIN_ID = "code-codex.glow-horizon-background";
 const HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID = "code-codex.heavenly-cloud-background";
 const AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID = "code-codex.aurora-ionosphere-background";
+const MOUNTAIN_BACKGROUND_PLUGIN_ID = "code-codex.layered-mountain-background";
 const MILKY_WAY_BACKGROUND_PLUGIN_ID = "code-codex.milky-way-background";
 const APPEARANCE_PLUGIN_IDS = new Set([
   TRANSPARENT_BACKGROUND_PLUGIN_ID,
@@ -93,6 +94,7 @@ const APPEARANCE_PLUGIN_IDS = new Set([
   HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,
   AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,
   MILKY_WAY_BACKGROUND_PLUGIN_ID,
+  MOUNTAIN_BACKGROUND_PLUGIN_ID,
 ]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
@@ -600,7 +602,8 @@ type DarkBackgroundPluginId =
   | typeof GLOW_HORIZON_BACKGROUND_PLUGIN_ID
   | typeof HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
   | typeof AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
-  | typeof MILKY_WAY_BACKGROUND_PLUGIN_ID;
+  | typeof MILKY_WAY_BACKGROUND_PLUGIN_ID
+  | typeof MOUNTAIN_BACKGROUND_PLUGIN_ID;
 
 interface ParticleThemeLease {
   readonly owner?: DarkBackgroundPluginId;
@@ -1921,6 +1924,7 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
         || lease.owner === HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
         || lease.owner === AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
         || lease.owner === MILKY_WAY_BACKGROUND_PLUGIN_ID
+        || lease.owner === MOUNTAIN_BACKGROUND_PLUGIN_ID
         ? lease.owner
         : undefined;
       return owner
@@ -7480,6 +7484,459 @@ function getMilkyWayBackgroundController(): MilkyWayBackgroundController {
   return controller;
 }
 
+
+const MOUNTAIN_DEFAULTS = { ...{ speed:.45, driftStrength:4, mountainHeight:1, zoom:1, horizon:0, softness:1, exposure:1, saturation:1, vignette:1, depth:1, detail:1, haze:1, light:1, warmth:1, resolution:1, steps:57 }, paused: false };
+type MountainSettings = typeof MOUNTAIN_DEFAULTS;
+const MOUNTAIN_CONTROLS = [
+  ["speed","漂移速度（负值反向）","Drift speed (negative reverses)",-20,20,.01],
+  ["driftStrength","漂移强度","Drift strength",0,20,.1],
+  ["mountainHeight","山体起伏高度","Mountain height",0,4,.01],
+  ["zoom","视角缩放","View zoom",.5,3,.01],
+  ["horizon","画面垂直位置","Vertical offset",-.8,.8,.01],
+  ["softness","山脊边缘柔和度","Edge softness",.1,6,.05],
+  ["depth","山峦纵深","Mountain depth",.55,1.45,.01],
+  ["detail","山脊细节","Ridge detail",0,1.5,.01],
+  ["haze","雾气浓度","Atmospheric haze",.2,1.8,.01],
+  ["light","逆光强度","Backlight",0,1.8,.01],
+  ["warmth","色温","Color warmth",0,1,.01],
+  ["exposure","曝光亮度","Exposure",.2,3,.01],
+  ["saturation","色彩饱和度","Saturation",0,2.5,.01],
+  ["vignette","暗角强度","Vignette",0,3,.01],
+  ["resolution","渲染比例","Render scale",.5,1,.05],
+] as const;
+function normalizeMountainSettings(value: unknown): MountainSettings {
+  const record = isObjectRecord(value) ? value : {};
+  const result = { ...MOUNTAIN_DEFAULTS };
+  for (const [key,,,min,max] of MOUNTAIN_CONTROLS) result[key] = clampParticleNumber(record[key],min,max,MOUNTAIN_DEFAULTS[key]);
+  result.steps = record.steps === 28 || record.steps === 42 || record.steps === 57 ? record.steps : 57;
+  result.paused = typeof record.paused === "boolean" ? record.paused : false;
+  return result;
+}
+function readMountainBackgroundSettings(): MountainSettings {
+  try { return normalizeMountainSettings(JSON.parse(localStorage.getItem("code-codex:mountain-settings:v1") || "{}")); }
+  catch { return { ...MOUNTAIN_DEFAULTS }; }
+}
+function writeMountainBackgroundSettings(settings: MountainSettings): void {
+  try { localStorage.setItem("code-codex:mountain-settings:v1",JSON.stringify(settings)); } catch { /* Keep session settings. */ }
+}
+// Supplied original reconstruction of a partial reference attributed to Yohei Nishitsuji.
+// Reference screenshot does not establish the original work's redistribution license.
+class MountainRenderer {
+  #settings: { current: MountainSettings };
+  #wake = { current: () => {} };
+  #cleanup: (() => void) | undefined;
+  #canvas: HTMLCanvasElement;
+  #onError: (message: string | undefined) => void;
+  constructor(_layer: HTMLElement, canvas: HTMLCanvasElement, settings: MountainSettings, onError: (message: string | undefined) => void) {
+    this.#canvas=canvas; this.#settings={current:settings}; this.#onError=onError;
+    this.#cleanup=this.#start();
+    canvas.addEventListener("webglcontextlost", this.#lost);
+    canvas.addEventListener("webglcontextrestored", this.#restored);
+  }
+  #start(): (() => void) | undefined {
+    const canvas=this.#canvas, settings=this.#settings, wake=this.#wake, onError=this.#onError;
+    const vertex = `#version 300 es
+in vec2 position;
+void main(){gl_Position=vec4(position,0.,1.);}`;
+
+// Ridge noise is evaluated in a compact 768x64 atlas instead of at every screen pixel.
+const atlasFragment = `#version 300 es
+precision highp float;
+uniform vec2 atlasResolution;
+uniform float time, detail, drift;
+out vec4 outColor;
+mat2 rotate2D(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
+void main(){
+  float layer=floor(gl_FragCoord.y);
+  float z=layer/63.;
+  float x=(gl_FragCoord.x/atlasResolution.x-.5)*16.;
+  vec2 p=vec2(x+drift*(.18+z),z*1.73);
+  mat2 m=rotate2D(.5);
+  float e=0.,s=4.,seed=z*7.1;
+  for(int octave=0;octave<14;octave++){
+    if(float(octave)>=7.+detail*4.)break;
+    p=m*p*1.037+vec2(seed*.73,-seed*.29);
+    e+=cos(time*.055+s*p.x+seed*2.1)/s*.48;
+    e+=sin(s*p.y*.63-seed)/s*.14;
+    s*=1.4;
+  }
+  outColor=vec4(clamp(.5+e*.8,0.,1.),0.,0.,1.);
+}`;
+
+const sceneFragment = `#version 300 es
+precision highp float;
+uniform vec2 resolution;
+uniform sampler2D ridgeAtlas;
+uniform float time, depth, haze, light, warmth;
+uniform float mountainHeight, zoom, horizon, softness, exposure, saturation, vignette;
+uniform int steps;
+out vec4 outColor;
+float hash21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*resolution)/resolution.y;
+  uv.x*=.93;
+  uv/=zoom;
+  uv.y-=horizon;
+  vec3 skyLow=mix(vec3(.55,.50,.44),vec3(.64,.47,.35),warmth);
+  vec3 skyHigh=mix(vec3(.73,.75,.75),vec3(.84,.81,.72),warmth);
+  vec3 col=mix(skyLow,skyHigh,smoothstep(-.45,.72,uv.y));
+  vec2 sunPos=vec2(.28,.31+light*.12);
+  float sun=exp(-length((uv-sunPos)*vec2(.8,1.25))*3.4);
+  col+=mix(vec3(.7,.78,.8),vec3(1.,.68,.28),warmth)*sun*(.18+light*.38);
+  vec3 farColor=mix(vec3(.64,.56,.48),vec3(.83,.58,.38),warmth);
+  vec3 nearColor=mix(vec3(.075,.09,.09),vec3(.11,.10,.085),warmth);
+
+  int layerCount=8+steps/8;
+  for(int i=0;i<16;i++){
+    if(i>=layerCount)break;
+    float fi=float(i),z=fi/float(max(layerCount-1,1));
+    float travel=1.3+z*3.5*depth;
+    float q=uv.x*travel;
+    vec2 atlasUv=vec2(clamp(q/16.+.5,.001,.999),(z*63.+.5)/64.);
+    float profile=(texture(ridgeAtlas,atlasUv).r-.5)/.8;
+    float baseline=mix(.36,-.58,pow(z,.78));
+    float mountain=baseline+profile*(.5+.38*z)*depth*mountainHeight;
+    float edge=1.-smoothstep(mountain-(.006+.008*z)*softness,mountain+.003*softness,uv.y);
+    float atmosphere=(1.-z)/(1.+haze*z*1.5);
+    vec3 mountainColor=mix(nearColor,farColor,atmosphere);
+    float rim=exp(-abs(uv.y-mountain)*85.)*(1.-z)*light;
+    mountainColor+=mix(vec3(.2,.25,.27),vec3(.9,.48,.2),warmth)*rim*.13;
+    col=mix(col,mountainColor,edge);
+  }
+
+  float mist=exp(-abs(uv.y+.03)*2.4)*haze*.045;
+  col+=mix(vec3(.35,.43,.45),vec3(.72,.50,.34),warmth)*mist;
+  col+=(hash21(gl_FragCoord.xy+floor(time*12.))-.5)/255.*2.2;
+  col*=max(0.,1.-vignette*.18*dot(uv,uv));
+  col=mix(vec3(dot(col,vec3(.2126,.7152,.0722))),col,saturation)*exposure;
+  outColor=vec4(pow(max(col,0.),vec3(.86)),1.);
+}`;
+
+function compile(gl: WebGL2RenderingContext, type: number, source: string) {
+  const shader = gl.createShader(type)!;
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const message = gl.getShaderInfoLog(shader) || "Shader compilation failed";
+    gl.deleteShader(shader);
+    throw new Error(message);
+  }
+  return shader;
+}
+
+function link(gl: WebGL2RenderingContext, fragment: string) {
+  const program = gl.createProgram()!;
+  const vs = compile(gl, gl.VERTEX_SHADER, vertex);
+  const fs = compile(gl, gl.FRAGMENT_SHADER, fragment);
+  gl.attachShader(program, vs); gl.attachShader(program, fs);
+  gl.bindAttribLocation(program, 0, "position"); gl.linkProgram(program);
+  gl.deleteShader(vs); gl.deleteShader(fs);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const message = gl.getProgramInfoLog(program) || "Shader link failed";
+    gl.deleteProgram(program);
+    throw new Error(message);
+  }
+  return program;
+}
+
+
+        const gl = canvas.getContext("webgl2", { alpha:false, antialias:false, depth:false, powerPreference:"high-performance" });
+    if (!gl) { throw new Error("WebGL 2 unavailable"); }
+    let atlasProgram: WebGLProgram | null = null, sceneProgram: WebGLProgram | null = null;
+    let buffer: WebGLBuffer | null = null, atlasTexture: WebGLTexture | null = null, framebuffer: WebGLFramebuffer | null = null;
+    let frame=0,last=0,elapsed=0,drift=0,width=1,height=1,visible=true,disposed=false;
+    const media=matchMedia("(prefers-reduced-motion: reduce)");
+    try {
+      atlasProgram=link(gl,atlasFragment); sceneProgram=link(gl,sceneFragment);
+      buffer=gl.createBuffer()!; gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+      gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+      atlasTexture=gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D,atlasTexture);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,768,64,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+      framebuffer=gl.createFramebuffer()!; gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,atlasTexture,0);
+      if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new Error("Mountain atlas framebuffer unavailable");
+      gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+      const atlasUniforms={resolution:gl.getUniformLocation(atlasProgram,"atlasResolution"),time:gl.getUniformLocation(atlasProgram,"time"),detail:gl.getUniformLocation(atlasProgram,"detail")};
+      const driftUniform=gl.getUniformLocation(atlasProgram,"drift");
+      const appearance = ["mountainHeight","zoom","horizon","softness","exposure","saturation","vignette"] as const;
+      const sceneUniforms=Object.fromEntries(["resolution","ridgeAtlas","time","depth","haze","light","warmth","steps",...appearance].map(name=>[name,gl.getUniformLocation(sceneProgram!,name)]));
+      const maxViewport=gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
+      const request=()=>{if(!frame&&!disposed&&visible&&!document.hidden)frame=requestAnimationFrame(draw);};
+      const draw=(now:number)=>{
+        frame=0; const s=settings.current;
+        if(!s.paused&&!media.matches){
+          const dt=Math.min((now-(last||now))/1000,.1);
+          elapsed+=dt*s.speed;
+          drift+=dt*s.speed*s.driftStrength*.012;
+        }
+        last=now;
+        const ratio=Math.min(devicePixelRatio||1,1.5)*s.resolution;
+        const rw=Math.max(1,Math.min(maxViewport[0]!,Math.round(width*ratio))),rh=Math.max(1,Math.min(maxViewport[1]!,Math.round(height*ratio)));
+        if(canvas.width!==rw||canvas.height!==rh){canvas.width=rw;canvas.height=rh;}
+        gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer); gl.viewport(0,0,768,64); gl.useProgram(atlasProgram);
+        gl.uniform2f(atlasUniforms.resolution,768,64); gl.uniform1f(atlasUniforms.time,elapsed); gl.uniform1f(atlasUniforms.detail,s.detail);
+        gl.uniform1f(driftUniform,drift);
+        gl.drawArrays(gl.TRIANGLES,0,3);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.viewport(0,0,rw,rh); gl.useProgram(sceneProgram);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,atlasTexture); gl.uniform1i(sceneUniforms.ridgeAtlas!,0);
+        gl.uniform2f(sceneUniforms.resolution!,rw,rh); gl.uniform1f(sceneUniforms.time!,elapsed);
+        gl.uniform1f(sceneUniforms.depth!,s.depth); gl.uniform1f(sceneUniforms.haze!,s.haze); gl.uniform1f(sceneUniforms.light!,s.light);
+        gl.uniform1f(sceneUniforms.warmth!,s.warmth); gl.uniform1i(sceneUniforms.steps!,Math.round(s.steps));
+        for(const key of appearance)gl.uniform1f(sceneUniforms[key]!,s[key]);
+        gl.drawArrays(gl.TRIANGLES,0,3);
+        if(!s.paused&&!media.matches&&s.speed!==0)request();
+      };
+      const reset=()=>{cancelAnimationFrame(frame);frame=0;last=0;request();};
+      const resize=new ResizeObserver(([entry])=>{if(!entry)return;width=entry.contentRect.width;height=entry.contentRect.height;request();});
+      const intersection=new IntersectionObserver(([entry])=>{if(!entry)return;visible=entry.isIntersecting;reset();});
+      resize.observe(canvas);intersection.observe(canvas);document.addEventListener("visibilitychange",reset);media.addEventListener("change",reset);
+      wake.current=reset;request();
+      return()=>{disposed=true;cancelAnimationFrame(frame);resize.disconnect();intersection.disconnect();document.removeEventListener("visibilitychange",reset);media.removeEventListener("change",reset);wake.current=()=>undefined;if(framebuffer)gl.deleteFramebuffer(framebuffer);if(atlasTexture)gl.deleteTexture(atlasTexture);if(buffer)gl.deleteBuffer(buffer);if(atlasProgram)gl.deleteProgram(atlasProgram);if(sceneProgram)gl.deleteProgram(sceneProgram);};
+    } catch(reason) {
+      onError(reason instanceof Error?reason.message:String(reason));
+      if(framebuffer)gl.deleteFramebuffer(framebuffer);if(atlasTexture)gl.deleteTexture(atlasTexture);if(buffer)gl.deleteBuffer(buffer);if(atlasProgram)gl.deleteProgram(atlasProgram);if(sceneProgram)gl.deleteProgram(sceneProgram);
+      throw reason;
+    }
+  }
+  #lost = (event: Event): void => { event.preventDefault(); this.#cleanup?.(); this.#cleanup=undefined; this.#onError("Mountain graphics context interrupted. Waiting to restore…"); };
+  #restored = (): void => { try { this.#cleanup=this.#start(); this.#onError(undefined); } catch(error) { this.#onError(String(error)); } };
+  setSettings(settings: MountainSettings): void { this.#settings.current=settings; this.#wake.current(); }
+  replay(): void { this.#cleanup?.(); this.#cleanup=this.#start(); }
+  dispose(): void { this.#cleanup?.(); this.#cleanup=undefined; this.#canvas.removeEventListener("webglcontextlost",this.#lost); this.#canvas.removeEventListener("webglcontextrestored",this.#restored); }
+}
+class MountainBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readMountainBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #canvas: HTMLCanvasElement | undefined;
+  #renderer: MountainRenderer | undefined;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() { window.addEventListener("pagehide", this.#onPageHide, { once: true }); }
+  get settings(): MountainSettings { return this.#settings; }
+  get enabled(): boolean { return this.#enabled; }
+  get pending(): boolean { return this.#pending; }
+  get error(): string | undefined { return this.#error; }
+  get stoppedForExternalThemeChange(): boolean { return this.#stoppedForExternalThemeChange; }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Layered Mountain Background is unavailable");
+  }
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try { await operation; } finally { if (this.#enableOperation === operation) this.#enableOperation = undefined; }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexParticleLayer = "v1";
+      layer.dataset.codeCodexMountainLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.backgroundColor = "#02090d";
+      const canvas = document.createElement("canvas");
+      canvas.className = "code-codex-particle-canvas code-codex-mountain-canvas";
+      layer.append(canvas);
+      document.body.prepend(layer);
+      this.#layer = layer;
+      this.#canvas = canvas;
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, "#02090d");
+      this.#renderer = new MountainRenderer(layer, canvas, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Layered Mountain Background could not be enabled";
+      this.#teardownPresentation();
+      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: MountainSettings): void {
+    this.#settings = normalizeMountainSettings(next);
+    writeMountainBackgroundSettings(this.#settings);
+    this.#renderer?.setSettings(this.#settings);
+    this.#notify();
+  }
+  reset(): void { this.updateSettings(MOUNTAIN_DEFAULTS); }
+  replay(): void { this.#renderer?.replay(); }
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    this.#canvas = undefined;
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = MOUNTAIN_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try { current = await readCodexAppearanceTheme(); }
+    catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) throw new Error("Another Code-Codex background is still using Dark mode");
+      if (lease && !lease.owner) writeParticleThemeLease({ ...lease, owner });
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Layered Mountain Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = MOUNTAIN_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease || (lease.owner && lease.owner !== owner)) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) { clearParticleThemeLease(owner); return; }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  }
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
+    } catch { /* A transient read failure does not tear down the presentation. */ }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Layered Mountain Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+  #notify(): void { for (const listener of this.#listeners) listener(); }
+  #onPageHide = (): void => { this.dispose(); };
+}
+
+const MOUNTAIN_BACKGROUND_CONTROLLER = Symbol.for("code-codex:mountain-background-controller:v1");
+
+function getMountainBackgroundController(): MountainBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[MOUNTAIN_BACKGROUND_CONTROLLER];
+  if (existing instanceof MountainBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+  }
+  const controller = new MountainBackgroundController();
+  globalState[MOUNTAIN_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
+
 const BLACK_HOLE_VERTEX_SHADER = `
 attribute vec2 aPos;
 varying vec2 vUv;
@@ -9776,6 +10233,14 @@ function milkyWaySettingsPanelMarkup(): string {
   `;
 }
 
+
+function mountainCardMarkup(): string {
+  return `<article class="preview-extension appearance-extension" data-appearance-plugin="${MOUNTAIN_BACKGROUND_PLUGIN_ID}"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 13 6 3l4 7 2-4 3 7ZM4 7l2 2 2-2" fill="none" stroke="currentColor"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Layered Mountain Background</h4><span class="preview-extension-status mountain-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action mountain-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger mountain-settings-trigger" type="button" aria-label="Configure Layered Mountain Background" aria-haspopup="dialog" aria-controls="cle-mountain-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
+}
+function mountainPanelMarkup(): string {
+  return `<section class="particle-settings-panel mountain-settings-panel" id="cle-mountain-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-mountain-title"><header class="particle-settings-header"><div class="particle-settings-heading"><p>${bilingualLabelMarkup("外观","Appearance")}</p><h3 id="cle-mountain-title">${bilingualLabelMarkup("层叠山峦设置","Layered Mountain settings")}</h3></div><div class="particle-settings-header-actions">${backgroundLanguageSwitchMarkup("cle-mountain-language")}<button class="particle-settings-close mountain-close" type="button" aria-label="Close settings">${icons.close}</button></div></header><div class="particle-settings-scroll"><fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("山峦与氛围","Mountains and atmosphere")}</legend>${MOUNTAIN_CONTROLS.map(([key,zh,en,min,max,step])=>`<div class="particle-control-row"><label for="cle-mountain-${key}">${bilingualLabelMarkup(zh,en)}</label><input id="cle-mountain-${key}" data-mountain-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${MOUNTAIN_DEFAULTS[key]}"><span class="particle-control-value"><output>${MOUNTAIN_DEFAULTS[key]}</output></span></div>`).join("")}</fieldset><fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("渲染质量","Render quality")}</legend><div class="heavenly-cloud-quality-toolbar">${[[28,"流畅","Fast"],[42,"均衡","Balanced"],[57,"完整","Full"]].map(([steps,zh,en])=>`<button type="button" data-mountain-steps="${steps}" aria-pressed="${steps===57}">${bilingualLabelMarkup(String(zh),String(en))}</button>`).join("")}</div></fieldset><label class="particle-toggle-row">${bilingualLabelMarkup("暂停动画","Pause animation")}<input type="checkbox" class="mountain-paused"></label><div class="glow-horizon-actions"><button type="button" class="mountain-reset">${bilingualLabelMarkup("重置","Reset")}</button><button type="button" class="mountain-replay">${bilingualLabelMarkup("重播","Replay")}</button></div><p class="particle-plugin-error mountain-error" role="status" hidden></p></div></section>`;
+}
+
 function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? path;
   const dot = name.lastIndexOf(".");
@@ -9865,6 +10330,10 @@ export class CodeCodexElement extends HTMLElement {
   #suppressNextClick = false;
   readonly #enabledPreviewers = new Set<string>();
   readonly #enabledAppearancePlugins = new Set<string>();
+  readonly #mountainController = getMountainBackgroundController();
+  #mountainUnsubscribe: (() => void) | undefined;
+  #mountainInitialization: Promise<void> | undefined;
+  #mountainEventsBound = false;
   #appearancePluginPending = false;
   #appearanceTransitionPending = false;
   #appearancePluginApplied: boolean | undefined;
@@ -10114,7 +10583,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -10143,6 +10612,7 @@ export class CodeCodexElement extends HTMLElement {
       ${heavenlyCloudSettingsPanelMarkup()}
       ${auroraIonosphereSettingsPanelMarkup()}
       ${milkyWaySettingsPanelMarkup()}
+      ${mountainPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -10240,7 +10710,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 6) {
+    if (this.#backgroundLanguageInputs.length !== 7) {
       throw new Error("Background settings require six synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
@@ -10370,6 +10840,11 @@ export class CodeCodexElement extends HTMLElement {
     this.#enabledAppearancePlugins.clear();
     for (const plugin of this.#readEnabledAppearancePlugins()) this.#enabledAppearancePlugins.add(plugin);
     let normalizedAppearancePlugins = false;
+    if (this.#mountainController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+    if (this.#enabledAppearancePlugins.has(MOUNTAIN_BACKGROUND_PLUGIN_ID)) {
+      this.#enabledAppearancePlugins.clear(); this.#enabledAppearancePlugins.add(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+      this.#writeEnabledAppearancePlugins();
+    }
     if (this.#particleBackgroundController.stoppedForExternalThemeChange) {
       normalizedAppearancePlugins = this.#enabledAppearancePlugins.delete(PARTICLE_BACKGROUND_PLUGIN_ID)
         || normalizedAppearancePlugins;
@@ -10523,6 +10998,21 @@ export class CodeCodexElement extends HTMLElement {
     });
     this.#milkyWayBackgroundInitialization = this.#auroraIonosphereBackgroundInitialization
       .then(() => this.#initializeMilkyWayBackground(appearanceInitializationGeneration));
+    this.#mountainUnsubscribe?.();
+    this.#mountainUnsubscribe = this.#mountainController.subscribe(() => {
+      if (this.#mountainController.stoppedForExternalThemeChange) {
+        this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderMountain();
+    });
+    this.#mountainInitialization = this.#milkyWayBackgroundInitialization.then(async () => {
+      if (!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration)) return;
+      if (this.#enabledAppearancePlugins.has(MOUNTAIN_BACKGROUND_PLUGIN_ID)) {
+        try { await this.#mountainController.enable(); } catch(error) { this.#showActionNotice(String(error), "error"); }
+      }
+      this.#renderMountain();
+    });
+    this.#bindMountain();
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
@@ -10576,6 +11066,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#auroraIonosphereBackgroundInitialization = undefined;
     this.#milkyWayBackgroundUnsubscribe?.();
     this.#milkyWayBackgroundUnsubscribe = undefined;
+    this.#mountainUnsubscribe?.(); this.#mountainUnsubscribe=undefined; this.#mountainInitialization=undefined;
+    this.#closeMountain();
     this.#milkyWayBackgroundInitialization = undefined;
     this.#appearancePluginPending = false;
     this.#appearanceTransitionPending = false;
@@ -10653,7 +11145,9 @@ export class CodeCodexElement extends HTMLElement {
     const heavenlyCloudWasEnabled = this.#enabledAppearancePlugins.delete(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
     const auroraIonosphereWasEnabled = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
     const milkyWayWasEnabled = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
-    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled || milkyWayWasEnabled) this.#writeEnabledAppearancePlugins();
+    const mountainWasEnabled = this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+    if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled || milkyWayWasEnabled || mountainWasEnabled) this.#writeEnabledAppearancePlugins();
+    if (mountainWasEnabled || this.#mountainController.enabled || this.#mountainController.pending) await this.#mountainController.disable();
     if (particleWasEnabled || this.#particleBackgroundController.enabled) {
       await this.#particleBackgroundController.disable();
     }
@@ -10841,7 +11335,7 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings")]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -10941,6 +11435,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundSettingsLanguage = language;
     this.#writeBackgroundSettingsLanguage();
     this.#syncBackgroundSettingsLanguagePresentation();
+    this.#renderMountain();
+    requestAnimationFrame(() => this.#positionMountain());
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
     this.#renderGlowHorizonBackgroundPlugin();
@@ -11361,6 +11857,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #onWindowResize = (): void => {
+    this.#positionMountain();
     this.#closeContextMenu(false);
     const marketHasFocus = this.#previewMarketPopover.contains(this.#shadow.activeElement);
     this.#closePreviewMarket(marketHasFocus);
@@ -11378,6 +11875,8 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowPointerDown = (event: PointerEvent): void => {
     const path = event.composedPath();
+    if (!path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
+        && !path.includes(this.#required<HTMLElement>(".mountain-settings-trigger"))) this.#closeMountain();
     if (!this.#contextMenu.hidden && !path.includes(this.#contextMenu)) this.#closeContextMenu(false);
     if (
       this.#particleSettingsOpen
@@ -11411,6 +11910,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#auroraIonosphereSettingsOpen
       && !path.includes(this.#auroraIonosphereSettingsPanel)
       && !path.includes(this.#milkyWaySettingsPanel)
+      && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
       && !path.includes(this.#auroraIonosphereSettingsTrigger)
     ) {
       this.#closeAuroraIonosphereSettings(false);
@@ -11418,6 +11918,7 @@ export class CodeCodexElement extends HTMLElement {
     if (
       this.#milkyWaySettingsOpen
       && !path.includes(this.#milkyWaySettingsPanel)
+      && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
       && !path.includes(this.#milkyWaySettingsTrigger)
     ) {
       this.#closeMilkyWaySettings(false);
@@ -11432,6 +11933,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#heavenlyCloudSettingsPanel)
       && !path.includes(this.#auroraIonosphereSettingsPanel)
       && !path.includes(this.#milkyWaySettingsPanel)
+      && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
     ) {
       this.#closePreviewMarket(false);
     }
@@ -14753,7 +15255,7 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
-  async #awaitBackgroundInitializations(operation: number): Promise<boolean> {
+  async #awaitBackgroundInitializations(operation: number, mountainSwitch = false): Promise<boolean> {
     const generation = this.#appearanceInitializationGeneration;
     this.#particleBackgroundInitialization ??= this.#initializeParticleBackground(generation);
     await this.#particleBackgroundInitialization;
@@ -14775,6 +15277,12 @@ export class CodeCodexElement extends HTMLElement {
     await this.#auroraIonosphereBackgroundInitialization;
     this.#milkyWayBackgroundInitialization ??= this.#auroraIonosphereBackgroundInitialization.then(() => this.#initializeMilkyWayBackground(generation));
     await this.#milkyWayBackgroundInitialization;
+    await this.#mountainInitialization;
+    if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceOperation) return false;
+    if (!mountainSwitch && (this.#mountainController.enabled || this.#enabledAppearancePlugins.has(MOUNTAIN_BACKGROUND_PLUGIN_ID))) {
+      await this.#mountainController.disable();
+      this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
+    }
     return this.#isCurrentBackgroundInitialization(generation) && operation === this.#appearanceOperation;
   }
 
@@ -17355,6 +17863,94 @@ export class CodeCodexElement extends HTMLElement {
     if (this.#milkyWaySettingsOpen) requestAnimationFrame(() => this.#positionMilkyWaySettingsPanel());
   }
 
+
+  #closeMountain(): void {
+    const panel=this.#shadow.querySelector<HTMLElement>("#cle-mountain-settings");
+    if(panel?.matches(":popover-open")) panel.hidePopover();
+    this.#shadow.querySelector(".mountain-settings-trigger")?.setAttribute("aria-expanded","false");
+  }
+  #positionMountain(): void {
+    const panel=this.#required<HTMLElement>("#cle-mountain-settings");
+    if(!panel.matches(":popover-open"))return;
+    const rect=this.#required<HTMLElement>(".mountain-settings-trigger").getBoundingClientRect();
+    panel.style.position="fixed"; panel.style.margin="0";
+    panel.style.maxHeight="calc(100vh - 24px)";
+    const width=Math.min(380,window.innerWidth-24);
+    panel.style.width=width+"px";
+    panel.style.left=Math.max(12,Math.min(rect.right+12,window.innerWidth-width-12))+"px";
+    panel.style.top=Math.max(12,Math.min(rect.top,window.innerHeight-panel.getBoundingClientRect().height-12))+"px";
+  }
+  #bindMountain(): void {
+    if(this.#mountainEventsBound)return; this.#mountainEventsBound=true;
+    const panel=this.#required<HTMLElement>("#cle-mountain-settings");
+    this.#required<HTMLButtonElement>(".mountain-enable").addEventListener("click",()=>void this.#toggleMountain());
+    this.#required<HTMLButtonElement>(".mountain-settings-trigger").addEventListener("click",()=>{
+      if(panel.matches(":popover-open")){this.#closeMountain();return;}
+      for(const other of this.#shadow.querySelectorAll<HTMLElement>(".particle-settings-panel")) if(other!==panel&&other.matches(":popover-open"))other.hidePopover();
+      this.#renderMountain(); panel.showPopover(); this.#positionMountain();
+      this.#required(".mountain-settings-trigger").setAttribute("aria-expanded","true");
+      this.#required<HTMLButtonElement>(".mountain-close").focus();
+    });
+    this.#required<HTMLButtonElement>(".mountain-close").addEventListener("click",()=>{this.#closeMountain();this.#required<HTMLButtonElement>(".mountain-settings-trigger").focus();});
+    panel.addEventListener("keydown",event=>{if(event.key==="Escape"){event.stopPropagation();this.#closeMountain();this.#required<HTMLButtonElement>(".mountain-settings-trigger").focus();}});
+    this.#previewMarketPopover.addEventListener("scroll",()=>this.#positionMountain());
+    panel.addEventListener("toggle",()=>{this.#required(".mountain-settings-trigger").setAttribute("aria-expanded",String(panel.matches(":popover-open")));});
+    for(const [key,,,min,max,step] of MOUNTAIN_CONTROLS){
+      const input=this.#required<HTMLInputElement>("#cle-mountain-"+key);
+      input.addEventListener("input",()=>this.#mountainController.updateSettings(normalizeMountainSettings({...this.#mountainController.settings,[key]:input.value})));
+      input.addEventListener("dblclick",()=>{ input.type="number";input.focus();input.select(); });
+      const finish=()=>{ input.value=String(clampParticleNumber(input.value,min,max,MOUNTAIN_DEFAULTS[key]));input.type="range";input.step=String(step);this.#mountainController.updateSettings(normalizeMountainSettings({...this.#mountainController.settings,[key]:input.value})); };
+      input.addEventListener("blur",finish);input.addEventListener("keydown",event=>{if(event.key==="Enter"){finish();input.blur();}});
+    }
+    this.#required<HTMLInputElement>(".mountain-paused").addEventListener("change",event=>this.#mountainController.updateSettings({...this.#mountainController.settings,paused:(event.target as HTMLInputElement).checked}));
+    this.#required(".mountain-reset").addEventListener("click",()=>this.#mountainController.reset());
+    this.#required(".mountain-replay").addEventListener("click",()=>this.#mountainController.replay());
+    for(const button of panel.querySelectorAll<HTMLButtonElement>("[data-mountain-steps]")) button.addEventListener("click",()=>this.#mountainController.updateSettings(normalizeMountainSettings({...this.#mountainController.settings,steps:Number(button.dataset.mountainSteps)})));
+  }
+  #renderMountain(): void {
+    const card=this.#shadow.querySelector<HTMLElement>('[data-appearance-plugin="'+MOUNTAIN_BACKGROUND_PLUGIN_ID+'"]'); if(!card)return;
+    const c=this.#mountainController, s=c.settings;
+    const busy=c.pending||this.#appearanceTransitionPending||this.#appearancePluginPending;
+    const button=card.querySelector<HTMLButtonElement>(".mountain-enable")!;
+    button.textContent=c.enabled?"Disable":"Enable";button.disabled=busy;button.setAttribute("aria-pressed",String(c.enabled));button.setAttribute("aria-label",`${c.enabled?"Disable":"Enable"} Layered Mountain Background`);
+    const status=card.querySelector<HTMLElement>(".mountain-status")!;status.textContent=c.pending?"Applying…":c.error?"Unavailable":c.enabled?"Enabled":"Disabled";status.dataset.enabled=String(c.enabled);
+    for(const [key,zh,en] of MOUNTAIN_CONTROLS){const input=this.#required<HTMLInputElement>("#cle-mountain-"+key);if(this.#shadow.activeElement!==input)input.value=String(s[key]);input.disabled=busy;input.setAttribute("aria-label",this.#backgroundText(zh,en));input.parentElement!.querySelector("output")!.textContent=s[key].toFixed(2);}
+    this.#required<HTMLInputElement>(".mountain-paused").checked=s.paused;
+    this.#required<HTMLInputElement>(".mountain-paused").disabled=busy;
+    this.#required<HTMLButtonElement>(".mountain-reset").disabled=busy;
+    this.#required<HTMLButtonElement>(".mountain-replay").disabled=busy||!c.enabled;
+    for(const button of this.#shadow.querySelectorAll<HTMLButtonElement>("[data-mountain-steps]")){button.setAttribute("aria-pressed",String(Number(button.dataset.mountainSteps)===s.steps));button.disabled=busy;}
+    const error=this.#required<HTMLElement>(".mountain-error");error.textContent=c.error??"";error.hidden=!c.error;
+  }
+  async #toggleMountain(): Promise<void> {
+    if(this.#appearanceTransitionPending||this.#appearancePluginPending||this.#mountainController.pending)return;
+    const operation=++this.#appearanceOperation;this.#appearanceTransitionPending=true;this.#renderPreviewMarket();
+    const controllers=[this.#particleBackgroundController,this.#blackHoleBackgroundController,this.#glowHorizonBackgroundController,this.#heavenlyCloudBackgroundController,this.#auroraIonosphereBackgroundController,this.#milkyWayBackgroundController];
+    const ids=[PARTICLE_BACKGROUND_PLUGIN_ID,BLACK_HOLE_BACKGROUND_PLUGIN_ID,GLOW_HORIZON_BACKGROUND_PLUGIN_ID,HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,MILKY_WAY_BACKGROUND_PLUGIN_ID];
+    let previous=-1;
+    try {
+      if(!await this.#awaitBackgroundInitializations(operation,true))return;
+      if(this.#mountainController.enabled){await this.#mountainController.disable();this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);}
+      else {
+        if(this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)){
+          if(!this.#bridge?.available)throw new Error("Restart Codex with Code-Codex to disable transparency first.");
+          await this.#setWindowTransparency(this.#bridge,false);this.#clearTransparentBackgroundPresentation();this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);this.#appearancePluginApplied=false;
+        }
+        for(let i=0;i<controllers.length;i++){if(controllers[i]!.enabled){previous=i;await controllers[i]!.disable(true);}this.#enabledAppearancePlugins.delete(ids[i]!);}
+        const lease=readParticleThemeLease();if(lease?.owner)transferParticleThemeLease(lease.owner,MOUNTAIN_BACKGROUND_PLUGIN_ID);
+        await this.#mountainController.enable();
+        if (!this.#connected || operation !== this.#appearanceOperation) { await this.#mountainController.disable(); return; }
+        if(!this.#mountainController.enabled)throw new Error(this.#mountainController.error||"Layered Mountain Background could not be enabled");
+        this.#enabledAppearancePlugins.add(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+    } catch(error) {
+      this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch{}}
+      this.#writeEnabledAppearancePlugins();this.#showActionNotice(error instanceof Error?error.message:String(error),"error");
+    } finally {this.#appearanceTransitionPending=false;this.#renderPreviewMarket();}
+  }
+
   #readEnabledAppearancePlugins(): readonly string[] {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(APPEARANCE_PLUGIN_SETTINGS_KEY) || "[]");
@@ -18132,6 +18728,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #closePreviewMarket(restoreFocus: boolean): void {
+    this.#closeMountain();
     this.#closeMilkyWaySettings(false);
     this.#closeParticleSettings(false);
     this.#closeBlackHoleSettings(false);
@@ -18160,6 +18757,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderPreviewMarket(): void {
+    this.#renderMountain();
     this.#renderAppearancePlugin();
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
