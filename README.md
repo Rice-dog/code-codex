@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.15"><img alt="版本" src="https://img.shields.io/badge/version-0.2.15-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.16"><img alt="版本" src="https://img.shields.io/badge/version-0.2.16-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,15 +35,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.2.15-x64-setup.exe`
-- 备选：`CodeCodex-0.2.15-x64.msi`
-- 便携包：`CodeCodex-0.2.15-x64.zip`
+- 推荐：`CodeCodex-0.2.16-x64-setup.exe`
+- 备选：`CodeCodex-0.2.16-x64.msi`
+- 便携包：`CodeCodex-0.2.16-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.15-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.16-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -82,7 +82,7 @@ Get-FileHash .\CodeCodex-0.2.15-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.15
+./scripts/package.ps1 -Version 0.2.16
 ```
 
 生成结果会写入 `releases/`。
@@ -176,21 +176,18 @@ Milky Way Background 外观插件可在整个 Codex 窗口中显示五色谐波�
 启用时自动切换为 Codex 深色外观，停用时恢复此前设置。所提供的效果项目根据
 Almina（@Code4_11）的“Milky way”部分参考片段重建。
 
+![Layered Mountain Background 层叠山峦背景](docs/screenshots/layered-mountain-background.png)
+
 Layered Mountain Background 在整个 Codex 窗口中显示动态层叠山峦、暖色逆光和雾气。
 启用时以约 3 秒的柔和开场由远及近显现山峦，随后进入正常漂移；点击“重播”可再次观看。系统开启减少动态效果时跳过开场。
 
-![Layered Mountain Background 层叠山峦背景](docs/screenshots/layered-mountain-background.png)
-
 在 Preview Market 中启用后，点击右侧设置按钮可打开中英文二级面板，调整反向漂移、
 山体形态、曝光、渲染比例与质量，并支持暂停和重置。复用所提供项目的双阶段 WebGL 2
-渲染和紧凑山脊图集，沿用其他背景的自动深色外观与停用恢复机制。所提供项目注明
-部分视觉参考来自 Yohei Nishitsuji；参考图片本身不构成原作品的再分发许可。
-
-Cloud Train Background 在整个 Codex 窗口中呈现云海、蒸汽列车与桥梁。通过文件树底部的 Preview Market 启用，右侧设置面板提供行进速度、缩放、云层细节、拖影、色相、色温以及天空／烟雾／列车染色，支持中英文切换、暂停和重置。启用时沿用原生深色模式及停用恢复机制。
+渲染和紧凑山脊图集，沿用其他背景的自动深色外观与停用恢复机制。
 
 ![Cloud Train Background 云海列车背景](docs/screenshots/cloud-train-background.png)
 
-来源项目将原着色器署名为 mdb，未附再分发许可；公开分发前需确认使用授权。集成保留来源项目的确定性噪声与帧间反馈假设。
+Cloud Train Background 在整个 Codex 窗口中呈现云海、蒸汽列车与桥梁。通过文件树底部的 Preview Market 启用，右侧设置面板提供行进速度、缩放、云层细节、拖影、色相、色温以及天空／烟雾／列车染色，支持中英文切换、暂停和重置。启用时沿用原生深色模式及停用恢复机制。
 
 Cloud Train 支持按景深从远到近在原位逐层淡入（无上下位移）的开场动画：可调整开关、时长（0.5～10 秒）和羽化宽度，支持重播。默认 3 秒；系统减少动态效果模式跳过开场，结束后保持原有画面。
 
