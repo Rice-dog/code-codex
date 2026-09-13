@@ -85,6 +85,7 @@ const GLOW_HORIZON_BACKGROUND_PLUGIN_ID = "code-codex.glow-horizon-background";
 const HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID = "code-codex.heavenly-cloud-background";
 const AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID = "code-codex.aurora-ionosphere-background";
 const MOUNTAIN_BACKGROUND_PLUGIN_ID = "code-codex.layered-mountain-background";
+const CLOUD_TRAIN_BACKGROUND_PLUGIN_ID = "code-codex.cloud-train-background";
 const MILKY_WAY_BACKGROUND_PLUGIN_ID = "code-codex.milky-way-background";
 const APPEARANCE_PLUGIN_IDS = new Set([
   TRANSPARENT_BACKGROUND_PLUGIN_ID,
@@ -95,6 +96,7 @@ const APPEARANCE_PLUGIN_IDS = new Set([
   AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,
   MILKY_WAY_BACKGROUND_PLUGIN_ID,
   MOUNTAIN_BACKGROUND_PLUGIN_ID,
+  CLOUD_TRAIN_BACKGROUND_PLUGIN_ID,
 ]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
@@ -603,7 +605,8 @@ type DarkBackgroundPluginId =
   | typeof HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
   | typeof AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
   | typeof MILKY_WAY_BACKGROUND_PLUGIN_ID
-  | typeof MOUNTAIN_BACKGROUND_PLUGIN_ID;
+  | typeof MOUNTAIN_BACKGROUND_PLUGIN_ID
+  | typeof CLOUD_TRAIN_BACKGROUND_PLUGIN_ID;
 
 interface ParticleThemeLease {
   readonly owner?: DarkBackgroundPluginId;
@@ -1933,6 +1936,7 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
         || lease.owner === AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
         || lease.owner === MILKY_WAY_BACKGROUND_PLUGIN_ID
         || lease.owner === MOUNTAIN_BACKGROUND_PLUGIN_ID
+        || lease.owner === CLOUD_TRAIN_BACKGROUND_PLUGIN_ID
         ? lease.owner
         : undefined;
       return owner
@@ -7964,6 +7968,403 @@ function getMountainBackgroundController(): MountainBackgroundController {
 }
 
 
+const CLOUD_TRAIN_DEFAULTS = {speed:1,resolution:.75,feedback:.3,vignette:1,zoom:1,offset:0,amplitude:1,detail:8,exposure:1,saturation:1,hue:0,temperature:0,skyTint:"#ffffff",smokeTint:"#ffffff",trainTint:"#ffffff",introEnabled:true,introDuration:3,introFeather:.22,paused:false};
+type CloudTrainSettings = typeof CLOUD_TRAIN_DEFAULTS;
+const CLOUD_TRAIN_CONTROLS = [
+["introDuration","开场时长（秒）","Opening duration (s)",.5,10,.1],
+["introFeather","开场羽化宽度","Opening feather",.02,.6,.01],
+["speed","行进速度","Travel speed",0,5,.01],
+["zoom","视角缩放","View zoom",.5,2,.01],
+["offset","垂直位置","Vertical position",-.5,.5,.01],
+["amplitude","云层起伏","Cloud amplitude",0,2,.01],
+["detail","噪声细节","Noise octaves",1,8,1],
+["exposure","曝光亮度","Exposure",.2,2,.01],
+["saturation","色彩饱和度","Saturation",0,2,.01],
+["hue","整体色相","Global hue",-180,180,1],
+["temperature","冷暖色温","Temperature",-1,1,.01],
+["resolution","渲染比例","Render scale",.25,1,.05],
+["feedback","帧间拖影","Frame feedback",0,.85,.01],
+["vignette","暗角强度","Vignette",0,1,.01],
+] as const;
+const CLOUD_TRAIN_TINTS = [["skyTint","天空染色","Sky tint"],["smokeTint","烟雾染色","Smoke tint"],["trainTint","列车染色","Train tint"]] as const;
+function normalizeCloudTrainSettings(value:unknown):CloudTrainSettings {
+const record=isObjectRecord(value)?value:{}, result={...CLOUD_TRAIN_DEFAULTS};
+for(const [key,,,min,max] of CLOUD_TRAIN_CONTROLS)result[key]=clampParticleNumber(record[key],min,max,CLOUD_TRAIN_DEFAULTS[key]);
+result.detail=Math.round(result.detail);
+result.introEnabled=typeof record.introEnabled==="boolean"?record.introEnabled:true;
+for(const [key] of CLOUD_TRAIN_TINTS)result[key]=typeof record[key]==="string"&&/^#[0-9a-f]{6}$/i.test(record[key])?record[key]:CLOUD_TRAIN_DEFAULTS[key];
+result.paused=typeof record.paused==="boolean"?record.paused:false;
+return result;
+}
+function readCloudTrainBackgroundSettings():CloudTrainSettings {try{return normalizeCloudTrainSettings(JSON.parse(localStorage.getItem("code-codex:cloud-train-settings:v1")||"{}"));}catch{return {...CLOUD_TRAIN_DEFAULTS};}}
+function writeCloudTrainBackgroundSettings(s:CloudTrainSettings):void {try{localStorage.setItem("code-codex:cloud-train-settings:v1",JSON.stringify(s));}catch{/* Session settings remain usable. */}}
+// Original supplied shader credited to mdb. No redistribution license was supplied.
+// Preserve the source project's deterministic noise and previous-frame feedback assumptions.
+// Tint within each material, before compositing and feedback. White is identity.
+function cloudTrainColorizeSource(source: string) {
+  let result = source.replace('return vec4(0.58, 0.7, 1.0, 1.);', 'return vec4(vec3(0.58, 0.7, 1.0)*skyTint, 1.);');
+  const trainStart = result.indexOf('col = mix(col, vec3(0.18');
+  const smokeStart = result.indexOf('// loco smoke');
+  if(trainStart < 0 || smokeStart < 0) throw new Error('Train color source markers missing');
+  result = result.slice(0, trainStart) + result.slice(trainStart, smokeStart)
+    .replace(/vec3\(([^()]*)\)/g, 'vec3($1)*trainTint') + result.slice(smokeStart);
+  result = result.replace('if(y < 0.0) col = vec3(1.0, 0.94, 0.91);', 'if(y < 0.0) col = vec3(1.0, 0.94, 0.91)*smokeTint;')
+    .replace('if(y < - 0.02) col = vec3(0.92, 0.85, 0.82);', 'if(y < - 0.02) col = vec3(0.92, 0.85, 0.82)*smokeTint;');
+  return 'uniform vec3 skyTint, smokeTint, trainTint;\n' + result;
+}
+
+// Reveal real depth layers, not rectangular screen bands. At intro=1 the
+// original layer boundaries and material compositing are unchanged.
+function cloudTrainOpeningSource(source: string): string {
+  return `uniform float intro, introFeather;
+float openingLayer(float start) {
+  if (intro >= 1.) return 1.;
+  float width = mix(.08, .24, clamp(introFeather / .6, 0., 1.));
+  return smoothstep(start, min(start + width, 1.), intro);
+}
+` + source
+    .replace('#define layer(dh, v)  if (uv.y < h + midlevel - (dh) ) return vec4(v, 1.);',
+      '#define layer(dh, v) { float p=openingLayer(dist>=10. ? .08+.60*(100.-dist)/90. : (dist>1.5 ? .78 : .88)); if(dist!=matchedDepth && uv.y < h + midlevel - (dh)) { matchedDepth=dist; accumulated.rgb+=(1.-accumulated.a)*p*(v); accumulated.a+=(1.-accumulated.a)*p; if(accumulated.a>=1.) return accumulated; } }')
+    .replaceAll('float midlevel;', 'vec4 accumulated=vec4(0.); float matchedDepth=-1.; float midlevel;')
+    .replace('return vec4(0.95, 0.80, 0.77, 0.);',
+      'return vec4(accumulated.a>0. ? accumulated.rgb/accumulated.a : vec3(0.95,0.80,0.77),accumulated.a);')
+    .replace('return vec4(vec3(0.58, 0.7, 1.0)*skyTint, 1.);',
+      'return vec4(accumulated.rgb+(1.-accumulated.a)*mix(vec3(.008,.035,.051),vec3(0.58, 0.7, 1.0)*skyTint,openingLayer(0.)), 1.);')
+    .replace('vec3 col = bg.rgb;', 'vec3 col = bg.rgb; vec3 openingBackground = col;')
+    .replace('col = mix(col, fg.rgb, fg.a);',
+      'col = mix(openingBackground, col, openingLayer(.70)); col = mix(col, fg.rgb, fg.a);');
+}
+
+function cloudTrainTintRgb(hex: string): [number, number, number] {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return [1, 1, 1];
+  return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
+}
+
+class CloudTrainRenderer {
+#canvas:HTMLCanvasElement; #settings:{current:CloudTrainSettings}; #wake={current:()=>{}}; #cleanup:(()=>void)|undefined; #onError:(message:string|undefined)=>void;
+constructor(_layer:HTMLElement,canvas:HTMLCanvasElement,settings:CloudTrainSettings,onError:(message:string|undefined)=>void){this.#canvas=canvas;this.#settings={current:settings};this.#onError=onError;this.#cleanup=this.#start();canvas.addEventListener("webglcontextlost",this.#lost);canvas.addEventListener("webglcontextrestored",this.#restored);}
+#start(): (()=>void)|undefined {
+const state=this.#settings,wake=this.#wake;
+const original="float noise(vec2 x){\n    vec2 f = fract(x);\n    vec2 u = f*f*f*(f*(f*6.0-15.0)+10.0);\n    vec2 du = 30.0*f*f*(f*(f-2.0)+1.0);\n    \n    vec2 p = floor(x);\n\tfloat a = texture(iChannel0, (p+vec2(0.0, 0.0))/1024.0).x;\n\tfloat b = texture(iChannel0, (p+vec2(1.0,0.0))/1024.0).x;\n\tfloat c = texture(iChannel0, (p+vec2(0.0,1.0))/1024.0).x;\n\tfloat d = texture(iChannel0, (p+vec2(1.0,1.0))/1024.0).x;\n\n    \n\treturn a+(b-a)*u.x+(c-a)*u.y+(a-b-c+d)*u.x*u.y;\n}\n\nfloat fbm(vec2 x, int detail){\n    float a = 0.0;\n    float b = 1.0;\n    float t = 0.0;\n    for(int i = 0; i < detail; i++){\n        float n = noise(x);\n        a += b*n;\n        t += b;\n        b *= 0.7;\n        x *= 2.0; \n    \n    }\n    return a/t;\n}\n\nfloat fbm2(vec2 x, int detail){\n    float a = 0.0;\n    float b = 1.0;\n    float t = 0.0;\n    for(int i = 0; i < detail; i++){\n        float n = noise(x);\n        a += b*n;\n        t += b;\n        b *= 0.9;\n        x *= 2.0; \n    \n    }\n    return a/t;\n}\n\nfloat box(vec2 uv, float x1, float x2, float y1, float y2){\n    return (uv.x > x1 && uv.x < x2 && uv.y > y1 && uv.y < y2)?1.0:0.0;\n} \n\n#define dot2(v) dot(v, v)\n#define layer(dh, v)  if (uv.y < h + midlevel - (dh) ) return vec4(v, 1.);\n\nvec4 foreground(vec2 uv, float t){\n    float midlevel;\n    float h;\n    float disp;\n    float dist;\n    vec2 uv2;\n    \n    uv.y -= 0.2;\n    // clouds foreground //////////////////////////////////////////////////////////////\n    \n    // c14\n    midlevel = -0.1;\n    disp = 1.7;\n    dist = 1.0;\n    uv2 = uv + vec2(t/dist + 40.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.12, vec3(0.43, 0.32, 0.31));\n    layer(0.08, vec3(0.55, 0.42, 0.41));\n    layer(0.04, vec3(0.66, 0.42, 0.40));\n    layer(0., vec3(0.77, 0.48, 0.46));\n    \n    // c13\n    \n    midlevel = 0.05;\n    disp = 1.7;\n    dist = 2.0;\n    uv2 = uv + vec2(t/dist + 38.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.95, 0.66, 0.48));\n    layer(0.04, vec3(0.98, 0.76, 0.64));\n    layer(0., vec3(0.95, 0.80, 0.77));\n    \n    return vec4(0.95, 0.80, 0.77, 0.);\n}\n\nvec4 background(vec2 uv, float t){\n    float midlevel;\n    float h;\n    float disp;\n    float dist;\n    vec2 uv2;\n    \n    // clouds ///////////////////////////////////////////////////////\n    \n    // c12\n    midlevel = 0.3;\n    disp = 0.9;\n    dist = 10.0;\n    uv2 = uv + vec2(t/dist + 32.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.14, vec3(0.48, 0.19, 0.20));\n    layer(0.1, vec3(0.68, 0.28, 0.19));\n    layer(0.07, vec3(0.88, 0.38, 0.24));\n    layer(0., vec3(0.95, 0.45, 0.30));\n    \n    // c11\n    midlevel = 0.35;\n    disp = 1.0;\n    dist = 15.0;\n    uv2 = uv + vec2(t/dist + 30.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.04, vec3(0.98, 0.76, 0.64));\n    layer(0., vec3(0.95, 0.80, 0.77));\n    \n    // c10\n    midlevel = 0.35;\n    disp = 3.5;\n    dist = 20.0;\n    uv2 = uv + vec2(t/dist + 27.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.12, vec3(0.43, 0.32, 0.31));\n    layer(0.08, vec3(0.55, 0.42, 0.41));\n    layer(0.04, vec3(0.66, 0.42, 0.40));\n    layer(0., vec3(0.77, 0.48, 0.46));\n    \n    // c9\n    midlevel = 0.45;\n    disp = 2.0;\n    dist = 25.0;\n    uv2 = uv + vec2(t/dist + 23.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.04, vec3(0.98, 0.57, 0.36));\n    layer(0., vec3(1.0, 0.62, 0.44));\n    \n    // c8\n    midlevel = 0.5;\n    disp = 2.3;\n    dist = 30.0;\n    uv2 = uv + vec2(t/dist + 20.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.12, vec3(0.41, 0.27, 0.27));\n    layer(0.08, vec3(0.53, 0.35, 0.32));\n    layer(0.04, vec3(0.80, 0.24, 0.17));\n    layer(0., vec3(0.99, 0.29, 0.20));\n    \n    // c7\n    midlevel = 0.5;\n    disp = 2.5;\n    dist = 35.0;\n    uv2 = uv + vec2(t/dist + 18.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.88, 0.38, 0.24));\n    layer(0.05, vec3(0.98, 0.42, 0.28));\n    layer(0., vec3(1.0, 0.48, 0.35));\n    \n    // c6\n    midlevel = 0.6;\n    disp = 2.0;\n    dist = 40.0;\n    uv2 = uv + vec2(t/dist + 18.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.95, 0.66, 0.48));\n    layer(0., vec3(1.0, 0.76, 0.60));\n    \n    // c5\n    midlevel = 0.75;\n    disp = 3.5;\n    dist = 45.0;\n    uv2 = uv + vec2(t/dist + 15.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.2, vec3(1.0, 0.55, 0.33));\n    layer(0.15, vec3(0.98, 0.50, 0.24));\n    layer(0.1, vec3(0.90, 0.55, 0.40));\n    layer(0., vec3(1.0, 0.62, 0.44));\n    \n    // c4\n    midlevel = 0.7;\n    disp = 2.7;\n    dist = 50.0;\n    uv2 = uv + vec2(t/dist + 12.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.04, vec3(0.73, 0.36, 0.30));\n    layer(0., vec3(0.80, 0.40, 0.34));\n    \n    // c3\n    midlevel = 0.8;\n    disp = 2.7;\n    dist = 60.0;\n    uv2 = uv + vec2(t/dist + 9.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.93, 0.58, 0.35));\n    layer(0., vec3(1.0, 0.76, 0.60));\n    \n    // c2\n    midlevel = 0.9;\n    disp = 3.0;\n    dist = 70.0;\n    uv2 = uv + vec2(t/dist + 7.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.56, 0.25, 0.22));\n    layer(0.05, vec3(0.60, 0.30, 0.27));\n    layer(0., vec3(0.74, 0.35, 0.30));\n    \n    // c1\n    midlevel = 1.0;\n    disp = 5.0;\n    dist = 100.0;\n    uv2 = uv + vec2(t/dist + 3.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.92, 0.85, 0.82));\n    layer(0., vec3(1.0, 0.94, 0.91));\n    \n    return vec4(0.58, 0.7, 1.0, 1.);\n}\n\nvoid mainImage( out vec4 fragColor, in vec2 fragCoord )\n{\n    vec2 uv = fragCoord/iResolution.y;\n    //uv.x += iTime;\n    float t = iTime*4.0;\n    vec4 bg = background(uv, t);\n    \n    vec4 fg = vec4(0.);\n    int n = 5;\n    if (uv.y < 0.5)\n    for (int i = 0; i < n; i++){\n        fg += foreground(uv, t+4.*float(i)/float(n)/60.) / (float(n));\n    }\n    \n    vec3 col = bg.rgb;\n    // train /////////////////////////////////////////////////////////////////////\n    float k;\n    float midlevel;\n    float h;\n    float disp;\n    float dist;\n    vec2 uv2;\n    uv.y -= 0.2;\n    // choo choo\n    k = 1.0;\n    uv2 = fract(uv*9.0);\n    float wagon = 1.0;\n    wagon *= 1.0 - step(0.45, uv.x);\n    wagon *= 1.0 - step(0.115, uv.y);\n    wagon *= step(0.103, uv.y);\n    wagon *= step(0.05, 1.0 - abs(uv2.x*2.0 - 1.0));\n    \n    float join = 1.0; \n    join *= 1.0 - step(0.45, uv.x);\n    join *= 1.0 - step(0.11, uv.y);\n    join *= step(0.107, uv.y);\n    \n    \n    float roof = 1.0;\n    roof *= 1.0 - step(0.45, uv.x);\n    roof *= 1.0 - step(0.117, uv.y);\n    roof *= step(0.11, uv.y);\n    roof *= step(0.15, 1.0 - abs(uv2.x*2.0 - 1.0));\n    \n    float loco = box(uv, 0.45, 0.5, 0.103, 0.112);\n    float chem1 = box(uv, 0.49, 0.495, 0.103, 0.12);\n    float chem2 = box(uv, 0.488, 0.496, 0.12, 0.123);\n    float locoRoof = box(uv, 0.443, 0.47, 0.11, 0.117);\n    \n    float wheel = 1.0 - step(0.00004, dot2(uv - vec2(0.457, 0.106)));\n    wheel += 1.0 - step(0.00002, dot2(uv - vec2(0.487, 0.105)));\n    wheel += 1.0 - step(0.00002, dot2(uv - vec2(0.497, 0.105)));\n    \n    if (uv.x < 0.45 && uv.y > 0.025 && uv.y < 0.2){\n        wheel += 1.0 - step(0.002, dot2(uv2 - vec2(0.2, 0.95)));\n        wheel += 1.0 - step(0.002, dot2(uv2 - vec2(0.8, 0.95)));\n    }\n    col = mix(col, vec3(0.18, 0.12, 0.15), join);\n    col =  mix(col, vec3(0.48, 0.19, 0.20), wagon);\n    col = mix(col, vec3(0.18, 0.12, 0.15), roof);\n    \n    col = mix(col, vec3(0.38, 0.19, 0.20), loco);\n    col = mix(col, vec3(0.38, 0.19, 0.20), chem1);\n    col = mix(col, vec3(0.18, 0.12, 0.15), locoRoof);\n    col = mix(col, vec3(0.18, 0.12, 0.15), chem2 + wheel);\n    // loco smoke //////\n    \n    dist = 5.0;\n    uv2 = uv + vec2(t/dist + 3.5, 0.0);\n    uv2.x -= t/dist*0.2;\n    h = fbm2(uv2, 8) - 0.55;\n    \n    if(uv.x < 0.49){\n        float x = -uv.x + 0.49;\n        float y = abs(uv.y + h*0.4 - 0.16*sqrt(x) - 0.12) - 0.8*x*exp(-x*10.0);\n        if(y < 0.0) col = vec3(1.0, 0.94, 0.91);\n        if(y < - 0.02) col = vec3(0.92, 0.85, 0.82);\n    }\n    \n    //bridge ///////\n    dist = 5.0;\n    uv2 = uv + vec2(t/dist + 32.5, 0.0);\n    uv2.x = fract(uv2.x*3.0);\n    k = 1.0;\n    k *= smoothstep(0.001, 0.003, abs(uv2.y - pow(uv2.x - 0.5, 2.0)*0.15 - 0.12));\n    k *= min(step(0.05, 1.0 - abs(uv2.x*2.0 - 1.0))\n         +   step(0.17, uv2.y), 1.0);\n    k *= min(smoothstep(0.02, 0.05, 1.0 - abs(uv2.x*2.0 - 1.0))\n         +   step(0.177, uv2.y), 1.0);\n         \n    k *= min(step(0.1, uv2.y)\n           + smoothstep(-0.09, -0.085, -uv2.y - 0.001/(1.0 - abs(uv2.x*2.0 - 1.0))), 1.0);\n           \n    k *= min(smoothstep(0.05, 0.2, 1.0 - abs(fract(uv2.x*16.0)*2.0 - 1.0))\n         +   step(0.12, uv2.y - pow(uv2.x - 0.5, 2.0)*0.15)\n         +   step(-0.1, -uv2.y), 1.0);\n    col = mix(vec3(0.29, 0.09, 0.08)*smoothstep(-0.08, 0.08, uv.y), col, k);\n    \n    \n    \n    col = mix(col, fg.rgb, fg.a);\n\n    // Output to screen\n    uv = fragCoord/iResolution.xy;\n    col = mix(col, texture(iChannel1, uv).rgb, 0.3);\n    fragColor = vec4(col,1.0);\n}\n\n";
+const imageSource="#version 300 es\nprecision highp float;\nuniform sampler2D scene;\nuniform vec2 resolution;\nuniform float vignette;\nuniform float exposure, saturation;\nuniform float hue, temperature;\nuniform float intro, introFeather;\nout vec4 color;\nvoid main(){\nvec2 uv=gl_FragCoord.xy/resolution;\nvec3 col=texture(scene,uv).rgb;\nif(hue!=0.){\n  vec3 axis=normalize(vec3(1.));\n  float angle=radians(hue);\n  col=col*cos(angle)+cross(axis,col)*sin(angle)+axis*dot(axis,col)*(1.-cos(angle));\n}\ncol*=vec3(1.+temperature*.25,1.,1.-temperature*.25);\ncol=max(col,vec3(0.));\ncol=mix(vec3(dot(col,vec3(.2126,.7152,.0722))),col,saturation)*exposure;\ncol*=mix(1.,.5+.5*pow(max(16.*uv.x*uv.y*(1.-uv.x)*(1.-uv.y),0.),.2),vignette);\nif(intro<1.){\n  float eased=intro*intro*(3.-2.*intro);\n  float edge=mix(-introFeather,1.+introFeather,eased);\n  float reveal=1.-smoothstep(edge-introFeather,edge+introFeather,uv.x);\n  col=mix(vec3(.008,.035,.051),col,reveal);\n}\ncolor=vec4(col,1.);\n}\n";
+const vertex='#version 300 es\nin vec2 p;void main(){gl_Position=vec4(p,0,1);}';
+const fragment='#version 300 es\nprecision highp float;\nuniform vec3 iResolution;uniform float iTime,uFeedback,zoom,offset,amplitude,uDetail;uniform sampler2D iChannel0,iChannel1;out vec4 result;\n'+cloudTrainOpeningSource(cloudTrainColorizeSource(original)).replace('texture(iChannel1, uv).rgb, 0.3','texture(iChannel1, uv).rgb, uFeedback').replace('vec2 uv = fragCoord/iResolution.y;', 'vec2 uv = (fragCoord/iResolution.y - .5*iResolution.xy/iResolution.y)/zoom + .5*iResolution.xy/iResolution.y; uv.y -= offset;').replaceAll('(fbm(uv2, 8) - 0.5)*disp','(fbm(uv2, 8) - 0.5)*disp*amplitude').replaceAll('i < detail;', 'i < min(detail, int(uDetail));')+'\nvoid main(){mainImage(result,gl_FragCoord.xy);}';
+
+const el=this.#canvas,gl=el.getContext('webgl2',{alpha:false,antialias:false,depth:false});
+if(!gl){throw new Error('WebGL 2 is required');}
+const programs:WebGLProgram[]=[],textures:WebGLTexture[]=[],buffers:WebGLBuffer[]=[],fbos:WebGLFramebuffer[]=[];
+let raf=0,last=0,time=0,w=0,h=0,read=0,history=false,dead=false;
+let introProgress=state.current.paused?1:0;
+function program(src:string){const p=gl!.createProgram()!;programs.push(p);
+for(const [type,source] of [[gl!.VERTEX_SHADER,vertex],[gl!.FRAGMENT_SHADER,src]] as const){
+const s=gl!.createShader(type)!;gl!.shaderSource(s,source);gl!.compileShader(s);
+if(!gl!.getShaderParameter(s,gl!.COMPILE_STATUS)){const e=gl!.getShaderInfoLog(s);gl!.deleteShader(s);throw Error(e||'Shader error');}
+gl!.attachShader(p,s);gl!.deleteShader(s);}
+gl!.bindAttribLocation(p,0,'p');gl!.linkProgram(p);if(!gl!.getProgramParameter(p,gl!.LINK_STATUS))throw Error(gl!.getProgramInfoLog(p)||'Link error');return p;}
+function texture(){const t=gl!.createTexture()!;textures.push(t);gl!.bindTexture(gl!.TEXTURE_2D,t);gl!.texParameteri(gl!.TEXTURE_2D,gl!.TEXTURE_MIN_FILTER,gl!.LINEAR);gl!.texParameteri(gl!.TEXTURE_2D,gl!.TEXTURE_MAG_FILTER,gl!.LINEAR);return t;}
+function clean(){dead=true;cancelAnimationFrame(raf);programs.forEach(p=>gl!.deleteProgram(p));textures.forEach(t=>gl!.deleteTexture(t));buffers.forEach(b=>gl!.deleteBuffer(b));fbos.forEach(f=>gl!.deleteFramebuffer(f));}
+try{
+// Keep five foreground samples, but reduce their temporal spread to one third.
+const scene=program(fragment.replace('t+4.*float(i)/float(n)/60.', 't+(4./3.)*float(i)/float(n)/60.')),post=program(imageSource);
+const locations=<const T extends readonly string[]>(p:WebGLProgram,n:T)=>Object.fromEntries(n.map(k=>[k,gl.getUniformLocation(p,k)])) as Record<T[number], WebGLUniformLocation | null>;
+const tintKeys=['skyTint','smokeTint','trainTint'] as const;
+const a=locations(scene,['iResolution','iTime','iChannel0','iChannel1','uFeedback','zoom','offset','amplitude','uDetail','intro','introFeather',...tintKeys]),b=locations(post,['resolution','scene','vignette','exposure','saturation','hue','temperature','intro','introFeather']);
+const quad=gl.createBuffer()!;buffers.push(quad);gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+// Restore the original deterministic noise; supplied thumbnail is retained as an asset only.
+const noise=texture(),data=new Uint8Array(1024*1024);let seed=93451;
+for(let i=0;i<data.length;i++){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;data[i]=seed&255;}
+gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,1024,1024,0,gl.RED,gl.UNSIGNED_BYTE,data);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
+const targets=[texture(),texture()];for(const t of targets){gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);fbos.push(gl.createFramebuffer()!);}
+const media=matchMedia('(prefers-reduced-motion: reduce)');
+function request(){if(!dead&&!raf&&!document.hidden)raf=requestAnimationFrame(draw);}
+const uniformCache=new Map<WebGLUniformLocation,number|string>();
+function scalar(location:WebGLUniformLocation|null,value:number){if(location&&uniformCache.get(location)!==value){gl!.uniform1f(location,value);uniformCache.set(location,value);}}
+function tint(location:WebGLUniformLocation|null,value:string){if(location&&uniformCache.get(location)!==value){gl!.uniform3f(location,...cloudTrainTintRgb(value));uniformCache.set(location,value);}}
+const bounds=el.getBoundingClientRect();let cssWidth=bounds.width,cssHeight=bounds.height;
+let pixelWidth=1,pixelHeight=1,scale=state.current.resolution;
+const maxViewport=gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
+function updatePixelSize(){const d=Math.min(devicePixelRatio||1,1.5)*scale;pixelWidth=Math.max(1,Math.min(maxViewport[0]!,Math.round(cssWidth*d)));pixelHeight=Math.max(1,Math.min(maxViewport[1]!,Math.round(cssHeight*d)));}
+updatePixelSize();
+// Each texture owns a unit: resize uploads and rendering share this cache.
+let activeUnit=-1;
+const boundTextures=new Map<number,WebGLTexture>();
+function bindTexture(unit:number,t:WebGLTexture){
+if(boundTextures.get(unit)===t)return;
+if(activeUnit!==unit){gl!.activeTexture(gl!.TEXTURE0+unit);activeUnit=unit;}
+gl!.bindTexture(gl!.TEXTURE_2D,t);boundTextures.set(unit,t);
+}
+function activate(unit:number){if(activeUnit!==unit){gl!.activeTexture(gl!.TEXTURE0+unit);activeUnit=unit;}}
+bindTexture(0,noise);targets.forEach((t,i)=>bindTexture(i+1,t));
+gl.useProgram(scene);gl.uniform1i(a.iChannel0,0);gl.uniform1i(a.iChannel1,1);
+gl.useProgram(post);gl.uniform1i(b.scene,2);
+function draw(now:number){
+raf=0;const s=state.current;
+if(!s.introEnabled||media.matches)introProgress=1;
+else if(!s.paused)introProgress=Math.min(1,introProgress+Math.min((now-(last||now))/1000,.05)/s.introDuration);
+if(!s.paused&&!media.matches)time+=Math.min((now-(last||now))/1000,.05)*s.speed;last=now;
+const nw=pixelWidth,nh=pixelHeight;
+if(w!==nw||h!==nh){w=nw;h=nh;el.width=w;el.height=h;history=false;
+targets.forEach((t,i)=>{bindTexture(i+1,t);activate(i+1);gl!.texImage2D(gl!.TEXTURE_2D,0,gl!.RGBA,w,h,0,gl!.RGBA,gl!.UNSIGNED_BYTE,null);gl!.bindFramebuffer(gl!.FRAMEBUFFER,fbos[i] ?? null);gl!.framebufferTexture2D(gl!.FRAMEBUFFER,gl!.COLOR_ATTACHMENT0,gl!.TEXTURE_2D,t,0);gl!.clearColor(0,0,0,1);gl!.clear(gl!.COLOR_BUFFER_BIT);});
+gl!.useProgram(scene);gl!.uniform3f(a.iResolution,w,h,1);
+gl!.useProgram(post);gl!.uniform2f(b.resolution,w,h);
+gl!.viewport(0,0,w,h);
+}
+const write=1-read;
+gl!.bindFramebuffer(gl!.FRAMEBUFFER,fbos[write]!);gl!.useProgram(scene);
+gl!.uniform1i(a.iChannel1,read+1);
+for(const key of tintKeys)tint(a[key]!,s[key]);
+scalar(a.zoom,s.zoom);scalar(a.offset,s.offset);scalar(a.amplitude,s.amplitude);scalar(a.uDetail,s.detail);
+scalar(a.intro,introProgress);scalar(a.introFeather,s.introFeather);scalar(a.iTime,time);scalar(a.uFeedback,history&&introProgress>=1?s.feedback:0);gl!.drawArrays(gl!.TRIANGLES,0,3);
+gl!.bindFramebuffer(gl!.FRAMEBUFFER,null);gl!.useProgram(post);gl!.uniform1i(b.scene,write+1);scalar(b.intro,1);scalar(b.introFeather,s.introFeather);scalar(b.vignette,s.vignette);scalar(b.exposure,s.exposure);scalar(b.saturation,s.saturation);scalar(b.hue,s.hue);scalar(b.temperature,s.temperature);gl!.drawArrays(gl!.TRIANGLES,0,3);read=write;history=true;
+if(!s.paused&&!media.matches&&(s.speed!==0||introProgress<1))request();
+}
+const reset=()=>{cancelAnimationFrame(raf);raf=0;last=0;history=false;if(scale!==state.current.resolution){scale=state.current.resolution;updatePixelSize();}request();};wake.current=reset;
+let dprQuery:MediaQueryList;
+const dprChanged=()=>{dprQuery?.removeEventListener('change',dprChanged);dprQuery=matchMedia('(resolution: '+(devicePixelRatio||1)+'dppx)');dprQuery.addEventListener('change',dprChanged);updatePixelSize();reset();};
+dprChanged();
+const resize=new ResizeObserver(([entry])=>{if(!entry)return;cssWidth=entry.contentRect.width;cssHeight=entry.contentRect.height;updatePixelSize();reset();});resize.observe(el);document.addEventListener('visibilitychange',reset);media.addEventListener('change',reset);request();
+return()=>{resize.disconnect();dprQuery.removeEventListener('change',dprChanged);document.removeEventListener('visibilitychange',reset);media.removeEventListener('change',reset);wake.current=()=>{};clean();};
+}catch(e){clean();throw e;}
+
+}
+#lost=(e:Event):void=>{e.preventDefault();this.#cleanup?.();this.#cleanup=undefined;this.#onError("Cloud Train graphics context interrupted. Waiting to restore…");};
+#restored=():void=>{try{this.#cleanup=this.#start();this.#onError(undefined);}catch(e){this.#onError(String(e));}};
+setSettings(s:CloudTrainSettings):void{this.#settings.current=s;this.#wake.current();}
+replay():void{this.#cleanup?.();this.#cleanup=this.#start();}
+dispose():void{this.#cleanup?.();this.#cleanup=undefined;this.#canvas.removeEventListener("webglcontextlost",this.#lost);this.#canvas.removeEventListener("webglcontextrestored",this.#restored);}
+}
+class CloudTrainBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readCloudTrainBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #canvas: HTMLCanvasElement | undefined;
+  #renderer: CloudTrainRenderer | undefined;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() { window.addEventListener("pagehide", this.#onPageHide, { once: true }); }
+  get settings(): CloudTrainSettings { return this.#settings; }
+  get enabled(): boolean { return this.#enabled; }
+  get pending(): boolean { return this.#pending; }
+  get error(): string | undefined { return this.#error; }
+  get stoppedForExternalThemeChange(): boolean { return this.#stoppedForExternalThemeChange; }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Cloud Train Background is unavailable");
+  }
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try { await operation; } finally { if (this.#enableOperation === operation) this.#enableOperation = undefined; }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexParticleLayer = "v1";
+      layer.dataset.codeCodexCloudTrainLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.backgroundColor = "#02090d";
+      const canvas = document.createElement("canvas");
+      canvas.className = "code-codex-particle-canvas code-codex-cloudTrain-canvas";
+      layer.append(canvas);
+      document.body.prepend(layer);
+      this.#layer = layer;
+      this.#canvas = canvas;
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, "#02090d");
+      this.#renderer = new CloudTrainRenderer(layer, canvas, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Cloud Train Background could not be enabled";
+      this.#teardownPresentation();
+      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: CloudTrainSettings): void {
+    this.#settings = normalizeCloudTrainSettings(next);
+    writeCloudTrainBackgroundSettings(this.#settings);
+    this.#renderer?.setSettings(this.#settings);
+    this.#notify();
+  }
+  reset(): void { this.updateSettings(CLOUD_TRAIN_DEFAULTS); }
+  replay(): void { this.#renderer?.replay(); }
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    this.#canvas = undefined;
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = CLOUD_TRAIN_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try { current = await readCodexAppearanceTheme(); }
+    catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) throw new Error("Another Code-Codex background is still using Dark mode");
+      if (lease && !lease.owner) writeParticleThemeLease({ ...lease, owner });
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Cloud Train Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = CLOUD_TRAIN_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease || (lease.owner && lease.owner !== owner)) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) { clearParticleThemeLease(owner); return; }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  }
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
+    } catch { /* A transient read failure does not tear down the presentation. */ }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Cloud Train Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+  #notify(): void { for (const listener of this.#listeners) listener(); }
+  #onPageHide = (): void => { this.dispose(); };
+}
+
+const CLOUD_TRAIN_BACKGROUND_CONTROLLER = Symbol.for("code-codex:cloudTrain-background-controller:v1");
+
+function getCloudTrainBackgroundController(): CloudTrainBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[CLOUD_TRAIN_BACKGROUND_CONTROLLER];
+  if (existing instanceof CloudTrainBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+  }
+  const controller = new CloudTrainBackgroundController();
+  globalState[CLOUD_TRAIN_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
+
+
 const BLACK_HOLE_VERTEX_SHADER = `
 attribute vec2 aPos;
 varying vec2 vUv;
@@ -10261,6 +10662,14 @@ function milkyWaySettingsPanelMarkup(): string {
 }
 
 
+function cloudTrainCardMarkup(): string {
+  return `<article class="preview-extension appearance-extension" data-appearance-plugin="${CLOUD_TRAIN_BACKGROUND_PLUGIN_ID}"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 13 6 3l4 7 2-4 3 7ZM4 7l2 2 2-2" fill="none" stroke="currentColor"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Cloud Train Background</h4><span class="preview-extension-status cloudTrain-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action cloudTrain-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger cloudTrain-settings-trigger" type="button" aria-label="Configure Cloud Train Background" aria-haspopup="dialog" aria-controls="cle-cloudTrain-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
+}
+function cloudTrainPanelMarkup(): string {
+  return `<section class="particle-settings-panel cloudTrain-settings-panel" id="cle-cloudTrain-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-cloudTrain-title"><header class="particle-settings-header"><div class="particle-settings-heading"><p>${bilingualLabelMarkup("外观","Appearance")}</p><h3 id="cle-cloudTrain-title">${bilingualLabelMarkup("云间列车设置","Cloud Train settings")}</h3></div><div class="particle-settings-header-actions">${backgroundLanguageSwitchMarkup("cle-cloudTrain-language")}<button class="particle-settings-close cloudTrain-close" type="button" aria-label="Close settings">${icons.close}</button></div></header><div class="particle-settings-scroll"><fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("列车与云海","Train and clouds")}</legend>${CLOUD_TRAIN_CONTROLS.map(([key,zh,en,min,max,step])=>`<div class="particle-control-row"><label for="cle-cloudTrain-${key}">${bilingualLabelMarkup(zh,en)}</label><input id="cle-cloudTrain-${key}" data-cloudTrain-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${CLOUD_TRAIN_DEFAULTS[key]}"><span class="particle-control-value"><output>${CLOUD_TRAIN_DEFAULTS[key]}</output></span></div>`).join("")}</fieldset>${CLOUD_TRAIN_TINTS.map(([key,zh,en])=>`<div class="particle-control-row"><label for="cle-cloudTrain-${key}">${bilingualLabelMarkup(zh,en)}</label><input id="cle-cloudTrain-${key}" type="color" value="#ffffff"></div>`).join("")}<label class="particle-toggle-row">${bilingualLabelMarkup("启用开场动画","Enable opening")}<input type="checkbox" class="cloudTrain-intro-enabled"></label><label class="particle-toggle-row">${bilingualLabelMarkup("暂停动画","Pause animation")}<input type="checkbox" class="cloudTrain-paused"></label><div class="glow-horizon-actions"><button type="button" class="cloudTrain-reset">${bilingualLabelMarkup("重置","Reset")}</button><button type="button" class="cloudTrain-replay">${bilingualLabelMarkup("重播","Replay")}</button></div><p class="particle-plugin-error cloudTrain-error" role="status" hidden></p></div></section>`;
+}
+
+
 function mountainCardMarkup(): string {
   return `<article class="preview-extension appearance-extension" data-appearance-plugin="${MOUNTAIN_BACKGROUND_PLUGIN_ID}"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 13 6 3l4 7 2-4 3 7ZM4 7l2 2 2-2" fill="none" stroke="currentColor"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Layered Mountain Background</h4><span class="preview-extension-status mountain-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action mountain-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger mountain-settings-trigger" type="button" aria-label="Configure Layered Mountain Background" aria-haspopup="dialog" aria-controls="cle-mountain-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
 }
@@ -10358,6 +10767,10 @@ export class CodeCodexElement extends HTMLElement {
   readonly #enabledPreviewers = new Set<string>();
   readonly #enabledAppearancePlugins = new Set<string>();
   readonly #mountainController = getMountainBackgroundController();
+  readonly #cloudTrainController = getCloudTrainBackgroundController();
+  #cloudTrainUnsubscribe: (() => void) | undefined;
+  #cloudTrainInitialization: Promise<void> | undefined;
+  #cloudTrainEventsBound = false;
   #mountainUnsubscribe: (() => void) | undefined;
   #mountainInitialization: Promise<void> | undefined;
   #mountainEventsBound = false;
@@ -10610,7 +11023,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -10640,6 +11053,7 @@ export class CodeCodexElement extends HTMLElement {
       ${auroraIonosphereSettingsPanelMarkup()}
       ${milkyWaySettingsPanelMarkup()}
       ${mountainPanelMarkup()}
+      ${cloudTrainPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -10737,7 +11151,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 7) {
+    if (this.#backgroundLanguageInputs.length !== 8) {
       throw new Error("Background settings require six synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
@@ -10868,6 +11282,10 @@ export class CodeCodexElement extends HTMLElement {
     for (const plugin of this.#readEnabledAppearancePlugins()) this.#enabledAppearancePlugins.add(plugin);
     let normalizedAppearancePlugins = false;
     if (this.#mountainController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+    if (this.#cloudTrainController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
+    if (this.#enabledAppearancePlugins.has(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID)) {
+      this.#enabledAppearancePlugins.clear(); this.#enabledAppearancePlugins.add(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
+    }
     if (this.#enabledAppearancePlugins.has(MOUNTAIN_BACKGROUND_PLUGIN_ID)) {
       this.#enabledAppearancePlugins.clear(); this.#enabledAppearancePlugins.add(MOUNTAIN_BACKGROUND_PLUGIN_ID);
       this.#writeEnabledAppearancePlugins();
@@ -11031,6 +11449,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
       }
       this.#renderMountain();
+      this.#renderCloudTrain();
     });
     this.#mountainInitialization = this.#milkyWayBackgroundInitialization.then(async () => {
       if (!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration)) return;
@@ -11040,6 +11459,22 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderMountain();
     });
     this.#bindMountain();
+    this.#cloudTrainUnsubscribe?.();
+    this.#cloudTrainUnsubscribe = this.#cloudTrainController.subscribe(() => {
+      if (this.#cloudTrainController.stoppedForExternalThemeChange) {
+        this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderCloudTrain();
+    });
+    this.#cloudTrainInitialization = this.#mountainInitialization!.then(async () => {
+      if (!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration)) return;
+      if (this.#enabledAppearancePlugins.has(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID)) {
+        try { await this.#cloudTrainController.enable(); } catch(error) { this.#showActionNotice(String(error), "error"); }
+      }
+      this.#renderCloudTrain();
+    });
+    this.#bindCloudTrain();
+
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
     this.#renderPreviewMarket();
@@ -11094,7 +11529,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#milkyWayBackgroundUnsubscribe?.();
     this.#milkyWayBackgroundUnsubscribe = undefined;
     this.#mountainUnsubscribe?.(); this.#mountainUnsubscribe=undefined; this.#mountainInitialization=undefined;
+    this.#cloudTrainUnsubscribe?.(); this.#cloudTrainUnsubscribe=undefined; this.#cloudTrainInitialization=undefined;
+    this.#closeCloudTrain();
     this.#closeMountain();
+    this.#closeCloudTrain();
     this.#milkyWayBackgroundInitialization = undefined;
     this.#appearancePluginPending = false;
     this.#appearanceTransitionPending = false;
@@ -11173,6 +11611,9 @@ export class CodeCodexElement extends HTMLElement {
     const auroraIonosphereWasEnabled = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
     const milkyWayWasEnabled = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
     const mountainWasEnabled = this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+    const cloudTrainWasEnabled = this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
+    if (cloudTrainWasEnabled) this.#writeEnabledAppearancePlugins();
+    if (cloudTrainWasEnabled || this.#cloudTrainController.enabled || this.#cloudTrainController.pending) await this.#cloudTrainController.disable();
     if (particleWasEnabled || blackHoleWasEnabled || glowHorizonWasEnabled || heavenlyCloudWasEnabled || auroraIonosphereWasEnabled || milkyWayWasEnabled || mountainWasEnabled) this.#writeEnabledAppearancePlugins();
     if (mountainWasEnabled || this.#mountainController.enabled || this.#mountainController.pending) await this.#mountainController.disable();
     if (particleWasEnabled || this.#particleBackgroundController.enabled) {
@@ -11362,7 +11803,7 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings")]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings")]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -11463,6 +11904,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#writeBackgroundSettingsLanguage();
     this.#syncBackgroundSettingsLanguagePresentation();
     this.#renderMountain();
+    this.#renderCloudTrain();
     requestAnimationFrame(() => this.#positionMountain());
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
@@ -11885,6 +12327,7 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowResize = (): void => {
     this.#positionMountain();
+    this.#positionCloudTrain();
     this.#closeContextMenu(false);
     const marketHasFocus = this.#previewMarketPopover.contains(this.#shadow.activeElement);
     this.#closePreviewMarket(marketHasFocus);
@@ -11902,6 +12345,7 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowPointerDown = (event: PointerEvent): void => {
     const path = event.composedPath();
+    if (!path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings")) && !path.includes(this.#required<HTMLElement>(".cloudTrain-settings-trigger"))) this.#closeCloudTrain();
     if (!path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
         && !path.includes(this.#required<HTMLElement>(".mountain-settings-trigger"))) this.#closeMountain();
     if (!this.#contextMenu.hidden && !path.includes(this.#contextMenu)) this.#closeContextMenu(false);
@@ -11938,6 +12382,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#auroraIonosphereSettingsPanel)
       && !path.includes(this.#milkyWaySettingsPanel)
       && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
       && !path.includes(this.#auroraIonosphereSettingsTrigger)
     ) {
       this.#closeAuroraIonosphereSettings(false);
@@ -11947,6 +12392,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#milkyWaySettingsPanel)
       && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
       && !path.includes(this.#milkyWaySettingsTrigger)
+      && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
     ) {
       this.#closeMilkyWaySettings(false);
     }
@@ -11961,6 +12407,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#auroraIonosphereSettingsPanel)
       && !path.includes(this.#milkyWaySettingsPanel)
       && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
     ) {
       this.#closePreviewMarket(false);
     }
@@ -15282,7 +15729,7 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
-  async #awaitBackgroundInitializations(operation: number, mountainSwitch = false): Promise<boolean> {
+  async #awaitBackgroundInitializations(operation: number, mountainSwitch = false, cloudTrainSwitch = false): Promise<boolean> {
     const generation = this.#appearanceInitializationGeneration;
     this.#particleBackgroundInitialization ??= this.#initializeParticleBackground(generation);
     await this.#particleBackgroundInitialization;
@@ -15305,6 +15752,12 @@ export class CodeCodexElement extends HTMLElement {
     this.#milkyWayBackgroundInitialization ??= this.#auroraIonosphereBackgroundInitialization.then(() => this.#initializeMilkyWayBackground(generation));
     await this.#milkyWayBackgroundInitialization;
     await this.#mountainInitialization;
+    await this.#cloudTrainInitialization;
+    if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceOperation) return false;
+    if (!cloudTrainSwitch && (this.#cloudTrainController.enabled || this.#enabledAppearancePlugins.has(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID))) {
+      await this.#cloudTrainController.disable();
+      this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
+    }
     if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceOperation) return false;
     if (!mountainSwitch && (this.#mountainController.enabled || this.#enabledAppearancePlugins.has(MOUNTAIN_BACKGROUND_PLUGIN_ID))) {
       await this.#mountainController.disable();
@@ -17978,6 +18431,97 @@ export class CodeCodexElement extends HTMLElement {
     } finally {this.#appearanceTransitionPending=false;this.#renderPreviewMarket();}
   }
 
+  #closeCloudTrain(): void {
+    const panel=this.#shadow.querySelector<HTMLElement>("#cle-cloudTrain-settings");
+    if(panel?.matches(":popover-open")) panel.hidePopover();
+    this.#shadow.querySelector(".cloudTrain-settings-trigger")?.setAttribute("aria-expanded","false");
+  }
+  #positionCloudTrain(): void {
+    const panel=this.#required<HTMLElement>("#cle-cloudTrain-settings");
+    if(!panel.matches(":popover-open"))return;
+    const rect=this.#required<HTMLElement>(".cloudTrain-settings-trigger").getBoundingClientRect();
+    panel.style.position="fixed"; panel.style.margin="0";
+    panel.style.maxHeight="calc(100vh - 24px)";
+    const width=Math.min(380,window.innerWidth-24);
+    panel.style.width=width+"px";
+    panel.style.left=Math.max(12,Math.min(rect.right+12,window.innerWidth-width-12))+"px";
+    panel.style.top=Math.max(12,Math.min(rect.top,window.innerHeight-panel.getBoundingClientRect().height-12))+"px";
+  }
+  #bindCloudTrain(): void {
+    if(this.#cloudTrainEventsBound)return; this.#cloudTrainEventsBound=true;
+    const panel=this.#required<HTMLElement>("#cle-cloudTrain-settings");
+    this.#required<HTMLButtonElement>(".cloudTrain-enable").addEventListener("click",()=>void this.#toggleCloudTrain());
+    this.#required<HTMLButtonElement>(".cloudTrain-settings-trigger").addEventListener("click",()=>{
+      if(panel.matches(":popover-open")){this.#closeCloudTrain();return;}
+      for(const other of this.#shadow.querySelectorAll<HTMLElement>(".particle-settings-panel")) if(other!==panel&&other.matches(":popover-open"))other.hidePopover();
+      this.#renderCloudTrain(); panel.showPopover(); this.#positionCloudTrain();
+      this.#required(".cloudTrain-settings-trigger").setAttribute("aria-expanded","true");
+      this.#required<HTMLButtonElement>(".cloudTrain-close").focus();
+    });
+    this.#required<HTMLButtonElement>(".cloudTrain-close").addEventListener("click",()=>{this.#closeCloudTrain();this.#required<HTMLButtonElement>(".cloudTrain-settings-trigger").focus();});
+    panel.addEventListener("keydown",event=>{if(event.key==="Escape"){event.stopPropagation();this.#closeCloudTrain();this.#required<HTMLButtonElement>(".cloudTrain-settings-trigger").focus();}});
+    this.#previewMarketPopover.addEventListener("scroll",()=>this.#positionCloudTrain());
+    panel.addEventListener("toggle",()=>{this.#required(".cloudTrain-settings-trigger").setAttribute("aria-expanded",String(panel.matches(":popover-open")));});
+    for(const [key,,,min,max,step] of CLOUD_TRAIN_CONTROLS){
+      const input=this.#required<HTMLInputElement>("#cle-cloudTrain-"+key);
+      input.addEventListener("input",()=>this.#cloudTrainController.updateSettings(normalizeCloudTrainSettings({...this.#cloudTrainController.settings,[key]:input.value})));
+      input.addEventListener("dblclick",()=>{ input.type="number";input.focus();input.select(); });
+      const finish=()=>{ input.value=String(clampParticleNumber(input.value,min,max,CLOUD_TRAIN_DEFAULTS[key]));input.type="range";input.step=String(step);this.#cloudTrainController.updateSettings(normalizeCloudTrainSettings({...this.#cloudTrainController.settings,[key]:input.value})); };
+      input.addEventListener("blur",finish);input.addEventListener("keydown",event=>{if(event.key==="Enter"){finish();input.blur();}});
+    }
+    for(const [key] of CLOUD_TRAIN_TINTS){const input=this.#required<HTMLInputElement>("#cle-cloudTrain-"+key);input.addEventListener("input",()=>this.#cloudTrainController.updateSettings(normalizeCloudTrainSettings({...this.#cloudTrainController.settings,[key]:input.value})));}
+    this.#required<HTMLInputElement>(".cloudTrain-paused").addEventListener("change",event=>this.#cloudTrainController.updateSettings({...this.#cloudTrainController.settings,paused:(event.target as HTMLInputElement).checked}));
+    this.#required<HTMLInputElement>(".cloudTrain-intro-enabled").addEventListener("change",event=>{this.#cloudTrainController.updateSettings({...this.#cloudTrainController.settings,introEnabled:(event.target as HTMLInputElement).checked});this.#cloudTrainController.replay();});
+    this.#required(".cloudTrain-reset").addEventListener("click",()=>this.#cloudTrainController.reset());
+    this.#required(".cloudTrain-replay").addEventListener("click",()=>this.#cloudTrainController.replay());
+  }
+  #renderCloudTrain(): void {
+    const card=this.#shadow.querySelector<HTMLElement>('[data-appearance-plugin="'+CLOUD_TRAIN_BACKGROUND_PLUGIN_ID+'"]'); if(!card)return;
+    const c=this.#cloudTrainController, s=c.settings;
+    const busy=c.pending||this.#appearanceTransitionPending||this.#appearancePluginPending;
+    const button=card.querySelector<HTMLButtonElement>(".cloudTrain-enable")!;
+    button.textContent=c.enabled?"Disable":"Enable";button.disabled=busy;button.setAttribute("aria-pressed",String(c.enabled));button.setAttribute("aria-label",`${c.enabled?"Disable":"Enable"} Cloud Train Background`);
+    const status=card.querySelector<HTMLElement>(".cloudTrain-status")!;status.textContent=c.pending?"Applying…":c.error?"Unavailable":c.enabled?"Enabled":"Disabled";status.dataset.enabled=String(c.enabled);
+    for(const [key,zh,en] of CLOUD_TRAIN_CONTROLS){const input=this.#required<HTMLInputElement>("#cle-cloudTrain-"+key);if(this.#shadow.activeElement!==input)input.value=String(s[key]);input.disabled=busy;input.setAttribute("aria-label",this.#backgroundText(zh,en));input.parentElement!.querySelector("output")!.textContent=s[key].toFixed(2);}
+    for(const [key,zh,en] of CLOUD_TRAIN_TINTS){const input=this.#required<HTMLInputElement>("#cle-cloudTrain-"+key);input.value=s[key];input.disabled=busy;input.setAttribute("aria-label",this.#backgroundText(zh,en));}
+    this.#required<HTMLInputElement>(".cloudTrain-paused").checked=s.paused;
+    this.#required<HTMLInputElement>(".cloudTrain-intro-enabled").checked=s.introEnabled;
+    this.#required<HTMLInputElement>(".cloudTrain-intro-enabled").disabled=busy;
+    this.#required<HTMLInputElement>(".cloudTrain-paused").disabled=busy;
+    this.#required<HTMLButtonElement>(".cloudTrain-reset").disabled=busy;
+    this.#required<HTMLButtonElement>(".cloudTrain-replay").disabled=busy||!c.enabled;
+    const error=this.#required<HTMLElement>(".cloudTrain-error");error.textContent=c.error??"";error.hidden=!c.error;
+  }
+  async #toggleCloudTrain(): Promise<void> {
+    if(this.#appearanceTransitionPending||this.#appearancePluginPending||this.#cloudTrainController.pending)return;
+    const operation=++this.#appearanceOperation;this.#appearanceTransitionPending=true;this.#renderPreviewMarket();
+    const controllers=[this.#particleBackgroundController,this.#blackHoleBackgroundController,this.#glowHorizonBackgroundController,this.#heavenlyCloudBackgroundController,this.#auroraIonosphereBackgroundController,this.#milkyWayBackgroundController,this.#mountainController];
+    const ids=[PARTICLE_BACKGROUND_PLUGIN_ID,BLACK_HOLE_BACKGROUND_PLUGIN_ID,GLOW_HORIZON_BACKGROUND_PLUGIN_ID,HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,MILKY_WAY_BACKGROUND_PLUGIN_ID,MOUNTAIN_BACKGROUND_PLUGIN_ID];
+    let previous=-1;
+    try {
+      if(!await this.#awaitBackgroundInitializations(operation,true,true))return;
+      if(this.#cloudTrainController.enabled){await this.#cloudTrainController.disable();this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);}
+      else {
+        if(this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)){
+          if(!this.#bridge?.available)throw new Error("Restart Codex with Code-Codex to disable transparency first.");
+          await this.#setWindowTransparency(this.#bridge,false);this.#clearTransparentBackgroundPresentation();this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);this.#appearancePluginApplied=false;
+        }
+        for(let i=0;i<controllers.length;i++){if(controllers[i]!.enabled){previous=i;await controllers[i]!.disable(true);}this.#enabledAppearancePlugins.delete(ids[i]!);}
+        const lease=readParticleThemeLease();if(lease?.owner)transferParticleThemeLease(lease.owner,CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
+        await this.#cloudTrainController.enable();
+        if (!this.#connected || operation !== this.#appearanceOperation) { await this.#cloudTrainController.disable(); return; }
+        if(!this.#cloudTrainController.enabled)throw new Error(this.#cloudTrainController.error||"Cloud Train Background could not be enabled");
+        this.#enabledAppearancePlugins.add(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+    } catch(error) {
+      this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
+      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch{}}
+      this.#writeEnabledAppearancePlugins();this.#showActionNotice(error instanceof Error?error.message:String(error),"error");
+    } finally {this.#appearanceTransitionPending=false;this.#renderPreviewMarket();}
+  }
+
+
   #readEnabledAppearancePlugins(): readonly string[] {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(APPEARANCE_PLUGIN_SETTINGS_KEY) || "[]");
@@ -18755,6 +19299,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #closePreviewMarket(restoreFocus: boolean): void {
+    this.#closeCloudTrain();
     this.#closeMountain();
     this.#closeMilkyWaySettings(false);
     this.#closeParticleSettings(false);
@@ -18784,6 +19329,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderPreviewMarket(): void {
+    this.#renderCloudTrain();
     this.#renderMountain();
     this.#renderAppearancePlugin();
     this.#renderParticleBackgroundPlugin();
