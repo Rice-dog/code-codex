@@ -2,6 +2,10 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.16
+
+Project Adjustments
+
 ## v0.2.15 — Cloud Train 原位分层淡入（本地集成）
 
 - 去除开场上下位移，各层在原位依次通过透明度显现。
