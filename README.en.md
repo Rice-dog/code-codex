@@ -241,4 +241,4 @@ workflows are not included in this public source package.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). See the [third-party notices](THIRD_PARTY_NOTICES_EN.md) for effect provenance, Code-Codex modifications, and license boundaries.

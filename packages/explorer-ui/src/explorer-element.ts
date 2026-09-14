@@ -78,6 +78,13 @@ const DEFAULT_SETTINGS: ExplorerSettings = { width: 260, collapsed: false, showH
 const SETTINGS_KEY = "code-codex:ui-settings:v1";
 const PREVIEWER_SETTINGS_KEY = "code-codex:previewers:v1";
 const APPEARANCE_PLUGIN_SETTINGS_KEY = "code-codex:appearance-plugins:v1";
+/*
+ * Third-party provenance and Code-Codex modification boundaries for the
+ * appearance effects below are documented in THIRD_PARTY_NOTICES_EN.md and
+ * THIRD_PARTY_NOTICES_ZH_CN.md. The repository MIT license does not relicense
+ * adapted or otherwise protected third-party material. Author references are
+ * attribution only and do not imply endorsement of Code-Codex.
+ */
 const TRANSPARENT_BACKGROUND_PLUGIN_ID = "code-codex.transparent-background";
 const PARTICLE_BACKGROUND_PLUGIN_ID = "code-codex.particle-image-background";
 const BLACK_HOLE_BACKGROUND_PLUGIN_ID = "code-codex.black-hole-background";
@@ -2520,6 +2527,9 @@ class ParticleImagePreparationCache {
   }
 }
 
+// Independently implemented from the public Particle Image interaction concept
+// by React Bits / David Haz; no React Bits Pro source or assets are intentionally included.
+// See THIRD_PARTY_NOTICES_EN.md and THIRD_PARTY_NOTICES_ZH_CN.md.
 const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   precision highp float;
   attribute vec2 a_previousHome;
@@ -4793,6 +4803,8 @@ interface GlowHorizonVariantGeometry {
   readonly rest: number;
 }
 
+// Independently implemented from the publicly presented Glow Horizon visual concept
+// by Bashar ahammed; no referenced component source or assets are intentionally included.
 const GLOW_HORIZON_VARIANT_GEOMETRY: Readonly<Record<GlowHorizonVariant, GlowHorizonVariantGeometry>> = Object.freeze({
   top: { axis: "y", enter: -100, rest: -50 },
   bottom: { axis: "y", enter: 100, rest: 50 },
@@ -5440,6 +5452,9 @@ function getGlowHorizonBackgroundController(): GlowHorizonBackgroundController {
   return controller;
 }
 
+// Reconstruction associated with “Heavenly [252]” by XorDev. No complete
+// third-party source or work-specific license header is preserved locally;
+// redistribution status is conditional as detailed in the third-party notices.
 const HEAVENLY_CLOUD_VERTEX_SHADER = `
 attribute vec2 aPosition;
 varying vec2 vUv;
@@ -6107,6 +6122,7 @@ void main() { gl_Position = vec4(aPosition, 0.0, 1.0); }
  * Adapted from “Auroras” by nimitz (@stormoid), Shadertoy XtGGRt.
  * The runtime noise atlas, volumetric height planes, spectral emission, and
  * four procedural star layers are preserved from the standalone effect.
+ * Applicable license evidence remains conditional; see the third-party notices.
  */
 const AURORA_IONOSPHERE_NOISE_SHADER = `
 precision highp float;
@@ -7092,6 +7108,7 @@ function writeMilkyWayBackgroundSettings(settings: MilkyWayBackgroundSettings): 
 
 // Reconstructed source reference: “Milky way”, Almina (@Code4_11).
 // The source project reconstructs missing stages; it is not a verified copy of the original artwork.
+// No explicit redistribution license for original fragments is asserted here.
 const MILKY_WAY_FRAGMENT_SHADER = `precision highp float;
 uniform vec2 uResolution;
 uniform float uTime, uAmplitude, uFrequency, uZoom, uRotation, uExposure;
@@ -7543,6 +7560,7 @@ function writeMountainBackgroundSettings(settings: MountainSettings): void {
 }
 // Supplied original reconstruction of a partial reference attributed to Yohei Nishitsuji.
 // Reference screenshot does not establish the original work's redistribution license.
+// This renderer is not represented as a verbatim recovery of the referenced source.
 class MountainRenderer {
   #settings: { current: MountainSettings };
   #wake = { current: () => {} };
@@ -7999,6 +8017,7 @@ return result;
 function readCloudTrainBackgroundSettings():CloudTrainSettings {try{return normalizeCloudTrainSettings(JSON.parse(localStorage.getItem("code-codex:cloud-train-settings:v1")||"{}"));}catch{return {...CLOUD_TRAIN_DEFAULTS};}}
 function writeCloudTrainBackgroundSettings(s:CloudTrainSettings):void {try{localStorage.setItem("code-codex:cloud-train-settings:v1",JSON.stringify(s));}catch{/* Session settings remain usable. */}}
 // Original supplied shader credited to mdb. No redistribution license was supplied.
+// Attribution does not grant redistribution permission; see the third-party notices.
 // Preserve the source project's deterministic noise and previous-frame feedback assumptions.
 // Tint within each material, before compositing and feedback. White is identity.
 function cloudTrainColorizeSource(source: string) {
@@ -8365,6 +8384,8 @@ function getCloudTrainBackgroundController(): CloudTrainBackgroundController {
 
 
 
+// Independently implemented from the publicly presented Black Hole Hero Section
+// visual concept by @yura; no referenced component source or assets are intentionally included.
 const BLACK_HOLE_VERTEX_SHADER = `
 attribute vec2 aPos;
 varying vec2 vUv;

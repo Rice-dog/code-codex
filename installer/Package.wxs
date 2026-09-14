@@ -177,6 +177,14 @@
               Id="ThirdPartyLicensesFile"
               Source="$(var.ThirdPartyLicensesPath)"
               Name="THIRD_PARTY_LICENSES.txt" />
+            <File
+              Id="VisualEffectNoticesEnFile"
+              Source="$(var.VisualEffectNoticesEnPath)"
+              Name="THIRD_PARTY_NOTICES_EN.md" />
+            <File
+              Id="VisualEffectNoticesZhFile"
+              Source="$(var.VisualEffectNoticesZhPath)"
+              Name="THIRD_PARTY_NOTICES_ZH_CN.md" />
             <File Id="SbomFile" Source="$(var.SbomPath)" Name="sbom.spdx.json" />
             <RegistryValue
               Root="HKCU"

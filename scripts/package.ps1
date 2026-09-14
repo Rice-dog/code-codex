@@ -38,6 +38,8 @@ if ($LASTEXITCODE -ne 0) { throw "SBOM generation failed" }
 if ($LASTEXITCODE -ne 0) { throw "SBOM verification failed" }
 $thirdPartyNotices = Join-Path $Artifacts "THIRD_PARTY.md"
 $thirdPartyLicenses = Join-Path $Artifacts "THIRD_PARTY_LICENSES.txt"
+$visualEffectNoticesEn = Join-Path $RepoRoot "THIRD_PARTY_NOTICES_EN.md"
+$visualEffectNoticesZh = Join-Path $RepoRoot "THIRD_PARTY_NOTICES_ZH_CN.md"
 & node (Join-Path $PSScriptRoot "generate-third-party.mjs") $thirdPartyNotices $thirdPartyLicenses
 if ($LASTEXITCODE -ne 0) { throw "Third-party notice generation failed" }
 $binary = Join-Path $RepoRoot "target\release\code-codex.exe"
@@ -73,6 +75,8 @@ Copy-Item -LiteralPath $uninstallProgram -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.md") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.en.md") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination $StageFullPath
+Copy-Item -LiteralPath $visualEffectNoticesEn -Destination $StageFullPath
+Copy-Item -LiteralPath $visualEffectNoticesZh -Destination $StageFullPath
 $docsPath = Join-Path $RepoRoot "docs"
 if (Test-Path -LiteralPath $docsPath -PathType Container) {
     Copy-Item -LiteralPath $docsPath -Destination $StageFullPath -Recurse
@@ -120,6 +124,8 @@ $msi = Join-Path $Artifacts "CodeCodex-$Version-x64.msi"
     -UninstallBinaryPath $uninstallBinary `
     -OutputPath $msi `
     -ThirdPartyLicensesPath $thirdPartyLicenses `
+    -VisualEffectNoticesEnPath $visualEffectNoticesEn `
+    -VisualEffectNoticesZhPath $visualEffectNoticesZh `
     -SbomPath (Join-Path $Artifacts "sbom.spdx.json")
 
 $downloadUninstaller = Join-Path $Artifacts "Uninstall-CodeCodex.exe"

@@ -214,4 +214,4 @@ releases/              已生成的可下载安装包
 
 ## 许可证
 
-[MIT](LICENSE)。
+[MIT](LICENSE)。第三方效果的来源、修改内容和许可证边界见[第三方声明](THIRD_PARTY_NOTICES_ZH_CN.md)。

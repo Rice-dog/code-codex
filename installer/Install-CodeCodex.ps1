@@ -242,6 +242,8 @@ foreach ($document in @(
     "README.md",
     "README.en.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES_EN.md",
+    "THIRD_PARTY_NOTICES_ZH_CN.md",
     "THIRD_PARTY_LICENSES.txt",
     "sbom.spdx.json"
 )) {
