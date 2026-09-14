@@ -8,6 +8,8 @@ param(
     [string]$UninstallBinaryPath,
     [string]$OutputPath,
     [string]$ThirdPartyLicensesPath,
+    [string]$VisualEffectNoticesEnPath,
+    [string]$VisualEffectNoticesZhPath,
     [string]$SbomPath,
     [string]$WixPath
 )
@@ -72,10 +74,18 @@ $licensePath = Join-Path $RepoRoot "LICENSE"
 if ([string]::IsNullOrWhiteSpace($ThirdPartyLicensesPath)) {
     $ThirdPartyLicensesPath = Join-Path $RepoRoot "THIRD_PARTY_LICENSES.txt"
 }
+if ([string]::IsNullOrWhiteSpace($VisualEffectNoticesEnPath)) {
+    $VisualEffectNoticesEnPath = Join-Path $RepoRoot "THIRD_PARTY_NOTICES_EN.md"
+}
+if ([string]::IsNullOrWhiteSpace($VisualEffectNoticesZhPath)) {
+    $VisualEffectNoticesZhPath = Join-Path $RepoRoot "THIRD_PARTY_NOTICES_ZH_CN.md"
+}
 if ([string]::IsNullOrWhiteSpace($SbomPath)) {
     $SbomPath = Join-Path $RepoRoot "artifacts\sbom.spdx.json"
 }
 $ThirdPartyLicensesPath = [IO.Path]::GetFullPath($ThirdPartyLicensesPath)
+$VisualEffectNoticesEnPath = [IO.Path]::GetFullPath($VisualEffectNoticesEnPath)
+$VisualEffectNoticesZhPath = [IO.Path]::GetFullPath($VisualEffectNoticesZhPath)
 $SbomPath = [IO.Path]::GetFullPath($SbomPath)
 $sourcePath = Join-Path $RepoRoot "installer\Package.wxs"
 $settingsCleanupProject = Join-Path $RepoRoot "installer\SettingsCleanupCA.vcxproj"
@@ -92,6 +102,8 @@ foreach ($requiredPath in @(
     $readmePath,
     $licensePath,
     $ThirdPartyLicensesPath,
+    $VisualEffectNoticesEnPath,
+    $VisualEffectNoticesZhPath,
     $SbomPath,
     $sourcePath,
     $settingsCleanupProject,
@@ -199,6 +211,8 @@ try {
         "-d", "ReadmePath=$readmePath",
         "-d", "LicensePath=$licensePath",
         "-d", "ThirdPartyLicensesPath=$ThirdPartyLicensesPath",
+        "-d", "VisualEffectNoticesEnPath=$VisualEffectNoticesEnPath",
+        "-d", "VisualEffectNoticesZhPath=$VisualEffectNoticesZhPath",
         "-d", "SbomPath=$SbomPath",
         "-d", "SettingsCleanupCAPath=$settingsCleanupCAPath",
         "-pdbtype", "none",
