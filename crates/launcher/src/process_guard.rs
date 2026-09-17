@@ -1125,6 +1125,117 @@ pub fn verify_listener_executable(
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DebugListenerCandidate {
+    executable_path: String,
+    command_line: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DebugListenerCandidates {
+    candidates: Vec<DebugListenerCandidate>,
+}
+
+/// Find the loopback CDP listener of an already-running official Codex browser
+/// process. Candidate command lines are treated as untrusted observations and
+/// every selected port is verified again against the canonical official
+/// executable before it can be used.
+pub fn discover_listener_port(
+    official_executable: &Path,
+) -> Result<Option<u16>, ProcessGuardError> {
+    #[cfg(not(windows))]
+    {
+        let _ = official_executable;
+        Ok(None)
+    }
+    #[cfg(windows)]
+    {
+        const MAX_OUTPUT_BYTES: usize = 256 * 1024;
+        const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $items=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.CommandLine -and $_.CommandLine -match '(?i)(^|\s)--remote-debugging-port(?:=|\s+)' } | Select-Object ExecutablePath,CommandLine); [pscustomobject]@{Candidates=$items} | ConvertTo-Json -Compress -Depth 3"#;
+
+        let official_executable = dunce::canonicalize(official_executable)
+            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        if !official_executable.is_file() {
+            return Err(ProcessGuardError::OwnershipUnknown);
+        }
+        let powershell = trusted_powershell().ok_or(ProcessGuardError::OwnershipUnknown)?;
+        let output = StdCommand::new(powershell)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                SCRIPT,
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        if !output.status.success()
+            || output.stdout.is_empty()
+            || output.stdout.len() > MAX_OUTPUT_BYTES
+        {
+            return Err(ProcessGuardError::OwnershipUnknown);
+        }
+        let snapshot: DebugListenerCandidates = serde_json::from_slice(&output.stdout)
+            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        let expected = official_executable.to_string_lossy().to_lowercase();
+        let mut candidate_ports = HashSet::new();
+        for candidate in snapshot.candidates {
+            let Ok(executable) = dunce::canonicalize(&candidate.executable_path) else {
+                continue;
+            };
+            if executable.to_string_lossy().to_lowercase() != expected {
+                continue;
+            }
+            let Some(port) = loopback_debugging_port(&candidate.command_line) else {
+                continue;
+            };
+            candidate_ports.insert(port);
+        }
+        let ports: HashSet<_> = candidate_ports
+            .into_iter()
+            .filter(|port| verify_listener_executable(*port, &official_executable).is_ok())
+            .collect();
+        match ports.len() {
+            0 => Ok(None),
+            1 => Ok(ports.into_iter().next()),
+            _ => Err(ProcessGuardError::OwnershipUnknown),
+        }
+    }
+}
+
+fn loopback_debugging_port(command_line: &str) -> Option<u16> {
+    if command_line_switch(command_line, "--type").is_some() {
+        return None;
+    }
+    let address = command_line_switch(command_line, "--remote-debugging-address")?;
+    if address != "127.0.0.1" {
+        return None;
+    }
+    command_line_switch(command_line, "--remote-debugging-port")?
+        .parse()
+        .ok()
+}
+
+fn command_line_switch<'a>(command_line: &'a str, name: &str) -> Option<&'a str> {
+    let mut tokens = command_line.split_whitespace().peekable();
+    while let Some(raw) = tokens.next() {
+        let token = raw.trim_matches(['"', '\'']);
+        if token.eq_ignore_ascii_case(name) {
+            return tokens.next().map(|value| value.trim_matches(['"', '\'']));
+        }
+        if let Some((prefix, value)) = token.split_once('=')
+            && prefix.eq_ignore_ascii_case(name)
+        {
+            return Some(value.trim_matches(['"', '\'']));
+        }
+    }
+    None
+}
+
 #[cfg(windows)]
 fn ownership_script(port: u16) -> String {
     format!(
@@ -1379,6 +1490,28 @@ fn path_starts_with(candidate: &Path, root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_only_root_loopback_debugging_ports() {
+        assert_eq!(
+            loopback_debugging_port(
+                r#""C:\Program Files\WindowsApps\OpenAI.Codex\app\ChatGPT.exe" --remote-debugging-address=127.0.0.1 --remote-debugging-port=11512"#,
+            ),
+            Some(11512),
+        );
+        assert_eq!(
+            loopback_debugging_port(
+                r#"ChatGPT.exe --type=renderer --remote-debugging-address=127.0.0.1 --remote-debugging-port=11512"#,
+            ),
+            None,
+        );
+        assert_eq!(
+            loopback_debugging_port(
+                r#"ChatGPT.exe --remote-debugging-address=0.0.0.0 --remote-debugging-port=11512"#,
+            ),
+            None,
+        );
+    }
 
     #[test]
     fn quotes_windows_arguments_with_spaces_and_empty_values() {

@@ -94,6 +94,8 @@ export interface FlatTreeRow {
 
 export interface BootstrapConfig {
   token?: string;
+  binding?: string;
+  receiver?: string;
   supported?: boolean;
   compatible?: boolean;
   version?: string;
@@ -128,6 +130,11 @@ declare global {
     __codeCodexNative?: ((payload: string) => unknown) | ObjectBridge;
     __codeCodexReceive?: (message: BridgeMessage | string) => void;
     __codeCodexInject?: () => HTMLElement | null;
+    __codeCodexRuntimeOwner?: {
+      version: string;
+      tagName: string;
+      inject: () => HTMLElement | null;
+    };
     electronBridge?: CodexElectronBridge;
   }
 }

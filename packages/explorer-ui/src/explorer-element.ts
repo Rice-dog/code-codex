@@ -11839,7 +11839,7 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
 
-    this.#bridge = new ExplorerBridge(bootstrap.token ?? "");
+    this.#bridge = new ExplorerBridge(bootstrap.token ?? "", bootstrap.binding, bootstrap.receiver);
     this.#unsubscribe = this.#bridge.subscribe((notification) => this.#onNotification(notification.method, notification.params));
     if (!this.#bridge.available) {
       this.#setState("error", "NO_BRIDGE");
@@ -12101,7 +12101,7 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
 
-    const bridge = new ExplorerBridge(bootstrap.token ?? "");
+    const bridge = new ExplorerBridge(bootstrap.token ?? "", bootstrap.binding, bootstrap.receiver);
     this.#bridge = bridge;
     this.#unsubscribe = bridge.subscribe((notification) => this.#onNotification(notification.method, notification.params));
     if (!bridge.available) {
@@ -20035,7 +20035,7 @@ export class CodeCodexElement extends HTMLElement {
       }
       this.#updateInstallPending = false;
       this.#closeUpdateDialog(false);
-      this.#updateCheckSummary = `Code-Codex v${result.latestVersion} setup is open. Finish installation, then restart Codex.`;
+      this.#updateCheckSummary = `Code-Codex v${result.latestVersion} setup is open. Finish installation; the running Codex window will activate it automatically.`;
       this.#showActionNotice(this.#updateCheckSummary);
     } catch (error) {
       if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;

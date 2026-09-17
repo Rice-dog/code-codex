@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use cdp_client::{CapabilityToken, PRIMARY_BINDING_NAME};
+use cdp_client::CapabilityToken;
+#[cfg(test)]
+use cdp_client::{PRIMARY_BINDING_NAME, PRIMARY_RECEIVER_NAME};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -20,6 +22,7 @@ pub enum BootstrapError {
 struct BootstrapMetadata<'a> {
     token: &'a str,
     binding: &'a str,
+    receiver: &'a str,
     codex_version: &'a str,
     channel: &'a str,
     compatible: bool,
@@ -56,6 +59,8 @@ fn validate_bundle_path(path: &Path) -> Result<PathBuf, BootstrapError> {
 pub fn build_bootstrap(
     bundle_source: &BundleSource,
     token: &CapabilityToken,
+    binding: &str,
+    receiver: &str,
     codex_version: &str,
     channel: &str,
     compatible: bool,
@@ -75,7 +80,8 @@ pub fn build_bootstrap(
     }
     let metadata = BootstrapMetadata {
         token: token.expose(),
-        binding: PRIMARY_BINDING_NAME,
+        binding,
+        receiver,
         codex_version,
         channel,
         compatible,
@@ -104,6 +110,8 @@ mod tests {
         let source = build_bootstrap(
             &BundleSource::DevelopmentOverride(bundle),
             &token,
+            PRIMARY_BINDING_NAME,
+            PRIMARY_RECEIVER_NAME,
             "26.715.3651.0",
             "beta",
             true,
@@ -144,8 +152,17 @@ mod tests {
         let source = resolve_bundle(None).expect("embedded source");
         assert!(matches!(source, BundleSource::Embedded));
         let token = CapabilityToken::generate();
-        let bootstrap = build_bootstrap(&source, &token, "26.715.3651.0", "beta", true, true)
-            .expect("embedded bootstrap");
+        let bootstrap = build_bootstrap(
+            &source,
+            &token,
+            PRIMARY_BINDING_NAME,
+            PRIMARY_RECEIVER_NAME,
+            "26.715.3651.0",
+            "beta",
+            true,
+            true,
+        )
+        .expect("embedded bootstrap");
         assert!(bootstrap.len() > token.expose().len() + 1_000);
         assert!(bootstrap.contains("\"manualWorkspace\":true"));
     }

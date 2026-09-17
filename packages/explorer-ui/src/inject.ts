@@ -21,15 +21,19 @@ import {
   isExplorerDismissedForSession,
 } from "./session-state";
 
-export const EXPLORER_TAG = "code-codex";
+declare const __CODE_CODEX_VERSION__: string;
+
+const UI_VERSION = __CODE_CODEX_VERSION__;
+export const EXPLORER_TAG = `code-codex-v${UI_VERSION.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 const DISMISS_EVENT = "code-codex:dismiss";
 const RESELECTION_LISTENER_STATE = Symbol.for("code-codex:reselection-listener:v1");
 const SHELL_LAYOUT_STYLE_SELECTOR = 'style[data-code-codex-shell-layout="codex-26.715"]';
 const PARTICLE_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-particle-background="v1"]';
 const GLOW_HORIZON_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-glow-horizon-background="v1"]';
 const TRANSPARENT_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-transparent-background="v1"]';
+const OWNED_EXPLORER_SELECTOR = '[data-code-codex-owned="true"]';
 const SHELL_LAYOUT_CSS = `
-code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + ${MAIN_SURFACE_SELECTOR} > header[data-app-shell-header-edge-scroll] {
+${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + ${MAIN_SURFACE_SELECTOR} > header[data-app-shell-header-edge-scroll] {
   position: absolute !important;
   top: 0 !important;
   right: 0 !important;
@@ -38,8 +42,8 @@ code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface
 }
 
 @container thread-content (min-width: 600px) {
-  code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + ${MAIN_SURFACE_SELECTOR} .thread-scroll-container[data-app-action-timeline-scroll] > div > [data-mcp-app-portal-target="true"],
-  code-codex[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + ${MAIN_SURFACE_SELECTOR} .thread-scroll-container[data-app-action-timeline-scroll] [data-pip-obstacle="thread-footer"] {
+  ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + ${MAIN_SURFACE_SELECTOR} .thread-scroll-container[data-app-action-timeline-scroll] > div > [data-mcp-app-portal-target="true"],
+  ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:main.main-surface"]:not([data-collapsed="true"]) + ${MAIN_SURFACE_SELECTOR} .thread-scroll-container[data-app-action-timeline-scroll] [data-pip-obstacle="thread-footer"] {
     max-width: min(var(--thread-content-max-width), calc(100% - 100px)) !important;
   }
 }
@@ -147,14 +151,14 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [class*
   background-image: none !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body code-codex[data-placement="inline"] {
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"] {
   position: relative !important;
   z-index: 3 !important;
   opacity: 1 !important;
   visibility: visible !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body code-codex[data-placement="drawer"] {
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body ${OWNED_EXPLORER_SELECTOR}[data-placement="drawer"] {
   z-index: 2147483000 !important;
   opacity: 1 !important;
   visibility: visible !important;
@@ -262,14 +266,14 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [cl
   background-image: none !important;
 }
 
-html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body code-codex[data-placement="inline"] {
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"] {
   position: relative !important;
   z-index: 3 !important;
   opacity: 1 !important;
   visibility: visible !important;
 }
 
-html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body code-codex[data-placement="drawer"] {
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body ${OWNED_EXPLORER_SELECTOR}[data-placement="drawer"] {
   z-index: 2147483000 !important;
   opacity: 1 !important;
   visibility: visible !important;
@@ -300,6 +304,40 @@ let remountObserver: MutationObserver | undefined;
 let remountFrame: number | undefined;
 let remountEnabled = !sessionDismissed();
 let dismissListenerInstalled = false;
+
+function versionParts(version: string): number[] {
+  return version.split(".").map((part) => {
+    const match = /^\d+/.exec(part);
+    return match ? Number.parseInt(match[0], 10) : 0;
+  });
+}
+
+function compareVersions(left: string, right: string): number {
+  const a = versionParts(left);
+  const b = versionParts(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function claimRuntimeOwnership(): boolean {
+  const current = window.__codeCodexRuntimeOwner;
+  if (current && compareVersions(current.version, UI_VERSION) > 0) return false;
+  window.__codeCodexRuntimeOwner = {
+    version: UI_VERSION,
+    tagName: EXPLORER_TAG,
+    inject: injectExplorer,
+  };
+  return true;
+}
+
+function removeSupersededExplorers(): void {
+  for (const explorer of document.querySelectorAll<HTMLElement>(OWNED_EXPLORER_SELECTOR)) {
+    if (explorer.localName !== EXPLORER_TAG) explorer.remove();
+  }
+}
 
 interface MountPoint {
   parent: Element;
@@ -559,12 +597,14 @@ function installRemountObserver(): void {
 }
 
 export function installInjector(): void {
+  if (!claimRuntimeOwnership()) return;
   window.__codeCodexInject = injectExplorer;
   installTransparentBackgroundStyle();
   installParticleBackgroundStyle();
   installGlowHorizonBackgroundStyle();
   installReselectionListener();
   const start = () => {
+    removeSupersededExplorers();
     const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     const explorer = injectExplorer();
     if (existing && explorer === existing && !sessionDismissed()) {

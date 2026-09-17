@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.2.21"
+    [string]$Version = "0.2.23"
 )
 
 $ErrorActionPreference = "Stop"
@@ -385,4 +385,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "The Codex or ChatGPT desktop shortcut could not be redirected, or the Code-Codex shortcut could not be created (exit code $LASTEXITCODE)."
 }
 
-Write-Host "Installed Code-Codex $Version. The Codex, ChatGPT, or Code-Codex desktop shortcut now starts Code-Codex."
+$installedCommandLine = Join-Path $VersionRoot "code-codex.exe"
+try {
+    Start-Process `
+        -FilePath $installedCommandLine `
+        -ArgumentList @("activate") `
+        -WindowStyle Hidden | Out-Null
+}
+catch {
+    Write-Warning "Code-Codex was installed, but the currently open Codex window could not be updated automatically: $($_.Exception.Message)"
+}
+
+Write-Host "Installed Code-Codex $Version. The current Codex window will update automatically when Code-Codex is already active; future launches use the Codex, ChatGPT, or Code-Codex desktop shortcut."

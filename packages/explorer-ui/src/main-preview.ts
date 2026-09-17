@@ -58,7 +58,9 @@ declare const __CODE_CODEX_PPT_WORKER_SOURCE__: string;
 declare const __CODE_CODEX_PPT_WASM_BASE64__: string;
 declare const __CODE_CODEX_PPT_VIEWER_STYLES__: string;
 
-export const MAIN_PREVIEW_TAG = "code-codex-main-preview";
+declare const __CODE_CODEX_VERSION__: string;
+
+export const MAIN_PREVIEW_TAG = `code-codex-main-preview-v${__CODE_CODEX_VERSION__.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 export const MAIN_PREVIEW_ACTIVATE_EVENT = "cle-main-preview-activate";
 export const MAIN_PREVIEW_CLOSE_EVENT = "cle-main-preview-close";
 export const MAIN_PREVIEW_DRAFT_EVENT = "cle-main-preview-draft";

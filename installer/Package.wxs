@@ -81,6 +81,13 @@
       Execute="deferred"
       Impersonate="yes"
       Return="check" />
+    <CustomAction
+      Id="ActivateRunningCodeCodex"
+      FileRef="CommandLineExecutable"
+      ExeCommand="activate"
+      Execute="immediate"
+      Impersonate="yes"
+      Return="asyncNoWait" />
 
     <InstallExecuteSequence>
       <Custom
@@ -103,6 +110,10 @@
         Action="CommitCodexShortcutInstall"
         After="InstallCodexShortcut"
         Condition="NOT Installed AND NOT (REMOVE = &quot;ALL&quot;)" />
+      <Custom
+        Action="ActivateRunningCodeCodex"
+        After="InstallFinalize"
+        Condition="NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom
         Action="RollbackCodexShortcutRemoval"
         Before="RestoreCodexShortcut"
