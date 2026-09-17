@@ -2,6 +2,28 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.21 — Pixel Sculpt 图片库与禁用态设置
+
+- 插件未启用时也可打开并调整完整参数面板，设置会在下次启用时生效。
+- 图片库改为按点击顺序加入播放队列，并支持清除顺序、紧凑编号与按队列前后切换。
+- 图片库缩略图直接显示原始颜色，不再应用灰度处理。
+
+## v0.2.20 — Pixel Sculpt 设置面板统一
+
+- Pixel Sculpt 参数面板改用 Particle Image Background 的滑杆、按钮、开关、间距与分组视觉规范。
+- 本地图片库改为一致的三列缩略图布局、选中状态、顺序标记和删除按钮样式。
+- 保留原有渲染、交互、图片切换及参数逻辑。
+
+## v0.2.19 — 启动修复（本地集成）
+
+- 修复 Pixel Sculpt 默认图片使 UI 包超过旧限制后，Code-Codex 无法启动的问题。
+- 保留有界的 UI 包大小校验，并为后续背景资源预留安全空间。
+
+## v0.2.18 — Pixel Sculpt Background（本地集成）
+
+- 图片立体像素浮雕背景、中英文二级设置与本地图片库。
+- 原生深色外观、自动变形切换及暂停／重置。
+
 ## v0.2.16
 
 Project Adjustments

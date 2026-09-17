@@ -1,4 +1,5 @@
-﻿import { ActiveThreadTracker } from "./active-thread";
+﻿import { PIXEL_SCULPT_CONTROLS_HTML, startPixelSculptRuntime } from "./pixel-sculpt-runtime";
+import { ActiveThreadTracker } from "./active-thread";
 import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
@@ -92,6 +93,7 @@ const GLOW_HORIZON_BACKGROUND_PLUGIN_ID = "code-codex.glow-horizon-background";
 const HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID = "code-codex.heavenly-cloud-background";
 const AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID = "code-codex.aurora-ionosphere-background";
 const MOUNTAIN_BACKGROUND_PLUGIN_ID = "code-codex.layered-mountain-background";
+const PIXEL_SCULPT_BACKGROUND_PLUGIN_ID = "code-codex.pixel-sculpt-background";
 const CLOUD_TRAIN_BACKGROUND_PLUGIN_ID = "code-codex.cloud-train-background";
 const MILKY_WAY_BACKGROUND_PLUGIN_ID = "code-codex.milky-way-background";
 const APPEARANCE_PLUGIN_IDS = new Set([
@@ -104,6 +106,7 @@ const APPEARANCE_PLUGIN_IDS = new Set([
   MILKY_WAY_BACKGROUND_PLUGIN_ID,
   MOUNTAIN_BACKGROUND_PLUGIN_ID,
   CLOUD_TRAIN_BACKGROUND_PLUGIN_ID,
+  PIXEL_SCULPT_BACKGROUND_PLUGIN_ID,
 ]);
 export const TRANSPARENT_BACKGROUND_ATTRIBUTE = "data-code-codex-transparent-background";
 export const TRANSPARENT_BACKGROUND_COLOR_PROPERTY = "--code-codex-window-background";
@@ -613,6 +616,7 @@ type DarkBackgroundPluginId =
   | typeof AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
   | typeof MILKY_WAY_BACKGROUND_PLUGIN_ID
   | typeof MOUNTAIN_BACKGROUND_PLUGIN_ID
+  | typeof PIXEL_SCULPT_BACKGROUND_PLUGIN_ID
   | typeof CLOUD_TRAIN_BACKGROUND_PLUGIN_ID;
 
 interface ParticleThemeLease {
@@ -1943,6 +1947,7 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
         || lease.owner === AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
         || lease.owner === MILKY_WAY_BACKGROUND_PLUGIN_ID
         || lease.owner === MOUNTAIN_BACKGROUND_PLUGIN_ID
+        || lease.owner === PIXEL_SCULPT_BACKGROUND_PLUGIN_ID
         || lease.owner === CLOUD_TRAIN_BACKGROUND_PLUGIN_ID
         ? lease.owner
         : undefined;
@@ -8386,6 +8391,301 @@ function getCloudTrainBackgroundController(): CloudTrainBackgroundController {
 
 // Independently implemented from the publicly presented Black Hole Hero Section
 // visual concept by @yura; no referenced component source or assets are intentionally included.
+type PixelSculptSettings = { paused: boolean };
+const PIXEL_SCULPT_DEFAULTS: PixelSculptSettings = { paused: false };
+function normalizePixelSculptSettings(value: unknown): PixelSculptSettings {return {paused:Boolean((value as PixelSculptSettings)?.paused)};}
+function readPixelSculptBackgroundSettings(): PixelSculptSettings {return {...PIXEL_SCULPT_DEFAULTS};}
+function writePixelSculptBackgroundSettings(_settings: PixelSculptSettings): void {}
+class PixelSculptRenderer {
+ readonly ready: Promise<void>;
+ #controls: HTMLElement;
+ #runtime: ReturnType<typeof startPixelSculptRuntime>;
+ #active = false;
+ constructor(layer:HTMLElement,canvas:HTMLCanvasElement,settings:PixelSculptSettings,onError:(message:string|undefined)=>void){
+   this.#controls=document.createElement('div');this.#controls.className='pixel-sculpt-controls';this.#controls.innerHTML=PIXEL_SCULPT_CONTROLS_HTML;
+   this.#runtime=startPixelSculptRuntime(canvas,this.#controls,onError);this.ready=this.#runtime.ready.then(()=>undefined);
+   this.#runtime.setPaused(true);layer.style.backgroundColor='#07070a';
+ }
+ mountControls(container:HTMLElement,language:BackgroundSettingsLanguage):void {if(this.#controls.parentElement!==container){container.replaceChildren(this.#controls);}this.#runtime.language(language);}
+ setActive(active:boolean,settings:PixelSculptSettings):void {this.#active=active;this.#runtime.setPaused(!active||settings.paused);}
+ setSettings(settings:PixelSculptSettings):void {this.#runtime.setPaused(!this.#active||settings.paused);}
+ replay():void {this.#runtime.replay();}
+ reset():void {this.#runtime.reset();}
+ dispose():void {this.#runtime.dispose();}
+}
+
+class PixelSculptBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readPixelSculptBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #canvas: HTMLCanvasElement | undefined;
+  #renderer: PixelSculptRenderer | undefined;
+  #editorOperation: Promise<void> | undefined;
+  #editorPending = false;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() { window.addEventListener("pagehide", this.#onPageHide, { once: true }); }
+  get settings(): PixelSculptSettings { return this.#settings; }
+  get enabled(): boolean { return this.#enabled; }
+  get pending(): boolean { return this.#pending; }
+  get editorPending(): boolean { return this.#editorPending; }
+  get editorReady(): boolean { return Boolean(this.#renderer); }
+  get error(): string | undefined { return this.#error; }
+  get stoppedForExternalThemeChange(): boolean { return this.#stoppedForExternalThemeChange; }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Pixel Sculpt Background is unavailable");
+  }
+  async prepareEditor(): Promise<void> {
+    if (this.#disposed) throw new Error("Pixel Sculpt Background is unavailable");
+    if (this.#renderer) { await this.#renderer.ready; return; }
+    if (this.#editorOperation) return this.#editorOperation;
+    const operation = this.#createEditor();
+    this.#editorOperation = operation;
+    try { await operation; } finally { if (this.#editorOperation === operation) this.#editorOperation = undefined; }
+  }
+  async #createEditor(): Promise<void> {
+    this.#editorPending = true;
+    this.#error = undefined;
+    this.#notify();
+    const layer = document.createElement("div");
+    layer.dataset.codeCodexParticleLayer = "v1";
+    layer.dataset.codeCodexPixelSculptLayer = "v1";
+    layer.setAttribute("aria-hidden", "true");
+    layer.style.backgroundColor = "#02090d";
+    const canvas = document.createElement("canvas");
+    canvas.className = "code-codex-particle-canvas code-codex-pixelSculpt-canvas";
+    layer.append(canvas);
+    let renderer: PixelSculptRenderer | undefined;
+    try {
+      renderer = new PixelSculptRenderer(layer, canvas, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+      this.#layer = layer;
+      this.#canvas = canvas;
+      this.#renderer = renderer;
+      await renderer.ready;
+    } catch (error) {
+      renderer?.dispose();
+      if (this.#renderer === renderer) this.#renderer = undefined;
+      if (this.#layer === layer) this.#layer = undefined;
+      if (this.#canvas === canvas) this.#canvas = undefined;
+      this.#error = error instanceof Error ? error.message : "Pixel Sculpt settings could not be loaded";
+      throw error;
+    } finally {
+      this.#editorPending = false;
+      this.#notify();
+    }
+  }
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try { await operation; } finally { if (this.#enableOperation === operation) this.#enableOperation = undefined; }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+      await this.prepareEditor();
+      if (this.#disposed || generation !== this.#generation || !this.#layer || !this.#renderer) return;
+      document.body.prepend(this.#layer);
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, "#02090d");
+      this.#renderer.setActive(true, this.#settings);
+      if (this.#disposed || generation !== this.#generation) return;
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Pixel Sculpt Background could not be enabled";
+      this.#detachPresentation();
+      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#detachPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: PixelSculptSettings): void {
+    this.#settings = normalizePixelSculptSettings(next);
+    writePixelSculptBackgroundSettings(this.#settings);
+    this.#renderer?.setSettings(this.#settings);
+    this.#notify();
+  }
+  reset(): void { this.updateSettings(PIXEL_SCULPT_DEFAULTS); this.#renderer?.reset(); }
+  replay(): void { this.#renderer?.replay(); }
+  mountControls(container: HTMLElement, language: BackgroundSettingsLanguage): void { this.#renderer?.mountControls(container, language); }
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#detachPresentation();
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer = undefined;
+    this.#canvas = undefined;
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #detachPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.setActive(false, this.#settings);
+    this.#layer?.remove();
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = PIXEL_SCULPT_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try { current = await readCodexAppearanceTheme(); }
+    catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) throw new Error("Another Code-Codex background is still using Dark mode");
+      if (lease && !lease.owner) writeParticleThemeLease({ ...lease, owner });
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Pixel Sculpt Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = PIXEL_SCULPT_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease || (lease.owner && lease.owner !== owner)) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) { clearParticleThemeLease(owner); return; }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  }
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
+    } catch { /* A transient read failure does not tear down the presentation. */ }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Pixel Sculpt Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#detachPresentation();
+    clearParticleThemeLease(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+  #notify(): void { for (const listener of this.#listeners) listener(); }
+  #onPageHide = (): void => { this.dispose(); };
+}
+
+const PIXEL_SCULPT_BACKGROUND_CONTROLLER = Symbol.for("code-codex:pixelSculpt-background-controller:v1");
+
+function getPixelSculptBackgroundController(): PixelSculptBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[PIXEL_SCULPT_BACKGROUND_CONTROLLER];
+  if (existing instanceof PixelSculptBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+  }
+  const controller = new PixelSculptBackgroundController();
+  globalState[PIXEL_SCULPT_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
+
+
+// Independently implemented from the publicly presented Black Hole Hero Section
+// visual concept by @yura; no referenced component source or assets are intentionally included.
+
 const BLACK_HOLE_VERTEX_SHADER = `
 attribute vec2 aPos;
 varying vec2 vUv;
@@ -10683,6 +10983,13 @@ function milkyWaySettingsPanelMarkup(): string {
 }
 
 
+function pixelSculptCardMarkup(): string {
+  return `<article class="preview-extension appearance-extension" data-appearance-plugin="${PIXEL_SCULPT_BACKGROUND_PLUGIN_ID}"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 13 6 3l4 7 2-4 3 7ZM4 7l2 2 2-2" fill="none" stroke="currentColor"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Pixel Sculpt Background</h4><span class="preview-extension-status pixelSculpt-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action pixelSculpt-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger pixelSculpt-settings-trigger" type="button" aria-label="Configure Pixel Sculpt Background" aria-haspopup="dialog" aria-controls="cle-pixelSculpt-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
+}
+function pixelSculptPanelMarkup(): string {
+ return `<section class="particle-settings-panel pixelSculpt-settings-panel" id="cle-pixelSculpt-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-pixelSculpt-title"><header class="particle-settings-header"><div class="particle-settings-heading"><p>${bilingualLabelMarkup("外观","Appearance")}</p><h3 id="cle-pixelSculpt-title">${bilingualLabelMarkup("像素雕塑设置","Pixel Sculpt settings")}</h3></div><div class="particle-settings-header-actions">${backgroundLanguageSwitchMarkup("cle-pixelSculpt-language")}<button class="particle-settings-close pixelSculpt-close" type="button" aria-label="Close settings">${icons.close}</button></div></header><div class="particle-settings-scroll"><p class="pixelSculpt-disabled">${bilingualLabelMarkup("插件尚未启用；这里的设置会在下次启用时生效。","The plugin is disabled; changes here apply the next time it is enabled.")}</p><div class="pixelSculpt-controls-host"></div><label class="particle-toggle-row pixelSculpt-paused-row">${bilingualLabelMarkup("暂停动画","Pause animation")}<input type="checkbox" class="pixelSculpt-paused"></label><div class="glow-horizon-actions pixelSculpt-actions"><button type="button" class="pixelSculpt-reset">${bilingualLabelMarkup("重置参数","Reset parameters")}</button></div><p class="particle-plugin-error pixelSculpt-error" role="status" hidden></p></div></section>`;
+}
+
 function cloudTrainCardMarkup(): string {
   return `<article class="preview-extension appearance-extension" data-appearance-plugin="${CLOUD_TRAIN_BACKGROUND_PLUGIN_ID}"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 13 6 3l4 7 2-4 3 7ZM4 7l2 2 2-2" fill="none" stroke="currentColor"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Cloud Train Background</h4><span class="preview-extension-status cloudTrain-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action cloudTrain-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger cloudTrain-settings-trigger" type="button" aria-label="Configure Cloud Train Background" aria-haspopup="dialog" aria-controls="cle-cloudTrain-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
 }
@@ -10788,6 +11095,10 @@ export class CodeCodexElement extends HTMLElement {
   readonly #enabledPreviewers = new Set<string>();
   readonly #enabledAppearancePlugins = new Set<string>();
   readonly #mountainController = getMountainBackgroundController();
+  readonly #pixelSculptController = getPixelSculptBackgroundController();
+  #pixelSculptUnsubscribe: (() => void) | undefined;
+  #pixelSculptInitialization: Promise<void> | undefined;
+  #pixelSculptEventsBound = false;
   readonly #cloudTrainController = getCloudTrainBackgroundController();
   #cloudTrainUnsubscribe: (() => void) | undefined;
   #cloudTrainInitialization: Promise<void> | undefined;
@@ -11044,7 +11355,7 @@ export class CodeCodexElement extends HTMLElement {
             <div class="preview-market-list">
               <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
                 <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}</div>
               </section>
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
@@ -11075,6 +11386,7 @@ export class CodeCodexElement extends HTMLElement {
       ${milkyWaySettingsPanelMarkup()}
       ${mountainPanelMarkup()}
       ${cloudTrainPanelMarkup()}
+      ${pixelSculptPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -11172,7 +11484,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 8) {
+    if (this.#backgroundLanguageInputs.length !== 9) {
       throw new Error("Background settings require six synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
@@ -11304,6 +11616,10 @@ export class CodeCodexElement extends HTMLElement {
     let normalizedAppearancePlugins = false;
     if (this.#mountainController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
     if (this.#cloudTrainController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
+    if (this.#pixelSculptController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
+    if (this.#enabledAppearancePlugins.has(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID)) {
+      this.#enabledAppearancePlugins.clear(); this.#enabledAppearancePlugins.add(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
+    }
     if (this.#enabledAppearancePlugins.has(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID)) {
       this.#enabledAppearancePlugins.clear(); this.#enabledAppearancePlugins.add(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
     }
@@ -11495,6 +11811,17 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderCloudTrain();
     });
     this.#bindCloudTrain();
+    this.#pixelSculptUnsubscribe?.();
+    this.#pixelSculptUnsubscribe = this.#pixelSculptController.subscribe(() => {
+      if(this.#pixelSculptController.stoppedForExternalThemeChange){this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);this.#writeEnabledAppearancePlugins();}
+      this.#renderPixelSculpt();
+    });
+    this.#pixelSculptInitialization = this.#cloudTrainInitialization.then(async()=>{
+      if(!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration))return;
+      if(this.#enabledAppearancePlugins.has(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID)){try{await this.#pixelSculptController.enable();}catch(error){this.#showActionNotice(String(error),"error");}}
+      this.#renderPixelSculpt();
+    });
+    this.#bindPixelSculpt();
 
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
@@ -11550,6 +11877,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#milkyWayBackgroundUnsubscribe?.();
     this.#milkyWayBackgroundUnsubscribe = undefined;
     this.#mountainUnsubscribe?.(); this.#mountainUnsubscribe=undefined; this.#mountainInitialization=undefined;
+    this.#pixelSculptUnsubscribe?.(); this.#pixelSculptUnsubscribe=undefined; this.#pixelSculptInitialization=undefined;
+    this.#closePixelSculpt();
     this.#cloudTrainUnsubscribe?.(); this.#cloudTrainUnsubscribe=undefined; this.#cloudTrainInitialization=undefined;
     this.#closeCloudTrain();
     this.#closeMountain();
@@ -11632,6 +11961,9 @@ export class CodeCodexElement extends HTMLElement {
     const auroraIonosphereWasEnabled = this.#enabledAppearancePlugins.delete(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
     const milkyWayWasEnabled = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
     const mountainWasEnabled = this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
+    const pixelSculptWasEnabled = this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
+    if(pixelSculptWasEnabled)this.#writeEnabledAppearancePlugins();
+    if(pixelSculptWasEnabled||this.#pixelSculptController.enabled||this.#pixelSculptController.pending)await this.#pixelSculptController.disable();
     const cloudTrainWasEnabled = this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
     if (cloudTrainWasEnabled) this.#writeEnabledAppearancePlugins();
     if (cloudTrainWasEnabled || this.#cloudTrainController.enabled || this.#cloudTrainController.pending) await this.#cloudTrainController.disable();
@@ -11824,7 +12156,7 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings")]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings"), this.#required<HTMLElement>("#cle-pixelSculpt-settings")]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -11927,6 +12259,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#renderMountain();
     this.#renderCloudTrain();
     requestAnimationFrame(() => this.#positionMountain());
+    this.#renderPixelSculpt();
+    requestAnimationFrame(() => this.#positionPixelSculpt());
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
     this.#renderGlowHorizonBackgroundPlugin();
@@ -12348,6 +12682,7 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowResize = (): void => {
     this.#positionMountain();
+    this.#positionPixelSculpt();
     this.#positionCloudTrain();
     this.#closeContextMenu(false);
     const marketHasFocus = this.#previewMarketPopover.contains(this.#shadow.activeElement);
@@ -12366,6 +12701,7 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowPointerDown = (event: PointerEvent): void => {
     const path = event.composedPath();
+    if(!path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))&&!path.includes(this.#required<HTMLElement>(".pixelSculpt-settings-trigger")))this.#closePixelSculpt();
     if (!path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings")) && !path.includes(this.#required<HTMLElement>(".cloudTrain-settings-trigger"))) this.#closeCloudTrain();
     if (!path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
         && !path.includes(this.#required<HTMLElement>(".mountain-settings-trigger"))) this.#closeMountain();
@@ -12403,6 +12739,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#auroraIonosphereSettingsPanel)
       && !path.includes(this.#milkyWaySettingsPanel)
       && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
       && !path.includes(this.#auroraIonosphereSettingsTrigger)
     ) {
@@ -12413,6 +12750,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#milkyWaySettingsPanel)
       && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
       && !path.includes(this.#milkyWaySettingsTrigger)
+      && !path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
     ) {
       this.#closeMilkyWaySettings(false);
@@ -12428,6 +12766,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#auroraIonosphereSettingsPanel)
       && !path.includes(this.#milkyWaySettingsPanel)
       && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
     ) {
       this.#closePreviewMarket(false);
@@ -15750,7 +16089,7 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
-  async #awaitBackgroundInitializations(operation: number, mountainSwitch = false, cloudTrainSwitch = false): Promise<boolean> {
+  async #awaitBackgroundInitializations(operation: number, mountainSwitch = false, cloudTrainSwitch = false, pixelSculptSwitch = false): Promise<boolean> {
     const generation = this.#appearanceInitializationGeneration;
     this.#particleBackgroundInitialization ??= this.#initializeParticleBackground(generation);
     await this.#particleBackgroundInitialization;
@@ -15774,6 +16113,10 @@ export class CodeCodexElement extends HTMLElement {
     await this.#milkyWayBackgroundInitialization;
     await this.#mountainInitialization;
     await this.#cloudTrainInitialization;
+    await this.#pixelSculptInitialization;
+    if(!pixelSculptSwitch&&(this.#pixelSculptController.enabled||this.#enabledAppearancePlugins.has(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID))){
+      await this.#pixelSculptController.disable();this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);this.#writeEnabledAppearancePlugins();
+    }
     if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceOperation) return false;
     if (!cloudTrainSwitch && (this.#cloudTrainController.enabled || this.#enabledAppearancePlugins.has(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID))) {
       await this.#cloudTrainController.disable();
@@ -18543,6 +18886,92 @@ export class CodeCodexElement extends HTMLElement {
   }
 
 
+  #closePixelSculpt(): void {
+    const panel=this.#shadow.querySelector<HTMLElement>("#cle-pixelSculpt-settings");
+    if(panel?.matches(":popover-open")) panel.hidePopover();
+    this.#shadow.querySelector(".pixelSculpt-settings-trigger")?.setAttribute("aria-expanded","false");
+  }
+  #positionPixelSculpt(): void {
+    const panel=this.#required<HTMLElement>("#cle-pixelSculpt-settings");
+    if(!panel.matches(":popover-open"))return;
+    const rect=this.#required<HTMLElement>(".pixelSculpt-settings-trigger").getBoundingClientRect();
+    panel.style.position="fixed"; panel.style.margin="0";
+    panel.style.maxHeight="calc(100vh - 24px)";
+    const width=Math.min(344,window.innerWidth-24);
+    panel.style.width=width+"px";
+    panel.style.left=Math.max(12,Math.min(rect.right+12,window.innerWidth-width-12))+"px";
+    panel.style.top=Math.max(12,Math.min(rect.top,window.innerHeight-panel.getBoundingClientRect().height-12))+"px";
+  }
+  #bindPixelSculpt(): void {
+    if(this.#pixelSculptEventsBound)return; this.#pixelSculptEventsBound=true;
+    const panel=this.#required<HTMLElement>("#cle-pixelSculpt-settings");
+    this.#required<HTMLButtonElement>(".pixelSculpt-enable").addEventListener("click",()=>void this.#togglePixelSculpt());
+    this.#required<HTMLButtonElement>(".pixelSculpt-settings-trigger").addEventListener("click",()=>{
+      if(panel.matches(":popover-open")){this.#closePixelSculpt();return;}
+      for(const other of this.#shadow.querySelectorAll<HTMLElement>(".particle-settings-panel")) if(other!==panel&&other.matches(":popover-open"))other.hidePopover();
+      this.#renderPixelSculpt(); panel.showPopover(); this.#positionPixelSculpt();
+      this.#required(".pixelSculpt-settings-trigger").setAttribute("aria-expanded","true");
+      this.#required<HTMLButtonElement>(".pixelSculpt-close").focus();
+      void this.#pixelSculptController.prepareEditor().then(()=>{
+        if(!this.#connected)return;
+        this.#renderPixelSculpt();
+        this.#positionPixelSculpt();
+      }).catch(()=>{ if(this.#connected)this.#renderPixelSculpt(); });
+    });
+    this.#required<HTMLButtonElement>(".pixelSculpt-close").addEventListener("click",()=>{this.#closePixelSculpt();this.#required<HTMLButtonElement>(".pixelSculpt-settings-trigger").focus();});
+    panel.addEventListener("keydown",event=>{if(event.key==="Escape"){event.stopPropagation();this.#closePixelSculpt();this.#required<HTMLButtonElement>(".pixelSculpt-settings-trigger").focus();}});
+    this.#previewMarketPopover.addEventListener("scroll",()=>this.#positionPixelSculpt());
+    panel.addEventListener("toggle",()=>{this.#required(".pixelSculpt-settings-trigger").setAttribute("aria-expanded",String(panel.matches(":popover-open")));});
+    this.#required<HTMLInputElement>(".pixelSculpt-paused").addEventListener("change",event=>this.#pixelSculptController.updateSettings({...this.#pixelSculptController.settings,paused:(event.target as HTMLInputElement).checked}));
+    this.#required(".pixelSculpt-reset").addEventListener("click",()=>this.#pixelSculptController.reset());
+  }
+  #renderPixelSculpt(): void {
+    const card=this.#shadow.querySelector<HTMLElement>('[data-appearance-plugin="'+PIXEL_SCULPT_BACKGROUND_PLUGIN_ID+'"]'); if(!card)return;
+    const c=this.#pixelSculptController, s=c.settings;
+    const busy=c.pending||c.editorPending||this.#appearanceTransitionPending||this.#appearancePluginPending;
+    const button=card.querySelector<HTMLButtonElement>(".pixelSculpt-enable")!;
+    button.textContent=c.enabled?"Disable":"Enable";button.disabled=busy;button.setAttribute("aria-pressed",String(c.enabled));button.setAttribute("aria-label",`${c.enabled?"Disable":"Enable"} Pixel Sculpt Background`);
+    const status=card.querySelector<HTMLElement>(".pixelSculpt-status")!;status.textContent=c.pending?"Applying…":c.error?"Unavailable":c.enabled?"Enabled":"Disabled";status.dataset.enabled=String(c.enabled);
+    this.#required<HTMLInputElement>(".pixelSculpt-paused").checked=s.paused;
+    this.#required<HTMLInputElement>(".pixelSculpt-paused").disabled=busy||!c.enabled;
+    this.#required<HTMLButtonElement>(".pixelSculpt-reset").disabled=busy||!c.editorReady;
+    this.#required<HTMLElement>(".pixelSculpt-disabled").hidden=c.enabled;
+    const controlsHost=this.#required<HTMLElement>(".pixelSculpt-controls-host");
+    controlsHost.hidden=!c.editorReady;
+    if(c.editorReady)c.mountControls(controlsHost,this.#backgroundSettingsLanguage);
+    const error=this.#required<HTMLElement>(".pixelSculpt-error");error.textContent=c.error??"";error.hidden=!c.error;
+  }
+  async #togglePixelSculpt(): Promise<void> {
+    if(this.#appearanceTransitionPending||this.#appearancePluginPending||this.#pixelSculptController.pending)return;
+    const operation=++this.#appearanceOperation;this.#appearanceTransitionPending=true;this.#renderPreviewMarket();
+    const controllers=[this.#particleBackgroundController,this.#blackHoleBackgroundController,this.#glowHorizonBackgroundController,this.#heavenlyCloudBackgroundController,this.#auroraIonosphereBackgroundController,this.#milkyWayBackgroundController,this.#mountainController,this.#cloudTrainController];
+    const ids=[PARTICLE_BACKGROUND_PLUGIN_ID,BLACK_HOLE_BACKGROUND_PLUGIN_ID,GLOW_HORIZON_BACKGROUND_PLUGIN_ID,HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,MILKY_WAY_BACKGROUND_PLUGIN_ID,MOUNTAIN_BACKGROUND_PLUGIN_ID,CLOUD_TRAIN_BACKGROUND_PLUGIN_ID];
+    let previous=-1;
+    try {
+      if(!await this.#awaitBackgroundInitializations(operation,true,true,true))return;
+      if(this.#pixelSculptController.enabled){await this.#pixelSculptController.disable();this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);}
+      else {
+        if(this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)){
+          if(!this.#bridge?.available)throw new Error("Restart Codex with Code-Codex to disable transparency first.");
+          await this.#setWindowTransparency(this.#bridge,false);this.#clearTransparentBackgroundPresentation();this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);this.#appearancePluginApplied=false;
+        }
+        for(let i=0;i<controllers.length;i++){if(controllers[i]!.enabled){previous=i;await controllers[i]!.disable(true);}this.#enabledAppearancePlugins.delete(ids[i]!);}
+        const lease=readParticleThemeLease();if(lease?.owner)transferParticleThemeLease(lease.owner,PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
+        await this.#pixelSculptController.enable();
+        if (!this.#connected || operation !== this.#appearanceOperation) { await this.#pixelSculptController.disable(); return; }
+        if(!this.#pixelSculptController.enabled)throw new Error(this.#pixelSculptController.error||"Pixel Sculpt Background could not be enabled");
+        this.#enabledAppearancePlugins.add(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+    } catch(error) {
+      this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
+      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch{}}
+      this.#writeEnabledAppearancePlugins();this.#showActionNotice(error instanceof Error?error.message:String(error),"error");
+    } finally {this.#appearanceTransitionPending=false;this.#renderPreviewMarket();}
+  }
+
+
+
   #readEnabledAppearancePlugins(): readonly string[] {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(APPEARANCE_PLUGIN_SETTINGS_KEY) || "[]");
@@ -19320,6 +19749,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #closePreviewMarket(restoreFocus: boolean): void {
+    this.#closePixelSculpt();
     this.#closeCloudTrain();
     this.#closeMountain();
     this.#closeMilkyWaySettings(false);
@@ -19350,6 +19780,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderPreviewMarket(): void {
+    this.#renderPixelSculpt();
     this.#renderCloudTrain();
     this.#renderMountain();
     this.#renderAppearancePlugin();

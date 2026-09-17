@@ -4,7 +4,7 @@ use cdp_client::{CapabilityToken, PRIMARY_BINDING_NAME};
 use serde::Serialize;
 use thiserror::Error;
 
-const MAX_UI_BUNDLE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_UI_BUNDLE_BYTES: u64 = 16 * 1024 * 1024;
 const EMBEDDED_UI_BUNDLE: &str = include_str!("../../../packages/explorer-ui/dist/explorer.js");
 
 #[derive(Debug, Error)]
@@ -129,6 +129,14 @@ mod tests {
         let bundle = directory.path().join("empty.js");
         fs::write(&bundle, "").expect("empty bundle");
         assert!(validate_bundle_path(&bundle).is_err());
+    }
+
+    #[test]
+    fn accepts_bundle_larger_than_legacy_limit() {
+        let directory = TempDir::new().expect("temp dir");
+        let bundle = directory.path().join("explorer.js");
+        fs::write(&bundle, vec![b'a'; 9 * 1024 * 1024]).expect("bundle");
+        assert!(validate_bundle_path(&bundle).is_ok());
     }
 
     #[test]

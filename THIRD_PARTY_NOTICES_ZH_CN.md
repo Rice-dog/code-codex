@@ -140,6 +140,18 @@ Code-Codex 的实现依据署名为上述作品的不完整截图或 Shader 片�
 
 以下效果依据公开展示的视觉概念或 Prompt，由 Code-Codex 独立实现。项目无意包含所参考作品的源码或素材。如果后续审计发现存在复制的代码或素材，应及时更新此分类。
 
+## Pixel Sculpt Background
+
+**所提供项目：** Pixel Sculpt — Interactive WebGL Study
+
+**项目声明的视觉参考：** React Bits Pro Pixel Sculpt
+
+**状态：** 源项目 README 声明为独立 WebGL2 实现；此处记录源项目声明，不代表已完成独立来源审计。默认向日葵图片的作者及再分发许可尚未记录。
+
+**Code-Codex 修改：** 全窗口渲染与输入转发、原生深色外观及恢复、中英文二级设置、本地参数和图片库持久化、上传限制、可见性与暂停处理及资源清理。保留所提供研究项目的着色器及像素棱柱几何。本声明不授予许可，也不表示 React Bits 的认可。
+
+---
+
 ## Particle Image Background / 粒子图像
 
 **视觉参考：** Particle Image — React Bits Pro  
