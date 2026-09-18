@@ -155,7 +155,8 @@ const PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION = 0.08;
 const PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT = 4.7438645;
 const PARTICLE_BACKGROUND_MORPH_SETTLE_ERROR = 0.0015;
 const PARTICLE_BACKGROUND_MORPH_SETTLE_VELOCITY = 0.005;
-const PARTICLE_BACKGROUND_MORPH_VISIBILITY_RELEASE_SECONDS = 0.42;
+const PARTICLE_BACKGROUND_MORPH_SETTLE_POSITION_PX = 0.05;
+const PARTICLE_BACKGROUND_MORPH_SETTLE_SPEED_PX_PER_SECOND = 0.2;
 const PARTICLE_BACKGROUND_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/avif";
 const PARTICLE_BACKGROUND_IMAGE_TYPES = new Set([
   "image/png",
@@ -2555,7 +2556,6 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   uniform float u_transitionFarResponse;
   uniform float u_transitionStagger;
   uniform float u_transitionActive;
-  uniform float u_transitionVisibility;
   uniform float u_dpr;
   uniform float u_particleSize;
   uniform float u_particleOpacity;
@@ -2921,7 +2921,6 @@ const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     vec2 restingPosition = home + ambientNow;
     float disturbed = smoothstep(0.75, 3.0, length(position - restingPosition));
     float lifecycleAlpha = mix(1.0, lifeAlpha, disturbed);
-    lifecycleAlpha = mix(lifecycleAlpha, 1.0, u_transitionVisibility);
     vec2 clip = vec2(position.x / u_resolution.x * 2.0 - 1.0, 1.0 - position.y / u_resolution.y * 2.0);
     gl_Position = vec4(clip, 0.0, 1.0);
     gl_PointSize = max(1.0, u_particleSize * u_dpr);
@@ -3003,7 +3002,7 @@ class ParticleImageRenderer {
   readonly #uniforms: Readonly<Record<
     "resolution" | "layout" | "pointerSegments" | "pointerMotion"
     | "pointerCount" | "time" | "transitionElapsed" | "transitionNearResponse" | "transitionFarResponse"
-    | "transitionStagger" | "transitionActive" | "transitionVisibility" | "dpr"
+    | "transitionStagger" | "transitionActive" | "dpr"
     | "particleSize" | "particleOpacity" | "speed" | "noiseScale" | "noiseStrength" | "dampingRate"
     | "ambientCycle" | "cursorStrength" | "cursorStrengthScales" | "cursorStrengthDerived",
     WebGLUniformLocation
@@ -3037,10 +3036,9 @@ class ParticleImageRenderer {
   #transitionClockCacheTime = Number.NaN;
   #transitionClockCache: ParticleTransitionClock | undefined;
   #transitionMaxResponse = DEFAULT_PARTICLE_BACKGROUND_SETTINGS.morphIntervalSeconds;
+  #transitionMaximumDistance = 0;
   #transitionVelocityRatio = 0;
   #transitionActive = false;
-  #transitionVisibility = 0;
-  #transitionReleaseStart = -100;
   #transitionRevision = 0;
   #transitionResolve: ((completed: boolean) => void) | undefined;
   #imageRevision = 0;
@@ -3051,7 +3049,6 @@ class ParticleImageRenderer {
   #renderSettingsUniformsDirty = true;
   #transitionConstantsUniformsDirty = true;
   #transitionActiveUniformDirty = true;
-  #transitionVisibilityUniformDirty = true;
   #transitionElapsedUniformDirty = true;
   #pointerGeometryUniformsDirty = true;
   #pointerCountUniformDirty = true;
@@ -3106,7 +3103,6 @@ class ParticleImageRenderer {
       transitionFarResponse: this.#requiredUniform("u_transitionFarResponse"),
       transitionStagger: this.#requiredUniform("u_transitionStagger"),
       transitionActive: this.#requiredUniform("u_transitionActive"),
-      transitionVisibility: this.#requiredUniform("u_transitionVisibility"),
       dpr: this.#requiredUniform("u_dpr"),
       particleSize: this.#requiredUniform("u_particleSize"),
       particleOpacity: this.#requiredUniform("u_particleOpacity"),
@@ -3216,7 +3212,10 @@ class ParticleImageRenderer {
     this.#transitionMaxResponse = canMorph
       ? this.#estimateMaximumTransitionResponse()
       : this.#transitionDuration;
-    if (!canMorph) this.#transitionVelocityRatio = 0;
+    if (!canMorph) {
+      this.#transitionMaximumDistance = 0;
+      this.#transitionVelocityRatio = 0;
+    }
     this.#uploadBuffer(this.#buffers.previousHome, this.#previousHomes);
     this.#uploadBuffer(this.#buffers.home, this.#homes);
     this.#uploadBuffer(this.#buffers.previousVelocity, this.#previousVelocities);
@@ -3362,6 +3361,15 @@ class ParticleImageRenderer {
     const response = Math.max(this.#transitionMaxResponse, 0.1);
     const omega = PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT / response;
     const carriedVelocity = Math.max(0, this.#transitionVelocityRatio);
+    const maximumDistance = Math.max(1, this.#transitionMaximumDistance);
+    const settleError = Math.min(
+      PARTICLE_BACKGROUND_MORPH_SETTLE_ERROR,
+      PARTICLE_BACKGROUND_MORPH_SETTLE_POSITION_PX / maximumDistance,
+    );
+    const settleVelocity = Math.min(
+      PARTICLE_BACKGROUND_MORPH_SETTLE_VELOCITY,
+      PARTICLE_BACKGROUND_MORPH_SETTLE_SPEED_PX_PER_SECOND / maximumDistance,
+    );
     const settled = (springElapsed: number): boolean => {
       const springTime = omega * springElapsed;
       const decay = Math.exp(-springTime);
@@ -3369,8 +3377,7 @@ class ParticleImageRenderer {
       const velocity = omega * (
         carriedVelocity + (1 + carriedVelocity) * springTime
       ) * decay;
-      return error <= PARTICLE_BACKGROUND_MORPH_SETTLE_ERROR
-        && velocity <= PARTICLE_BACKGROUND_MORPH_SETTLE_VELOCITY;
+      return error <= settleError && velocity <= settleVelocity;
     };
     let lower = 0;
     let upper = response;
@@ -3495,6 +3502,7 @@ class ParticleImageRenderer {
     let maximumResponse = this.#transitionNearResponse()
       * (1 - PARTICLE_BACKGROUND_MORPH_RESPONSE_VARIATION);
     let maximumVelocityRatio = 0;
+    let maximumDistance = 0;
     for (let index = 0; index < this.#count; index += 1) {
       const offset = index * 2;
       const homeX = x + (this.#homes[offset] ?? 0) * width;
@@ -3503,6 +3511,7 @@ class ParticleImageRenderer {
         homeX - (this.#previousHomes[offset] ?? 0),
         homeY - (this.#previousHomes[offset + 1] ?? 0),
       );
+      maximumDistance = Math.max(maximumDistance, distance);
       const response = this.#particleTransitionResponse(distance, this.#seeds[index] ?? 0);
       maximumResponse = Math.max(maximumResponse, response);
       const velocity = Math.hypot(
@@ -3512,6 +3521,7 @@ class ParticleImageRenderer {
       const omega = PARTICLE_BACKGROUND_CRITICAL_SPRING_95_PERCENT / response;
       maximumVelocityRatio = Math.max(maximumVelocityRatio, velocity / (omega * Math.max(distance, 1)));
     }
+    this.#transitionMaximumDistance = maximumDistance;
     this.#transitionVelocityRatio = maximumVelocityRatio;
     return maximumResponse;
   }
@@ -3535,11 +3545,8 @@ class ParticleImageRenderer {
     this.#transitionClockCacheTime = Number.NaN;
     this.#transitionClockCache = undefined;
     this.#transitionActive = active;
-    this.#transitionVisibility = active ? 1 : 0;
-    this.#transitionReleaseStart = -100;
     this.#transitionConstantsUniformsDirty = true;
     this.#transitionActiveUniformDirty = true;
-    this.#transitionVisibilityUniformDirty = true;
     this.#transitionElapsedUniformDirty = true;
     this.#onTransitionFrame(active ? 0 : 1, !active);
     if (!active) return Promise.resolve(true);
@@ -3554,10 +3561,7 @@ class ParticleImageRenderer {
     this.#transitionActive = false;
     this.#transitionClockCacheTime = Number.NaN;
     this.#transitionClockCache = undefined;
-    this.#transitionVisibility = 1;
-    this.#transitionReleaseStart = this.#simulationTime;
     this.#transitionActiveUniformDirty = true;
-    this.#transitionVisibilityUniformDirty = true;
     this.#transitionElapsedUniformDirty = true;
     this.#onTransitionFrame(1, true);
     const resolve = this.#transitionResolve;
@@ -3565,17 +3569,6 @@ class ParticleImageRenderer {
     this.#transitionResolve = undefined;
     this.#transitionRevision = 0;
     resolve?.(revision === this.#imageRevision && !this.#disposed);
-  }
-
-  #updateTransitionVisibility(): void {
-    if (this.#transitionActive || this.#transitionVisibility <= 0) return;
-    const elapsed = this.#simulationTime - this.#transitionReleaseStart;
-    const visibility = 1 - smootherParticleTransition(
-      elapsed / PARTICLE_BACKGROUND_MORPH_VISIBILITY_RELEASE_SECONDS,
-    );
-    if (visibility === this.#transitionVisibility) return;
-    this.#transitionVisibility = visibility;
-    this.#transitionVisibilityUniformDirty = true;
   }
 
   #clockSeconds(timestamp = performance.now()): number {
@@ -3703,14 +3696,14 @@ class ParticleImageRenderer {
     }
     this.#lastFrame = timestamp;
     const gl = this.#gl;
+    let completeTransitionAfterDraw = false;
     gl.clear(gl.COLOR_BUFFER_BIT);
     if (this.#count > 0) {
       const time = this.#simulationTime;
       if (this.#transitionActive) {
         this.#onTransitionFrame(this.#transitionProgress(), false);
-        if (this.#transitionSettled()) this.#completeTransition();
+        completeTransitionAfterDraw = this.#transitionSettled();
       }
-      this.#updateTransitionVisibility();
       while (
         this.#pointerSegments.length
         && time - (this.#pointerSegments[0]?.createdAt ?? time) > PARTICLE_BACKGROUND_MAX_LIFETIME_SECONDS
@@ -3775,10 +3768,6 @@ class ParticleImageRenderer {
         gl.uniform1f(this.#uniforms.transitionActive, this.#transitionActive ? 1 : 0);
         this.#transitionActiveUniformDirty = false;
       }
-      if (this.#transitionVisibilityUniformDirty) {
-        gl.uniform1f(this.#uniforms.transitionVisibility, this.#transitionVisibility);
-        this.#transitionVisibilityUniformDirty = false;
-      }
       if (this.#renderSettingsUniformsDirty) {
         gl.uniform1f(this.#uniforms.particleSize, this.#settings.particleSize);
         gl.uniform1f(this.#uniforms.particleOpacity, this.#settings.particleOpacity);
@@ -3811,6 +3800,10 @@ class ParticleImageRenderer {
       }
       gl.drawArrays(gl.POINTS, 0, this.#count);
     }
+    // Keep the transition shader active through the draw that uses the final
+    // spring state. Completing earlier skips that presentation frame and makes
+    // the renderer jump straight from the penultimate pose to the static grid.
+    if (completeTransitionAfterDraw) this.#completeTransition();
     if (scheduleNext) this.#scheduleFrame();
   }
 }
@@ -4499,11 +4492,19 @@ class ParticleBackgroundController {
       return;
     }
     const blend = smootherParticleTransition(this.#sourceTransitionProgress);
-    const particleReveal = 1 - Math.sin(this.#sourceTransitionProgress * Math.PI) ** 2 * 0.58;
+    const incomingOpacity = opacity * blend;
+    const outgoingContribution = opacity * this.#sourceTransitionOutgoingScale * (1 - blend);
+    const remainingCoverage = 1 - incomingOpacity;
+    // The current image is composited over the previous image. Compensate the
+    // lower layer so its effective source-over contribution follows the same
+    // crossfade curve instead of dimming twice beneath the incoming layer.
+    const outgoingOpacity = remainingCoverage > Number.EPSILON
+      ? Math.min(1, Math.max(0, outgoingContribution / remainingCoverage))
+      : 0;
     previousImage.style.opacity = String(
-      opacity * this.#sourceTransitionOutgoingScale * (1 - blend) * particleReveal,
+      outgoingOpacity,
     );
-    image.style.opacity = String(opacity * blend * particleReveal);
+    image.style.opacity = String(incomingOpacity);
     if (complete) this.#finishSourceTransition();
   }
 

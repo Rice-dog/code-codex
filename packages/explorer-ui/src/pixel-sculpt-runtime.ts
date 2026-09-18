@@ -39,68 +39,48 @@ function applyLanguage(lang){currentLang=lang;document.documentElement.lang=lang
 
 let W=0,H=0,DPR=2,stageW=0,cols=0,rows=0,imageAspect=1,instanceCount=0,sourceImage=null,pickData=new Float32Array(0);let pointer=[9999,9999],pointerInside=false,clickPos=[9999,9999],clickStart=-99,camPos=[0,0,0],vp=null,invVP=null;
 const MAX_PULSES=8,pulsePositions=new Float32Array(MAX_PULSES*2),pulseAges=new Float32Array(MAX_PULSES);let pulses=[];
-const staticVs=`#version 300 es
-precision highp float;
-layout(location=0)in vec3 aPos;layout(location=1)in vec3 aNormal;
-layout(location=2)in vec2 iCenter;layout(location=3)in vec3 iColor;layout(location=4)in float iLum;layout(location=5)in float iRand;
-uniform mat4 uVP;uniform float uDepth;uniform float uGap;uniform float uRadius;uniform float uStrength;uniform vec2 uPointer;uniform int uHover;uniform int uClick;uniform float uClickAge;uniform vec2 uClickPos;uniform float uClickStrength;uniform float uPulseSpeed;uniform int uPulseCount;uniform vec2 uPulsePos[8];uniform float uPulseAge[8];uniform int uColorMode;uniform int uInvert;uniform vec3 uBaseColor;
-out vec3 vColor;out vec3 vNormal;out vec3 vWorld;out float vTopness;out float vAlpha;
-float gauss(float x,float k){return exp(-x*x*k);}
-void main(){
-  vec2 center=iCenter;
-  vec3 sampleColor=iColor;
-  float sampleLum=iLum,sampleRand=iRand;
-  float lum=(uInvert==1)?(1.0-sampleLum):sampleLum;
-  float tileHeight=max(0.025,lum*uDepth);
-  float gapAmt=clamp(uGap,0.0,0.96),tileScale=max(0.02,1.0-gapAmt);
-  vec3 p=aPos,n=aNormal;p.xy*=tileScale;p.z*=tileHeight;
-  float d=distance(center,uPointer),radius=max(uRadius,0.001),infl=gauss(d/radius,2.35);
-  if(uHover==0){p.z+=infl*uStrength*0.95;}else if(uHover==1){vec2 dir=normalize(center-uPointer+vec2(cos(sampleRand*6.2831),sin(sampleRand*6.2831))*0.02);p.xy+=dir*infl*uStrength*0.55;p.z+=infl*uStrength*0.55;}
-  if(uClick==0){for(int pi=0;pi<8;pi++){if(pi>=uPulseCount)break;float age=max(uPulseAge[pi],0.0),rd=distance(center,uPulsePos[pi]),front=age*uPulseSpeed,diff=rd-front,ring=exp(-diff*diff*0.24),outwardFade=exp(-rd/max(uRadius*1.8,1.0));p.z+=ring*outwardFade*uClickStrength*1.85;}}
-  else if(uClick==1){float age=max(uClickAge,0.0),rd=distance(center,uClickPos),localT=clamp((age-rd*0.018)/1.15,0.0,1.0),rebuild=sin(localT*3.14159265),rebuildPower=uClickStrength*0.5,ang=sampleRand*6.2831853;vec2 jitter=vec2(cos(ang),sin(ang));p.xy+=jitter*rebuild*uClickStrength*0.08;p.z-=rebuild*(tileHeight+uDepth*0.55)*rebuildPower;}
-  vec3 world=vec3(center,0.0)+p;vWorld=world;vNormal=normalize(n);vTopness=clamp(vNormal.z*0.5+0.5,0.0,1.0);vAlpha=1.0;
-  if(uColorMode==0){vColor=sampleColor;}else if(uColorMode==1){vColor=uBaseColor;}else{vColor=uBaseColor*mix(0.18,1.0,lum);}
-  gl_Position=uVP*vec4(world,1.0);
-}`;
 const morphVs=`#version 300 es
 precision highp float;
 layout(location=0)in vec3 aPos;layout(location=1)in vec3 aNormal;
-layout(location=2)in vec2 iCenter;layout(location=3)in vec3 iColor;layout(location=4)in float iLum;layout(location=5)in float iRand;
-layout(location=6)in vec2 iTargetCenter;layout(location=7)in vec3 iTargetColor;layout(location=8)in float iTargetLum;layout(location=9)in float iTargetRand;
-uniform mat4 uVP;uniform float uTime;uniform float uDepth;uniform float uGap;uniform float uRadius;uniform float uStrength;uniform vec2 uPointer;uniform int uHover;uniform int uClick;uniform float uClickAge;uniform vec2 uClickPos;uniform float uClickStrength;uniform float uPulseSpeed;uniform int uPulseCount;uniform vec2 uPulsePos[8];uniform float uPulseAge[8];uniform int uColorMode;uniform int uInvert;uniform vec3 uBaseColor;
+layout(location=2)in vec2 iCenter;layout(location=3)in vec3 iColor;layout(location=4)in float iLum;layout(location=5)in float iRand;layout(location=6)in float iPresence;
+layout(location=7)in vec2 iTargetCenter;layout(location=8)in vec3 iTargetColor;layout(location=9)in float iTargetLum;layout(location=10)in float iTargetRand;layout(location=11)in float iTargetPresence;
+uniform mat4 uVP;uniform float uTime;uniform float uDepth;uniform float uGap;uniform float uRadius;uniform float uStrength;uniform vec2 uPointer;uniform int uHover;uniform int uClick;uniform float uClickAge;uniform vec2 uClickPos;uniform float uClickStrength;uniform float uPulseSpeed;uniform int uPulseCount;uniform vec2 uPulsePos[8];uniform float uPulseAge[8];uniform int uColorMode;uniform int uInvert;uniform int uRemoveBg;uniform vec3 uBaseColor;
 uniform float uTransition;uniform float uTransitionSpread;uniform int uMorphing;
-out vec3 vColor;out vec3 vNormal;out vec3 vWorld;out float vTopness;out float vAlpha;
+out vec3 vColor;out vec3 vNormal;out vec3 vWorld;out float vTopness;out float vAlpha;out float vMotion;
 float gauss(float x,float k){return exp(-x*x*k);}
 void main(){
   float morph=uMorphing==1?uTransition:0.0;
   vec2 center=mix(iCenter,iTargetCenter,morph);
   vec3 sampleColor=mix(iColor,iTargetColor,morph);
-  float sampleLum=mix(iLum,iTargetLum,morph),sampleRand=mix(iRand,iTargetRand,morph);
+  float sampleLum=mix(iLum,iTargetLum,morph),sampleRand=mix(iRand,iTargetRand,morph),presence=mix(iPresence,iTargetPresence,morph);
   float lum=(uInvert==1)?(1.0-sampleLum):sampleLum;
   float tileHeight=max(0.025,lum*uDepth);
   float gapAmt=clamp(uGap,0.0,0.96),tileScale=max(0.02,1.0-gapAmt);
-  vec3 p=aPos,n=aNormal;p.xy*=tileScale;p.z*=tileHeight;
+  vec3 p=aPos,n=aNormal;float presenceScale=smoothstep(0.0,1.0,presence);p.xy*=tileScale*presenceScale;p.z*=tileHeight*presenceScale;
+  float motion=0.0;
   if(uMorphing==1){
     vec2 delta=iTargetCenter-iCenter;
-    float arc=sin(morph*3.14159265),travel=length(iTargetCenter-iCenter),lift=arc*uTransitionSpread*(0.18+0.34*sampleRand);
+    float arc=sin(morph*3.14159265),foreground=uRemoveBg==1?smoothstep(0.025,0.14,max(sampleColor.r,max(sampleColor.g,sampleColor.b))):1.0;
+    motion=arc*foreground*presenceScale;
+    float travel=length(iTargetCenter-iCenter),lift=motion*uTransitionSpread*(0.18+0.34*sampleRand);
     vec2 tangent=travel>0.001?normalize(vec2(-delta.y,delta.x)):vec2(0.0);
     vec2 radial=length(center)>0.001?normalize(center):vec2(0.0,1.0);
     vec2 drift=vec2(cos(sampleRand*6.2831853),sin(sampleRand*6.2831853));
-    center+=tangent*arc*min(travel*0.08,uTransitionSpread*0.04)*(sampleRand-0.5);
-    center+=radial*arc*uTransitionSpread*0.12+drift*arc*uTransitionSpread*0.025;
+    center+=tangent*motion*min(travel*0.08,uTransitionSpread*0.04)*(sampleRand-0.5);
+    center+=radial*motion*uTransitionSpread*0.12+drift*motion*uTransitionSpread*0.025;
     p.z+=lift;
   }
   float d=distance(center,uPointer),radius=max(uRadius,0.001),infl=gauss(d/radius,2.35);
   if(uHover==0){p.z+=infl*uStrength*0.95;}else if(uHover==1){vec2 dir=normalize(center-uPointer+vec2(cos(sampleRand*6.2831),sin(sampleRand*6.2831))*0.02);p.xy+=dir*infl*uStrength*0.55;p.z+=infl*uStrength*0.55;}
   if(uClick==0){for(int pi=0;pi<8;pi++){if(pi>=uPulseCount)break;float age=max(uPulseAge[pi],0.0),rd=distance(center,uPulsePos[pi]),front=age*uPulseSpeed,diff=rd-front,ring=exp(-diff*diff*0.24),outwardFade=exp(-rd/max(uRadius*1.8,1.0));p.z+=ring*outwardFade*uClickStrength*1.85;}}
   else if(uClick==1){float age=max(uClickAge,0.0),rd=distance(center,uClickPos),localT=clamp((age-rd*0.018)/1.15,0.0,1.0),rebuild=sin(localT*3.14159265),rebuildPower=uClickStrength*0.5,ang=sampleRand*6.2831853;vec2 jitter=vec2(cos(ang),sin(ang));p.xy+=jitter*rebuild*uClickStrength*0.08;p.z-=rebuild*(tileHeight+uDepth*0.55)*rebuildPower;}
-  vec3 world=vec3(center,0.0)+p;vWorld=world;vNormal=normalize(n);vTopness=clamp(vNormal.z*0.5+0.5,0.0,1.0);vAlpha=1.0;
+  vec3 world=vec3(center,0.0)+p;vWorld=world;vNormal=normalize(n);vTopness=clamp(vNormal.z*0.5+0.5,0.0,1.0);vAlpha=presence>0.001?1.0:0.0;vMotion=motion;
   if(uColorMode==0){vColor=sampleColor;}else if(uColorMode==1){vColor=uBaseColor;}else{vColor=uBaseColor*mix(0.18,1.0,lum);}
   gl_Position=uVP*vec4(world,1.0);
 }`;
 const fs=`#version 300 es
 precision highp float;
-in vec3 vColor;in vec3 vNormal;in vec3 vWorld;in float vTopness;in float vAlpha;
+in vec3 vColor;in vec3 vNormal;in vec3 vWorld;in float vTopness;in float vAlpha;in float vMotion;
 uniform vec3 uCamPos;
 out vec4 outColor;
 void main(){
@@ -110,7 +90,7 @@ void main(){
   vec3 viewDir=normalize(uCamPos-vWorld);
   float diffuse=max(dot(n,lightDir),0.0);
   float topFace=smoothstep(0.86,0.98,vTopness);
-  float sideLight=0.34+0.50*diffuse;
+  float sideLight=mix(0.34+0.50*diffuse,0.68+0.24*diffuse,smoothstep(0.0,0.45,vMotion));
   float topLight=0.92+0.08*diffuse;
   float faceLight=mix(sideLight,topLight,topFace);
   vec3 coolShade=vec3(0.94,0.80,0.66);
@@ -126,10 +106,9 @@ void main(){
 }`;
 function compile(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s}
 function createProgram(vertexSource){const program=gl.createProgram();gl.attachShader(program,compile(gl.VERTEX_SHADER,vertexSource));gl.attachShader(program,compile(gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));return program}
-function sharedUniforms(program){return {uVP:gl.getUniformLocation(program,'uVP'),uDepth:gl.getUniformLocation(program,'uDepth'),uGap:gl.getUniformLocation(program,'uGap'),uColorMode:gl.getUniformLocation(program,'uColorMode'),uInvert:gl.getUniformLocation(program,'uInvert'),uBaseColor:gl.getUniformLocation(program,'uBaseColor'),uCamPos:gl.getUniformLocation(program,'uCamPos')}}
+function sharedUniforms(program){return {uVP:gl.getUniformLocation(program,'uVP'),uDepth:gl.getUniformLocation(program,'uDepth'),uGap:gl.getUniformLocation(program,'uGap'),uColorMode:gl.getUniformLocation(program,'uColorMode'),uInvert:gl.getUniformLocation(program,'uInvert'),uRemoveBg:gl.getUniformLocation(program,'uRemoveBg'),uBaseColor:gl.getUniformLocation(program,'uBaseColor'),uCamPos:gl.getUniformLocation(program,'uCamPos')}}
 function interactionUniforms(program){return {uRadius:gl.getUniformLocation(program,'uRadius'),uStrength:gl.getUniformLocation(program,'uStrength'),uPointer:gl.getUniformLocation(program,'uPointer'),uHover:gl.getUniformLocation(program,'uHover'),uClick:gl.getUniformLocation(program,'uClick'),uClickAge:gl.getUniformLocation(program,'uClickAge'),uClickPos:gl.getUniformLocation(program,'uClickPos'),uClickStrength:gl.getUniformLocation(program,'uClickStrength'),uPulseSpeed:gl.getUniformLocation(program,'uPulseSpeed'),uPulseCount:gl.getUniformLocation(program,'uPulseCount'),uPulsePos:gl.getUniformLocation(program,'uPulsePos[0]'),uPulseAge:gl.getUniformLocation(program,'uPulseAge[0]')}}
-const staticProgram=createProgram(staticVs),morphProgram=createProgram(morphVs);
-const staticU={...sharedUniforms(staticProgram),...interactionUniforms(staticProgram)};
+const morphProgram=createProgram(morphVs);
 const morphU={...sharedUniforms(morphProgram),...interactionUniforms(morphProgram),uTransition:gl.getUniformLocation(morphProgram,'uTransition'),uTransitionSpread:gl.getUniformLocation(morphProgram,'uTransitionSpread'),uMorphing:gl.getUniformLocation(morphProgram,'uMorphing')};
 function makePrism(kind){
   let pts=[];
@@ -154,12 +133,13 @@ function makePrism(kind){
 }
 const geos={square:makePrism('square'),round:makePrism('round'),hex:makePrism('hex')},staticVaos={},morphVaos={};
 let currentBuffer=gl.createBuffer(),morphFromBuffer=gl.createBuffer(),morphToBuffer=gl.createBuffer();
-function bindInstanceSet(buffer,base){
-  const stride=7*4;gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+function bindMorphInstanceSet(buffer,base){
+  const stride=8*4;gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
   gl.enableVertexAttribArray(base);gl.vertexAttribPointer(base,2,gl.FLOAT,false,stride,0);gl.vertexAttribDivisor(base,1);
   gl.enableVertexAttribArray(base+1);gl.vertexAttribPointer(base+1,3,gl.FLOAT,false,stride,2*4);gl.vertexAttribDivisor(base+1,1);
   gl.enableVertexAttribArray(base+2);gl.vertexAttribPointer(base+2,1,gl.FLOAT,false,stride,5*4);gl.vertexAttribDivisor(base+2,1);
   gl.enableVertexAttribArray(base+3);gl.vertexAttribPointer(base+3,1,gl.FLOAT,false,stride,6*4);gl.vertexAttribDivisor(base+3,1);
+  gl.enableVertexAttribArray(base+4);gl.vertexAttribPointer(base+4,1,gl.FLOAT,false,stride,7*4);gl.vertexAttribDivisor(base+4,1);
 }
 function createShapeVao(g,fromBuffer,toBuffer){
   const vao=gl.createVertexArray();gl.bindVertexArray(vao);
@@ -167,7 +147,7 @@ function createShapeVao(g,fromBuffer,toBuffer){
   gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
   gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,3,gl.FLOAT,false,0,g.pos.byteLength);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,g.indexBuffer);
-  bindInstanceSet(fromBuffer,2);if(toBuffer)bindInstanceSet(toBuffer,6);
+  bindMorphInstanceSet(fromBuffer,2);bindMorphInstanceSet(toBuffer||fromBuffer,7);
   return vao;
 }
 for(const [name,g] of Object.entries(geos)){
@@ -175,11 +155,11 @@ for(const [name,g] of Object.entries(geos)){
   gl.bufferData(gl.ARRAY_BUFFER,g.pos.byteLength+g.norm.byteLength,gl.STATIC_DRAW);
   gl.bufferSubData(gl.ARRAY_BUFFER,0,g.pos);gl.bufferSubData(gl.ARRAY_BUFFER,g.pos.byteLength,g.norm);
   const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,g.indices,gl.STATIC_DRAW);g.indexBuffer=ib;
-  staticVaos[name]=createShapeVao(g,currentBuffer);
+  staticVaos[name]=createShapeVao(g,currentBuffer,currentBuffer);
   morphVaos[name]=createShapeVao(g,morphFromBuffer,morphToBuffer);
 }
 gl.bindVertexArray(null);
-gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);gl.disable(gl.BLEND);
 function hash(x,y){let v=Math.sin(x*127.1+y*311.7)*43758.5453123;return v-Math.floor(v)}
 const sampleCanvas=document.createElement('canvas'),sctx=sampleCanvas.getContext('2d',{willReadFrequently:true});
 function datasetKey(){return Math.round(state.resolution)+'|'+(state.removeBg?1:0)+'|'+state.tolerance.toFixed(3)}
@@ -200,7 +180,8 @@ function buildInstanceData(image){
   for(let y=0;y<r;y++)for(let x=0;x<c;x++){let idx=y*c+x,i=idx*4,a=data[i+3]/255,rr=data[i]/255,gg=data[i+1]/255,b=data[i+2]/255,lum=.2126*rr+.7152*gg+.0722*b;if(a<.035||(removed&&removed[idx]))continue;heightGrid[idx]=lum;let cx=x-(c-1)/2,cy=(r-1)/2-y;pick.push(cx,cy,lum);arr.push(cx,cy,rr,gg,b,lum,hash(x,y))}
   return {data:new Float32Array(arr),pickData:new Float32Array(pick),heightGrid,count:arr.length/7,cols:c,rows:r,aspect:image.width/image.height,image,key:datasetKey()};
 }
-function uploadDataset(buffer,dataset){gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,dataset.data,gl.STATIC_DRAW)}
+function packDataset(dataset){const packed=new Float32Array(dataset.count*8);for(let i=0;i<dataset.count;i++){for(let k=0;k<7;k++)packed[i*8+k]=dataset.data[i*7+k]||0;packed[i*8+7]=1}return packed}
+function uploadDataset(buffer,dataset){gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,packDataset(dataset),gl.STATIC_DRAW)}
 function heightGridFromInstances(data,c,r){const grid=new Float32Array(c*r);grid.fill(-1);for(let i=0;i<data.length;i+=7){const x=Math.round(data[i]+(c-1)/2),y=Math.round((r-1)/2-data[i+1]);if(x>=0&&x<c&&y>=0&&y<r)grid[y*c+x]=data[i+5]}return grid}
 let currentDataset=null,gallery=[],currentGalleryIndex=-1,transition=null,galleryShownAt=0,gallerySequence=0;
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -242,25 +223,45 @@ function switchPlayback(step,fromAuto=false){
 }
 function transitionProgress(now){return transition?Math.min(1,Math.max(0,(now-transition.start)/transition.duration)):1}
 function easedProgress(value){return value*value*(3-2*value)}
-function buildMorphPair(fromDataset,toDataset){
-  const count=Math.max(fromDataset.count,toDataset.count),fromData=new Float32Array(count*7),toData=new Float32Array(count*7);
-  for(let i=0;i<count;i++){
-    const t=count>1?i/(count-1):0;
-    const ai=fromDataset.count>1?Math.round(t*(fromDataset.count-1)):0;
-    const bi=toDataset.count>1?Math.round(t*(toDataset.count-1)):0;
-    for(let k=0;k<7;k++){fromData[i*7+k]=fromDataset.data[ai*7+k]||0;toData[i*7+k]=toDataset.data[bi*7+k]||0}
+function gridRecordOffsets(dataset){
+  const offsets=new Int32Array(dataset.cols*dataset.rows);offsets.fill(-1);
+  for(let i=0;i<dataset.count;i++){
+    const a=i*7,x=Math.round(dataset.data[a]+(dataset.cols-1)/2),y=Math.round((dataset.rows-1)/2-dataset.data[a+1]);
+    if(x>=0&&x<dataset.cols&&y>=0&&y<dataset.rows)offsets[y*dataset.cols+x]=a;
   }
-  return {fromData,toData,count};
+  return offsets;
+}
+function mappedRecordOffset(dataset,offsets,gx,gy,gridCols,gridRows){
+  const sx=dataset.cols>1&&gridCols>1?Math.round(gx*(dataset.cols-1)/(gridCols-1)):0;
+  const sy=dataset.rows>1&&gridRows>1?Math.round(gy*(dataset.rows-1)/(gridRows-1)):0;
+  const canonicalX=dataset.cols>1&&gridCols>1?Math.round(sx*(gridCols-1)/(dataset.cols-1)):0;
+  const canonicalY=dataset.rows>1&&gridRows>1?Math.round(sy*(gridRows-1)/(dataset.rows-1)):0;
+  return gx===canonicalX&&gy===canonicalY?offsets[sy*dataset.cols+sx]:-1;
+}
+function buildMorphPair(fromDataset,toDataset){
+  const gridCols=Math.max(fromDataset.cols,toDataset.cols),gridRows=Math.max(fromDataset.rows,toDataset.rows);
+  const fromOffsets=gridRecordOffsets(fromDataset),toOffsets=gridRecordOffsets(toDataset),fromValues=[],toValues=[];
+  for(let gy=0;gy<gridRows;gy++)for(let gx=0;gx<gridCols;gx++){
+    const fromOffset=mappedRecordOffset(fromDataset,fromOffsets,gx,gy,gridCols,gridRows),toOffset=mappedRecordOffset(toDataset,toOffsets,gx,gy,gridCols,gridRows);
+    if(fromOffset<0&&toOffset<0)continue;
+    const fromRecord=fromOffset>=0?fromOffset:toOffset,toRecord=toOffset>=0?toOffset:fromOffset;
+    for(let k=0;k<7;k++){fromValues.push(fromOffset>=0?fromDataset.data[fromRecord+k]:toDataset.data[fromRecord+k]);toValues.push(toOffset>=0?toDataset.data[toRecord+k]:fromDataset.data[toRecord+k]);}
+    fromValues.push(fromOffset>=0?1:0);toValues.push(toOffset>=0?1:0);
+  }
+  const fromData=new Float32Array(fromValues),toData=new Float32Array(toValues);
+  return {fromData,toData,count:fromData.length/8};
 }
 function presentationDataset(t,e){
-  const data=new Float32Array(t.pair.count*7),pick=new Float32Array(t.pair.count*3);
+  const values=[];
   for(let i=0;i<t.pair.count;i++){
-    const a=i*7,p=i*3;
-    for(let k=0;k<7;k++)data[a+k]=t.pair.fromData[a+k]+(t.pair.toData[a+k]-t.pair.fromData[a+k])*e;
-    pick[p]=data[a];pick[p+1]=data[a+1];pick[p+2]=data[a+5];
+    const a=i*8,presence=t.pair.fromData[a+7]+(t.pair.toData[a+7]-t.pair.fromData[a+7])*e;
+    if(presence<.5)continue;
+    for(let k=0;k<7;k++)values.push(t.pair.fromData[a+k]+(t.pair.toData[a+k]-t.pair.fromData[a+k])*e);
   }
+  const data=new Float32Array(values),pick=new Float32Array(data.length/7*3);
+  for(let i=0;i<data.length/7;i++){pick[i*3]=data[i*7];pick[i*3+1]=data[i*7+1];pick[i*3+2]=data[i*7+5]}
   const image=e>=.5?t.targetItem.image:sourceImage,c=Math.round(cols+(t.targetDataset.cols-cols)*e),r=Math.round(rows+(t.targetDataset.rows-rows)*e);
-  return {data,pickData:pick,heightGrid:heightGridFromInstances(data,c,r),count:t.pair.count,cols:c,rows:r,aspect:image?.width&&image?.height?image.width/image.height:imageAspect,image,key:'presentation',synthetic:true};
+  return {data,pickData:pick,heightGrid:heightGridFromInstances(data,c,r),count:data.length/7,cols:c,rows:r,aspect:image?.width&&image?.height?image.width/image.height:imageAspect,image,key:'presentation',synthetic:true};
 }
 function promoteTransition(){
   if(!transition)return;
@@ -355,14 +356,14 @@ function eventToLocal(e,hoverAware=false){let rect=panel.getBoundingClientRect()
 canvas.addEventListener('pointermove',e=>{let p=eventToLocal(e,true);if(!p){pointerInside=false;return}pointer=p;pointerInside=e.clientX<stageW&&isFinite(p[0])&&Math.abs(p[0])<cols*.7&&Math.abs(p[1])<rows*.7});canvas.addEventListener('pointerleave',()=>pointerInside=false);canvas.addEventListener('pointerdown',e=>{let p=eventToLocal(e,false);if(!p||state.click==='none')return;let now=simulationNow();clickPos=p;clickStart=now;if(state.click==='pulse'){pulses.push({x:p[0],y:p[1],start:now});if(pulses.length>MAX_PULSES)pulses.shift()}});
 function hexToRgb(h){let s=(h||'#000000').replace('#','');if(s.length===3)s=s.split('').map(x=>x+x).join('');let n=parseInt(s,16);return [(n>>16&255)/255,(n>>8&255)/255,(n&255)/255]}
 function setSharedUniforms(U){
-  gl.uniformMatrix4fv(U.uVP,false,vp);gl.uniform1f(U.uDepth,state.depth);gl.uniform1f(U.uGap,state.gap);gl.uniform1i(U.uColorMode,{image:0,mono:1,luminance:2}[state.colorMode]);gl.uniform1i(U.uInvert,state.invert?1:0);gl.uniform3fv(U.uBaseColor,hexToRgb(state.baseColor));gl.uniform3fv(U.uCamPos,camPos);
+  gl.uniformMatrix4fv(U.uVP,false,vp);gl.uniform1f(U.uDepth,state.depth);gl.uniform1f(U.uGap,state.gap);gl.uniform1i(U.uColorMode,{image:0,mono:1,luminance:2}[state.colorMode]);gl.uniform1i(U.uInvert,state.invert?1:0);gl.uniform1i(U.uRemoveBg,state.removeBg?1:0);gl.uniform3fv(U.uBaseColor,hexToRgb(state.baseColor));gl.uniform3fv(U.uCamPos,camPos);
 }
 function setInteractionUniforms(U,time,pulseCount){
   gl.uniform1f(U.uRadius,state.radius);gl.uniform1f(U.uStrength,state.strength);gl.uniform1f(U.uClickAge,time-clickStart);gl.uniform1f(U.uClickStrength,state.clickStrength);gl.uniform1f(U.uPulseSpeed,state.pulseSpeed);gl.uniform1i(U.uPulseCount,pulseCount);gl.uniform2fv(U.uPulsePos,pulsePositions);gl.uniform1fv(U.uPulseAge,pulseAges);gl.uniform2f(U.uPointer,...(pointerInside?pointer:[9999,9999]));gl.uniform2f(U.uClickPos,...clickPos);gl.uniform1i(U.uHover,{raise:0,separate:1}[state.hover]);gl.uniform1i(U.uClick,{pulse:0,rebuild:1,none:2}[state.click]);
 }
 function drawStatic(count,time,pulseCount){
-  const U=staticU,g=geos[state.shape];gl.useProgram(staticProgram);setSharedUniforms(U);
-  setInteractionUniforms(U,time,pulseCount);
+  const U=morphU,g=geos[state.shape];gl.useProgram(morphProgram);setSharedUniforms(U);
+  setInteractionUniforms(U,time,pulseCount);gl.uniform1f(U.uTransition,0);gl.uniform1f(U.uTransitionSpread,0);gl.uniform1i(U.uMorphing,0);
   gl.bindVertexArray(staticVaos[state.shape]);gl.drawElementsInstanced(gl.TRIANGLES,g.indexCount,gl.UNSIGNED_SHORT,0,count);
 }
 function drawMorph(count,progress,time,pulseCount){
@@ -372,7 +373,7 @@ function drawMorph(count,progress,time,pulseCount){
 }
 function render(ms){
   let time=reducedMotion.matches?0:Math.max(0,ms/1000-timeOffset);
-  if(transition&&transitionProgress(time)>=1)promoteTransition();
+  const completedTransition=Boolean(transition&&transitionProgress(time)>=1);
   if(!document.hidden&&state.galleryAuto&&!transition&&gallery.length&&time-galleryShownAt>=state.displayTime)switchPlayback(1,true);
   let maxPulseTravel=Math.hypot(cols,rows)*.8+8,write=0;
   for(let i=0;i<pulses.length;i++){let q=pulses[i];if((time-q.start)*state.pulseSpeed<maxPulseTravel)pulses[write++]=q}
@@ -385,6 +386,7 @@ function render(ms){
     if(transition){const e=easedProgress(transitionProgress(time));drawMorph(transition.pair.count,e,time,pulseCount)}
     else drawStatic(currentDataset.count,time,pulseCount);
   }
+  if(completedTransition)promoteTransition();
   if(!reducedMotion.matches)scheduleFrame();
 }
 function pct(el){let a=+el.min||0,b=+el.max||100,v=+el.value;el.style.setProperty('--pct',((v-a)/(b-a)*100)+'%')}
