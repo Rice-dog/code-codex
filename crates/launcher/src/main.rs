@@ -15,7 +15,7 @@ use bootstrap::{BootstrapError, build_bootstrap, resolve_bundle};
 use bridge::NativeBridge;
 use cdp_client::{
     CapabilityToken, CdpEndpoint, CdpError, CdpSupervisor, IdlePolicy, InjectionConfig,
-    SupervisorOptions, TargetDiscovery,
+    PRIMARY_BINDING_NAME, PRIMARY_RECEIVER_NAME, SupervisorOptions, TargetDiscovery,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use context_resolver::{AppServerClient, AppServerCommand, ResolverError};
@@ -25,8 +25,9 @@ use discovery::{
 };
 use futures_util::{SinkExt, StreamExt};
 use process_guard::{
-    CodexProcessGuard, PortReservation, ProcessGuardError, is_executable_running,
-    verify_listener_executable, verify_listener_owner, verify_process_identity,
+    CodexProcessGuard, PortReservation, ProcessGuardError, discover_listener_port,
+    is_executable_running, verify_listener_executable, verify_listener_owner,
+    verify_process_identity,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -66,6 +67,8 @@ enum Commands {
     Run(RunArgs),
     /// Attach to a user-authorized, already-running loopback CDP endpoint.
     Attach(AttachArgs),
+    /// Activate this installed version inside an already-running Code-Codex session.
+    Activate(ActivateArgs),
     /// Report package, bundle, App Server, and optional CDP diagnostics.
     Diagnose(DiagnoseArgs),
 }
@@ -119,6 +122,14 @@ struct AttachArgs {
     /// Diagnostics only; URL/title filtering is relaxed, but DOM qualification remains mandatory.
     #[arg(long)]
     allow_any_page: bool,
+}
+
+#[derive(Debug, Args)]
+struct ActivateArgs {
+    #[command(flatten)]
+    common: CommonArgs,
+    #[arg(long, value_enum, default_value_t = ChannelPreference::Any)]
+    channel: ChannelPreference,
 }
 
 #[derive(Debug, Args)]
@@ -194,6 +205,7 @@ async fn main() -> ExitCode {
     {
         Commands::Run(args) => run(args).await,
         Commands::Attach(args) => attach(args).await,
+        Commands::Activate(args) => activate(args).await,
         Commands::Diagnose(args) => diagnose(args).await,
     };
     match result {
@@ -339,6 +351,8 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             &installation.version,
             &installation.channel,
             compatible,
+            PRIMARY_BINDING_NAME,
+            PRIMARY_RECEIVER_NAME,
         )
         .await?;
         tokio::task::spawn_blocking(move || {
@@ -409,6 +423,8 @@ async fn attach(args: AttachArgs) -> Result<(), AppError> {
         &installation.version,
         &installation.channel,
         compatible,
+        PRIMARY_BINDING_NAME,
+        PRIMARY_RECEIVER_NAME,
     )
     .await?;
     let executable = installation.executable.clone();
@@ -428,18 +444,83 @@ async fn attach(args: AttachArgs) -> Result<(), AppError> {
     .await
 }
 
+async fn activate(args: ActivateArgs) -> Result<(), AppError> {
+    let installation = discover_codex(None, None, args.channel)?;
+    if installation.source != DiscoverySource::WindowsPackageManager {
+        tracing::info!(
+            event = "live_activation_skipped",
+            reason = "official_package_required"
+        );
+        return Ok(());
+    }
+    let executable = installation.executable.clone();
+    let port = tokio::task::spawn_blocking(move || discover_listener_port(&executable))
+        .await
+        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+    let Some(port) = port else {
+        tracing::info!(
+            event = "live_activation_skipped",
+            reason = "no_verified_listener"
+        );
+        return Ok(());
+    };
+    let endpoint = CdpEndpoint::loopback(port);
+    wait_for_endpoint(endpoint, Duration::from_secs(5)).await?;
+    let suffix = format!(
+        "{}_{}",
+        env!("CARGO_PKG_VERSION").replace('.', "_"),
+        std::process::id()
+    );
+    let binding_name = format!("__codeCodexLive_{suffix}");
+    let receiver_name = format!("__codeCodexReceiveLive_{suffix}");
+    let compatible = is_supported_version(&installation.version);
+    let (bridge, injection) = prepare_runtime(
+        &args.common,
+        Some(&installation),
+        &installation.version,
+        &installation.channel,
+        compatible,
+        &binding_name,
+        &receiver_name,
+    )
+    .await?;
+    let executable = installation.executable.clone();
+    tokio::task::spawn_blocking(move || verify_listener_executable(port, &executable))
+        .await
+        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+    tracing::info!(
+        event = "live_activation_started",
+        port,
+        version = env!("CARGO_PKG_VERSION")
+    );
+    supervise(
+        endpoint,
+        bridge,
+        injection,
+        ListenerIdentity::OfficialExecutable(installation.executable),
+        false,
+        IdlePolicy::ExitAfterTimeout,
+        CancellationToken::new(),
+    )
+    .await
+}
+
 async fn prepare_runtime(
     common: &CommonArgs,
     installation: Option<&CodexInstallation>,
     version: &str,
     channel: &str,
     compatible: bool,
+    binding_name: &str,
+    receiver_name: &str,
 ) -> Result<(Arc<NativeBridge>, InjectionConfig), AppError> {
     let bundle = resolve_bundle(common.ui_bundle.as_deref())?;
     let token = CapabilityToken::generate();
     let bootstrap = build_bootstrap(
         &bundle,
         &token,
+        binding_name,
+        receiver_name,
         version,
         channel,
         compatible,
@@ -481,7 +562,9 @@ async fn prepare_runtime(
         settings,
     ));
     bridge.initialize_manual().await;
-    let injection = InjectionConfig::new(bootstrap, token);
+    let mut injection = InjectionConfig::new(bootstrap, token);
+    injection.binding_name = binding_name.to_owned();
+    injection.receiver_name = receiver_name.to_owned();
     Ok((bridge, injection))
 }
 

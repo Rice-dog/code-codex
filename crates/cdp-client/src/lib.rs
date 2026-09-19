@@ -28,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 pub const PRIMARY_BINDING_NAME: &str = "__codeCodex";
+pub const PRIMARY_RECEIVER_NAME: &str = "__codeCodexReceive";
 // A 64 KiB UTF-8 edit expands to about 86 KiB as Base64. Keep ingress tightly
 // bounded while leaving room for the authenticated JSON request envelope.
 const MAX_BINDING_PAYLOAD_BYTES: usize = 96 * 1024;
@@ -402,6 +403,7 @@ fn valid_method(method: &str) -> bool {
 #[derive(Clone)]
 pub struct InjectionConfig {
     pub binding_name: String,
+    pub receiver_name: String,
     pub bootstrap_source: Arc<str>,
     pub capability_token: CapabilityToken,
 }
@@ -411,6 +413,7 @@ impl InjectionConfig {
     pub fn new(bootstrap_source: impl Into<Arc<str>>, token: CapabilityToken) -> Self {
         Self {
             binding_name: PRIMARY_BINDING_NAME.to_owned(),
+            receiver_name: PRIMARY_RECEIVER_NAME.to_owned(),
             bootstrap_source: bootstrap_source.into(),
             capability_token: token,
         }
@@ -1259,7 +1262,7 @@ where
                 {
                     continue;
                 }
-                let expression = delivery_expression(&outbound.payload)?;
+                let expression = delivery_expression(&outbound.payload, &injection.receiver_name)?;
                 send_command(
                     &mut writer,
                     next_id,
@@ -1276,7 +1279,7 @@ where
                     {
                         continue;
                     }
-                    let expression = delivery_expression(&notification.payload)?;
+                    let expression = delivery_expression(&notification.payload, &injection.receiver_name)?;
                     send_command(
                         &mut writer,
                         next_id,
@@ -1290,7 +1293,7 @@ where
                         continue;
                     }
                     let resync = json!({ "method": "explorer.resync", "params": {} });
-                    let expression = delivery_expression(&resync)?;
+                    let expression = delivery_expression(&resync, &injection.receiver_name)?;
                     send_command(
                         &mut writer,
                         next_id,
@@ -1381,7 +1384,7 @@ where
                                     )?;
                                 }
                                 let resync = json!({ "method": "explorer.resync", "params": {} });
-                                let expression = delivery_expression(&resync)?;
+                                let expression = delivery_expression(&resync, &injection.receiver_name)?;
                                 send_command(
                                     &mut writer,
                                     next_id,
@@ -1931,11 +1934,20 @@ fn bounded_binding_payload<'a>(message: &'a Value, binding_name: &str) -> Option
     Some(payload)
 }
 
-fn delivery_expression(message: &Value) -> Result<String, CdpError> {
+fn delivery_expression(message: &Value, receiver_name: &str) -> Result<String, CdpError> {
+    if receiver_name.is_empty()
+        || receiver_name.len() > 96
+        || !receiver_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return Err(CdpError::Protocol);
+    }
     let serialized = serde_json::to_string(message).map_err(|_| CdpError::Protocol)?;
     let quoted = serde_json::to_string(&serialized).map_err(|_| CdpError::Protocol)?;
+    let receiver = serde_json::to_string(receiver_name).map_err(|_| CdpError::Protocol)?;
     Ok(format!(
-        "(()=>{{const m=JSON.parse({quoted});if(typeof window.__codeCodexReceive==='function'){{window.__codeCodexReceive(m);}}else{{window.dispatchEvent(new CustomEvent('code-codex:message',{{detail:m}}));}}}})()"
+        "(()=>{{const m=JSON.parse({quoted});const r=window[{receiver}];if(typeof r==='function'){{r(m);}}else{{window.dispatchEvent(new CustomEvent('code-codex:message',{{detail:m}}));}}}})()"
     ))
 }
 
@@ -3071,10 +3083,13 @@ mod tests {
 
     #[test]
     fn outbound_data_is_encoded_not_interpolated() {
-        let expression = delivery_expression(&json!({
-            "id": "x",
-            "result": "</script>\u{2028}'\""
-        }))
+        let expression = delivery_expression(
+            &json!({
+                "id": "x",
+                "result": "</script>\u{2028}'\""
+            }),
+            PRIMARY_RECEIVER_NAME,
+        )
         .expect("expression");
         assert!(expression.contains("JSON.parse"));
         assert!(expression.contains("__codeCodexReceive"));

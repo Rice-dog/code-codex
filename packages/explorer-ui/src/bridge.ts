@@ -9,11 +9,19 @@ import type {
 } from "./types";
 const MESSAGE_EVENT = "code-codex:message";
 
+function safeRuntimeName(value: string | undefined, fallback: string): string {
+  return typeof value === "string" && /^__[A-Za-z][A-Za-z0-9_]{1,94}$/.test(value)
+    ? value
+    : fallback;
+}
+
 function consumeBootstrap(): Readonly<BootstrapConfig> {
   const source = window.__CODE_CODEX_BOOTSTRAP__;
   const copy: BootstrapConfig = source
     ? {
         ...(typeof source.token === "string" ? { token: source.token } : {}),
+        ...(typeof source.binding === "string" ? { binding: source.binding } : {}),
+        ...(typeof source.receiver === "string" ? { receiver: source.receiver } : {}),
         ...(typeof source.supported === "boolean" ? { supported: source.supported } : {}),
         ...(typeof source.compatible === "boolean" ? { compatible: source.compatible } : {}),
         ...(typeof source.version === "string" ? { version: source.version } : {}),
@@ -97,23 +105,36 @@ export class ExplorerBridge extends EventTarget {
   readonly #listeners = new Set<NotificationListener>();
   readonly #timeoutMs: number;
   readonly #capabilityToken: string;
+  readonly #bindingName: string;
+  readonly #receiverName: string;
   readonly #receive: (message: BridgeMessage | string) => void;
   readonly #eventListener: EventListener;
-  readonly #previousReceiver: typeof window.__codeCodexReceive;
+  readonly #previousReceiver: ((message: BridgeMessage | string) => void) | undefined;
   #unsubscribeObjectBridge?: () => void;
   #sequence = 0;
   #disposed = false;
 
-  constructor(capabilityToken: string, timeoutMs = 12_000) {
+  constructor(
+    capabilityToken: string,
+    bindingName = bootstrap.binding,
+    receiverName = bootstrap.receiver,
+    timeoutMs = 12_000,
+  ) {
     super();
     this.#capabilityToken = capabilityToken;
     this.#timeoutMs = timeoutMs;
+    this.#bindingName = safeRuntimeName(bindingName, "__codeCodex");
+    this.#receiverName = safeRuntimeName(receiverName, "__codeCodexReceive");
     this.#receive = (message) => this.#handle(message);
     this.#eventListener = ((event: CustomEvent<BridgeMessage | string>) => {
       this.#handle(event.detail);
     }) as EventListener;
-    this.#previousReceiver = window.__codeCodexReceive;
-    window.__codeCodexReceive = this.#receive;
+    const runtime = window as unknown as Record<string, unknown>;
+    const previousReceiver = runtime[this.#receiverName];
+    this.#previousReceiver = typeof previousReceiver === "function"
+      ? previousReceiver as (message: BridgeMessage | string) => void
+      : undefined;
+    runtime[this.#receiverName] = this.#receive;
     window.addEventListener(MESSAGE_EVENT, this.#eventListener);
 
     const binding = this.#binding();
@@ -174,9 +195,10 @@ export class ExplorerBridge extends EventTarget {
     if (this.#disposed) return;
     this.#disposed = true;
     window.removeEventListener(MESSAGE_EVENT, this.#eventListener);
-    if (window.__codeCodexReceive === this.#receive) {
-      if (this.#previousReceiver) window.__codeCodexReceive = this.#previousReceiver;
-      else delete window.__codeCodexReceive;
+    const runtime = window as unknown as Record<string, unknown>;
+    if (runtime[this.#receiverName] === this.#receive) {
+      if (this.#previousReceiver) runtime[this.#receiverName] = this.#previousReceiver;
+      else delete runtime[this.#receiverName];
     }
     this.#unsubscribeObjectBridge?.();
     this.#listeners.clear();
@@ -188,7 +210,12 @@ export class ExplorerBridge extends EventTarget {
   }
 
   #binding(): typeof window.__codeCodex {
-    return window.__codeCodex ?? window.__codeCodexNative;
+    const runtime = window as unknown as Record<string, unknown>;
+    const binding = runtime[this.#bindingName];
+    if (typeof binding === "function" || (binding && typeof binding === "object")) {
+      return binding as typeof window.__codeCodex;
+    }
+    return this.#bindingName === "__codeCodex" ? window.__codeCodexNative : undefined;
   }
 
   #send(binding: NonNullable<typeof window.__codeCodex>, request: BridgeRequest): unknown {

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.16"><img alt="版本" src="https://img.shields.io/badge/version-0.2.16-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.30"><img alt="版本" src="https://img.shields.io/badge/version-0.2.30-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,15 +35,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.2.16-x64-setup.exe`
-- 备选：`CodeCodex-0.2.16-x64.msi`
-- 便携包：`CodeCodex-0.2.16-x64.zip`
+- 推荐：`CodeCodex-0.2.30-x64-setup.exe`
+- 备选：`CodeCodex-0.2.30-x64.msi`
+- 便携包：`CodeCodex-0.2.30-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.16-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.30-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -82,7 +82,7 @@ Get-FileHash .\CodeCodex-0.2.16-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.16
+./scripts/package.ps1 -Version 0.2.30
 ```
 
 生成结果会写入 `releases/`。
@@ -190,6 +190,12 @@ Layered Mountain Background 在整个 Codex 窗口中显示动态层叠山峦、
 Cloud Train Background 在整个 Codex 窗口中呈现云海、蒸汽列车与桥梁。通过文件树底部的 Preview Market 启用，右侧设置面板提供行进速度、缩放、云层细节、拖影、色相、色温以及天空／烟雾／列车染色，支持中英文切换、暂停和重置。启用时沿用原生深色模式及停用恢复机制。
 
 Cloud Train 支持按景深从远到近在原位逐层淡入（无上下位移）的开场动画：可调整开关、时长（0.5～10 秒）和羽化宽度，支持重播。默认 3 秒；系统减少动态效果模式跳过开场，结束后保持原有画面。
+
+### Pixel Sculpt Background
+
+![Pixel Sculpt Background 立体像素浮雕背景](docs/screenshots/pixel-sculpt-background.png)
+
+在 Preview Market 中启用，将图片转换为可交互的立体像素浮雕背景。右侧中英文二级面板可调整像素形状、浮雕深度、鼠标波纹、颜色、位置和旋转；支持本地图片库、排序与自动变形切换。启用时切换原生深色外观，停用后恢复之前的设置。
 
 ## 仓库结构
 

@@ -140,6 +140,18 @@ This is an unofficial independent reconstruction from a partial reference. Yohei
 
 The following effects were independently implemented for Code-Codex from publicly visible concepts or prompts. No source code or assets from the referenced works are intentionally included. This classification must be updated if a later audit identifies copied code or assets.
 
+## Pixel Sculpt Background
+
+**Supplied project:** Pixel Sculpt — Interactive WebGL Study
+
+**Declared visual reference:** React Bits Pro Pixel Sculpt
+
+**Status:** The supplied README describes an independent WebGL2 implementation; this records the source declaration, not an independent provenance audit. The supplied default sunflower image's author and redistribution permission have not been documented.
+
+**Code-Codex modifications:** full-window rendering and input forwarding, native Dark appearance and restoration, bilingual secondary settings, local settings and image-library persistence, bounded uploads, visibility/pause handling, and resource cleanup. Original shaders and prism geometry are retained from the supplied study. This entry does not grant permission or imply endorsement from React Bits.
+
+---
+
 ## Particle Image Background
 
 **Visual reference:** Particle Image — React Bits Pro  
