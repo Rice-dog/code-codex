@@ -6,7 +6,7 @@ Code-Codex 仓库根目录中的 MIT License 仅适用于由 Code-Codex 独立�
 
 本文件用于记录来源及目前的核验状态，本身不会产生任何授权。如果本声明与原始许可证或原作者条款冲突，应以原始条款为准。
 
-**最后更新：** 2026 年 9 月 14 日
+**最后更新：** 2026 年 9 月 19 日
 
 安装包所含软件依赖的许可证由 `THIRD_PARTY_LICENSES.txt` 另行记录。本文件主要说明视觉效果的来源。
 
@@ -142,13 +142,17 @@ Code-Codex 的实现依据署名为上述作品的不完整截图或 Shader 片�
 
 ## Pixel Sculpt Background
 
-**所提供项目：** Pixel Sculpt — Interactive WebGL Study
+**视觉参考：** Pixel Sculpt — React Bits Pro
 
-**项目声明的视觉参考：** React Bits Pro Pixel Sculpt
+**参考页面：** https://pro.reactbits.dev/docs/components/pixel-sculpt
 
-**状态：** 源项目 README 声明为独立 WebGL2 实现；此处记录源项目声明，不代表已完成独立来源审计。默认向日葵图片的作者及再分发许可尚未记录。
+**状态：** 仅作参考
 
-**Code-Codex 修改：** 全窗口渲染与输入转发、原生深色外观及恢复、中英文二级设置、本地参数和图片库持久化、上传限制、可见性与暂停处理及资源清理。保留所提供研究项目的着色器及像素棱柱几何。本声明不授予许可，也不表示 React Bits 的认可。
+Pixel Sculpt Background 的视觉效果与交互概念参考了 React Bits Pro 公开展示的 Pixel Sculpt 页面。Code-Codex 未复制、提取、修改或分发 React Bits Pro 的源代码、组件、预览素材或其他产品文件。本插件的程序代码、WebGL 渲染流程、像素棱柱几何、界面集成及扩展功能均为 Code-Codex 独立实现。
+
+**Code-Codex 原创工作：** 图片采样与浮雕生成、实例化棱柱渲染、鼠标与点击交互、本地图片库管理、按序自动播放与变形切换、中英文参数控制、全窗口渲染与输入转发、原生深色外观及恢复、设置持久化、上传限制、生命周期处理和资源清理。
+
+本声明仅用于标明视觉灵感来源，不表示 React Bits Pro 对 Code-Codex 的认可、赞助或关联。
 
 ---
 
