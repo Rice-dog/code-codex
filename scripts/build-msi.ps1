@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.2.30",
+    [string]$Version = "0.2.37",
     [string]$BinaryPath,
     [string]$GuiBinaryPath,
     [string]$ShimBinaryPath,

@@ -360,6 +360,44 @@ interface UpdateInstallResult {
   readonly launched: boolean;
 }
 
+interface GitCommitSummary {
+  readonly hash: string;
+  readonly shortHash: string;
+  readonly author: string;
+  readonly authoredAt: string;
+  readonly subject: string;
+}
+
+interface GitHistoryResult {
+  readonly branch: string;
+  readonly detached: boolean;
+  readonly commits: readonly GitCommitSummary[];
+  readonly hasMore: boolean;
+}
+
+interface GitChangedFile {
+  readonly status: string;
+  readonly path: string;
+  readonly oldPath?: string;
+}
+
+interface GitCommitResult {
+  readonly hash: string;
+  readonly shortHash: string;
+  readonly author: string;
+  readonly authorEmail: string;
+  readonly authoredAt: string;
+  readonly message: string;
+  readonly files: readonly GitChangedFile[];
+  readonly filesTruncated: boolean;
+}
+
+interface GitDiffResult {
+  readonly path: string;
+  readonly content: string;
+  readonly truncated: boolean;
+}
+
 interface PreviewTab {
   readonly instanceId: number;
   readonly path: string;
@@ -10298,6 +10336,48 @@ function previewerCardMarkup(previewer: PreviewerDefinition): string {
   `;
 }
 
+function gitHistoryCardMarkup(): string {
+  return `
+    <article class="preview-extension git-history-extension">
+      <span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="8" r="1.5"/><path d="M4 4.5v7M5.5 5.25C8 5.25 9 8 10.5 8"/></svg></span>
+      <div class="preview-extension-copy">
+        <div class="preview-extension-title-row">
+          <h4>Git History</h4>
+        </div>
+        <div class="preview-extension-meta"><span>Commits</span><span>Diffs</span></div>
+      </div>
+      <button class="preview-extension-action git-history-open" type="button" aria-controls="cle-git-history" aria-expanded="false">Enable</button>
+    </article>
+  `;
+}
+
+function gitHistoryPanelMarkup(): string {
+  return `
+    <section class="git-history-panel" id="cle-git-history" role="region" aria-labelledby="cle-git-history-title" hidden>
+      <div class="git-history-resize-handle" role="separator" aria-label="Resize Git History panel" aria-orientation="horizontal" aria-valuemin="120" tabindex="0"></div>
+      <header class="git-history-header">
+        <h3 id="cle-git-history-title">Git History</h3>
+        <div class="git-history-header-actions">
+          <button class="git-history-refresh" type="button" title="Refresh history" aria-label="Refresh Git history">${icons.refresh}</button>
+          <button class="git-history-close" type="button" title="Close Git history" aria-label="Close Git history">${icons.close}</button>
+        </div>
+      </header>
+      <div class="git-history-toolbar"><span class="git-history-branch">Repository</span></div>
+      <div class="git-history-body">
+        <section class="git-history-list-view">
+          <div class="git-history-state" role="status">Open Git History to load commits.</div>
+          <div class="git-history-list" role="list"></div>
+          <button class="git-history-load-more" type="button" hidden>Load more</button>
+        </section>
+        <section class="git-history-detail-view" hidden>
+          <button class="git-history-back" type="button">← History</button>
+          <div class="git-history-detail"></div>
+        </section>
+      </div>
+    </section>
+  `;
+}
+
 function transparentBackgroundCardMarkup(): string {
   return `
     <article class="preview-extension appearance-extension" data-appearance-plugin="${TRANSPARENT_BACKGROUND_PLUGIN_ID}" aria-busy="false">
@@ -11118,6 +11198,12 @@ export class CodeCodexElement extends HTMLElement {
   #appearanceInitializationGeneration = 0;
   #appearanceRpcTail: Promise<void> = Promise.resolve();
   #previewMarketOpen = false;
+  #gitHistoryOpen = false;
+  #gitHistoryLoading = false;
+  #gitHistoryGeneration = 0;
+  #gitHistoryCommits: GitCommitSummary[] = [];
+  #gitHistoryHasMore = false;
+  #gitHistoryResizeState: { pointerId: number; startY: number; startHeight: number } | undefined;
   #particleSettingsOpen = false;
   #blackHoleSettingsOpen = false;
   #glowHorizonSettingsOpen = false;
@@ -11147,6 +11233,19 @@ export class CodeCodexElement extends HTMLElement {
   readonly #previewMarketPopover: HTMLElement;
   readonly #previewMarketList: HTMLElement;
   readonly #previewMarketCloseButton: HTMLButtonElement;
+  readonly #gitHistoryOpenButton: HTMLButtonElement;
+  readonly #gitHistoryPanel: HTMLElement;
+  readonly #gitHistoryResizeHandle: HTMLElement;
+  readonly #gitHistoryCloseButton: HTMLButtonElement;
+  readonly #gitHistoryRefreshButton: HTMLButtonElement;
+  readonly #gitHistoryBranch: HTMLElement;
+  readonly #gitHistoryState: HTMLElement;
+  readonly #gitHistoryList: HTMLElement;
+  readonly #gitHistoryLoadMoreButton: HTMLButtonElement;
+  readonly #gitHistoryListView: HTMLElement;
+  readonly #gitHistoryDetailView: HTMLElement;
+  readonly #gitHistoryBackButton: HTMLButtonElement;
+  readonly #gitHistoryDetail: HTMLElement;
   readonly #previewerButtons = new Map<string, HTMLButtonElement>();
   readonly #previewerStatuses = new Map<string, HTMLElement>();
   readonly #transparentBackgroundCard: HTMLElement;
@@ -11343,13 +11442,14 @@ export class CodeCodexElement extends HTMLElement {
           <div class="tree-spacer"><div class="tree-window"></div><div class="tree-marquee" aria-hidden="true" hidden></div></div>
         </div>
         <section class="state" hidden></section>
+        ${gitHistoryPanelMarkup()}
         <div class="loading-veil" aria-hidden="true"><span class="loading-chip">Switching project</span></div>
         <footer class="statusbar">
           <div class="preview-market-popover" id="cle-preview-market" role="dialog" aria-modal="false" aria-labelledby="cle-preview-market-title" hidden>
             <div class="preview-market-header">
               <div>
                 <h3 id="cle-preview-market-title">Preview Market</h3>
-                <p>File preview extensions</p>
+                <p>Preview and developer extensions</p>
               </div>
               <button class="preview-market-close" type="button" title="Close Preview Market" aria-label="Close Preview Market">${icons.close}</button>
             </div>
@@ -11361,6 +11461,10 @@ export class CodeCodexElement extends HTMLElement {
               <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
                 <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
                 <div class="preview-market-section-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
+              </section>
+              <section class="preview-market-section" aria-labelledby="cle-developer-tools-section-title">
+                <div class="preview-market-section-title" id="cle-developer-tools-section-title">Developer Tools</div>
+                <div class="preview-market-section-list">${gitHistoryCardMarkup()}</div>
               </section>
             </div>
           </div>
@@ -11411,6 +11515,19 @@ export class CodeCodexElement extends HTMLElement {
     this.#previewMarketPopover = this.#required<HTMLElement>(".preview-market-popover");
     this.#previewMarketList = this.#required<HTMLElement>(".preview-market-list");
     this.#previewMarketCloseButton = this.#required<HTMLButtonElement>(".preview-market-close");
+    this.#gitHistoryOpenButton = this.#required<HTMLButtonElement>(".git-history-open");
+    this.#gitHistoryPanel = this.#required<HTMLElement>(".git-history-panel");
+    this.#gitHistoryResizeHandle = this.#required<HTMLElement>(".git-history-resize-handle");
+    this.#gitHistoryCloseButton = this.#required<HTMLButtonElement>(".git-history-close");
+    this.#gitHistoryRefreshButton = this.#required<HTMLButtonElement>(".git-history-refresh");
+    this.#gitHistoryBranch = this.#required<HTMLElement>(".git-history-branch");
+    this.#gitHistoryState = this.#required<HTMLElement>(".git-history-state");
+    this.#gitHistoryList = this.#required<HTMLElement>(".git-history-list");
+    this.#gitHistoryLoadMoreButton = this.#required<HTMLButtonElement>(".git-history-load-more");
+    this.#gitHistoryListView = this.#required<HTMLElement>(".git-history-list-view");
+    this.#gitHistoryDetailView = this.#required<HTMLElement>(".git-history-detail-view");
+    this.#gitHistoryBackButton = this.#required<HTMLButtonElement>(".git-history-back");
+    this.#gitHistoryDetail = this.#required<HTMLElement>(".git-history-detail");
     for (const previewer of PREVIEWER_DEFINITIONS) {
       const card = this.#required<HTMLElement>(`[data-preview-extension="${previewer.id}"]`);
       const button = card.querySelector<HTMLButtonElement>(".preview-extension-action");
@@ -12287,6 +12404,27 @@ export class CodeCodexElement extends HTMLElement {
       this.#updateInstallButton.addEventListener("click", () => void this.#installUpdate());
       this.#previewMarketButton.addEventListener("click", () => this.#togglePreviewMarket());
       this.#previewMarketCloseButton.addEventListener("click", () => this.#closePreviewMarket(true));
+      this.#gitHistoryOpenButton.addEventListener("click", () => this.#toggleGitHistory());
+      this.#gitHistoryCloseButton.addEventListener("click", () => this.#closeGitHistory(true));
+      this.#gitHistoryRefreshButton.addEventListener("click", () => void this.#loadGitHistory(true));
+      this.#gitHistoryResizeHandle.addEventListener("pointerdown", (event) => this.#beginGitHistoryResize(event));
+      this.#gitHistoryResizeHandle.addEventListener("pointermove", (event) => this.#updateGitHistoryResize(event));
+      this.#gitHistoryResizeHandle.addEventListener("pointerup", (event) => this.#finishGitHistoryResize(event));
+      this.#gitHistoryResizeHandle.addEventListener("pointercancel", (event) => this.#finishGitHistoryResize(event));
+      this.#gitHistoryResizeHandle.addEventListener("lostpointercapture", (event) => this.#finishGitHistoryResize(event));
+      this.#gitHistoryResizeHandle.addEventListener("keydown", (event) => this.#onGitHistoryResizeKeyDown(event));
+      this.#gitHistoryLoadMoreButton.addEventListener("click", () => void this.#loadGitHistory(false));
+      this.#gitHistoryBackButton.addEventListener("click", () => this.#showGitHistoryList());
+      this.#gitHistoryList.addEventListener("click", (event) => {
+        const button = (event.target as Element | null)?.closest<HTMLButtonElement>("button[data-git-hash]");
+        if (button?.dataset.gitHash) void this.#openGitCommit(button.dataset.gitHash);
+      });
+      this.#gitHistoryDetail.addEventListener("click", (event) => {
+        const button = (event.target as Element | null)?.closest<HTMLButtonElement>("button[data-git-file]");
+        if (button?.dataset.gitFile && button.dataset.gitHash) {
+          void this.#toggleGitFileDiff(button, button.dataset.gitHash, button.dataset.gitFile);
+        }
+      });
       this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
       this.#particleBackgroundButton.addEventListener("click", () => void this.#toggleParticleBackground());
       this.#blackHoleBackgroundButton.addEventListener("click", () => void this.#toggleBlackHoleBackground());
@@ -12849,6 +12987,12 @@ export class CodeCodexElement extends HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       this.#closeMilkyWaySettings(true);
+      return;
+    }
+    if (this.#gitHistoryOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#closeGitHistory(true);
       return;
     }
     if (this.#updateDialogOpen) {
@@ -19749,6 +19893,291 @@ export class CodeCodexElement extends HTMLElement {
     panel.dataset.side = side;
   }
 
+  #toggleGitHistory(): void {
+    if (this.#gitHistoryOpen) {
+      this.#closeGitHistory(true);
+      return;
+    }
+    this.#gitHistoryOpen = true;
+    this.#frame.dataset.gitHistoryOpen = "true";
+    this.#gitHistoryPanel.hidden = false;
+    this.#gitHistoryOpenButton.setAttribute("aria-expanded", "true");
+    this.#gitHistoryOpenButton.textContent = "Disable";
+    this.#gitHistoryOpenButton.dataset.enabled = "true";
+    this.#showGitHistoryList();
+    this.#closePreviewMarket(false);
+    requestAnimationFrame(() => this.#syncGitHistoryResizeAria());
+    void this.#loadGitHistory(true);
+  }
+
+  #closeGitHistory(restoreFocus: boolean): void {
+    if (!this.#gitHistoryOpen && this.#gitHistoryPanel.hidden) return;
+    this.#gitHistoryOpen = false;
+    this.#gitHistoryGeneration += 1;
+    this.#gitHistoryLoading = false;
+    this.#cancelGitHistoryResize();
+    delete this.#frame.dataset.gitHistoryOpen;
+    this.#gitHistoryPanel.hidden = true;
+    this.#gitHistoryOpenButton.setAttribute("aria-expanded", "false");
+    this.#gitHistoryOpenButton.textContent = "Enable";
+    delete this.#gitHistoryOpenButton.dataset.enabled;
+    if (restoreFocus && this.#gitHistoryOpenButton.isConnected) this.#gitHistoryOpenButton.focus();
+  }
+
+  #beginGitHistoryResize(event: PointerEvent): void {
+    if (!this.#gitHistoryOpen || event.button !== 0) return;
+    event.preventDefault();
+    this.#gitHistoryResizeState = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: this.#gitHistoryPanel.getBoundingClientRect().height,
+    };
+    this.#gitHistoryResizeHandle.setPointerCapture(event.pointerId);
+    this.#frame.dataset.gitHistoryResizing = "true";
+  }
+
+  #updateGitHistoryResize(event: PointerEvent): void {
+    const state = this.#gitHistoryResizeState;
+    if (!state || state.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    this.#setGitHistoryHeight(state.startHeight + state.startY - event.clientY);
+  }
+
+  #finishGitHistoryResize(event: PointerEvent): void {
+    const state = this.#gitHistoryResizeState;
+    if (!state || state.pointerId !== event.pointerId) return;
+    this.#gitHistoryResizeState = undefined;
+    delete this.#frame.dataset.gitHistoryResizing;
+    if (this.#gitHistoryResizeHandle.hasPointerCapture(event.pointerId)) {
+      this.#gitHistoryResizeHandle.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  #cancelGitHistoryResize(): void {
+    const state = this.#gitHistoryResizeState;
+    this.#gitHistoryResizeState = undefined;
+    delete this.#frame.dataset.gitHistoryResizing;
+    if (state && this.#gitHistoryResizeHandle.hasPointerCapture(state.pointerId)) {
+      this.#gitHistoryResizeHandle.releasePointerCapture(state.pointerId);
+    }
+  }
+
+  #setGitHistoryHeight(height: number): void {
+    const frameHeight = this.#frame.getBoundingClientRect().height;
+    const minimum = 120;
+    const maximum = Math.max(minimum, frameHeight - 170);
+    const nextHeight = Math.round(Math.min(maximum, Math.max(minimum, height)));
+    this.#frame.style.setProperty("--cle-git-history-height", `${nextHeight}px`);
+    this.#gitHistoryResizeHandle.setAttribute("aria-valuemax", String(Math.round(maximum)));
+    this.#gitHistoryResizeHandle.setAttribute("aria-valuenow", String(nextHeight));
+  }
+
+  #syncGitHistoryResizeAria(): void {
+    if (!this.#gitHistoryOpen) return;
+    const frameHeight = this.#frame.getBoundingClientRect().height;
+    const maximum = Math.max(120, frameHeight - 170);
+    const currentHeight = Math.round(this.#gitHistoryPanel.getBoundingClientRect().height);
+    this.#gitHistoryResizeHandle.setAttribute("aria-valuemax", String(Math.round(maximum)));
+    this.#gitHistoryResizeHandle.setAttribute("aria-valuenow", String(currentHeight));
+  }
+
+  #onGitHistoryResizeKeyDown(event: KeyboardEvent): void {
+    if (!this.#gitHistoryOpen || (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home")) return;
+    event.preventDefault();
+    const currentHeight = this.#gitHistoryPanel.getBoundingClientRect().height;
+    if (event.key === "Home") {
+      this.#frame.style.removeProperty("--cle-git-history-height");
+      requestAnimationFrame(() => this.#syncGitHistoryResizeAria());
+      return;
+    }
+    this.#setGitHistoryHeight(currentHeight + (event.key === "ArrowUp" ? 20 : -20));
+  }
+
+  async #loadGitHistory(reset: boolean): Promise<void> {
+    if (this.#gitHistoryLoading) return;
+    const bridge = this.#bridge;
+    if (!bridge?.available) {
+      this.#showGitHistoryError("Code-Codex is not connected.");
+      return;
+    }
+    const generation = ++this.#gitHistoryGeneration;
+    this.#gitHistoryLoading = true;
+    this.#gitHistoryRefreshButton.disabled = true;
+    this.#gitHistoryLoadMoreButton.disabled = true;
+    if (reset) {
+      this.#showGitHistoryList();
+      this.#gitHistoryCommits = [];
+      this.#gitHistoryState.hidden = false;
+      this.#gitHistoryState.textContent = "Loading commit history…";
+      this.#gitHistoryList.replaceChildren();
+      this.#gitHistoryLoadMoreButton.hidden = true;
+    }
+    try {
+      const raw = await bridge.request<unknown>("explorer.git.history", {
+        skip: reset ? 0 : this.#gitHistoryCommits.length,
+        limit: 50,
+      });
+      if (generation !== this.#gitHistoryGeneration || !this.#gitHistoryOpen) return;
+      const result = normalizeGitHistory(raw);
+      this.#gitHistoryCommits = reset
+        ? [...result.commits]
+        : [...this.#gitHistoryCommits, ...result.commits];
+      this.#gitHistoryHasMore = result.hasMore;
+      this.#gitHistoryBranch.textContent = result.branch;
+      this.#renderGitHistoryList();
+    } catch (error) {
+      if (generation === this.#gitHistoryGeneration && this.#gitHistoryOpen) {
+        this.#showGitHistoryError(gitHistoryError(error));
+      }
+    } finally {
+      if (generation === this.#gitHistoryGeneration) {
+        this.#gitHistoryLoading = false;
+        this.#gitHistoryRefreshButton.disabled = false;
+        this.#gitHistoryLoadMoreButton.disabled = false;
+      }
+    }
+  }
+
+  #renderGitHistoryList(): void {
+    this.#gitHistoryList.replaceChildren();
+    for (const commit of this.#gitHistoryCommits) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "git-history-commit";
+      button.dataset.gitHash = commit.hash;
+      button.setAttribute("role", "listitem");
+
+      const rail = document.createElement("span");
+      rail.className = "git-history-rail";
+      rail.setAttribute("aria-hidden", "true");
+      const copy = document.createElement("span");
+      copy.className = "git-history-commit-copy";
+      const subject = document.createElement("strong");
+      subject.textContent = commit.subject || "Untitled commit";
+      const meta = document.createElement("span");
+      meta.className = "git-history-commit-meta";
+      const hash = document.createElement("code");
+      hash.textContent = commit.shortHash;
+      const author = document.createElement("span");
+      author.textContent = commit.author;
+      const time = document.createElement("time");
+      time.dateTime = commit.authoredAt;
+      time.textContent = formatGitDate(commit.authoredAt);
+      meta.append(hash, author, time);
+      copy.append(subject, meta);
+      button.append(rail, copy);
+      this.#gitHistoryList.append(button);
+    }
+    this.#gitHistoryState.hidden = this.#gitHistoryCommits.length > 0;
+    if (!this.#gitHistoryCommits.length) this.#gitHistoryState.textContent = "No commits found in this repository.";
+    this.#gitHistoryLoadMoreButton.hidden = !this.#gitHistoryHasMore;
+  }
+
+  #showGitHistoryError(message: string): void {
+    this.#gitHistoryState.hidden = false;
+    this.#gitHistoryState.textContent = message;
+    this.#gitHistoryLoadMoreButton.hidden = true;
+  }
+
+  #showGitHistoryList(): void {
+    this.#gitHistoryDetailView.hidden = true;
+    this.#gitHistoryListView.hidden = false;
+    this.#gitHistoryDetail.replaceChildren();
+  }
+
+  async #openGitCommit(hash: string): Promise<void> {
+    const bridge = this.#bridge;
+    if (!bridge?.available) return;
+    const generation = ++this.#gitHistoryGeneration;
+    this.#gitHistoryListView.hidden = true;
+    this.#gitHistoryDetailView.hidden = false;
+    this.#gitHistoryDetail.textContent = "Loading commit…";
+    try {
+      const result = normalizeGitCommit(await bridge.request<unknown>("explorer.git.commit", { hash }));
+      if (generation !== this.#gitHistoryGeneration || !this.#gitHistoryOpen) return;
+      this.#renderGitCommit(result);
+    } catch (error) {
+      if (generation === this.#gitHistoryGeneration) this.#gitHistoryDetail.textContent = gitHistoryError(error);
+    }
+  }
+
+  #renderGitCommit(commit: GitCommitResult): void {
+    this.#gitHistoryDetail.replaceChildren();
+    const heading = document.createElement("h4");
+    heading.textContent = commit.message.split(/\r?\n/, 1)[0] || "Untitled commit";
+    const metadata = document.createElement("div");
+    metadata.className = "git-history-detail-meta";
+    const hash = document.createElement("code");
+    hash.textContent = commit.shortHash;
+    const author = document.createElement("span");
+    author.textContent = `${commit.author} · ${formatGitDate(commit.authoredAt)}`;
+    metadata.append(hash, author);
+    const message = document.createElement("pre");
+    message.className = "git-history-message";
+    message.textContent = commit.message;
+    const fileHeading = document.createElement("h5");
+    fileHeading.textContent = `${commit.files.length} changed ${commit.files.length === 1 ? "file" : "files"}`;
+    this.#gitHistoryDetail.append(heading, metadata, message, fileHeading);
+    for (const file of commit.files) {
+      const row = document.createElement("div");
+      row.className = "git-history-file";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.gitHash = commit.hash;
+      button.dataset.gitFile = file.path;
+      const status = document.createElement("span");
+      status.className = `git-history-file-status status-${file.status[0]?.toLowerCase() || "m"}`;
+      status.textContent = file.status[0] || "M";
+      const path = document.createElement("span");
+      path.className = "git-history-file-path";
+      path.textContent = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
+      const chevron = document.createElement("span");
+      chevron.className = "git-history-file-chevron";
+      chevron.textContent = "›";
+      button.append(status, path, chevron);
+      const diff = document.createElement("div");
+      diff.className = "git-history-diff";
+      diff.hidden = true;
+      row.append(button, diff);
+      this.#gitHistoryDetail.append(row);
+    }
+    if (commit.filesTruncated) {
+      const note = document.createElement("p");
+      note.className = "git-history-note";
+      note.textContent = "Only the first 500 changed files are shown.";
+      this.#gitHistoryDetail.append(note);
+    }
+  }
+
+  async #toggleGitFileDiff(button: HTMLButtonElement, hash: string, path: string): Promise<void> {
+    const container = button.nextElementSibling as HTMLElement | null;
+    if (!container) return;
+    if (!container.hidden) {
+      container.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+      return;
+    }
+    container.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    if (container.dataset.loaded === "true") return;
+    container.textContent = "Loading diff…";
+    try {
+      const bridge = this.#bridge;
+      if (!bridge?.available) throw new BridgeUnavailableError();
+      const result = normalizeGitDiff(await bridge.request<unknown>("explorer.git.diff", { hash, path }));
+      container.replaceChildren(renderGitDiff(result.content));
+      if (result.truncated) {
+        const note = document.createElement("p");
+        note.className = "git-history-note";
+        note.textContent = "Diff truncated at 1.5 MB.";
+        container.append(note);
+      }
+      container.dataset.loaded = "true";
+    } catch (error) {
+      container.textContent = gitHistoryError(error);
+    }
+  }
+
   #closePreviewMarket(restoreFocus: boolean): void {
     this.#closePixelSculpt();
     this.#closeCloudTrain();
@@ -20482,6 +20911,123 @@ function externalImportError(error: unknown, committedCount: number): string {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function normalizeGitCommitSummary(raw: unknown): GitCommitSummary {
+  const object = asRecord(raw);
+  if (
+    !object
+    || typeof object.hash !== "string"
+    || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(object.hash)
+    || typeof object.shortHash !== "string"
+    || typeof object.author !== "string"
+    || typeof object.authoredAt !== "string"
+    || typeof object.subject !== "string"
+  ) throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git history response was not valid." });
+  return {
+    hash: object.hash,
+    shortHash: object.shortHash,
+    author: object.author,
+    authoredAt: object.authoredAt,
+    subject: object.subject,
+  };
+}
+
+function normalizeGitHistory(raw: unknown): GitHistoryResult {
+  const object = asRecord(raw);
+  if (
+    !object
+    || typeof object.branch !== "string"
+    || typeof object.detached !== "boolean"
+    || !Array.isArray(object.commits)
+    || typeof object.hasMore !== "boolean"
+  ) throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git history response was not valid." });
+  return {
+    branch: object.branch,
+    detached: object.detached,
+    commits: object.commits.map(normalizeGitCommitSummary),
+    hasMore: object.hasMore,
+  };
+}
+
+function normalizeGitCommit(raw: unknown): GitCommitResult {
+  const object = asRecord(raw);
+  if (
+    !object
+    || typeof object.hash !== "string"
+    || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(object.hash)
+    || typeof object.shortHash !== "string"
+    || typeof object.author !== "string"
+    || typeof object.authorEmail !== "string"
+    || typeof object.authoredAt !== "string"
+    || typeof object.message !== "string"
+    || !Array.isArray(object.files)
+    || typeof object.filesTruncated !== "boolean"
+  ) throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git commit response was not valid." });
+  const files = object.files.map((rawFile): GitChangedFile => {
+    const file = asRecord(rawFile);
+    if (
+      !file
+      || typeof file.status !== "string"
+      || typeof file.path !== "string"
+      || (file.oldPath !== undefined && typeof file.oldPath !== "string")
+    ) throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git commit response was not valid." });
+    return {
+      status: file.status,
+      path: file.path,
+      ...(typeof file.oldPath === "string" ? { oldPath: file.oldPath } : {}),
+    };
+  });
+  return {
+    hash: object.hash,
+    shortHash: object.shortHash,
+    author: object.author,
+    authorEmail: object.authorEmail,
+    authoredAt: object.authoredAt,
+    message: object.message,
+    files,
+    filesTruncated: object.filesTruncated,
+  };
+}
+
+function normalizeGitDiff(raw: unknown): GitDiffResult {
+  const object = asRecord(raw);
+  if (!object || typeof object.path !== "string" || typeof object.content !== "string" || typeof object.truncated !== "boolean") {
+    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git diff response was not valid." });
+  }
+  return { path: object.path, content: object.content, truncated: object.truncated };
+}
+
+function formatGitDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
+}
+
+function gitHistoryError(error: unknown): string {
+  switch (errorCode(error)) {
+    case "NO_CONTEXT": return "Choose a local project to view its Git history.";
+    case "NOT_GIT_REPOSITORY": return "The selected project is not a Git repository.";
+    case "GIT_UNAVAILABLE": return "Git is not installed or is unavailable to Code-Codex.";
+    case "GIT_TIMEOUT": return "Git history took too long to load.";
+    case "GIT_OUTPUT_TOO_LARGE": return "This Git result is too large to display safely.";
+    case "CANCELLED": return "The active project changed. Reopen Git History to continue.";
+    default: return "Git history could not be loaded.";
+  }
+}
+
+function renderGitDiff(content: string): HTMLElement {
+  const pre = document.createElement("pre");
+  pre.className = "git-history-diff-content";
+  for (const line of content.split("\n")) {
+    const span = document.createElement("span");
+    if (line.startsWith("+") && !line.startsWith("+++")) span.className = "git-diff-add";
+    else if (line.startsWith("-") && !line.startsWith("---")) span.className = "git-diff-remove";
+    else if (line.startsWith("@@")) span.className = "git-diff-hunk";
+    span.textContent = `${line}\n`;
+    pre.append(span);
+  }
+  return pre;
 }
 
 function normalizeUpdateCheckResult(raw: unknown): UpdateCheckResult {

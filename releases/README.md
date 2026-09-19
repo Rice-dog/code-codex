@@ -2,6 +2,19 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.37 — 可调整高度的 Git History
+
+- 移除 Git History 面板中的 “Developer Tools” 与 “Read only” 文案，保持界面简洁。
+- 面板上边缘支持拖动调整高度，并保留默认占文件树下方三分之一的布局。
+- 略微增大提交记录、元数据和差异内容字号，提高可读性。
+
+## v0.2.36 — 只读 Git History
+
+- Preview Market 新增 Git History 工具，可查看当前项目的分支、提交记录、提交详情与变更文件。
+- 启用后固定显示在文件树下方三分之一的区域，关闭后恢复完整文件树。
+- 支持按文件展开统一 diff，并对长历史分页加载。
+- Git 调用使用固定只读参数、禁用交互与可选锁，不提供提交、暂存、分支切换或其他写入操作。
+
 ## v0.2.30 — Pixel Sculpt 统一变形渲染
 
 - 静止与图片切换统一使用同一套顶点着色路径，消除两种状态之间的材质与几何跳变。

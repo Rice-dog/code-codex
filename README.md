@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.30"><img alt="版本" src="https://img.shields.io/badge/version-0.2.30-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.37"><img alt="版本" src="https://img.shields.io/badge/version-0.2.37-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,15 +35,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.2.30-x64-setup.exe`
-- 备选：`CodeCodex-0.2.30-x64.msi`
-- 便携包：`CodeCodex-0.2.30-x64.zip`
+- 推荐：`CodeCodex-0.2.37-x64-setup.exe`
+- 备选：`CodeCodex-0.2.37-x64.msi`
+- 便携包：`CodeCodex-0.2.37-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.30-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.37-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -82,7 +82,7 @@ Get-FileHash .\CodeCodex-0.2.30-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.30
+./scripts/package.ps1 -Version 0.2.37
 ```
 
 生成结果会写入 `releases/`。
@@ -117,6 +117,7 @@ Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创
 - “极光电离层背景”外观插件提供体积光幕、程序化星空、自适应渲染质量、电影式揭示控制和中英文设置面板。
 - Milky Way Background 外观插件提供五色流动光场、可调波动形态、柔和开场动画和中英文设置面板。
 - 点击文件树底部的版本号，可通过 GitHub 检查最新发布的稳定版本。
+- Preview Market 的 Git History 工具以只读方式显示当前项目的分支、提交记录、变更文件和逐文件 diff，不提供提交、暂存、切换分支或其他仓库写入操作。
 - Codex 软件包版本仅作为诊断信息；未来版本不再受固定版本白名单限制，而是通过实时协议和 DOM 结构检查。
 - 在本地以表格形式预览 CSV，支持引号字段、字段内换行、固定表头和受限渲染。
 - 在本地以受限方式预览 `.drawio` 文件和常用 `.plantuml` 活动图语法，不会上传源代码。
