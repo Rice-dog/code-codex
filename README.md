@@ -193,6 +193,8 @@ Cloud Train 支持按景深从远到近在原位逐层淡入（无上下位移�
 
 ### Pixel Sculpt Background
 
+![Pixel Sculpt Background 立体像素浮雕背景](docs/screenshots/pixel-sculpt-background.png)
+
 在 Preview Market 中启用，将图片转换为可交互的立体像素浮雕背景。右侧中英文二级面板可调整像素形状、浮雕深度、鼠标波纹、颜色、位置和旋转；支持本地图片库、排序与自动变形切换。启用时切换原生深色外观，停用后恢复之前的设置。
 
 ## 仓库结构

@@ -216,6 +216,12 @@ Cloud Train Background renders clouds, a steam train, and a bridge across Codex.
 
 Cloud Train includes a staggered, in-place back-to-front fade-in without vertical movement with an enable switch, duration (0.5–10 seconds), feather width, and Replay. The default is three seconds. Reduced-motion skips the opening; the completed scene remains unchanged.
 
+### Pixel Sculpt Background
+
+![Pixel Sculpt Background](docs/screenshots/pixel-sculpt-background.png)
+
+Enable Pixel Sculpt Background in Preview Market to transform images into an interactive 3D pixel-relief background. Its bilingual secondary settings panel controls tile shape, relief depth, pointer ripples, color, position, and rotation, with a local image library, playback ordering, and automatic morph transitions. Enabling the plugin switches Codex to its native Dark appearance; disabling it restores the previous setting.
+
 ## Repository Layout
 
 ```text
