@@ -199,22 +199,11 @@ reconstructs a partial reference to “Milky way” by Almina (@Code4_11).
 
 ![Layered Mountain Background](docs/screenshots/layered-mountain-background.png)
 
-Layered Mountain Background adds animated atmospheric ridges, warm backlight,
-mist, and depth across the Codex window. A gentle three-second opening reveals
-distant ridges before the foreground settles into place. Replay restarts the opening;
-reduced-motion preferences skip it.
-
-Open Preview Market and use its settings
-button for bilingual controls, reverse drift, mountain shape, exposure, render
-scale, quality presets, and pause/reset. It uses the supplied two-pass WebGL 2
-reconstruction with a compact ridge atlas, and the same automatic Dark appearance
-and preference restoration as the other backgrounds.
+Layered Mountain Background adds animated atmospheric ridges, warm backlight, mist, and depth across the Codex window, with bilingual controls for reverse drift, mountain shape, exposure, render scale, quality, pause, and reset; its gentle three-second opening reveals the ridges from back to front, supports replay, and is skipped under reduced motion; the plugin uses a two-pass WebGL 2 renderer with a compact ridge atlas and automatically restores the previous appearance after its native Dark mode is disabled.
 
 ![Cloud Train Background](docs/screenshots/cloud-train-background.png)
 
-Cloud Train Background renders clouds, a steam train, and a bridge across Codex. Enable it in Preview Market at the bottom of the file tree and open its secondary settings panel for speed, zoom, cloud detail, feedback, hue, temperature, and independent sky/smoke/train tints. It supports bilingual controls, pause/reset, and native Dark appearance with restoration on disable.
-
-Cloud Train includes a staggered, in-place back-to-front fade-in without vertical movement with an enable switch, duration (0.5–10 seconds), feather width, and Replay. The default is three seconds. Reduced-motion skips the opening; the completed scene remains unchanged.
+Cloud Train Background renders clouds, a steam train, and a bridge across Codex, with bilingual controls for speed, zoom, cloud detail, feedback, hue, temperature, independent sky/smoke/train tints, pause, and reset; its staggered in-place opening fades layers from back to front without vertical movement and provides an enable switch, a 0.5–10 second duration, feather width, and replay, defaulting to three seconds and skipping under reduced motion; enabling the plugin uses the native Dark appearance and disabling it restores the previous setting.
 
 ### Pixel Sculpt Background
 
