@@ -6,7 +6,7 @@ The MIT License in the root of the Code-Codex repository applies only to materia
 
 This document records provenance and the current verification status of the relevant material. It does not create a license. If this notice conflicts with an original license or an author's terms, the original terms control.
 
-**Last updated:** September 14, 2026
+**Last updated:** September 19, 2026
 
 Dependency licenses generated for packaged software are documented separately in `THIRD_PARTY_LICENSES.txt`. This document focuses on visual-effect provenance.
 
@@ -142,13 +142,17 @@ The following effects were independently implemented for Code-Codex from publicl
 
 ## Pixel Sculpt Background
 
-**Supplied project:** Pixel Sculpt — Interactive WebGL Study
+**Visual reference:** Pixel Sculpt — React Bits Pro
 
-**Declared visual reference:** React Bits Pro Pixel Sculpt
+**Reference:** https://pro.reactbits.dev/docs/components/pixel-sculpt
 
-**Status:** The supplied README describes an independent WebGL2 implementation; this records the source declaration, not an independent provenance audit. The supplied default sunflower image's author and redistribution permission have not been documented.
+**Status:** Reference only
 
-**Code-Codex modifications:** full-window rendering and input forwarding, native Dark appearance and restoration, bilingual secondary settings, local settings and image-library persistence, bounded uploads, visibility/pause handling, and resource cleanup. Original shaders and prism geometry are retained from the supplied study. This entry does not grant permission or imply endorsement from React Bits.
+The visual effect and interaction concept of Pixel Sculpt Background were inspired by the publicly presented React Bits Pro Pixel Sculpt showcase. Code-Codex does not copy, extract, modify, or redistribute React Bits Pro source code, components, preview assets, or other Product files. The program code, WebGL rendering pipeline, prism geometry, interface integration, and extended functionality were independently implemented for Code-Codex.
+
+**Code-Codex original work:** image sampling and relief generation, instanced prism rendering, pointer and click interactions, local image-library management, ordered autoplay and morph transitions, bilingual controls, full-window rendering and input forwarding, native Dark appearance and restoration, settings persistence, bounded uploads, lifecycle handling, and resource cleanup.
+
+This notice identifies visual inspiration only and does not imply endorsement, sponsorship, or affiliation with React Bits Pro.
 
 ---
 
