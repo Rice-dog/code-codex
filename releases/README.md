@@ -2,6 +2,11 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.38 — 从 Git History 打开文件
+
+- 点击 Git History 中的变更文件可按文件树相同的方式在主对话区域打开文件标签页。
+- 差异展开保留为右侧独立按钮，删除文件保持不可打开但仍可查看提交差异。
+
 ## v0.2.37 — 可调整高度的 Git History
 
 - 移除 Git History 面板中的 “Developer Tools” 与 “Read only” 文案，保持界面简洁。

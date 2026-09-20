@@ -1469,27 +1469,45 @@ export const styles = String.raw`
     white-space: pre-wrap;
   }
   .git-history-file { border-top: 1px solid var(--cle-rule); }
-  .git-history-file > button {
+  .git-history-file-actions {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr) 14px;
+    grid-template-columns: minmax(0, 1fr) 30px;
     align-items: center;
-    gap: 7px;
-    width: 100%;
-    padding: 7px 3px;
+    gap: 2px;
+  }
+  .git-history-file-actions button {
     color: var(--cle-ink);
-    text-align: left;
     background: transparent;
     border: 0;
     cursor: pointer;
     font: inherit;
   }
-  .git-history-file > button:hover { background: var(--cle-hover); }
+  .git-history-file-open {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 7px 3px;
+    text-align: left;
+  }
+  .git-history-file-diff-toggle {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 5px;
+  }
+  .git-history-file-actions button:hover { background: var(--cle-hover); }
+  .git-history-file-open:disabled { cursor: not-allowed; opacity: .5; }
+  .git-history-file-open:disabled:hover { background: transparent; }
   .git-history-file-status { font: 700 11px/17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align: center; color: var(--cle-signal); }
   .git-history-file-status.status-a { color: var(--cle-added); }
   .git-history-file-status.status-d { color: var(--cle-deleted); }
   .git-history-file-path { overflow-wrap: anywhere; font: 11px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .git-history-file-chevron { color: var(--cle-muted); font-size: 17px; transition: transform 120ms ease; }
-  .git-history-file > button[aria-expanded="true"] .git-history-file-chevron { transform: rotate(90deg); }
+  .git-history-file-diff-toggle[aria-expanded="true"] .git-history-file-chevron { transform: rotate(90deg); }
   .git-history-diff { margin: 0 0 8px; overflow: auto; background: color-mix(in srgb, var(--cle-subtle) 70%, transparent); border: 1px solid var(--cle-rule); border-radius: 6px; }
   .git-history-diff[hidden] { display: none; }
   .git-history-diff-content { min-width: max-content; margin: 0; padding: 8px; color: var(--cle-muted); font: 10.5px/15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }

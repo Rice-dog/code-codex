@@ -12420,9 +12420,15 @@ export class CodeCodexElement extends HTMLElement {
         if (button?.dataset.gitHash) void this.#openGitCommit(button.dataset.gitHash);
       });
       this.#gitHistoryDetail.addEventListener("click", (event) => {
-        const button = (event.target as Element | null)?.closest<HTMLButtonElement>("button[data-git-file]");
-        if (button?.dataset.gitFile && button.dataset.gitHash) {
-          void this.#toggleGitFileDiff(button, button.dataset.gitHash, button.dataset.gitFile);
+        const target = event.target as Element | null;
+        const openButton = target?.closest<HTMLButtonElement>("button[data-git-open-file]");
+        if (openButton?.dataset.gitOpenFile) {
+          this.#openGitHistoryFile(openButton.dataset.gitOpenFile);
+          return;
+        }
+        const diffButton = target?.closest<HTMLButtonElement>("button[data-git-diff-file]");
+        if (diffButton?.dataset.gitDiffFile && diffButton.dataset.gitHash) {
+          void this.#toggleGitFileDiff(diffButton, diffButton.dataset.gitHash, diffButton.dataset.gitDiffFile);
         }
       });
       this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
@@ -15640,16 +15646,28 @@ export class CodeCodexElement extends HTMLElement {
     ) {
       return;
     }
+    this.#openPreviewPath(node.relativePath, node.name);
+  }
+
+  #openPreviewPath(relativePath: string, name: string): void {
+    if (
+      (this.#state !== "ready" && this.#state !== "empty") ||
+      !this.#context ||
+      !this.#bridge?.available ||
+      !this.#mainPreviewSurface?.isConnected
+    ) {
+      return;
+    }
     if (
       this.#editingPath !== null &&
-      this.#editingPath !== node.relativePath &&
+      this.#editingPath !== relativePath &&
       !this.#leaveEditing("Open another file and discard your unsaved changes?")
     ) {
       return;
     }
     if (!this.#ensureMainPreview()) return;
 
-    let tab = this.#previewTabs.find((candidate) => candidate.path === node.relativePath);
+    let tab = this.#previewTabs.find((candidate) => candidate.path === relativePath);
     if (!tab) {
       if (this.#previewTabs.length >= MAX_PREVIEW_TABS) {
         const evicted = this.#previewTabs.shift();
@@ -15657,13 +15675,13 @@ export class CodeCodexElement extends HTMLElement {
       }
       tab = {
         instanceId: this.#nextPreviewInstanceId++,
-        path: node.relativePath,
-        name: node.name,
+        path: relativePath,
+        name,
         revision: 0,
         timer: undefined,
         modifiedDuringSave: false,
         dirty: false,
-        view: { kind: "loading", path: node.relativePath, name: node.name },
+        view: { kind: "loading", path: relativePath, name },
       };
       this.#previewTabs.push(tab);
     }
@@ -20121,24 +20139,37 @@ export class CodeCodexElement extends HTMLElement {
     for (const file of commit.files) {
       const row = document.createElement("div");
       row.className = "git-history-file";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.gitHash = commit.hash;
-      button.dataset.gitFile = file.path;
+      const actions = document.createElement("div");
+      actions.className = "git-history-file-actions";
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "git-history-file-open";
+      openButton.dataset.gitOpenFile = file.path;
+      openButton.setAttribute("aria-label", `Open ${file.path} in the main view`);
+      openButton.disabled = file.status.startsWith("D");
       const status = document.createElement("span");
       status.className = `git-history-file-status status-${file.status[0]?.toLowerCase() || "m"}`;
       status.textContent = file.status[0] || "M";
       const path = document.createElement("span");
       path.className = "git-history-file-path";
       path.textContent = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
+      openButton.append(status, path);
+      const diffButton = document.createElement("button");
+      diffButton.type = "button";
+      diffButton.className = "git-history-file-diff-toggle";
+      diffButton.dataset.gitHash = commit.hash;
+      diffButton.dataset.gitDiffFile = file.path;
+      diffButton.setAttribute("aria-expanded", "false");
+      diffButton.setAttribute("aria-label", `Show diff for ${file.path}`);
       const chevron = document.createElement("span");
       chevron.className = "git-history-file-chevron";
       chevron.textContent = "›";
-      button.append(status, path, chevron);
+      diffButton.append(chevron);
+      actions.append(openButton, diffButton);
       const diff = document.createElement("div");
       diff.className = "git-history-diff";
       diff.hidden = true;
-      row.append(button, diff);
+      row.append(actions, diff);
       this.#gitHistoryDetail.append(row);
     }
     if (commit.filesTruncated) {
@@ -20149,8 +20180,14 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  #openGitHistoryFile(path: string): void {
+    const normalizedPath = path.replaceAll("\\", "/");
+    const name = normalizedPath.split("/").at(-1) || normalizedPath;
+    this.#openPreviewPath(normalizedPath, name);
+  }
+
   async #toggleGitFileDiff(button: HTMLButtonElement, hash: string, path: string): Promise<void> {
-    const container = button.nextElementSibling as HTMLElement | null;
+    const container = button.closest(".git-history-file")?.querySelector<HTMLElement>(".git-history-diff") ?? null;
     if (!container) return;
     if (!container.hidden) {
       container.hidden = true;
