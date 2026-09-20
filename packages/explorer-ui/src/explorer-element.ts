@@ -12422,13 +12422,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#gitHistoryDetail.addEventListener("click", (event) => {
         const target = event.target as Element | null;
         const openButton = target?.closest<HTMLButtonElement>("button[data-git-open-file]");
-        if (openButton?.dataset.gitOpenFile) {
-          this.#openGitHistoryFile(openButton.dataset.gitOpenFile);
-          return;
-        }
-        const diffButton = target?.closest<HTMLButtonElement>("button[data-git-diff-file]");
-        if (diffButton?.dataset.gitDiffFile && diffButton.dataset.gitHash) {
-          void this.#toggleGitFileDiff(diffButton, diffButton.dataset.gitHash, diffButton.dataset.gitDiffFile);
+        if (openButton?.dataset.gitOpenFile && openButton.dataset.gitHash) {
+          void this.#openGitHistoryFile(openButton.dataset.gitHash, openButton.dataset.gitOpenFile);
         }
       });
       this.#transparentBackgroundButton.addEventListener("click", () => void this.#toggleTransparentBackground());
@@ -20144,8 +20139,8 @@ export class CodeCodexElement extends HTMLElement {
       openButton.type = "button";
       openButton.className = "git-history-file-open";
       openButton.dataset.gitOpenFile = file.path;
-      openButton.setAttribute("aria-label", `Open ${file.path} in the main view`);
-      openButton.disabled = file.status.startsWith("D");
+      openButton.dataset.gitHash = commit.hash;
+      openButton.setAttribute("aria-label", `Open changes for ${file.path} in the main view`);
       const status = document.createElement("span");
       status.className = `git-history-file-status status-${file.status[0]?.toLowerCase() || "m"}`;
       status.textContent = file.status[0] || "M";
@@ -20153,22 +20148,8 @@ export class CodeCodexElement extends HTMLElement {
       path.className = "git-history-file-path";
       path.textContent = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
       openButton.append(status, path);
-      const diffButton = document.createElement("button");
-      diffButton.type = "button";
-      diffButton.className = "git-history-file-diff-toggle";
-      diffButton.dataset.gitHash = commit.hash;
-      diffButton.dataset.gitDiffFile = file.path;
-      diffButton.setAttribute("aria-expanded", "false");
-      diffButton.setAttribute("aria-label", `Show diff for ${file.path}`);
-      const chevron = document.createElement("span");
-      chevron.className = "git-history-file-chevron";
-      chevron.textContent = "›";
-      diffButton.append(chevron);
-      actions.append(openButton, diffButton);
-      const diff = document.createElement("div");
-      diff.className = "git-history-diff";
-      diff.hidden = true;
-      row.append(actions, diff);
+      actions.append(openButton);
+      row.append(actions);
       this.#gitHistoryDetail.append(row);
     }
     if (commit.filesTruncated) {
@@ -20179,38 +20160,64 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
-  #openGitHistoryFile(path: string): void {
+  async #openGitHistoryFile(hash: string, path: string): Promise<void> {
     const normalizedPath = path.replaceAll("\\", "/");
     const name = normalizedPath.split("/").at(-1) || normalizedPath;
-    this.#openPreviewPath(normalizedPath, name);
-  }
+    const tabPath = `git-diff://${hash}/${normalizedPath}`;
+    if (
+      (this.#state !== "ready" && this.#state !== "empty") ||
+      !this.#context ||
+      !this.#bridge?.available ||
+      !this.#mainPreviewSurface?.isConnected ||
+      !this.#ensureMainPreview()
+    ) return;
+    if (this.#editingPath !== null && !this.#leaveEditing("Open a Git diff and discard your unsaved changes?")) return;
 
-  async #toggleGitFileDiff(button: HTMLButtonElement, hash: string, path: string): Promise<void> {
-    const container = button.closest(".git-history-file")?.querySelector<HTMLElement>(".git-history-diff") ?? null;
-    if (!container) return;
-    if (!container.hidden) {
-      container.hidden = true;
-      button.setAttribute("aria-expanded", "false");
-      return;
+    let tab = this.#previewTabs.find((candidate) => candidate.path === tabPath);
+    if (!tab) {
+      if (this.#previewTabs.length >= MAX_PREVIEW_TABS) {
+        const evicted = this.#previewTabs.shift();
+        if (evicted) this.#disposePreviewTab(evicted);
+      }
+      tab = {
+        instanceId: this.#nextPreviewInstanceId++,
+        path: tabPath,
+        name,
+        revision: 0,
+        timer: undefined,
+        modifiedDuringSave: false,
+        dirty: false,
+        view: { kind: "loading", path: tabPath, name },
+      };
+      this.#previewTabs.push(tab);
     }
-    container.hidden = false;
-    button.setAttribute("aria-expanded", "true");
-    if (container.dataset.loaded === "true") return;
-    container.textContent = "Loading diff…";
+    const revision = ++tab.revision;
+    tab.view = { kind: "loading", path: tabPath, name };
+    this.#activePreviewPath = tabPath;
+    this.#syncMainPreview();
+    this.#renderVisible();
+    if (this.dataset.placement === "drawer" && !this.#settings.collapsed) this.collapse(true);
     try {
       const bridge = this.#bridge;
       if (!bridge?.available) throw new BridgeUnavailableError();
       const result = normalizeGitDiff(await bridge.request<unknown>("explorer.git.diff", { hash, path }));
-      container.replaceChildren(renderGitDiff(result.content));
-      if (result.truncated) {
-        const note = document.createElement("p");
-        note.className = "git-history-note";
-        note.textContent = "Diff truncated at 1.5 MB.";
-        container.append(note);
-      }
-      container.dataset.loaded = "true";
+      if (!this.#previewTabs.includes(tab) || tab.revision !== revision) return;
+      tab.view = {
+        kind: "git-diff",
+        path: tabPath,
+        name,
+        sourcePath: result.path || normalizedPath,
+        content: result.content,
+        truncated: result.truncated,
+        shortHash: hash.slice(0, 7),
+      };
+      this.#syncMainPreview();
+      this.#announce(`${name} changes opened in the main view`);
     } catch (error) {
-      container.textContent = gitHistoryError(error);
+      if (!this.#previewTabs.includes(tab) || tab.revision !== revision) return;
+      tab.view = { kind: "error", path: tabPath, name, code: errorCode(error), message: gitHistoryError(error) };
+      this.#syncMainPreview();
+      this.#announce(`Changes could not load for ${name}`);
     }
   }
 
@@ -21050,20 +21057,6 @@ function gitHistoryError(error: unknown): string {
     case "CANCELLED": return "The active project changed. Reopen Git History to continue.";
     default: return "Git history could not be loaded.";
   }
-}
-
-function renderGitDiff(content: string): HTMLElement {
-  const pre = document.createElement("pre");
-  pre.className = "git-history-diff-content";
-  for (const line of content.split("\n")) {
-    const span = document.createElement("span");
-    if (line.startsWith("+") && !line.startsWith("+++")) span.className = "git-diff-add";
-    else if (line.startsWith("-") && !line.startsWith("---")) span.className = "git-diff-remove";
-    else if (line.startsWith("@@")) span.className = "git-diff-hunk";
-    span.textContent = `${line}\n`;
-    pre.append(span);
-  }
-  return pre;
 }
 
 function normalizeUpdateCheckResult(raw: unknown): UpdateCheckResult {

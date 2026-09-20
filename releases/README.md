@@ -2,6 +2,10 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.44 — Git 提交差异预览
+
+- 移除提交文件行右侧的展开箭头，点击文件名会在主界面标签页中显示带增删颜色的提交差异。
+
 ## v0.2.43 — Git History 返回按钮调整
 
 - 将提交详情返回按钮移到分支栏的刷新与关闭按钮之间，并改为紧凑的左箭头图标。

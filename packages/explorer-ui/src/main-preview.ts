@@ -843,6 +843,14 @@ export interface MainPreviewTextView extends MainPreviewFileBase {
   readonly lineEnding?: MainPreviewLineEnding;
 }
 
+export interface MainPreviewGitDiffView extends MainPreviewFileBase {
+  readonly kind: "git-diff";
+  readonly sourcePath: string;
+  readonly content: string;
+  readonly truncated: boolean;
+  readonly shortHash: string;
+}
+
 export interface MainPreviewEmptyView extends MainPreviewFileBase {
   readonly kind: "empty";
   readonly sizeBytes: number;
@@ -890,6 +898,7 @@ export interface MainPreviewErrorView extends MainPreviewFileBase {
 export type MainPreviewFileView =
   | MainPreviewLoadingView
   | MainPreviewTextView
+  | MainPreviewGitDiffView
   | MainPreviewEmptyView
   | MainPreviewMediaView
   | MainPreviewModelView
@@ -3448,6 +3457,39 @@ const mainPreviewStyles = String.raw`
     overflow: auto;
   }
 
+  .git-diff-reader {
+    min-width: max-content;
+    margin: 0;
+    padding: 10px 0 24px;
+    color: var(--cle-main-muted);
+    font: 12px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    tab-size: 4;
+  }
+
+  .git-diff-line {
+    display: block;
+    min-height: 18px;
+    padding: 0 16px;
+    white-space: pre;
+  }
+
+  .git-diff-line-add {
+    color: var(--cle-syntax-inserted);
+    background: color-mix(in srgb, var(--cle-syntax-inserted) 13%, transparent);
+  }
+
+  .git-diff-line-remove {
+    color: var(--cle-syntax-deleted);
+    background: color-mix(in srgb, var(--cle-syntax-deleted) 13%, transparent);
+  }
+
+  .git-diff-line-hunk {
+    color: var(--cle-syntax-meta);
+    background: color-mix(in srgb, var(--cle-syntax-meta) 8%, transparent);
+  }
+
+  .git-diff-line-header { color: var(--cle-main-faint); }
+
   .media-preview {
     display: flex;
     align-items: center;
@@ -5124,6 +5166,16 @@ function cloneView(view: MainPreviewFileView): MainPreviewFileView {
         ...(view.version === undefined ? {} : { version: view.version }),
         ...(view.lineEnding === undefined ? {} : { lineEnding: view.lineEnding }),
       };
+    case "git-diff":
+      return {
+        kind: "git-diff",
+        path: view.path,
+        name,
+        sourcePath: view.sourcePath,
+        content: view.content,
+        truncated: view.truncated,
+        shortHash: view.shortHash,
+      };
     case "empty":
       return {
         kind: "empty",
@@ -5552,8 +5604,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     const metaBar = this.ownerDocument.createElement("header");
     metaBar.className = "preview-meta-bar";
     metaBar.append(this.#staticIcon(getFileIcon(view.name).markup, "panel-icon"));
-    const location = this.#textSpan(view.path, "preview-location");
-    location.title = view.path;
+    const displayPath = view.kind === "git-diff" ? view.sourcePath : view.path;
+    const location = this.#textSpan(displayPath, "preview-location");
+    location.title = displayPath;
     const editor = this.#state.editor?.path === view.path ? this.#state.editor : undefined;
     const markdownEditing = Boolean(
       editor &&
@@ -5672,6 +5725,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
           reader.append(lineNumbers, pre);
           content.append(reader);
         }
+        return;
+      case "git-diff":
+        content.append(this.#gitDiffReader(view));
         return;
       case "image":
       case "video":
@@ -10843,6 +10899,8 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
         return "Loading";
       case "text":
         return view.truncated ? `${formatBytes(view.sizeBytes)} \u00b7 Preview truncated` : formatBytes(view.sizeBytes);
+      case "git-diff":
+        return `Commit ${view.shortHash}${view.truncated ? " \u00b7 Diff truncated" : ""}`;
       case "empty":
         return formatBytes(view.sizeBytes);
       case "image":
@@ -10866,6 +10924,25 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       case "error":
         return view.code || "Preview error";
     }
+  }
+
+  #gitDiffReader(view: MainPreviewGitDiffView): HTMLElement {
+    const reader = this.ownerDocument.createElement("pre");
+    reader.className = "git-diff-reader";
+    reader.setAttribute("aria-label", `${view.name} changes in commit ${view.shortHash}`);
+    for (const line of view.content.split("\n")) {
+      const row = this.ownerDocument.createElement("span");
+      row.className = "git-diff-line";
+      if (line.startsWith("+") && !line.startsWith("+++")) row.classList.add("git-diff-line-add");
+      else if (line.startsWith("-") && !line.startsWith("---")) row.classList.add("git-diff-line-remove");
+      else if (line.startsWith("@@")) row.classList.add("git-diff-line-hunk");
+      else if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) {
+        row.classList.add("git-diff-line-header");
+      }
+      row.textContent = line || " ";
+      reader.append(row);
+    }
+    return reader;
   }
 
   #highlightedSource(path: string, source: string): SyntaxHighlight {
