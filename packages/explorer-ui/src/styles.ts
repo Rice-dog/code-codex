@@ -1286,7 +1286,7 @@ export const styles = String.raw`
     z-index: 2;
     grid-row: 4;
     display: grid;
-    grid-template-rows: 8px auto auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
     overflow: hidden;
@@ -1308,40 +1308,17 @@ export const styles = String.raw`
   .git-history-resize-handle {
     position: relative;
     z-index: 1;
-    width: 100%;
-    min-height: 8px;
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    align-self: stretch;
+    min-width: 0;
     cursor: ns-resize;
     touch-action: none;
   }
-  .git-history-resize-handle::before {
-    content: "";
-    position: absolute;
-    top: 3px;
-    left: 50%;
-    width: 34px;
-    height: 2px;
-    background: var(--cle-rule-strong);
-    border-radius: 999px;
-    transform: translateX(-50%);
-    transition: background-color 120ms ease, width 120ms ease;
-  }
-  .git-history-resize-handle:hover::before,
-  .git-history-resize-handle:focus-visible::before {
-    width: 42px;
-    background: var(--cle-signal);
-  }
-  .git-history-resize-handle:focus-visible { outline: none; }
-  .git-history-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 9px 7px 11px;
-    border-bottom: 1px solid var(--cle-rule);
-  }
-  .git-history-header h3 { margin: 0; font-size: 13px; line-height: 18px; }
-  .git-history-header-actions { display: flex; gap: 3px; }
-  .git-history-header-actions button {
+  .git-history-resize-handle:focus-visible { outline: 1px solid var(--cle-focus); outline-offset: -1px; }
+  .git-history-toolbar-actions { display: flex; flex: 0 0 auto; gap: 3px; }
+  .git-history-toolbar-actions button {
     display: grid;
     place-items: center;
     width: 26px;
@@ -1353,9 +1330,10 @@ export const styles = String.raw`
     border-radius: 5px;
     cursor: pointer;
   }
-  .git-history-header-actions button:hover { color: var(--cle-ink); background: var(--cle-hover); }
-  .git-history-header-actions button:disabled { cursor: default; opacity: .45; }
-  .git-history-header-actions svg {
+  .git-history-toolbar-actions button[hidden] { display: none; }
+  .git-history-toolbar-actions button:hover { color: var(--cle-ink); background: var(--cle-hover); }
+  .git-history-toolbar-actions button:disabled { cursor: default; opacity: .45; }
+  .git-history-toolbar-actions svg {
     width: 14px;
     height: 14px;
     fill: none;
@@ -1367,10 +1345,10 @@ export const styles = String.raw`
   .git-history-toolbar {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: space-between;
     gap: 10px;
-    min-height: 30px;
-    padding: 5px 11px;
+    min-height: 28px;
+    padding: 1px 5px 1px 11px;
     background: color-mix(in srgb, var(--cle-subtle) 60%, transparent);
     border-bottom: 1px solid var(--cle-rule);
   }
@@ -1440,8 +1418,7 @@ export const styles = String.raw`
   .git-history-commit-meta code { color: var(--cle-signal); font: 600 10.5px/15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .git-history-commit-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-history-commit-meta time { flex: 0 0 auto; }
-  .git-history-load-more,
-  .git-history-back {
+  .git-history-load-more {
     margin: 5px 10px 12px;
     padding: 5px 9px;
     color: var(--cle-muted);
@@ -1452,22 +1429,12 @@ export const styles = String.raw`
     font: 600 11.5px/17px inherit;
   }
   .git-history-load-more { width: calc(100% - 20px); }
-  .git-history-load-more:hover,
-  .git-history-back:hover { color: var(--cle-ink); background: var(--cle-hover); }
+  .git-history-load-more:hover { color: var(--cle-ink); background: var(--cle-hover); }
   .git-history-detail-view { padding: 8px 10px 14px; box-sizing: border-box; }
-  .git-history-back { margin: 0 0 8px; }
   .git-history-detail h4 { margin: 2px 2px 5px; font-size: 13px; line-height: 18px; }
   .git-history-detail h5 { margin: 16px 2px 7px; color: var(--cle-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
   .git-history-detail-meta { display: flex; gap: 8px; margin: 0 2px 10px; color: var(--cle-muted); font-size: 11px; }
   .git-history-detail-meta code { color: var(--cle-signal); }
-  .git-history-message {
-    max-height: 110px;
-    margin: 0 2px;
-    overflow: auto;
-    color: var(--cle-muted);
-    font: 11.5px/17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    white-space: pre-wrap;
-  }
   .git-history-file { border-top: 1px solid var(--cle-rule); }
   .git-history-file-actions {
     display: grid;

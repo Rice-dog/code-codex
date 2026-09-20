@@ -10353,16 +10353,17 @@ function gitHistoryCardMarkup(): string {
 
 function gitHistoryPanelMarkup(): string {
   return `
-    <section class="git-history-panel" id="cle-git-history" role="region" aria-labelledby="cle-git-history-title" hidden>
-      <div class="git-history-resize-handle" role="separator" aria-label="Resize Git History panel" aria-orientation="horizontal" aria-valuemin="120" tabindex="0"></div>
-      <header class="git-history-header">
-        <h3 id="cle-git-history-title">Git History</h3>
-        <div class="git-history-header-actions">
+    <section class="git-history-panel" id="cle-git-history" role="region" aria-label="Git History" hidden>
+      <div class="git-history-toolbar">
+        <div class="git-history-resize-handle" role="separator" aria-label="Resize Git History panel" aria-orientation="horizontal" aria-valuemin="120" tabindex="0">
+          <span class="git-history-branch">Repository</span>
+        </div>
+        <div class="git-history-toolbar-actions">
           <button class="git-history-refresh" type="button" title="Refresh history" aria-label="Refresh Git history">${icons.refresh}</button>
+          <button class="git-history-back" type="button" title="Back to history" aria-label="Back to Git history" hidden>${icons.collapse}</button>
           <button class="git-history-close" type="button" title="Close Git history" aria-label="Close Git history">${icons.close}</button>
         </div>
-      </header>
-      <div class="git-history-toolbar"><span class="git-history-branch">Repository</span></div>
+      </div>
       <div class="git-history-body">
         <section class="git-history-list-view">
           <div class="git-history-state" role="status">Open Git History to load commits.</div>
@@ -10370,7 +10371,6 @@ function gitHistoryPanelMarkup(): string {
           <button class="git-history-load-more" type="button" hidden>Load more</button>
         </section>
         <section class="git-history-detail-view" hidden>
-          <button class="git-history-back" type="button">← History</button>
           <div class="git-history-detail"></div>
         </section>
       </div>
@@ -20100,6 +20100,7 @@ export class CodeCodexElement extends HTMLElement {
   #showGitHistoryList(): void {
     this.#gitHistoryDetailView.hidden = true;
     this.#gitHistoryListView.hidden = false;
+    this.#gitHistoryBackButton.hidden = true;
     this.#gitHistoryDetail.replaceChildren();
   }
 
@@ -20109,6 +20110,7 @@ export class CodeCodexElement extends HTMLElement {
     const generation = ++this.#gitHistoryGeneration;
     this.#gitHistoryListView.hidden = true;
     this.#gitHistoryDetailView.hidden = false;
+    this.#gitHistoryBackButton.hidden = false;
     this.#gitHistoryDetail.textContent = "Loading commit…";
     try {
       const result = normalizeGitCommit(await bridge.request<unknown>("explorer.git.commit", { hash }));
@@ -20130,12 +20132,9 @@ export class CodeCodexElement extends HTMLElement {
     const author = document.createElement("span");
     author.textContent = `${commit.author} · ${formatGitDate(commit.authoredAt)}`;
     metadata.append(hash, author);
-    const message = document.createElement("pre");
-    message.className = "git-history-message";
-    message.textContent = commit.message;
     const fileHeading = document.createElement("h5");
     fileHeading.textContent = `${commit.files.length} changed ${commit.files.length === 1 ? "file" : "files"}`;
-    this.#gitHistoryDetail.append(heading, metadata, message, fileHeading);
+    this.#gitHistoryDetail.append(heading, metadata, fileHeading);
     for (const file of commit.files) {
       const row = document.createElement("div");
       row.className = "git-history-file";
