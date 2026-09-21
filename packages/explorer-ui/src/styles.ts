@@ -1111,10 +1111,10 @@ export const styles = String.raw`
   }
   .preview-market-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 13px 13px 10px 14px;
+    padding: 8px 10px 8px 14px;
     border-bottom: 1px solid var(--cle-rule);
   }
   .preview-market-header h3 {
@@ -1123,11 +1123,6 @@ export const styles = String.raw`
     font-size: 13px;
     font-weight: 650;
     line-height: 18px;
-  }
-  .preview-market-header p {
-    margin: 1px 0 0;
-    color: var(--cle-muted);
-    font-size: 10.5px;
   }
   .preview-market-close {
     display: grid;
@@ -1153,25 +1148,71 @@ export const styles = String.raw`
     stroke-width: 1.3;
   }
   .preview-market-list {
+    position: relative;
     display: grid;
-    gap: 12px;
-    max-height: min(300px, calc(100vh - 210px));
+    align-content: start;
+    gap: 8px;
+    height: min(300px, calc(100vh - 210px));
     padding: 8px;
     overflow: auto;
+  }
+  .preview-market-list[data-preview-market-category="developer-tools"] {
+    padding-right: 18px;
+    overflow-y: hidden;
+  }
+  .preview-market-list[data-preview-market-category="developer-tools"]::after {
+    position: absolute;
+    z-index: 2;
+    top: 8px;
+    right: 2px;
+    bottom: 8px;
+    width: 10px;
+    background: var(--cle-scroll-thumb);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    content: "";
+    pointer-events: none;
   }
   .preview-market-section {
     display: grid;
     gap: 6px;
     min-width: 0;
   }
-  .preview-market-section-title {
-    padding: 0 2px;
+  .preview-market-section[hidden] { display: none; }
+  .preview-market-categories {
+    display: grid;
+    width: fit-content;
+    grid-template-columns: repeat(3, max-content);
+    gap: 2px;
+    padding: 2px;
+    background: var(--cle-subtle);
+    border: 1px solid var(--cle-rule);
+    border-radius: 7px;
+  }
+  .preview-market-category {
+    min-width: 0;
+    padding: 5px 6px;
     color: var(--cle-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    cursor: pointer;
     font-size: 10px;
     font-weight: 650;
-    line-height: 15px;
+    line-height: 14px;
     letter-spacing: .01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
+  .preview-market-category:hover { color: var(--cle-ink); background: var(--cle-hover); }
+  .preview-market-category[aria-selected="true"] {
+    color: var(--cle-ink);
+    background: var(--cle-paper);
+    box-shadow: 0 1px 2px rgba(12, 18, 28, .08);
+  }
+  .preview-market-category:focus-visible { outline: 2px solid var(--cle-focus); outline-offset: 1px; }
   .preview-market-section-list {
     display: grid;
     gap: 8px;
@@ -1294,9 +1335,9 @@ export const styles = String.raw`
     padding: 0;
     color: var(--cle-ink);
     background: var(--cle-paper);
-    border: 0;
-    border-top: 1px solid var(--cle-rule-strong);
-    border-radius: 0;
+    border: 1px solid var(--cle-rule-strong);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
     box-shadow: 0 -8px 20px rgba(12, 18, 28, .06);
     font-size: 13px;
     line-height: 1.45;
@@ -1317,7 +1358,15 @@ export const styles = String.raw`
     touch-action: none;
   }
   .git-history-resize-handle:focus-visible { outline: 1px solid var(--cle-focus); outline-offset: -1px; }
-  .git-history-toolbar-actions { display: flex; flex: 0 0 auto; gap: 3px; }
+  .git-history-toolbar-actions {
+    position: absolute;
+    top: 1px;
+    right: 5px;
+    z-index: 1;
+    display: flex;
+    gap: 3px;
+    background: color-mix(in srgb, var(--cle-subtle) 60%, var(--cle-paper));
+  }
   .git-history-toolbar-actions button {
     display: grid;
     place-items: center;
@@ -1343,19 +1392,19 @@ export const styles = String.raw`
     stroke-linejoin: round;
   }
   .git-history-toolbar {
+    position: relative;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 10px;
     min-height: 28px;
-    padding: 1px 5px 1px 11px;
+    padding: 1px 91px 1px 11px;
     background: color-mix(in srgb, var(--cle-subtle) 60%, transparent);
     border-bottom: 1px solid var(--cle-rule);
+    border-radius: 8px 8px 0 0;
   }
   .git-history-branch {
     min-width: 0;
     overflow: hidden;
-    font: 600 11.5px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font: 650 13px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     text-overflow: ellipsis;
     white-space: nowrap;
   }

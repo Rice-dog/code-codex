@@ -346,6 +346,7 @@ type StateCopy = { title: string; copy: string; action?: string };
 type PreviewUnavailableReason = "binary" | "invalid-utf8" | "sensitive" | "previewer-disabled" | "unsupported-type" | "unknown";
 type UpdateCheckStatus = "upToDate" | "updateAvailable" | "ahead";
 type UpdateCheckPresentation = "idle" | "checking" | "upToDate" | "updateAvailable" | "ahead" | "error";
+type PreviewMarketCategory = "appearance" | "file-preview" | "developer-tools";
 
 interface UpdateCheckResult {
   readonly currentVersion: string;
@@ -11447,23 +11448,22 @@ export class CodeCodexElement extends HTMLElement {
         <footer class="statusbar">
           <div class="preview-market-popover" id="cle-preview-market" role="dialog" aria-modal="false" aria-labelledby="cle-preview-market-title" hidden>
             <div class="preview-market-header">
-              <div>
-                <h3 id="cle-preview-market-title">Preview Market</h3>
-                <p>Preview and developer extensions</p>
-              </div>
+              <h3 id="cle-preview-market-title">Preview Market</h3>
               <button class="preview-market-close" type="button" title="Close Preview Market" aria-label="Close Preview Market">${icons.close}</button>
             </div>
             <div class="preview-market-list">
-              <section class="preview-market-section" aria-labelledby="cle-appearance-section-title">
-                <div class="preview-market-section-title" id="cle-appearance-section-title">Appearance</div>
+              <div class="preview-market-categories" role="tablist" aria-label="Plugin categories">
+                <button class="preview-market-category" type="button" role="tab" aria-selected="true" aria-controls="cle-appearance-section" data-preview-market-category="appearance">Appearance</button>
+                <button class="preview-market-category" type="button" role="tab" aria-selected="false" aria-controls="cle-file-preview-section" data-preview-market-category="file-preview">File Preview</button>
+                <button class="preview-market-category" type="button" role="tab" aria-selected="false" aria-controls="cle-developer-tools-section" data-preview-market-category="developer-tools">Tools</button>
+              </div>
+              <section class="preview-market-section" id="cle-appearance-section" role="tabpanel" data-preview-market-section="appearance">
                 <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}</div>
               </section>
-              <section class="preview-market-section" aria-labelledby="cle-file-preview-section-title">
-                <div class="preview-market-section-title" id="cle-file-preview-section-title">File Preview</div>
+              <section class="preview-market-section" id="cle-file-preview-section" role="tabpanel" data-preview-market-section="file-preview" hidden>
                 <div class="preview-market-section-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
               </section>
-              <section class="preview-market-section" aria-labelledby="cle-developer-tools-section-title">
-                <div class="preview-market-section-title" id="cle-developer-tools-section-title">Developer Tools</div>
+              <section class="preview-market-section" id="cle-developer-tools-section" role="tabpanel" data-preview-market-section="developer-tools" hidden>
                 <div class="preview-market-section-list">${gitHistoryCardMarkup()}</div>
               </section>
             </div>
@@ -12404,6 +12404,13 @@ export class CodeCodexElement extends HTMLElement {
       this.#updateInstallButton.addEventListener("click", () => void this.#installUpdate());
       this.#previewMarketButton.addEventListener("click", () => this.#togglePreviewMarket());
       this.#previewMarketCloseButton.addEventListener("click", () => this.#closePreviewMarket(true));
+      this.#previewMarketList.addEventListener("click", (event) => {
+        const button = (event.target as Element | null)?.closest<HTMLButtonElement>("button[data-preview-market-category]");
+        const category = button?.dataset.previewMarketCategory;
+        if (category === "appearance" || category === "file-preview" || category === "developer-tools") {
+          this.#selectPreviewMarketCategory(category);
+        }
+      });
       this.#gitHistoryOpenButton.addEventListener("click", () => this.#toggleGitHistory());
       this.#gitHistoryCloseButton.addEventListener("click", () => this.#closeGitHistory(true));
       this.#gitHistoryRefreshButton.addEventListener("click", () => void this.#loadGitHistory(true));
@@ -13085,6 +13092,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#clearSelection(false);
       if (this.#allRowCount > 0) this.#renderTree();
     }
+    this.#prepareGitHistoryForThreadSwitch();
     const generation = ++this.#generation;
     this.#clearWorkspaceTimers();
     this.#threadId = threadId;
@@ -13093,6 +13101,7 @@ export class CodeCodexElement extends HTMLElement {
     const bridge = this.#bridge;
     if (!bridge) {
       this.#setState("error", "NO_BRIDGE");
+      this.#showGitHistoryUnavailable("Code-Codex is not connected.");
       return;
     }
 
@@ -13105,6 +13114,7 @@ export class CodeCodexElement extends HTMLElement {
         await this.#clearNativeContext(bridge);
         if (generation !== this.#generation) return;
         this.#showNoProject();
+        this.#showGitHistoryUnavailable("Choose a local project to view its Git history.");
         return;
       }
 
@@ -13113,6 +13123,7 @@ export class CodeCodexElement extends HTMLElement {
       const context = normalizeContext(rawContext, threadId);
       if (!context.compatible) {
         this.#setState("incompatible", context.reason ?? "This Codex version is not supported.");
+        this.#showGitHistoryUnavailable("Git history is unavailable for this task.");
         return;
       }
       this.#context = context;
@@ -13136,6 +13147,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#setState("ready");
       this.#renderTree();
       if (!this.#restoreDetachedDraft(context)) this.#announce(`${context.projectName} loaded`);
+      if (this.#gitHistoryOpen) void this.#loadGitHistory(true);
     } catch (error) {
       if (generation !== this.#generation) return;
       if (error instanceof ExplorerBridgeError && error.code === "NO_CONTEXT") {
@@ -13144,13 +13156,19 @@ export class CodeCodexElement extends HTMLElement {
           await this.#clearNativeContext(bridge);
           if (generation !== this.#generation) return;
           this.#showNoProject();
+          this.#showGitHistoryUnavailable("Choose a local project to view its Git history.");
         } catch (clearError) {
-          if (generation === this.#generation) this.#setState("error", errorCode(clearError));
+          if (generation === this.#generation) {
+            this.#setState("error", errorCode(clearError));
+            this.#showGitHistoryUnavailable("Git history is unavailable for this task.");
+          }
         }
       } else if (error instanceof ExplorerBridgeError && error.code === "UNSUPPORTED_VERSION") {
         this.#setState("incompatible", error.message);
+        this.#showGitHistoryUnavailable("Git history is unavailable for this task.");
       } else {
         this.#setState("error", errorCode(error));
+        this.#showGitHistoryUnavailable("Git history is unavailable while the project is not loaded.");
       }
     }
   }
@@ -19529,6 +19547,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#previewMarketOpen = true;
     this.#previewMarketPopover.hidden = false;
     this.#previewMarketButton.setAttribute("aria-expanded", "true");
+    this.#selectPreviewMarketCategory("appearance", false);
     this.#renderPreviewMarket();
     queueMicrotask(() => {
       if (this.#previewMarketOpen) this.#previewMarketCloseButton.focus();
@@ -19923,6 +19942,31 @@ export class CodeCodexElement extends HTMLElement {
     void this.#loadGitHistory(true);
   }
 
+  #selectPreviewMarketCategory(category: PreviewMarketCategory, focus = true): void {
+    this.#previewMarketList.dataset.previewMarketCategory = category;
+    for (const button of this.#previewMarketList.querySelectorAll<HTMLButtonElement>("button[data-preview-market-category]")) {
+      const selected = button.dataset.previewMarketCategory === category;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      if (selected && focus) button.focus();
+    }
+    for (const section of this.#previewMarketList.querySelectorAll<HTMLElement>("[data-preview-market-section]")) {
+      section.hidden = section.dataset.previewMarketSection !== category;
+    }
+    this.#previewMarketList.scrollTop = 0;
+    if (category !== "appearance") {
+      this.#closePixelSculpt();
+      this.#closeCloudTrain();
+      this.#closeMountain();
+      this.#closeMilkyWaySettings(false);
+      this.#closeParticleSettings(false);
+      this.#closeBlackHoleSettings(false);
+      this.#closeGlowHorizonSettings(false);
+      this.#closeHeavenlyCloudSettings(false);
+      this.#closeAuroraIonosphereSettings(false);
+    }
+  }
+
   #closeGitHistory(restoreFocus: boolean): void {
     if (!this.#gitHistoryOpen && this.#gitHistoryPanel.hidden) return;
     this.#gitHistoryOpen = false;
@@ -20004,6 +20048,36 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
     this.#setGitHistoryHeight(currentHeight + (event.key === "ArrowUp" ? 20 : -20));
+  }
+
+  #prepareGitHistoryForThreadSwitch(): void {
+    if (!this.#gitHistoryOpen) return;
+    this.#gitHistoryGeneration += 1;
+    this.#gitHistoryLoading = false;
+    this.#gitHistoryCommits = [];
+    this.#gitHistoryHasMore = false;
+    this.#showGitHistoryList();
+    this.#gitHistoryBranch.textContent = "Repository";
+    this.#gitHistoryState.hidden = false;
+    this.#gitHistoryState.textContent = "Switching repository…";
+    this.#gitHistoryList.replaceChildren();
+    this.#gitHistoryLoadMoreButton.hidden = true;
+    this.#gitHistoryRefreshButton.disabled = true;
+    this.#gitHistoryLoadMoreButton.disabled = true;
+  }
+
+  #showGitHistoryUnavailable(message: string): void {
+    if (!this.#gitHistoryOpen) return;
+    this.#gitHistoryGeneration += 1;
+    this.#gitHistoryLoading = false;
+    this.#gitHistoryCommits = [];
+    this.#gitHistoryHasMore = false;
+    this.#showGitHistoryList();
+    this.#gitHistoryBranch.textContent = "Repository";
+    this.#gitHistoryList.replaceChildren();
+    this.#showGitHistoryError(message);
+    this.#gitHistoryRefreshButton.disabled = false;
+    this.#gitHistoryLoadMoreButton.disabled = false;
   }
 
   async #loadGitHistory(reset: boolean): Promise<void> {

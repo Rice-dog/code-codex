@@ -2,6 +2,42 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.53 — Git History 跟随会话切换
+
+- 切换会话时自动清除旧仓库节点并加载当前会话的 Git 历史，无需关闭后重新启用插件。
+
+## v0.2.52 — Tools 分类固定滚动滑块
+
+- Tools 分类显示不可拖动的满格滚动滑块，与可滚动分类保持视觉一致。
+
+## v0.2.51 — Preview Market 分类栏宽度调整
+
+- 分类栏按按钮总宽度收缩，减少 Tools 右侧多余空白。
+
+## v0.2.50 — Preview Market 分类按钮紧凑布局
+
+- 三个分类按钮按文字宽度自适应，并统一缩小左右间距。
+
+## v0.2.49 — Preview Market 分类按钮等宽
+
+- 将 Appearance、File Preview 和 Tools 三个分类按钮调整为相同宽度。
+
+## v0.2.48 — 功能文档分类调整
+
+- 将功能介绍精简为核心功能、插件、更新与兼容三类，并按 Preview Market 的实际分类整理详细插件说明。
+
+## v0.2.47 — Git 分支栏视觉调整
+
+- 在不改变分支栏高度的情况下增大分支名称字号，并为面板顶部增加圆角边框。
+
+## v0.2.46 — Preview Market 高度统一
+
+- 统一三个插件分类的内容区高度，内容较少的分类以空白补齐，避免切换时弹窗高度跳变。
+
+## v0.2.45 — Preview Market 分类切换
+
+- 精简 Preview Market 标题栏，并增加 Appearance、File Preview、Tools 分类切换，每次打开默认显示 Appearance。
+
 ## v0.2.44 — Git 提交差异预览
 
 - 移除提交文件行右侧的展开箭头，点击文件名会在主界面标签页中显示带增删颜色的提交差异。
