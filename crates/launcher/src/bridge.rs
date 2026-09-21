@@ -1,11 +1,13 @@
 #[cfg(windows)]
 use std::ffi::OsString;
+use std::io;
 use std::io::Write as _;
 #[cfg(windows)]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 #[cfg(windows)]
 use std::process::Command;
+use std::process::Stdio;
 #[cfg(windows)]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,6 +31,7 @@ use serde_json::{Value, json};
 use sha2::Digest as _;
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
+use tokio::{io::AsyncReadExt, process::Command as TokioCommand};
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{
     CloseHandle, E_INVALIDARG, GetLastError, HWND, LPARAM, RECT, RPC_E_CHANGED_MODE, S_FALSE, S_OK,
@@ -86,6 +89,15 @@ const MIN_UPDATE_ASSET_BYTES: u64 = 256 * 1024;
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);
+const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(8);
+const DEFAULT_GIT_HISTORY_LIMIT: usize = 50;
+const MAX_GIT_HISTORY_LIMIT: usize = 100;
+const MAX_GIT_HISTORY_SKIP: usize = 10_000;
+const MAX_GIT_HISTORY_BYTES: usize = 512 * 1024;
+const MAX_GIT_COMMIT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_GIT_DIFF_BYTES: usize = 1536 * 1024;
+const MAX_GIT_CHANGED_FILES: usize = 500;
+const MAX_GIT_STDERR_BYTES: usize = 64 * 1024;
 
 #[derive(Clone)]
 pub struct NativeBridge {
@@ -601,6 +613,86 @@ struct ListParams {
     cursor: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GitHistoryParams {
+    #[serde(default)]
+    skip: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct GitCommitSummary {
+    hash: String,
+    short_hash: String,
+    author: String,
+    authored_at: String,
+    subject: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHistoryResult {
+    branch: String,
+    detached: bool,
+    commits: Vec<GitCommitSummary>,
+    has_more: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GitCommitParams {
+    hash: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct GitChangedFile {
+    status: String,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    old_path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCommitResult {
+    hash: String,
+    short_hash: String,
+    author: String,
+    author_email: String,
+    authored_at: String,
+    message: String,
+    files: Vec<GitChangedFile>,
+    files_truncated: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GitDiffParams {
+    hash: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitDiffResult {
+    path: String,
+    content: String,
+    truncated: bool,
+}
+
+struct BoundedGitOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+struct GitCommandOutput {
+    stdout: BoundedGitOutput,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2157,6 +2249,180 @@ impl NativeBridge {
             .await
     }
 
+    async fn git_history(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: GitHistoryParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let skip = params.skip.unwrap_or(0);
+        let limit = params.limit.unwrap_or(DEFAULT_GIT_HISTORY_LIMIT);
+        if skip > MAX_GIT_HISTORY_SKIP || limit == 0 || limit > MAX_GIT_HISTORY_LIMIT {
+            return Err(BridgeError::invalid_request());
+        }
+        let context = self.git_context(epoch)?;
+        let root = context.workspace.root_path().to_path_buf();
+
+        let branch_output = run_git_readonly(
+            root.clone(),
+            vec!["rev-parse".into(), "--abbrev-ref".into(), "HEAD".into()],
+            4096,
+        )
+        .await?;
+        if branch_output.stdout.truncated {
+            return Err(git_output_too_large_error());
+        }
+        let mut branch = String::from_utf8_lossy(&branch_output.stdout.bytes)
+            .trim()
+            .to_owned();
+        let detached = branch == "HEAD";
+        if detached {
+            let head_output = run_git_readonly(
+                root.clone(),
+                vec!["rev-parse".into(), "--short".into(), "HEAD".into()],
+                4096,
+            )
+            .await?;
+            if head_output.stdout.truncated {
+                return Err(git_output_too_large_error());
+            }
+            branch = format!(
+                "Detached at {}",
+                String::from_utf8_lossy(&head_output.stdout.bytes).trim()
+            );
+        }
+
+        let output = run_git_readonly(
+            root,
+            vec![
+                "log".into(),
+                "-z".into(),
+                "--date=iso-strict".into(),
+                "--format=%H%x00%h%x00%an%x00%aI%x00%s".into(),
+                format!("--max-count={}", limit + 1),
+                format!("--skip={skip}"),
+            ],
+            MAX_GIT_HISTORY_BYTES,
+        )
+        .await?;
+        if output.stdout.truncated {
+            return Err(git_output_too_large_error());
+        }
+        let mut commits = parse_git_history(&output.stdout.bytes)?;
+        let has_more = commits.len() > limit;
+        commits.truncate(limit);
+        self.ensure_active_context(&context, epoch)?;
+        serde_json::to_value(GitHistoryResult {
+            branch,
+            detached,
+            commits,
+            has_more,
+        })
+        .map_err(|_| internal_error())
+    }
+
+    async fn git_commit(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: GitCommitParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        if !valid_git_hash(&params.hash) {
+            return Err(BridgeError::invalid_request());
+        }
+        let context = self.git_context(epoch)?;
+        let root = context.workspace.root_path().to_path_buf();
+        let metadata = run_git_readonly(
+            root.clone(),
+            vec![
+                "show".into(),
+                "-s".into(),
+                "--date=iso-strict".into(),
+                "--format=%H%x00%h%x00%an%x00%ae%x00%aI%x00%B".into(),
+                params.hash.clone(),
+            ],
+            MAX_GIT_COMMIT_BYTES,
+        )
+        .await?;
+        if metadata.stdout.truncated {
+            return Err(git_output_too_large_error());
+        }
+        let (hash, short_hash, author, author_email, authored_at, message) =
+            parse_git_commit_metadata(&metadata.stdout.bytes)?;
+        let files_output = run_git_readonly(
+            root,
+            vec![
+                "diff-tree".into(),
+                "--no-commit-id".into(),
+                "--name-status".into(),
+                "-r".into(),
+                "-m".into(),
+                "--first-parent".into(),
+                "-M".into(),
+                "--root".into(),
+                "-z".into(),
+                params.hash,
+            ],
+            MAX_GIT_COMMIT_BYTES,
+        )
+        .await?;
+        if files_output.stdout.truncated {
+            return Err(git_output_too_large_error());
+        }
+        let mut files = parse_git_changed_files(&files_output.stdout.bytes)?;
+        let files_truncated = files.len() > MAX_GIT_CHANGED_FILES;
+        files.truncate(MAX_GIT_CHANGED_FILES);
+        self.ensure_active_context(&context, epoch)?;
+        serde_json::to_value(GitCommitResult {
+            hash,
+            short_hash,
+            author,
+            author_email,
+            authored_at,
+            message,
+            files,
+            files_truncated,
+        })
+        .map_err(|_| internal_error())
+    }
+
+    async fn git_diff(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let params: GitDiffParams =
+            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        if !valid_git_hash(&params.hash) || !valid_git_relative_path(&params.path) {
+            return Err(BridgeError::invalid_request());
+        }
+        let context = self.git_context(epoch)?;
+        let root = context.workspace.root_path().to_path_buf();
+        let output = run_git_readonly(
+            root,
+            vec![
+                "show".into(),
+                "--format=".into(),
+                "--no-ext-diff".into(),
+                "--no-textconv".into(),
+                "--unified=3".into(),
+                "--find-renames".into(),
+                params.hash,
+                "--".into(),
+                params.path.clone(),
+            ],
+            MAX_GIT_DIFF_BYTES,
+        )
+        .await?;
+        self.ensure_active_context(&context, epoch)?;
+        serde_json::to_value(GitDiffResult {
+            path: params.path,
+            content: String::from_utf8_lossy(&output.stdout.bytes).into_owned(),
+            truncated: output.stdout.truncated,
+        })
+        .map_err(|_| internal_error())
+    }
+
+    fn git_context(&self, epoch: u64) -> Result<ActiveContext, BridgeError> {
+        let state = lock_unpoisoned(&self.inner.state);
+        self.ensure_epoch(epoch)?;
+        let context = state.current.clone().ok_or_else(no_context_error)?;
+        if context.lifecycle_epoch != epoch {
+            return Err(no_context_error());
+        }
+        Ok(context)
+    }
+
     async fn preview(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         self.preview_with_reader(params, epoch, |workspace, relative_path| {
             workspace.preview(&relative_path)
@@ -3115,6 +3381,9 @@ impl BridgeHandler for NativeBridge {
             "explorer.context" => self.context(request.params, epoch).await,
             "explorer.context.clear" => self.context_clear(request.params, epoch),
             "explorer.list" => self.list(request.params, epoch).await,
+            "explorer.git.history" => self.git_history(request.params, epoch).await,
+            "explorer.git.commit" => self.git_commit(request.params, epoch).await,
+            "explorer.git.diff" => self.git_diff(request.params, epoch).await,
             "explorer.preview" => self.preview(request.params, epoch).await,
             "explorer.preview.save" => self.preview_save(request.params, epoch).await,
             "explorer.media.info" => self.media_info(request.params, epoch).await,
@@ -3255,6 +3524,204 @@ fn valid_content_version(version: &str) -> bool {
         && version
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_git_hash(hash: &str) -> bool {
+    matches!(hash.len(), 40 | 64) && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_git_relative_path(path: &str) -> bool {
+    if path.is_empty() || path.contains('\0') {
+        return false;
+    }
+    let path = Path::new(path);
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+        && path
+            .components()
+            .any(|component| matches!(component, Component::Normal(_)))
+}
+
+fn parse_git_history(bytes: &[u8]) -> Result<Vec<GitCommitSummary>, BridgeError> {
+    let fields = nul_fields(bytes);
+    if fields.is_empty() {
+        return Ok(Vec::new());
+    }
+    if fields.len() % 5 != 0 {
+        return Err(internal_error());
+    }
+    let mut commits = Vec::with_capacity(fields.len() / 5);
+    for fields in fields.chunks_exact(5) {
+        if !valid_git_hash(fields[0]) {
+            return Err(internal_error());
+        }
+        commits.push(GitCommitSummary {
+            hash: fields[0].to_owned(),
+            short_hash: fields[1].to_owned(),
+            author: fields[2].to_owned(),
+            authored_at: fields[3].to_owned(),
+            subject: fields[4].to_owned(),
+        });
+    }
+    Ok(commits)
+}
+
+fn parse_git_commit_metadata(
+    bytes: &[u8],
+) -> Result<(String, String, String, String, String, String), BridgeError> {
+    let fields = nul_fields(bytes);
+    if fields.len() != 6 || !valid_git_hash(fields[0]) {
+        return Err(internal_error());
+    }
+    Ok((
+        fields[0].to_owned(),
+        fields[1].to_owned(),
+        fields[2].to_owned(),
+        fields[3].to_owned(),
+        fields[4].to_owned(),
+        fields[5].trim_end().to_owned(),
+    ))
+}
+
+fn parse_git_changed_files(bytes: &[u8]) -> Result<Vec<GitChangedFile>, BridgeError> {
+    let fields = nul_fields(bytes);
+    let mut files = Vec::new();
+    let mut index = 0;
+    while index < fields.len() {
+        let status = fields[index];
+        index += 1;
+        if status.is_empty() || index >= fields.len() {
+            return Err(internal_error());
+        }
+        if status.starts_with('R') || status.starts_with('C') {
+            if index + 1 >= fields.len() {
+                return Err(internal_error());
+            }
+            let old_path = fields[index].to_owned();
+            let path = fields[index + 1].to_owned();
+            index += 2;
+            if !valid_git_relative_path(&old_path) || !valid_git_relative_path(&path) {
+                return Err(internal_error());
+            }
+            files.push(GitChangedFile {
+                status: status.to_owned(),
+                path,
+                old_path: Some(old_path),
+            });
+        } else {
+            let path = fields[index].to_owned();
+            index += 1;
+            if !valid_git_relative_path(&path) {
+                return Err(internal_error());
+            }
+            files.push(GitChangedFile {
+                status: status.to_owned(),
+                path,
+                old_path: None,
+            });
+        }
+    }
+    Ok(files)
+}
+
+fn nul_fields(bytes: &[u8]) -> Vec<&str> {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .map(|field| std::str::from_utf8(field).unwrap_or_default())
+        .collect()
+}
+
+async fn collect_bounded<R>(mut reader: R, limit: usize) -> io::Result<BoundedGitOutput>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
+    let mut buffer = [0_u8; 8192];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        let keep = limit.saturating_sub(bytes.len()).min(read);
+        bytes.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
+    }
+    Ok(BoundedGitOutput { bytes, truncated })
+}
+
+async fn run_git_readonly(
+    root: PathBuf,
+    args: Vec<String>,
+    max_stdout_bytes: usize,
+) -> Result<GitCommandOutput, BridgeError> {
+    let mut command = TokioCommand::new("git");
+    command
+        .arg("--no-pager")
+        .arg("-c")
+        .arg("color.ui=false")
+        .args(args)
+        .current_dir(root)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn().map_err(|_| {
+        BridgeError::new(
+            "GIT_UNAVAILABLE",
+            "Git is not installed or is unavailable to Code-Codex.",
+        )
+    })?;
+    let stdout = child.stdout.take().ok_or_else(internal_error)?;
+    let stderr = child.stderr.take().ok_or_else(internal_error)?;
+    let completed = tokio::time::timeout(GIT_COMMAND_TIMEOUT, async {
+        tokio::join!(
+            child.wait(),
+            collect_bounded(stdout, max_stdout_bytes),
+            collect_bounded(stderr, MAX_GIT_STDERR_BYTES)
+        )
+    })
+    .await;
+    let (status, stdout, stderr) = match completed {
+        Ok(result) => result,
+        Err(_) => {
+            let _ = child.kill().await;
+            return Err(BridgeError::new(
+                "GIT_TIMEOUT",
+                "Git history took too long to load.",
+            ));
+        }
+    };
+    let status = status.map_err(|_| internal_error())?;
+    let stdout = stdout.map_err(|_| internal_error())?;
+    let stderr = stderr.map_err(|_| internal_error())?;
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr.bytes);
+        if stderr.to_ascii_lowercase().contains("not a git repository") {
+            return Err(BridgeError::new(
+                "NOT_GIT_REPOSITORY",
+                "The selected project is not a Git repository.",
+            ));
+        }
+        return Err(BridgeError::new(
+            "GIT_FAILED",
+            "Git could not read this repository's history.",
+        ));
+    }
+    Ok(GitCommandOutput { stdout })
+}
+
+fn git_output_too_large_error() -> BridgeError {
+    BridgeError::new(
+        "GIT_OUTPUT_TOO_LARGE",
+        "This Git history result is too large to display safely.",
+    )
 }
 
 fn no_context_error() -> BridgeError {
@@ -3626,6 +4093,99 @@ mod tests {
             params,
             lifecycle_epoch,
         }
+    }
+
+    #[test]
+    fn git_identifiers_and_paths_reject_unsafe_input() {
+        assert!(valid_git_hash(&"a".repeat(40)));
+        assert!(valid_git_hash(&"B".repeat(64)));
+        assert!(!valid_git_hash("HEAD"));
+        assert!(!valid_git_hash(&"z".repeat(40)));
+
+        assert!(valid_git_relative_path("src/main.rs"));
+        assert!(valid_git_relative_path("README.md"));
+        assert!(!valid_git_relative_path(""));
+        assert!(!valid_git_relative_path("../secret.txt"));
+        assert!(!valid_git_relative_path("/absolute.txt"));
+        assert!(!valid_git_relative_path("C:\\absolute.txt"));
+    }
+
+    #[test]
+    fn parses_bounded_git_history_records() {
+        let hash = "a".repeat(40);
+        let bytes =
+            format!("{hash}\0abc1234\0Ada\02026-09-20T10:00:00+08:00\0Add history viewer\0");
+        let commits = parse_git_history(bytes.as_bytes()).expect("history");
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].hash, hash);
+        assert_eq!(commits[0].short_hash, "abc1234");
+        assert_eq!(commits[0].author, "Ada");
+        assert_eq!(commits[0].subject, "Add history viewer");
+    }
+
+    #[test]
+    fn parses_changed_files_and_renames() {
+        let files = parse_git_changed_files(
+            b"M\0src/main.rs\0A\0README.md\0R100\0old name.txt\0new name.txt\0",
+        )
+        .expect("changed files");
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].status, "M");
+        assert_eq!(files[0].path, "src/main.rs");
+        assert_eq!(files[2].status, "R100");
+        assert_eq!(files[2].old_path.as_deref(), Some("old name.txt"));
+        assert_eq!(files[2].path, "new name.txt");
+    }
+
+    #[tokio::test]
+    async fn read_only_git_bridge_returns_history_commit_and_diff() {
+        let (directory, bridge) = manual_bridge().await;
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(directory.path())
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .status()
+                .expect("git should be available for bridge tests");
+            assert!(status.success(), "git command failed: {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Code Codex Test"]);
+        git(&["config", "user.email", "code-codex@example.invalid"]);
+        git(&["add", "README.md"]);
+        git(&["commit", "-q", "-m", "Initial history"]);
+
+        let history = bridge
+            .handle(request(
+                "explorer.git.history",
+                json!({ "skip": 0, "limit": 50 }),
+            ))
+            .await
+            .expect("history");
+        assert_eq!(history["commits"][0]["subject"], "Initial history");
+        let hash = history["commits"][0]["hash"]
+            .as_str()
+            .expect("commit hash")
+            .to_owned();
+
+        let commit = bridge
+            .handle(request("explorer.git.commit", json!({ "hash": hash })))
+            .await
+            .expect("commit");
+        assert_eq!(commit["files"][0]["path"], "README.md");
+        assert_eq!(commit["files"][0]["status"], "A");
+
+        let diff = bridge
+            .handle(request(
+                "explorer.git.diff",
+                json!({ "hash": hash, "path": "README.md" }),
+            ))
+            .await
+            .expect("diff");
+        assert!(diff["content"].as_str().is_some_and(|content| {
+            content.contains("diff --git") && content.contains("+content")
+        }));
+        assert_eq!(diff["truncated"], false);
     }
 
     async fn read_json_line<R>(reader: &mut R) -> Value

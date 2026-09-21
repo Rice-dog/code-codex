@@ -817,6 +817,42 @@ const bridge: ObjectBridge = {
       const next = offset + entries.length;
       return { entries, ...(next < all.length ? { nextCursor: String(next) } : {}) };
     }
+    if (method === "explorer.git.history") {
+      return {
+        branch: "main",
+        detached: false,
+        commits: [{
+          hash: "7f0ee64000000000000000000000000000000000",
+          shortHash: "7f0ee64",
+          author: "Code-Codex",
+          authoredAt: "2026-09-20T00:00:00Z",
+          subject: "feat: open changed files in the main view",
+        }],
+        hasMore: false,
+      };
+    }
+    if (method === "explorer.git.commit") {
+      return {
+        hash: "7f0ee64000000000000000000000000000000000",
+        shortHash: "7f0ee64",
+        author: "Code-Codex",
+        authorEmail: "demo@example.invalid",
+        authoredAt: "2026-09-20T00:00:00Z",
+        message: "feat: open changed files in the main view",
+        files: [
+          { status: "M", path: "src/explorer-element.ts" },
+          { status: "D", path: "src/legacy-preview.ts" },
+        ],
+        filesTruncated: false,
+      };
+    }
+    if (method === "explorer.git.diff") {
+      return {
+        path: String(params.path ?? ""),
+        content: "@@ -1,2 +1,3 @@\n export class CodeCodexElement extends HTMLElement {\n+  // Opened from Git History\n }\n",
+        truncated: false,
+      };
+    }
     if (method === "explorer.preview") {
       const path = String(params.relativePath ?? "");
       if (path === ".env") {

@@ -282,6 +282,11 @@ export const styles = String.raw`
     border: 1px solid var(--cle-rule);
     border-radius: 12px;
   }
+  .frame[data-git-history-open="true"] {
+    grid-template-rows: auto auto minmax(0, 1fr) var(--cle-git-history-height, 33.333%) auto;
+  }
+  .frame[data-git-history-open="true"] .statusbar { grid-row: 5; }
+  .frame[data-git-history-resizing="true"] { cursor: ns-resize; user-select: none; }
 
   .activity-bus {
     position: absolute;
@@ -1106,10 +1111,10 @@ export const styles = String.raw`
   }
   .preview-market-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 13px 13px 10px 14px;
+    padding: 8px 10px 8px 14px;
     border-bottom: 1px solid var(--cle-rule);
   }
   .preview-market-header h3 {
@@ -1118,11 +1123,6 @@ export const styles = String.raw`
     font-size: 13px;
     font-weight: 650;
     line-height: 18px;
-  }
-  .preview-market-header p {
-    margin: 1px 0 0;
-    color: var(--cle-muted);
-    font-size: 10.5px;
   }
   .preview-market-close {
     display: grid;
@@ -1148,25 +1148,71 @@ export const styles = String.raw`
     stroke-width: 1.3;
   }
   .preview-market-list {
+    position: relative;
     display: grid;
-    gap: 12px;
-    max-height: min(300px, calc(100vh - 210px));
+    align-content: start;
+    gap: 8px;
+    height: min(300px, calc(100vh - 210px));
     padding: 8px;
     overflow: auto;
+  }
+  .preview-market-list[data-preview-market-category="developer-tools"] {
+    padding-right: 18px;
+    overflow-y: hidden;
+  }
+  .preview-market-list[data-preview-market-category="developer-tools"]::after {
+    position: absolute;
+    z-index: 2;
+    top: 8px;
+    right: 2px;
+    bottom: 8px;
+    width: 10px;
+    background: var(--cle-scroll-thumb);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    content: "";
+    pointer-events: none;
   }
   .preview-market-section {
     display: grid;
     gap: 6px;
     min-width: 0;
   }
-  .preview-market-section-title {
-    padding: 0 2px;
+  .preview-market-section[hidden] { display: none; }
+  .preview-market-categories {
+    display: grid;
+    width: fit-content;
+    grid-template-columns: repeat(3, max-content);
+    gap: 2px;
+    padding: 2px;
+    background: var(--cle-subtle);
+    border: 1px solid var(--cle-rule);
+    border-radius: 7px;
+  }
+  .preview-market-category {
+    min-width: 0;
+    padding: 5px 6px;
     color: var(--cle-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    cursor: pointer;
     font-size: 10px;
     font-weight: 650;
-    line-height: 15px;
+    line-height: 14px;
     letter-spacing: .01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
+  .preview-market-category:hover { color: var(--cle-ink); background: var(--cle-hover); }
+  .preview-market-category[aria-selected="true"] {
+    color: var(--cle-ink);
+    background: var(--cle-paper);
+    box-shadow: 0 1px 2px rgba(12, 18, 28, .08);
+  }
+  .preview-market-category:focus-visible { outline: 2px solid var(--cle-focus); outline-offset: 1px; }
   .preview-market-section-list {
     display: grid;
     gap: 8px;
@@ -1270,6 +1316,201 @@ export const styles = String.raw`
     background: transparent;
     border-color: var(--cle-rule-strong);
   }
+
+  .git-history-extension .preview-extension-icon {
+    color: var(--cle-added);
+    background: color-mix(in srgb, var(--cle-added) 9%, var(--cle-paper));
+    border-color: color-mix(in srgb, var(--cle-added) 22%, var(--cle-rule));
+  }
+  .git-history-panel {
+    position: relative;
+    z-index: 2;
+    grid-row: 4;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    color: var(--cle-ink);
+    background: var(--cle-paper);
+    border: 1px solid var(--cle-rule-strong);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    box-shadow: 0 -8px 20px rgba(12, 18, 28, .06);
+    font-size: 13px;
+    line-height: 1.45;
+    animation: cle-git-panel-in 150ms cubic-bezier(.2, .8, .2, 1) both;
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
+  }
+  .git-history-panel[hidden] { display: none; }
+  .git-history-resize-handle {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    align-self: stretch;
+    min-width: 0;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+  .git-history-resize-handle:focus-visible { outline: 1px solid var(--cle-focus); outline-offset: -1px; }
+  .git-history-toolbar-actions {
+    position: absolute;
+    top: 1px;
+    right: 5px;
+    z-index: 1;
+    display: flex;
+    gap: 3px;
+    background: color-mix(in srgb, var(--cle-subtle) 60%, var(--cle-paper));
+  }
+  .git-history-toolbar-actions button {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    color: var(--cle-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .git-history-toolbar-actions button[hidden] { display: none; }
+  .git-history-toolbar-actions button:hover { color: var(--cle-ink); background: var(--cle-hover); }
+  .git-history-toolbar-actions button:disabled { cursor: default; opacity: .45; }
+  .git-history-toolbar-actions svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.35;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .git-history-toolbar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 1px 91px 1px 11px;
+    background: color-mix(in srgb, var(--cle-subtle) 60%, transparent);
+    border-bottom: 1px solid var(--cle-rule);
+    border-radius: 8px 8px 0 0;
+  }
+  .git-history-branch {
+    min-width: 0;
+    overflow: hidden;
+    font: 650 13px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .git-history-body { min-height: 0; overflow: hidden; }
+  .git-history-list-view,
+  .git-history-detail-view { height: 100%; overflow: auto; }
+  .git-history-state {
+    padding: 36px 24px;
+    color: var(--cle-muted);
+    text-align: center;
+  }
+  .git-history-list { padding: 6px 8px; }
+  .git-history-commit {
+    position: relative;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    width: 100%;
+    padding: 8px 8px 8px 2px;
+    color: var(--cle-ink);
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 7px;
+    cursor: pointer;
+    font: inherit;
+  }
+  .git-history-commit:hover { background: var(--cle-hover); }
+  .git-history-rail::before {
+    content: "";
+    position: absolute;
+    top: -8px;
+    bottom: -8px;
+    left: 8px;
+    width: 1px;
+    background: var(--cle-rule-strong);
+  }
+  .git-history-rail::after {
+    content: "";
+    position: absolute;
+    top: 15px;
+    left: 5px;
+    width: 7px;
+    height: 7px;
+    background: var(--cle-paper-raised);
+    border: 2px solid var(--cle-added);
+    border-radius: 50%;
+    box-sizing: border-box;
+  }
+  .git-history-commit:hover .git-history-rail::after { background: var(--cle-hover); }
+  .git-history-commit-copy { display: grid; min-width: 0; gap: 4px; }
+  .git-history-commit-copy strong {
+    overflow: hidden;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .git-history-commit-meta { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--cle-muted); font-size: 10.5px; }
+  .git-history-commit-meta code { color: var(--cle-signal); font: 600 10.5px/15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .git-history-commit-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-history-commit-meta time { flex: 0 0 auto; }
+  .git-history-load-more {
+    margin: 5px 10px 12px;
+    padding: 5px 9px;
+    color: var(--cle-muted);
+    background: transparent;
+    border: 1px solid var(--cle-rule-strong);
+    border-radius: 6px;
+    cursor: pointer;
+    font: 600 11.5px/17px inherit;
+  }
+  .git-history-load-more { width: calc(100% - 20px); }
+  .git-history-load-more:hover { color: var(--cle-ink); background: var(--cle-hover); }
+  .git-history-detail-view { padding: 8px 10px 14px; box-sizing: border-box; }
+  .git-history-detail h4 { margin: 2px 2px 5px; font-size: 13px; line-height: 18px; }
+  .git-history-detail h5 { margin: 16px 2px 7px; color: var(--cle-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .git-history-detail-meta { display: flex; gap: 8px; margin: 0 2px 10px; color: var(--cle-muted); font-size: 11px; }
+  .git-history-detail-meta code { color: var(--cle-signal); }
+  .git-history-file { border-top: 1px solid var(--cle-rule); }
+  .git-history-file-actions {
+    display: block;
+  }
+  .git-history-file-actions button {
+    color: var(--cle-ink);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+  }
+  .git-history-file-open {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 7px 3px;
+    text-align: left;
+  }
+  .git-history-file-actions button:hover { background: var(--cle-hover); }
+  .git-history-file-status { font: 700 11px/17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align: center; color: var(--cle-signal); }
+  .git-history-file-status.status-a { color: var(--cle-added); }
+  .git-history-file-status.status-d { color: var(--cle-deleted); }
+  .git-history-file-path { overflow-wrap: anywhere; font: 11px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .git-history-note { margin: 7px; color: var(--cle-muted); font-size: 10.5px; }
+  .git-history-panel button:focus-visible { outline: 2px solid var(--cle-focus); outline-offset: 1px; }
 
   .preview-extension-actions {
     display: flex;
@@ -2660,6 +2901,7 @@ export const styles = String.raw`
     :host([data-busy="true"]) .activity-bus,
     .preview-market-popover,
     .update-popover,
+    .git-history-panel,
     .particle-settings-panel,
     .status-code[data-update-state="checking"]::after { animation: none !important; }
     .activity-bus,
@@ -2672,6 +2914,10 @@ export const styles = String.raw`
   @keyframes cle-market-in {
     from { opacity: 0; transform: translateY(5px) scale(.985); }
     to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes cle-git-panel-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 .pixel-sculpt-controls .panel{position:fixed;z-index:6;right:20px;top:20px;width:300px;max-height:calc(100vh - 40px);overflow:auto;padding:15px;border:1px solid var(--line);border-radius:17px;background:var(--panel);backdrop-filter:blur(26px) saturate(130%);box-shadow:0 24px 70px rgba(0,0,0,.42)}.pixel-sculpt-controls .panel::-webkit-scrollbar{width:5px}.pixel-sculpt-controls .panel::-webkit-scrollbar-thumb{background:#2f2d36;border-radius:9px}.pixel-sculpt-controls .ph{display:flex;align-items:start;justify-content:space-between;gap:10px;margin-bottom:12px}.pixel-sculpt-controls .ph h2{font-size:13px;margin:1px 0 3px}.pixel-sculpt-controls .ph p{font-size:10.5px;color:#85858f;margin:0}.pixel-sculpt-controls .reset,.pixel-sculpt-controls .ghost{border:1px solid var(--line);border-radius:8px;background:#14141a;color:#bdbdc5;padding:6px 8px;font-size:10px;cursor:pointer}.pixel-sculpt-controls .reset:hover,.pixel-sculpt-controls .ghost:hover{background:#1b1b22;color:#fff}.pixel-sculpt-controls .actions{display:flex;gap:6px;align-items:center}.pixel-sculpt-controls .lang-switch{display:flex;padding:2px;border:1px solid var(--line);border-radius:9px;background:#101015}.pixel-sculpt-controls .lang-switch button{border:0;background:transparent;color:#777783;border-radius:6px;padding:4px 6px;font-size:9.5px;cursor:pointer}.pixel-sculpt-controls .lang-switch button.on{background:#2b2432;color:#f5efff;box-shadow:inset 0 0 0 1px rgba(167,139,250,.14)}.pixel-sculpt-controls .row{margin:10px 0 13px}.pixel-sculpt-controls .row-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:10.5px;color:#b8b8c0}.pixel-sculpt-controls .row-head output{font-variant-numeric:tabular-nums;color:#ededf1}.pixel-sculpt-controls .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px}.pixel-sculpt-controls .seg button{min-width:0;border:1px solid rgba(255,255,255,.075);background:#131319;color:#8f8f99;border-radius:7px;padding:7px 4px;font-size:9.5px;cursor:pointer;white-space:nowrap}.pixel-sculpt-controls .seg button.on{background:#292132;color:#f3ecff;border-color:#655177;box-shadow:inset 0 0 0 1px rgba(167,139,250,.15)}.pixel-sculpt-controls input[type=range]{appearance:none;width:100%;height:3px;border-radius:99px;background:linear-gradient(90deg,#a78bfa var(--pct,50%),#34313d var(--pct,50%));outline:none;cursor:pointer}.pixel-sculpt-controls input[type=range]::-webkit-slider-thumb{appearance:none;width:10px;height:10px;border-radius:50%;background:#f5f2ff;border:2px solid #9e82e7;box-shadow:0 0 0 2px rgba(158,130,231,.12)}.pixel-sculpt-controls .toggle-line{display:flex;align-items:center;justify-content:space-between;margin:10px 0;font-size:10.5px;color:#b8b8c0}.pixel-sculpt-controls .toggle{position:relative;width:31px;height:17px}.pixel-sculpt-controls .toggle input{opacity:0;width:0;height:0}.pixel-sculpt-controls .toggle span{position:absolute;inset:0;border-radius:99px;background:#2d2b34;border:1px solid #3a3743;transition:.2s}.pixel-sculpt-controls .toggle span:after{content:"";position:absolute;width:11px;height:11px;left:2px;top:2px;border-radius:50%;background:#aaa7b1;transition:.2s}.pixel-sculpt-controls .toggle input:checked+span{background:#5f4b75;border-color:#8066a0}.pixel-sculpt-controls .toggle input:checked+span:after{transform:translateX(14px);background:#fff}.pixel-sculpt-controls .color-row{display:grid;grid-template-columns:1fr 40px;gap:8px;align-items:center}.pixel-sculpt-controls .color-row input[type=text]{width:100%;background:#111117;border:1px solid var(--line);border-radius:7px;color:#dddde5;padding:7px 8px;font-size:9.5px;outline:none}.pixel-sculpt-controls .color-row input[type=color]{appearance:none;width:40px;height:29px;border:1px solid var(--line);border-radius:7px;background:#111117;padding:3px}.pixel-sculpt-controls .file-row{display:flex;align-items:center;gap:8px;min-width:0}.pixel-sculpt-controls .file-row button{flex:0 0 auto;border:1px solid rgba(167,139,250,.32);background:#211a2b;color:#eee9f7;border-radius:7px;font-size:9.5px;padding:7px 10px;cursor:pointer}.pixel-sculpt-controls .file-row button:hover{background:#2b2237;border-color:rgba(167,139,250,.55)}.pixel-sculpt-controls .file-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#85858f;font-size:9.5px}.pixel-sculpt-controls .gallery-block{padding:10px;border:1px solid rgba(255,255,255,.065);border-radius:11px;background:rgba(7,7,11,.28)}.pixel-sculpt-controls .gallery-strip{display:flex;gap:7px;margin-top:9px;overflow-x:auto;padding:2px 2px 6px;scrollbar-width:thin}.pixel-sculpt-controls .gallery-empty{display:grid;place-items:center;width:100%;min-height:48px;border:1px dashed rgba(255,255,255,.09);border-radius:8px;color:#696975;font-size:9px}.pixel-sculpt-controls .gallery-item{position:relative;flex:0 0 68px;height:72px;border:1px solid rgba(255,255,255,.09);border-radius:9px;background:#111117;overflow:hidden;transition:border-color .18s,transform .18s,box-shadow .18s,opacity .18s}.pixel-sculpt-controls .gallery-item:hover{transform:translateY(-1px);border-color:rgba(167,139,250,.38)}.pixel-sculpt-controls .gallery-item.on{border-color:#a78bfa;box-shadow:0 0 0 2px rgba(167,139,250,.13)}.pixel-sculpt-controls .gallery-preview{display:block;width:100%;height:48px;padding:0;border:0;background:#0b0b10;cursor:pointer}.pixel-sculpt-controls .gallery-preview img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .18s,filter .18s}.pixel-sculpt-controls .gallery-item.is-excluded .gallery-preview img{opacity:.34;filter:grayscale(.7)}.pixel-sculpt-controls .gallery-item .remove{position:absolute;right:3px;top:3px;width:16px;height:16px;padding:0;border:0;border-radius:50%;background:rgba(5,5,8,.78);color:#ddd;font:11px/16px sans-serif;cursor:pointer;opacity:0;transition:opacity .16s}.pixel-sculpt-controls .gallery-item:hover .remove,.pixel-sculpt-controls .gallery-item:focus-within .remove{opacity:1}.pixel-sculpt-controls .gallery-order{height:23px;display:grid;grid-template-columns:15px 1fr;align-items:center;border-top:1px solid rgba(255,255,255,.065);background:#0e0e14;color:#696975;font:9px/1 ui-monospace,SFMono-Regular,Consolas,monospace}.pixel-sculpt-controls .gallery-order span{text-align:right}.pixel-sculpt-controls .gallery-order input{width:100%;height:22px;min-width:0;padding:0 4px;border:0;background:transparent;color:#c8b8ff;font:10px/1 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:center;font-variant-numeric:tabular-nums;outline:none;-moz-appearance:textfield}.pixel-sculpt-controls .gallery-order input::-webkit-inner-spin-button,.pixel-sculpt-controls .gallery-order input::-webkit-outer-spin-button{appearance:none;margin:0}.pixel-sculpt-controls .gallery-order input:focus{background:rgba(167,139,250,.1);color:#fff}.pixel-sculpt-controls .gallery-item.is-excluded .gallery-order input{color:#62616c}.pixel-sculpt-controls .gallery-order-hint{margin-top:3px;color:#686873;font-size:8.5px;letter-spacing:.02em}.pixel-sculpt-controls .gallery-nav{display:grid;grid-template-columns:32px 1fr 32px;gap:6px;align-items:center;margin-top:7px}.pixel-sculpt-controls .gallery-nav button{height:26px;border:1px solid var(--line);border-radius:7px;background:#14141a;color:#aaa9b2;cursor:pointer}.pixel-sculpt-controls .gallery-nav button:hover:not(:disabled){color:#fff;background:#1e1b25}.pixel-sculpt-controls .gallery-nav button:disabled{opacity:.35;cursor:default}.pixel-sculpt-controls .gallery-index{text-align:center;color:#777783;font-size:9px;font-variant-numeric:tabular-nums}
 

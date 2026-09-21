@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.30"><img alt="版本" src="https://img.shields.io/badge/version-0.2.30-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.53"><img alt="版本" src="https://img.shields.io/badge/version-0.2.53-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,15 +35,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.2.30-x64-setup.exe`
-- 备选：`CodeCodex-0.2.30-x64.msi`
-- 便携包：`CodeCodex-0.2.30-x64.zip`
+- 推荐：`CodeCodex-0.2.53-x64-setup.exe`
+- 备选：`CodeCodex-0.2.53-x64.msi`
+- 便携包：`CodeCodex-0.2.53-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.30-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.53-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -82,7 +82,7 @@ Get-FileHash .\CodeCodex-0.2.30-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.30
+./scripts/package.ps1 -Version 0.2.53
 ```
 
 生成结果会写入 `releases/`。
@@ -103,40 +103,44 @@ Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创
 
 ## 功能
 
+### 核心功能
+
 - Codex 侧边栏中的本地工作区文件树。
 - 支持从 Windows 文件资源管理器将文件和文件夹复制拖入工作区根目录或文件树中的文件夹。
+- 右键菜单支持新建、重命名、删除、复制路径、在资源管理器中显示和刷新。
+- 支持在文件树中拖拽移动文件和文件夹。
 - 位于对话旁边的主窗口文件标签页。
 - 文本预览与编辑，包括多语言 Markdown 内容。
-- 可在预览市场中独立启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 和 3D 模型预览。
-- 可选的“透明背景”外观插件，通过可恢复的 Windows 合成器透明表面显示 Codex 后方内容，同时保持整个 Codex 窗口接收输入，避免点击穿透到后方应用。
-- 启用“粒子图像背景”时，Codex 原生设置主面板可保持透明，而设置卡片仍保持清晰可读；对话页面的表面不受影响。
-- “粒子图像背景”外观插件提供持久化的灰度图片库、按顺序自动切换、流畅的粒子变形、逐图构图，以及可调的粒子、Source、流动、指针和渲染参数。
-- “黑洞背景”外观插件提供 GPU 渲染的吸积盘、辉光、质量控制和四套内置视觉预设。
-- “发光地平线背景”外观插件提供四个方向、滚轮驱动动画、惯性释放、可调辉光颜色和中英文设置面板。
-- “天境云隧道背景”外观插件提供实时云隧道、指针引导、电影式开场、三档渲染质量和中英文设置面板。
-- “极光电离层背景”外观插件提供体积光幕、程序化星空、自适应渲染质量、电影式揭示控制和中英文设置面板。
-- Milky Way Background 外观插件提供五色流动光场、可调波动形态、柔和开场动画和中英文设置面板。
+- 本地 bridge 仅执行受限的工作区操作。
+
+### 插件
+
+- Preview Market 分为 Appearance、File Preview 和 Tools 三类，打开时默认显示 Appearance。
+- File Preview 可独立启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 和 3D 模型预览；所有处理都在本地完成。
+- Appearance 包含透明背景、粒子图像、黑洞、发光地平线、天境云隧道、极光电离层、银河光场、层叠山峦、云海列车和立体像素浮雕等背景插件。
+- Tools 中的 Git History 以只读方式显示当前分支、提交记录、变更文件和带颜色的逐文件 diff，不执行仓库写入操作。
+
+### 更新与兼容
+
 - 点击文件树底部的版本号，可通过 GitHub 检查最新发布的稳定版本。
 - Codex 软件包版本仅作为诊断信息；未来版本不再受固定版本白名单限制，而是通过实时协议和 DOM 结构检查。
-- 在本地以表格形式预览 CSV，支持引号字段、字段内换行、固定表头和受限渲染。
-- 在本地以受限方式预览 `.drawio` 文件和常用 `.plantuml` 活动图语法，不会上传源代码。
-- 在本地以只读方式预览 Jupyter Notebook 的 Markdown、代码单元格和已保存输出。
-- 在本地以只读方式预览 DOCX 文档、XLSX 工作簿和 PPT/PPTX 演示文稿。
-- 在本地交互式预览 glTF 2.0 `.gltf` 和 `.glb` 模型，支持旋转、平移、缩放、适配/重置视图、参考网格和动画播放。
-- 右键菜单：新建、重命名、删除、复制路径、在资源管理器中显示、刷新。
-- 文件和文件夹拖拽移动。
-- 用于受限工作区操作的本地 bridge 代码。
 
-## 预览插件
+## Preview Market 插件
+
+“预览市场”入口位于 Code-Codex 文件树底部。插件面板按 **Appearance**、**File Preview**
+和 **Tools** 分类显示，打开时默认进入 Appearance；选择分类后只显示该分类的插件。
+
+### 文件预览插件
 
 ![Code-Codex 交互式 glTF 和 GLB 3D 模型预览](docs/screenshots/gltf-preview.png)
 
-“预览市场”入口位于 Code-Codex 文件树底部。点击该入口即可打开插件面板，并按需独立启用
-Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 文档和 glTF 3D
-模型预览插件。预览处理在用户电脑本地完成。
+File Preview 分类可按需独立启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter
+Notebook、Office 文档和 glTF 3D 模型预览，所有预览处理都在用户电脑本地完成。
 
 3D 模型预览插件为 `.gltf` 和 `.glb` 文件提供交互式视图，支持旋转、平移、缩放、
 适配/重置视图、参考网格和动画控制。
+
+### 外观插件
 
 ![Code-Codex 粒子图像背景外观插件](docs/screenshots/particle-image-background.png)
 
@@ -184,11 +188,16 @@ Layered Mountain Background 在整个 Codex 窗口中呈现动态层叠山峦、
 
 Cloud Train Background 在整个 Codex 窗口中呈现云海、蒸汽列车与桥梁，右侧中英文设置面板可调节行进速度、缩放、云层细节、拖影、色相、色温及天空／烟雾／列车染色，并支持暂停和重置；开场动画会按景深从远到近在原位逐层淡入，可调整开关、时长（0.5～10 秒）和羽化宽度并支持重播，默认 3 秒且在减少动态效果模式下跳过；启用插件时沿用原生深色外观，停用时恢复此前设置。
 
-### Pixel Sculpt Background
+#### Pixel Sculpt Background
 
 ![Pixel Sculpt Background 立体像素浮雕背景](docs/screenshots/pixel-sculpt-background.png)
 
 在 Preview Market 中启用，将图片转换为可交互的立体像素浮雕背景。右侧中英文二级面板可调整像素形状、浮雕深度、鼠标波纹、颜色、位置和旋转；支持本地图片库、排序与自动变形切换。启用时切换原生深色外观，停用后恢复之前的设置。
+
+### 工具插件
+
+Git History 位于 Tools 分类中，以只读方式显示当前分支和提交记录。进入提交节点后可查看变更文件，
+点击文件名会在主对话区域打开带绿色新增、红色删除和紫色区块定位信息的 diff 标签页。
 
 ## 仓库结构
 

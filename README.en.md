@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.30"><img alt="Version" src="https://img.shields.io/badge/version-0.2.30-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.53"><img alt="Version" src="https://img.shields.io/badge/version-0.2.53-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,15 +38,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.2.30-x64-setup.exe`
-- Alternative: `CodeCodex-0.2.30-x64.msi`
-- Portable package: `CodeCodex-0.2.30-x64.zip`
+- Recommended: `CodeCodex-0.2.53-x64-setup.exe`
+- Alternative: `CodeCodex-0.2.53-x64.msi`
+- Portable package: `CodeCodex-0.2.53-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.30-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.2.53-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -86,7 +86,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.30
+./scripts/package.ps1 -Version 0.2.53
 ```
 
 The generated packages are written to `releases/`.
@@ -107,41 +107,46 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 
 ## Features
 
+### Core Features
+
 - File tree in the Codex sidebar for local workspaces.
 - Drag files and folders from Windows File Explorer into the workspace root or a file-tree folder.
+- Context menu actions for create, rename, delete, copy path, reveal, and refresh.
+- Drag-and-drop movement for workspace files and folders.
 - Main-window file tabs beside the conversation.
 - Text preview and editing, including multilingual Markdown content.
-- Independently enabled Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews from Preview Market.
-- Optional Transparent Background appearance plugin with a reversible Windows compositor surface that reveals content behind Codex while keeping the full Codex window input-active.
-- When Particle Image Background is active, the native Codex Settings surface can remain transparent while its settings cards stay readable; conversation surfaces are unchanged.
-- Particle Image Background appearance plugin with a persistent grayscale image library, ordered auto-switching, smooth particle morphing, per-photo framing, and adjustable particle, source, flow, pointer, and render settings.
-- Black Hole Background appearance plugin with a GPU-rendered accretion disk, bloom, quality controls, and four built-in visual presets.
-- Glow Horizon Background appearance plugin with four directions, wheel-driven motion, inertial release, adjustable glow colors, and bilingual settings.
-- Heavenly Cloud Background appearance plugin with a real-time cloud tunnel, pointer steering, a cinematic opening, three quality levels, and bilingual settings.
-- Aurora Ionosphere Background appearance plugin with volumetric light curtains, a procedural star field, adaptive quality, cinematic reveal controls, and bilingual settings.
-- Milky Way Background appearance plugin with five flowing colors, adjustable wave motion, a soft opening animation, and bilingual settings.
+- A local bridge restricted to bounded workspace operations.
+
+### Plugins
+
+- Preview Market groups plugins into Appearance, File Preview, and Tools, and opens on Appearance by default.
+- File Preview independently enables Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews, with all processing performed locally.
+- Appearance includes Transparent, Particle Image, Black Hole, Glow Horizon, Heavenly Cloud, Aurora Ionosphere, Milky Way, Layered Mountain, Cloud Train, and Pixel Sculpt backgrounds.
+- Git History under Tools shows the current branch, commits, changed files, and colored per-file diffs in read-only mode without repository write operations.
+
+### Updates and Compatibility
+
 - Click the version number at the bottom of the file tree to check GitHub for the latest published stable release.
 - Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
-- Local CSV table previews with quoted fields, embedded line breaks, sticky headers, and bounded rendering.
-- Local, bounded Diagram Preview rendering for `.drawio` files and common `.plantuml` activity syntax without uploading source code.
-- Local, read-only Jupyter Notebook previews for Markdown and code cells with saved outputs.
-- Local, read-only previews for DOCX documents, XLSX workbooks, and PPT/PPTX presentations.
-- Local, interactive glTF 2.0 previews for `.gltf` and `.glb`, including orbit, pan, zoom, fit/reset, a reference grid, and animation playback.
-- Context menu actions for create, rename, delete, copy path, reveal, and refresh.
-- Drag and drop file movement.
-- Local bridge code for bounded workspace operations.
 
-## Preview Plugins
+## Preview Market Plugins
+
+Preview Market is located at the bottom of the Code-Codex file tree. It groups plugins into
+**Appearance**, **File Preview**, and **Tools**, shows one category at a time, and opens on
+Appearance by default.
+
+### File Preview Plugins
 
 ![Code-Codex interactive glTF and GLB 3D model preview](docs/screenshots/gltf-preview.png)
 
-Preview Market is located at the bottom of the Code-Codex file tree. Click it
-to open the plugin panel and independently enable previews for Markdown, CSV,
-diagrams, images, video, PDF, audio, Jupyter Notebook, Office documents, and
-glTF 3D models. Preview processing runs locally on the user's computer.
+File Preview can independently enable Markdown, CSV, diagram, image, video, PDF, audio,
+Jupyter Notebook, Office document, and glTF 3D model previews. All preview processing runs
+locally on the user's computer.
 
 The 3D Model Preview plugin provides an interactive view for `.gltf` and `.glb`
 files with orbit, pan, zoom, fit/reset, reference-grid, and animation controls.
+
+### Appearance Plugins
 
 ![Code-Codex Particle Image Background appearance plugin](docs/screenshots/particle-image-background.png)
 
@@ -205,11 +210,17 @@ Layered Mountain Background adds animated atmospheric ridges, warm backlight, mi
 
 Cloud Train Background renders clouds, a steam train, and a bridge across Codex, with bilingual controls for speed, zoom, cloud detail, feedback, hue, temperature, independent sky/smoke/train tints, pause, and reset; its staggered in-place opening fades layers from back to front without vertical movement and provides an enable switch, a 0.5–10 second duration, feather width, and replay, defaulting to three seconds and skipping under reduced motion; enabling the plugin uses the native Dark appearance and disabling it restores the previous setting.
 
-### Pixel Sculpt Background
+#### Pixel Sculpt Background
 
 ![Pixel Sculpt Background](docs/screenshots/pixel-sculpt-background.png)
 
 Enable Pixel Sculpt Background in Preview Market to transform images into an interactive 3D pixel-relief background. Its bilingual secondary settings panel controls tile shape, relief depth, pointer ripples, color, position, and rotation, with a local image library, playback ordering, and automatic morph transitions. Enabling the plugin switches Codex to its native Dark appearance; disabling it restores the previous setting.
+
+### Tool Plugins
+
+Git History is available under Tools and shows the current branch and commit history in read-only
+mode. Open a commit to inspect its changed files, then select a filename to open a diff tab in the
+main conversation area with green additions, red deletions, and purple hunk-location metadata.
 
 ## Repository Layout
 
