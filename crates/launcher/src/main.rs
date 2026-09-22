@@ -3,6 +3,7 @@ mod bridge;
 mod discovery;
 mod exit_codes;
 mod process_guard;
+mod startup_diagnostics;
 
 use std::path::PathBuf;
 use std::process::{ExitCode, Stdio};
@@ -31,6 +32,7 @@ use process_guard::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use startup_diagnostics::StartupDiagnostic;
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::process::Command;
@@ -193,6 +195,188 @@ impl AppError {
             | Self::AttachMetadataMismatch => exit_codes::GENERIC_FAILURE,
         }
     }
+
+    fn startup_diagnostic(&self) -> StartupDiagnostic {
+        use bootstrap::BootstrapError;
+        use cdp_client::CdpError;
+        use context_resolver::ResolverError;
+        use discovery::DiscoveryError;
+        use process_guard::ProcessGuardError;
+
+        let reason = self.to_string();
+        match self {
+            Self::Discovery(DiscoveryError::CodexNotFound) => StartupDiagnostic::new(
+                "CC-START-DISCOVERY-001",
+                "Finding Codex Desktop",
+                "Codex Desktop was not found",
+                reason,
+                "Install or repair the official Codex Desktop app, then start Code-Codex again.",
+            ),
+            Self::Discovery(DiscoveryError::InvalidExecutable) => StartupDiagnostic::new(
+                "CC-START-DISCOVERY-002",
+                "Verifying Codex Desktop",
+                "The Codex installation could not be verified",
+                reason,
+                "Repair or reinstall the official Codex Desktop app.",
+            ),
+            Self::Discovery(DiscoveryError::AppServerNotFound) => StartupDiagnostic::new(
+                "CC-START-APP-001",
+                "Finding the App Server",
+                "The Codex App Server was not found",
+                reason,
+                "Update or repair Codex Desktop, then start Code-Codex again.",
+            ),
+            Self::Bootstrap(BootstrapError::BundleNotFound) => StartupDiagnostic::new(
+                "CC-START-UI-001",
+                "Loading the Explorer UI",
+                "The Explorer UI bundle was not found",
+                reason,
+                "Run the Code-Codex installer again to repair this installation.",
+            ),
+            Self::Bootstrap(BootstrapError::InvalidBundle) => StartupDiagnostic::new(
+                "CC-START-UI-002",
+                "Validating the Explorer UI",
+                "The Explorer UI bundle is invalid",
+                reason,
+                "Run the Code-Codex installer again to repair this installation.",
+            ),
+            Self::Resolver(ResolverError::Spawn) => StartupDiagnostic::new(
+                "CC-START-APP-002",
+                "Starting the App Server",
+                "The App Server process could not be started",
+                reason,
+                "Restart Windows, then repair Codex Desktop if this problem continues.",
+            ),
+            Self::Resolver(ResolverError::Timeout) => StartupDiagnostic::new(
+                "CC-START-APP-003",
+                "Waiting for the App Server",
+                "The App Server did not respond in time",
+                reason,
+                "Restart Codex Desktop and try again. If it repeats, include the diagnostic report when reporting the problem.",
+            ),
+            Self::Resolver(ResolverError::Protocol) => StartupDiagnostic::new(
+                "CC-START-APP-004",
+                "Connecting to the App Server",
+                "The App Server returned invalid data",
+                reason,
+                "Update Codex Desktop and Code-Codex to compatible versions.",
+            ),
+            Self::Resolver(ResolverError::Io) => StartupDiagnostic::new(
+                "CC-START-APP-005",
+                "Communicating with the App Server",
+                "Communication with the App Server failed",
+                reason,
+                "Restart Codex Desktop and try again. Include the diagnostic report if it repeats.",
+            ),
+            Self::Resolver(ResolverError::Remote { .. }) => StartupDiagnostic::new(
+                "CC-START-APP-006",
+                "Requesting App Server data",
+                "The App Server rejected a request",
+                reason,
+                "Update Codex Desktop and Code-Codex, then try again.",
+            ),
+            Self::Resolver(ResolverError::NoWorkspace) => StartupDiagnostic::new(
+                "CC-START-WORKSPACE-001",
+                "Resolving the active workspace",
+                "The selected task has no local workspace",
+                reason,
+                "Open a local Codex task that is connected to a project folder.",
+            ),
+            Self::Resolver(ResolverError::InvalidThreadId) => StartupDiagnostic::new(
+                "CC-START-WORKSPACE-002",
+                "Resolving the active task",
+                "The active task identifier is invalid",
+                reason,
+                "Switch to another Codex task and try again.",
+            ),
+            Self::Workspace(error) => StartupDiagnostic::new(
+                "CC-START-WORKSPACE-003",
+                "Opening the workspace",
+                "The local workspace could not be opened",
+                error.to_string(),
+                "Check that the project folder still exists and that your account can access it.",
+            ),
+            Self::Cdp(CdpError::EndpointUnavailable) => StartupDiagnostic::new(
+                "CC-START-CDP-001",
+                "Connecting to Codex Desktop",
+                "The Codex debugging endpoint was unavailable",
+                reason,
+                "Restart Codex Desktop from the Code-Codex shortcut and try again.",
+            ),
+            Self::Cdp(CdpError::NoCompatibleTarget | CdpError::IncompatibleRenderer) => {
+                StartupDiagnostic::new(
+                    "CC-START-CDP-002",
+                    "Finding the Codex window",
+                    "A compatible Codex window was not found",
+                    reason,
+                    "Update Code-Codex or use a supported Codex Desktop version.",
+                )
+            }
+            Self::Cdp(CdpError::AmbiguousRenderer) => StartupDiagnostic::new(
+                "CC-START-CDP-003",
+                "Selecting the Codex window",
+                "More than one compatible Codex window was detected",
+                reason,
+                "Close extra Codex windows and start Code-Codex again.",
+            ),
+            Self::Cdp(error) => StartupDiagnostic::new(
+                "CC-START-CDP-004",
+                "Connecting to the Codex window",
+                "Code-Codex could not establish a trusted window connection",
+                error.to_string(),
+                "Restart Codex Desktop from the Code-Codex shortcut. Include the diagnostic report if it repeats.",
+            ),
+            Self::ProcessGuard(ProcessGuardError::PortUnavailable) => StartupDiagnostic::new(
+                "CC-START-PROCESS-001",
+                "Preparing a local connection",
+                "A local debugging port could not be reserved",
+                reason,
+                "Restart Windows or check whether security software is blocking local loopback connections.",
+            ),
+            Self::ProcessGuard(error) => StartupDiagnostic::new(
+                "CC-START-PROCESS-002",
+                "Verifying the Codex process",
+                "The Codex process identity could not be verified",
+                error.to_string(),
+                "Repair the official Codex Desktop installation and try again.",
+            ),
+            Self::UnsupportedVersion => StartupDiagnostic::new(
+                "CC-START-COMPAT-001",
+                "Checking compatibility",
+                "This Codex Desktop version is not supported",
+                reason,
+                "Update Code-Codex or install a supported Codex Desktop version.",
+            ),
+            Self::AlreadyRunning => StartupDiagnostic::new(
+                "CC-START-STATE-001",
+                "Checking the Codex process",
+                "Codex Desktop is already running without Code-Codex",
+                reason,
+                "Close Codex Desktop, then start it from the Codex or Code-Codex desktop shortcut.",
+            ),
+            Self::Launch => StartupDiagnostic::new(
+                "CC-START-CODEX-001",
+                "Starting Codex Desktop",
+                "Codex Desktop could not be started",
+                reason,
+                "Repair the official Codex Desktop installation and try again.",
+            ),
+            Self::InvalidLaunchArgument => StartupDiagnostic::new(
+                "CC-START-SECURITY-001",
+                "Validating startup options",
+                "A restricted startup option was rejected",
+                reason,
+                "Remove custom debugging or inspection arguments and try again.",
+            ),
+            Self::UnverifiedAttach | Self::AttachMetadataMismatch => StartupDiagnostic::new(
+                "CC-START-SECURITY-002",
+                "Verifying the running Codex instance",
+                "The running Codex instance could not be verified",
+                reason,
+                "Start the official Codex Desktop app through the Code-Codex shortcut.",
+            ),
+        }
+    }
 }
 
 #[tokio::main]
@@ -212,6 +396,9 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(event = "launcher_failed", error = %error);
+            if let Some(line) = error.startup_diagnostic().encoded_line() {
+                eprintln!("{line}");
+            }
             eprintln!("error: {error}");
             ExitCode::from(error.exit_code())
         }
@@ -1470,6 +1657,23 @@ mod tests {
             AppError::InvalidLaunchArgument.exit_code(),
             exit_codes::GENERIC_FAILURE
         );
+    }
+
+    #[test]
+    fn startup_failures_expose_specific_safe_support_details() {
+        let app_server =
+            AppError::Discovery(DiscoveryError::AppServerNotFound).startup_diagnostic();
+        assert_eq!(app_server.code, "CC-START-APP-001");
+        assert_eq!(app_server.stage, "Finding the App Server");
+        assert!(app_server.reason.contains("App Server executable"));
+
+        let timeout = AppError::Resolver(ResolverError::Timeout).startup_diagnostic();
+        assert_eq!(timeout.code, "CC-START-APP-003");
+        assert_eq!(timeout.stage, "Waiting for the App Server");
+
+        let bundle = AppError::Bootstrap(BootstrapError::InvalidBundle).startup_diagnostic();
+        assert_eq!(bundle.code, "CC-START-UI-002");
+        assert!(bundle.guidance.contains("installer"));
     }
 
     #[test]
