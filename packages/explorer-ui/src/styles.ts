@@ -213,8 +213,7 @@ export const styles = String.raw`
     .action-notice,
     .state-action,
     .preview-market-popover,
-    .preview-extension,
-    .collapsed-tab
+    .preview-extension
   ),
   :host-context(html[data-code-codex-particle-image-background]) .preview-market-popover::after {
     background-color: var(--cle-paper-raised) !important;
@@ -259,11 +258,19 @@ export const styles = String.raw`
     .action-notice,
     .state-action,
     .preview-market-popover,
-    .preview-extension,
-    .collapsed-tab
+    .preview-extension
   ),
   :host-context(html[data-code-codex-glow-horizon-background]) .preview-market-popover::after {
     background-color: var(--cle-paper-raised) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  :host-context(html[data-code-codex-particle-image-background]) .collapsed-tab,
+  :host-context(html[data-code-codex-glow-horizon-background]) .collapsed-tab {
+    background: var(--code-codex-particle-ui-surface, rgba(11, 12, 15, .58)) !important;
+    border-color: transparent;
+    border-right: 0;
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }

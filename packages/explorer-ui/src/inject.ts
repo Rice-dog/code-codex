@@ -34,6 +34,11 @@ const GLOW_HORIZON_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-glow-horiz
 const TRANSPARENT_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-transparent-background="v1"]';
 const OWNED_EXPLORER_SELECTOR = '[data-code-codex-owned="true"]';
 const SHELL_LAYOUT_CSS = `
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"] + ${MAIN_SURFACE_SELECTOR} {
+  border-left-color: transparent !important;
+  background-clip: border-box !important;
+}
+
 ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + ${MAIN_SURFACE_SELECTOR} > header[data-app-shell-header-edge-scroll] {
   position: absolute !important;
   top: 0 !important;
