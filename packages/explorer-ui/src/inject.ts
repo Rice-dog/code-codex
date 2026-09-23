@@ -1,4 +1,5 @@
 import { getBootstrapConfig } from "./bridge";
+import { reconcileApplicationMenu } from "./application-menu";
 import {
   CodeCodexElement,
   GLOW_HORIZON_BACKGROUND_ATTRIBUTE,
@@ -302,7 +303,7 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] [data-code-codex-glow-horizon-layer] 
 
 let remountObserver: MutationObserver | undefined;
 let remountFrame: number | undefined;
-let remountEnabled = !sessionDismissed();
+let remountEnabled = true;
 let dismissListenerInstalled = false;
 
 function versionParts(version: string): number[] {
@@ -465,7 +466,40 @@ function installGlowHorizonBackgroundStyle(): void {
   if (style.textContent !== GLOW_HORIZON_BACKGROUND_CSS) style.textContent = GLOW_HORIZON_BACKGROUND_CSS;
 }
 
+function revealExplorer(): CodeCodexElement | null {
+  if (sessionDismissed()) clearExplorerDismissalForSession();
+  remountEnabled = true;
+  installRemountObserver();
+  const explorer = injectExplorer();
+  if (explorer?.isConnected && explorer.dataset.collapsed === "true") explorer.collapse(false);
+  return explorer;
+}
+
+const applicationMenuActions = {
+  isExplorerVisible: () => {
+    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
+    return !sessionDismissed() && Boolean(explorer?.isConnected && explorer.dataset.collapsed !== "true");
+  },
+  toggleExplorer: () => {
+    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
+    if (sessionDismissed() || !explorer?.isConnected) {
+      revealExplorer();
+    } else {
+      explorer.collapse(explorer.dataset.collapsed !== "true");
+    }
+  },
+  openPreviewMarket: () => {
+    const explorer = revealExplorer();
+    if (explorer?.isConnected) {
+      requestAnimationFrame(() => {
+        if (explorer.isConnected) explorer.openPreviewMarket();
+      });
+    }
+  },
+};
+
 export function injectExplorer(): CodeCodexElement | null {
+  reconcileApplicationMenu(applicationMenuActions);
   installTransparentBackgroundStyle();
   installParticleBackgroundStyle();
   installGlowHorizonBackgroundStyle();
@@ -512,8 +546,6 @@ function retireRemountObserver(): void {
 
 function disableRemount(): void {
   dismissExplorerForSession();
-  remountEnabled = false;
-  retireRemountObserver();
 }
 
 function sessionDismissed(): boolean {

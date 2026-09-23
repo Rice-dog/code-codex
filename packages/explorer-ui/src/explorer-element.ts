@@ -12062,6 +12062,11 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  openPreviewMarket(): void {
+    if (!this.#previewMarketOpen) this.#togglePreviewMarket();
+    else this.#previewMarketCloseButton.focus();
+  }
+
   async disable(): Promise<void> {
     if (this.#disableButton.disabled) return;
     this.#closeContextMenu(false);

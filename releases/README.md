@@ -2,6 +2,10 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.56 — 顶部 Code-Codex 菜单
+
+- 在 Codex 顶部 Help 右侧增加 Code-Codex 菜单，可显示或隐藏文件树，并打开 Preview Market。
+
 ## v0.2.55 — 启动错误诊断
 
 - 启动失败弹窗显示具体阶段、支持代码、底层原因和建议操作，不再只显示笼统的 App Server 错误。
