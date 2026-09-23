@@ -2,6 +2,33 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.0 — 顶部菜单与启动诊断
+
+- 在 Codex 顶部 Help 右侧增加 Code-Codex 菜单，可显示或隐藏文件树、打开 Preview Market、检查 GitHub 更新并访问项目仓库；菜单样式与原生 Help 菜单保持一致。
+- 启动失败时显示具体失败阶段、支持代码、原因和处理建议，并提供脱敏诊断报告。
+- 版本号更新为 v0.3.0，提供 setup EXE、MSI、ZIP、独立卸载程序和 SHA-256 校验文件。
+
+## v0.2.59 — 顶部菜单样式统一
+
+- Code-Codex 下拉菜单对齐 Codex 原生 Help 菜单的字号、行距、宽度、背景、阴影、圆角和分组间距。
+
+## v0.2.58 — 菜单访问 GitHub 仓库
+
+- 顶部 Code-Codex 菜单新增 **Open GitHub Repository**，可直接访问项目的 GitHub 仓库。
+
+## v0.2.57 — 菜单检查更新
+
+- 顶部 Code-Codex 菜单新增 **Check for Updates…**，与点击文件树底部版本号使用同一 GitHub 检查及更新确认流程。
+
+## v0.2.56 — 顶部 Code-Codex 菜单
+
+- 在 Codex 顶部 Help 右侧增加 Code-Codex 菜单，可显示或隐藏文件树，并打开 Preview Market。
+
+## v0.2.55 — 启动错误诊断
+
+- 启动失败弹窗显示具体阶段、支持代码、底层原因和建议操作，不再只显示笼统的 App Server 错误。
+- 自动生成脱敏诊断报告，支持一键复制详情或在文件资源管理器中打开报告；仅保留最近 10 份启动报告。
+
 ## v0.2.53 — Git History 跟随会话切换
 
 - 切换会话时自动清除旧仓库节点并加载当前会话的 Git 历史，无需关闭后重新启用插件。

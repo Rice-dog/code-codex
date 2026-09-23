@@ -1,4 +1,5 @@
 import { getBootstrapConfig } from "./bridge";
+import { reconcileApplicationMenu } from "./application-menu";
 import {
   CodeCodexElement,
   GLOW_HORIZON_BACKGROUND_ATTRIBUTE,
@@ -33,6 +34,11 @@ const GLOW_HORIZON_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-glow-horiz
 const TRANSPARENT_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-transparent-background="v1"]';
 const OWNED_EXPLORER_SELECTOR = '[data-code-codex-owned="true"]';
 const SHELL_LAYOUT_CSS = `
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"] + ${MAIN_SURFACE_SELECTOR} {
+  border-left-color: transparent !important;
+  background-clip: border-box !important;
+}
+
 ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:main.main-surface"] + ${MAIN_SURFACE_SELECTOR} > header[data-app-shell-header-edge-scroll] {
   position: absolute !important;
   top: 0 !important;
@@ -302,7 +308,7 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] [data-code-codex-glow-horizon-layer] 
 
 let remountObserver: MutationObserver | undefined;
 let remountFrame: number | undefined;
-let remountEnabled = !sessionDismissed();
+let remountEnabled = true;
 let dismissListenerInstalled = false;
 
 function versionParts(version: string): number[] {
@@ -465,7 +471,48 @@ function installGlowHorizonBackgroundStyle(): void {
   if (style.textContent !== GLOW_HORIZON_BACKGROUND_CSS) style.textContent = GLOW_HORIZON_BACKGROUND_CSS;
 }
 
+function revealExplorer(): CodeCodexElement | null {
+  if (sessionDismissed()) clearExplorerDismissalForSession();
+  remountEnabled = true;
+  installRemountObserver();
+  const explorer = injectExplorer();
+  if (explorer?.isConnected && explorer.dataset.collapsed === "true") explorer.collapse(false);
+  return explorer;
+}
+
+const applicationMenuActions = {
+  isExplorerVisible: () => {
+    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
+    return !sessionDismissed() && Boolean(explorer?.isConnected && explorer.dataset.collapsed !== "true");
+  },
+  toggleExplorer: () => {
+    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
+    if (sessionDismissed() || !explorer?.isConnected) {
+      revealExplorer();
+    } else {
+      explorer.collapse(explorer.dataset.collapsed !== "true");
+    }
+  },
+  openPreviewMarket: () => {
+    const explorer = revealExplorer();
+    if (explorer?.isConnected) {
+      requestAnimationFrame(() => {
+        if (explorer.isConnected) explorer.openPreviewMarket();
+      });
+    }
+  },
+  checkForUpdates: () => {
+    const explorer = revealExplorer();
+    if (explorer?.isConnected) {
+      requestAnimationFrame(() => {
+        if (explorer.isConnected) explorer.checkForUpdates();
+      });
+    }
+  },
+};
+
 export function injectExplorer(): CodeCodexElement | null {
+  reconcileApplicationMenu(applicationMenuActions);
   installTransparentBackgroundStyle();
   installParticleBackgroundStyle();
   installGlowHorizonBackgroundStyle();
@@ -512,8 +559,6 @@ function retireRemountObserver(): void {
 
 function disableRemount(): void {
   dismissExplorerForSession();
-  remountEnabled = false;
-  retireRemountObserver();
 }
 
 function sessionDismissed(): boolean {

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.2.53"><img alt="Version" src="https://img.shields.io/badge/version-0.2.53-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.3.0"><img alt="Version" src="https://img.shields.io/badge/version-0.3.0-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,15 +38,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.2.53-x64-setup.exe`
-- Alternative: `CodeCodex-0.2.53-x64.msi`
-- Portable package: `CodeCodex-0.2.53-x64.zip`
+- Recommended: `CodeCodex-0.3.0-x64-setup.exe`
+- Alternative: `CodeCodex-0.3.0-x64.msi`
+- Portable package: `CodeCodex-0.3.0-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.2.53-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.3.0-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -86,7 +86,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.2.53
+./scripts/package.ps1 -Version 0.3.0
 ```
 
 The generated packages are written to `releases/`.
@@ -109,6 +109,7 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 
 ### Core Features
 
+- A Code-Codex menu beside Help in the Codex top bar shows or hides the file tree, opens Preview Market, checks for updates, and opens the project's GitHub repository.
 - File tree in the Codex sidebar for local workspaces.
 - Drag files and folders from Windows File Explorer into the workspace root or a file-tree folder.
 - Context menu actions for create, rename, delete, copy path, reveal, and refresh.
@@ -126,7 +127,8 @@ that shortcut. MSI installs can also be removed from Windows **Installed apps**.
 
 ### Updates and Compatibility
 
-- Click the version number at the bottom of the file tree to check GitHub for the latest published stable release.
+- Click the version number at the bottom of the file tree or choose **Check for Updates…** from the Code-Codex menu to check GitHub for the latest published stable release.
+- Startup failures show the exact failing stage, a stable support code, a suggested action, and buttons to copy or open a redacted local diagnostic report.
 - Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
 
 ## Preview Market Plugins
