@@ -41,33 +41,44 @@ ${MENU_HOST_SELECTOR} > button {
 ${MENU_POPUP_SELECTOR} {
   position: fixed;
   z-index: 2147483000;
-  min-width: 190px;
-  padding: 5px;
-  border: 1px solid var(--color-border-primary-outline, rgba(128, 128, 128, .24));
-  border-radius: 10px;
-  background: var(--color-surface-elevated-secondary, #fff);
-  color: var(--color-text-primary, #1a1c1f);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .16);
-  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-sizing: border-box;
+  width: min(220px, calc(100vw - 16px));
+  max-height: calc(100vh - 12px);
+  padding: 4px 0;
+  border: 0;
+  border-radius: var(--radius-sm, 7.5px);
+  background: var(--color-codex-application-menu, #f8f8f9);
+  color: var(--app-color-foreground-application-menu, #1a1c1f);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .42);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow-y: auto;
+  user-select: none;
 }
 ${MENU_POPUP_SELECTOR}[hidden] { display: none !important; }
 ${MENU_POPUP_SELECTOR} > :is(button, a) {
   display: block;
-  width: 100%;
-  padding: 8px 10px;
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  margin: 0 4px;
+  padding: 5px 16px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm, 7.5px);
   background: transparent;
   color: inherit;
-  font: inherit;
+  font: 400 12px/18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   text-align: start;
   text-decoration: none;
   cursor: pointer;
 }
 ${MENU_POPUP_SELECTOR} > :is(button, a):hover,
 ${MENU_POPUP_SELECTOR} > :is(button, a):focus-visible {
-  background: var(--color-background-primary-surface, rgba(128, 128, 128, .1));
+  background: var(--color-background-primary-ghost-hover, rgba(26, 28, 31, .053));
   outline: none;
+}
+${MENU_POPUP_SELECTOR} > [role="separator"] {
+  height: .5px;
+  margin: 8px 0;
+  background: var(--color-border-strong, rgba(26, 28, 31, .117));
 }
 `;
 
@@ -143,7 +154,9 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   repositoryItem.setAttribute("role", "menuitem");
   repositoryItem.tabIndex = -1;
   repositoryItem.textContent = "Open GitHub Repository";
-  popup.append(treeItem, marketItem, updateItem, repositoryItem);
+  const separator = document.createElement("div");
+  separator.setAttribute("role", "separator");
+  popup.append(treeItem, marketItem, separator, updateItem, repositoryItem);
 
   // Keep this sibling separate from Codex's React-owned Radix menubar. It
   // shares the visual row without joining Radix's private keyboard collection.
@@ -154,9 +167,9 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   const position = () => {
     if (popup.hidden) return;
     const rect = trigger.getBoundingClientRect();
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - popup.offsetWidth - 8));
+    const left = Math.max(8, Math.min(Math.round(rect.left), window.innerWidth - popup.offsetWidth - 8));
     popup.style.left = `${left}px`;
-    popup.style.top = `${Math.min(rect.bottom + 5, window.innerHeight - popup.offsetHeight - 8)}px`;
+    popup.style.top = `${Math.max(8, Math.min(Math.round(rect.bottom), window.innerHeight - popup.offsetHeight - 8))}px`;
   };
   const close = (returnFocus = false) => {
     if (popup.hidden) return;

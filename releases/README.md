@@ -2,6 +2,10 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.59 — 顶部菜单样式统一
+
+- Code-Codex 下拉菜单对齐 Codex 原生 Help 菜单的字号、行距、宽度、背景、阴影、圆角和分组间距。
+
 ## v0.2.58 — 菜单访问 GitHub 仓库
 
 - 顶部 Code-Codex 菜单新增 **Open GitHub Repository**，可直接访问项目的 GitHub 仓库。
