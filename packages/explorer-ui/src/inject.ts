@@ -496,6 +496,14 @@ const applicationMenuActions = {
       });
     }
   },
+  checkForUpdates: () => {
+    const explorer = revealExplorer();
+    if (explorer?.isConnected) {
+      requestAnimationFrame(() => {
+        if (explorer.isConnected) explorer.checkForUpdates();
+      });
+    }
+  },
 };
 
 export function injectExplorer(): CodeCodexElement | null {

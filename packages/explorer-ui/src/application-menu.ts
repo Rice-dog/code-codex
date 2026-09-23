@@ -2,6 +2,7 @@ interface ApplicationMenuActions {
   isExplorerVisible(): boolean;
   toggleExplorer(): void;
   openPreviewMarket(): void;
+  checkForUpdates(): void;
 }
 
 interface MenuMount {
@@ -22,6 +23,7 @@ const MENU_STATE = Symbol.for("code-codex:application-menu:v1");
 const MENU_HOST_SELECTOR = "[data-code-codex-application-menu]";
 const MENU_POPUP_SELECTOR = "[data-code-codex-application-menu-popup]";
 const MENU_STYLE_SELECTOR = "style[data-code-codex-application-menu-style]";
+const REPOSITORY_URL = "https://github.com/Rice-dog/code-codex";
 const owner = {};
 
 const MENU_CSS = `
@@ -49,7 +51,7 @@ ${MENU_POPUP_SELECTOR} {
   font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 ${MENU_POPUP_SELECTOR}[hidden] { display: none !important; }
-${MENU_POPUP_SELECTOR} > button {
+${MENU_POPUP_SELECTOR} > :is(button, a) {
   display: block;
   width: 100%;
   padding: 8px 10px;
@@ -59,10 +61,11 @@ ${MENU_POPUP_SELECTOR} > button {
   color: inherit;
   font: inherit;
   text-align: start;
+  text-decoration: none;
   cursor: pointer;
 }
-${MENU_POPUP_SELECTOR} > button:hover,
-${MENU_POPUP_SELECTOR} > button:focus-visible {
+${MENU_POPUP_SELECTOR} > :is(button, a):hover,
+${MENU_POPUP_SELECTOR} > :is(button, a):focus-visible {
   background: var(--color-background-primary-surface, rgba(128, 128, 128, .1));
   outline: none;
 }
@@ -128,14 +131,26 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   marketItem.setAttribute("role", "menuitem");
   marketItem.tabIndex = -1;
   marketItem.textContent = "Preview Market";
-  popup.append(treeItem, marketItem);
+  const updateItem = document.createElement("button");
+  updateItem.type = "button";
+  updateItem.setAttribute("role", "menuitem");
+  updateItem.tabIndex = -1;
+  updateItem.textContent = "Check for Updates…";
+  const repositoryItem = document.createElement("a");
+  repositoryItem.href = REPOSITORY_URL;
+  repositoryItem.target = "_blank";
+  repositoryItem.rel = "noopener noreferrer";
+  repositoryItem.setAttribute("role", "menuitem");
+  repositoryItem.tabIndex = -1;
+  repositoryItem.textContent = "Open GitHub Repository";
+  popup.append(treeItem, marketItem, updateItem, repositoryItem);
 
   // Keep this sibling separate from Codex's React-owned Radix menubar. It
   // shares the visual row without joining Radix's private keyboard collection.
   mount.topBar.insertBefore(host, mount.menubar.nextSibling);
   document.body.append(popup);
 
-  const items = [treeItem, marketItem];
+  const items: HTMLElement[] = [treeItem, marketItem, updateItem, repositoryItem];
   const position = () => {
     if (popup.hidden) return;
     const rect = trigger.getBoundingClientRect();
@@ -162,7 +177,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       open();
-      (event.key === "ArrowDown" ? treeItem : marketItem).focus();
+      (event.key === "ArrowDown" ? treeItem : repositoryItem).focus();
     } else if (event.key === "Escape") {
       close(true);
     }
@@ -175,7 +190,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
       close();
     } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
-      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      const index = items.indexOf(document.activeElement as HTMLElement);
       const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
         (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
       items[next]?.focus();
@@ -183,6 +198,8 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   }, { signal });
   treeItem.addEventListener("click", () => { close(); actions.toggleExplorer(); }, { signal });
   marketItem.addEventListener("click", () => { close(); actions.openPreviewMarket(); }, { signal });
+  updateItem.addEventListener("click", () => { close(); actions.checkForUpdates(); }, { signal });
+  repositoryItem.addEventListener("click", () => close(), { signal });
   document.addEventListener("pointerdown", (event) => {
     const target = event.target;
     if (target instanceof Node && !host.contains(target) && !popup.contains(target)) close();

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.2.56"
+    [string]$Version = "0.2.58",
+    [string]$WixPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -126,7 +127,8 @@ $msi = Join-Path $Artifacts "CodeCodex-$Version-x64.msi"
     -ThirdPartyLicensesPath $thirdPartyLicenses `
     -VisualEffectNoticesEnPath $visualEffectNoticesEn `
     -VisualEffectNoticesZhPath $visualEffectNoticesZh `
-    -SbomPath (Join-Path $Artifacts "sbom.spdx.json")
+    -SbomPath (Join-Path $Artifacts "sbom.spdx.json") `
+    -WixPath $WixPath
 
 $downloadUninstaller = Join-Path $Artifacts "Uninstall-CodeCodex.exe"
 Copy-Item -LiteralPath $uninstallProgram -Destination $downloadUninstaller -Force

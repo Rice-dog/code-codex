@@ -2,6 +2,14 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.2.58 — 菜单访问 GitHub 仓库
+
+- 顶部 Code-Codex 菜单新增 **Open GitHub Repository**，可直接访问项目的 GitHub 仓库。
+
+## v0.2.57 — 菜单检查更新
+
+- 顶部 Code-Codex 菜单新增 **Check for Updates…**，与点击文件树底部版本号使用同一 GitHub 检查及更新确认流程。
+
 ## v0.2.56 — 顶部 Code-Codex 菜单
 
 - 在 Codex 顶部 Help 右侧增加 Code-Codex 菜单，可显示或隐藏文件树，并打开 Preview Market。
