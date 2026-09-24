@@ -39,45 +39,46 @@
       Impersonate="yes"
       Return="check" />
 
+    <!-- INSTALLFOLDER ends with a backslash; append a dot so it cannot escape the closing command-line quote. -->
     <CustomAction
       Id="RollbackCodexShortcutInstall"
       FileRef="ShortcutIntegrationExecutable"
-      ExeCommand="rollback-install --install-root &quot;[INSTALLFOLDER]&quot;"
+      ExeCommand="rollback-install --install-root &quot;[INSTALLFOLDER].&quot;"
       Execute="rollback"
       Impersonate="yes"
       Return="ignore" />
     <CustomAction
       Id="PrepareCodexShortcutInstall"
       FileRef="ShortcutIntegrationExecutable"
-      ExeCommand="prepare-install --install-root &quot;[INSTALLFOLDER]&quot;"
+      ExeCommand="prepare-install --install-root &quot;[INSTALLFOLDER].&quot;"
       Execute="deferred"
       Impersonate="yes"
       Return="check" />
     <CustomAction
       Id="InstallCodexShortcut"
       FileRef="ShortcutIntegrationExecutable"
-      ExeCommand="install --install-root &quot;[INSTALLFOLDER]&quot; --version &quot;$(var.ProductVersion)&quot; --preserve-legacy"
+      ExeCommand="install --install-root &quot;[INSTALLFOLDER].&quot; --version &quot;$(var.ProductVersion)&quot; --preserve-legacy"
       Execute="deferred"
       Impersonate="yes"
       Return="check" />
     <CustomAction
       Id="CommitCodexShortcutInstall"
       FileRef="ShortcutIntegrationExecutable"
-      ExeCommand="commit-install --install-root &quot;[INSTALLFOLDER]&quot;"
+      ExeCommand="commit-install --install-root &quot;[INSTALLFOLDER].&quot;"
       Execute="commit"
       Impersonate="yes"
       Return="ignore" />
     <CustomAction
       Id="RollbackCodexShortcutRemoval"
       FileRef="ShortcutIntegrationExecutable"
-      ExeCommand="install --install-root &quot;[INSTALLFOLDER]&quot; --version &quot;$(var.ProductVersion)&quot;"
+      ExeCommand="install --install-root &quot;[INSTALLFOLDER].&quot; --version &quot;$(var.ProductVersion)&quot;"
       Execute="rollback"
       Impersonate="yes"
       Return="ignore" />
     <CustomAction
       Id="RestoreCodexShortcut"
       FileRef="ShortcutIntegrationExecutable"
-      ExeCommand="restore --install-root &quot;[INSTALLFOLDER]&quot;"
+      ExeCommand="restore --install-root &quot;[INSTALLFOLDER].&quot;"
       Execute="deferred"
       Impersonate="yes"
       Return="check" />
