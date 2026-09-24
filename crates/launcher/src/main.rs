@@ -205,6 +205,50 @@ impl AppError {
 
         let reason = self.to_string();
         match self {
+            Self::Discovery(DiscoveryError::PackageQueryFailed) => StartupDiagnostic::new(
+                "CC-START-DISCOVERY-003",
+                "Querying Codex Desktop registration",
+                "Windows could not check the Codex Desktop installation",
+                reason,
+                "Restart Code-Codex once. If it repeats, repair the official Codex Desktop app in Windows Settings.",
+            ),
+            Self::Discovery(DiscoveryError::StablePackageNotRegistered) => StartupDiagnostic::new(
+                "CC-START-DISCOVERY-004",
+                "Finding stable Codex Desktop",
+                "Stable Codex Desktop is not registered for this Windows user",
+                reason,
+                "Install the official stable Codex Desktop app for this Windows user, then start Code-Codex again.",
+            ),
+            Self::Discovery(DiscoveryError::StablePackageNotRegisteredBetaOnly) => {
+                StartupDiagnostic::new(
+                    "CC-START-DISCOVERY-005",
+                    "Finding stable Codex Desktop",
+                    "Only Codex Beta is registered for this Windows user",
+                    reason,
+                    "Install the official stable Codex Desktop app; the desktop shortcut starts the stable channel.",
+                )
+            }
+            Self::Discovery(DiscoveryError::PackageIdentityRejected) => StartupDiagnostic::new(
+                "CC-START-DISCOVERY-006",
+                "Verifying Codex Desktop registration",
+                "The registered Codex package identity could not be trusted",
+                reason,
+                "Repair the official Codex Desktop app. Code-Codex will not launch an unverified package.",
+            ),
+            Self::Discovery(DiscoveryError::PackageLocationUnavailable) => StartupDiagnostic::new(
+                "CC-START-DISCOVERY-007",
+                "Opening Codex Desktop",
+                "The registered Codex installation directory is unavailable",
+                reason,
+                "Repair the official Codex Desktop app in Windows Settings, then start Code-Codex again.",
+            ),
+            Self::Discovery(DiscoveryError::PackageExecutableMissing) => StartupDiagnostic::new(
+                "CC-START-DISCOVERY-008",
+                "Finding the Codex executable",
+                "The registered Codex package has no usable desktop executable",
+                reason,
+                "Repair the official Codex Desktop app in Windows Settings, then start Code-Codex again.",
+            ),
             Self::Discovery(DiscoveryError::CodexNotFound) => StartupDiagnostic::new(
                 "CC-START-DISCOVERY-001",
                 "Finding Codex Desktop",
@@ -1661,6 +1705,17 @@ mod tests {
 
     #[test]
     fn startup_failures_expose_specific_safe_support_details() {
+        let unregistered =
+            AppError::Discovery(DiscoveryError::StablePackageNotRegistered).startup_diagnostic();
+        assert_eq!(unregistered.code, "CC-START-DISCOVERY-004");
+        assert!(unregistered.reason.contains("this Windows user"));
+
+        let inaccessible =
+            AppError::Discovery(DiscoveryError::PackageLocationUnavailable).startup_diagnostic();
+        assert_eq!(inaccessible.code, "CC-START-DISCOVERY-007");
+        assert!(inaccessible.reason.contains("directory"));
+        assert!(!inaccessible.reason.contains("C:\\"));
+
         let app_server =
             AppError::Discovery(DiscoveryError::AppServerNotFound).startup_diagnostic();
         assert_eq!(app_server.code, "CC-START-APP-001");
