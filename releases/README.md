@@ -2,6 +2,12 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.2 — 启动发现诊断增强
+
+- 启动时区分官方 Codex 包未注册、仅安装 Beta、包身份异常、安装目录不可访问及主程序缺失等原因，并自动重试短暂失败的包查询。
+- 失败报告增加 PowerShell 退出码、Windows HRESULT、错误 ID／类别和文件访问的 Win32 错误码；复制详情时过滤完整用户路径。
+- 提供更新后的 setup EXE、MSI、ZIP 和 SHA-256 校验文件。
+
 ## v0.3.1 — 修复 MSI 安装错误 1722
 
 - 修正 MSI 快捷方式自定义操作的安装目录参数；此前 Windows 会错误解析结尾反斜杠与引号，导致安装程序退出并显示 1722。
