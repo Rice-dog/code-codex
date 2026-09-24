@@ -39,8 +39,10 @@ use crate::process_guard::trusted_powershell;
 pub enum DiscoveryError {
     #[error("Codex Desktop was not found")]
     CodexNotFound,
-    #[error("Windows could not query the current user's Codex Desktop package registration")]
-    PackageQueryFailed,
+    #[error(
+        "Windows could not query the current user's Codex Desktop package registration ({step}: {code})"
+    )]
+    PackageQueryFailed { step: &'static str, code: String },
     #[error("the official stable Codex Desktop package is not registered for this Windows user")]
     StablePackageNotRegistered,
     #[error(
@@ -49,8 +51,10 @@ pub enum DiscoveryError {
     StablePackageNotRegisteredBetaOnly,
     #[error("the registered Codex Desktop package has an unexpected publisher or package identity")]
     PackageIdentityRejected,
-    #[error("the registered Codex Desktop installation directory is missing or inaccessible")]
-    PackageLocationUnavailable,
+    #[error(
+        "the registered Codex Desktop installation directory is missing or inaccessible ({code})"
+    )]
+    PackageLocationUnavailable { code: String },
     #[error(
         "the registered Codex Desktop package has no accessible ChatGPT or Codex application executable"
     )]
@@ -310,8 +314,11 @@ fn select_package_installations(
 
 #[cfg(windows)]
 fn query_windows_package_records() -> Result<Vec<PackageRecord>, DiscoveryError> {
-    const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new(); $packages=@(Get-AppxPackage -Name 'OpenAI.Codex*' -PackageTypeFilter Main -ErrorAction Stop | Where-Object { $_.Name -in @('OpenAI.Codex','OpenAI.CodexBeta') } | Select-Object Name,Version,InstallLocation,Publisher,PackageFamilyName,PackageFullName); ConvertTo-Json -InputObject $packages -Compress"#;
-    let powershell = trusted_powershell().ok_or(DiscoveryError::PackageQueryFailed)?;
+    const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new(); try { $packages=@(Get-AppxPackage -Name 'OpenAI.Codex*' -PackageTypeFilter Main -ErrorAction Stop | Where-Object { $_.Name -in @('OpenAI.Codex','OpenAI.CodexBeta') } | Select-Object Name,Version,InstallLocation,Publisher,PackageFamilyName,PackageFullName); ConvertTo-Json -InputObject $packages -Compress } catch { $failure=@{ errorId=[string]$_.FullyQualifiedErrorId; category=[string]$_.CategoryInfo.Category; hresult=[int]$_.Exception.HResult }; [Console]::Error.WriteLine((ConvertTo-Json -InputObject $failure -Compress)); exit 1 }"#;
+    let powershell = trusted_powershell().ok_or_else(|| DiscoveryError::PackageQueryFailed {
+        step: "locate PowerShell",
+        code: "trusted System32 PowerShell executable unavailable".to_owned(),
+    })?;
     let output = Command::new(powershell)
         .args([
             "-NoLogo",
@@ -321,37 +328,138 @@ fn query_windows_package_records() -> Result<Vec<PackageRecord>, DiscoveryError>
             SCRIPT,
         ])
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .output()
-        .map_err(|_| DiscoveryError::PackageQueryFailed)?;
-    if !output.status.success() || output.stdout.len() > 1024 * 1024 {
-        return Err(DiscoveryError::PackageQueryFailed);
+        .map_err(|error| DiscoveryError::PackageQueryFailed {
+            step: "start PowerShell",
+            code: windows_io_code(&error),
+        })?;
+    if !output.status.success() {
+        return Err(DiscoveryError::PackageQueryFailed {
+            step: "Get-AppxPackage",
+            code: package_query_exit_code(output.status.code(), &output.stderr),
+        });
     }
-    let value = serde_json::from_slice::<serde_json::Value>(&output.stdout)
-        .map_err(|_| DiscoveryError::PackageQueryFailed)?;
+    if output.stdout.len() > 1024 * 1024 {
+        return Err(DiscoveryError::PackageQueryFailed {
+            step: "read package query output",
+            code: "output exceeded 1 MiB limit".to_owned(),
+        });
+    }
+    let value = serde_json::from_slice::<serde_json::Value>(&output.stdout).map_err(|error| {
+        DiscoveryError::PackageQueryFailed {
+            step: "parse package query JSON",
+            code: format!(
+                "JSON error at line {}, column {}",
+                error.line(),
+                error.column()
+            ),
+        }
+    })?;
     let records: Vec<PackageRecord> = match value {
         serde_json::Value::Array(values) => values
             .into_iter()
-            .map(|value| {
-                serde_json::from_value(value).map_err(|_| DiscoveryError::PackageQueryFailed)
-            })
+            .map(|value| serde_json::from_value(value).map_err(package_record_error))
             .collect::<Result<_, _>>()?,
         value @ serde_json::Value::Object(_) => {
-            vec![serde_json::from_value(value).map_err(|_| DiscoveryError::PackageQueryFailed)?]
+            vec![serde_json::from_value(value).map_err(package_record_error)?]
         }
-        _ => return Err(DiscoveryError::PackageQueryFailed),
+        _ => {
+            return Err(DiscoveryError::PackageQueryFailed {
+                step: "parse package query JSON",
+                code: "unexpected JSON shape".to_owned(),
+            });
+        }
     };
     Ok(records)
+}
+
+#[cfg(windows)]
+fn package_record_error(error: serde_json::Error) -> DiscoveryError {
+    DiscoveryError::PackageQueryFailed {
+        step: "parse package metadata",
+        code: format!(
+            "JSON metadata error: {}",
+            safe_code_token(&error.to_string())
+        ),
+    }
+}
+
+#[cfg(windows)]
+fn windows_io_code(error: &std::io::Error) -> String {
+    error
+        .raw_os_error()
+        .map(|code| format!("Win32={code} (0x{code:08X})"))
+        .unwrap_or_else(|| format!("I/O kind={:?}", error.kind()))
+}
+
+#[cfg(windows)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageQueryFailureRecord {
+    error_id: String,
+    category: String,
+    hresult: i32,
+}
+
+#[cfg(windows)]
+fn package_query_exit_code(exit_code: Option<i32>, stderr: &[u8]) -> String {
+    let mut parts = vec![format!(
+        "PowerShell exit={}",
+        exit_code.map_or("unknown".to_owned(), |code| code.to_string())
+    )];
+    if let Some(record) = std::str::from_utf8(stderr).ok().and_then(|output| {
+        output
+            .lines()
+            .rev()
+            .find_map(|line| serde_json::from_str::<PackageQueryFailureRecord>(line).ok())
+    }) {
+        parts.push(format!("HRESULT=0x{:08X}", record.hresult as u32));
+        parts.push(format!("ErrorId={}", safe_code_token(&record.error_id)));
+        parts.push(format!("Category={}", safe_code_token(&record.category)));
+    }
+    parts.join(", ")
+}
+
+#[cfg(windows)]
+fn safe_code_token(value: &str) -> String {
+    if value
+        .chars()
+        .any(|character| matches!(character, '\\' | '/' | ':' | '@'))
+    {
+        return "redacted".to_owned();
+    }
+    let token: String = value
+        .chars()
+        .take(120)
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | ',') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if token.is_empty() {
+        "unknown".to_owned()
+    } else {
+        token
+    }
 }
 
 #[cfg(windows)]
 fn package_installation(record: PackageRecord) -> Result<CodexInstallation, DiscoveryError> {
     let (package_full_name, app_user_model_id) =
         validated_package_activation(&record).ok_or(DiscoveryError::PackageIdentityRejected)?;
-    let root = dunce::canonicalize(&record.install_location)
-        .map_err(|_| DiscoveryError::PackageLocationUnavailable)?;
+    let root = dunce::canonicalize(&record.install_location).map_err(|error| {
+        DiscoveryError::PackageLocationUnavailable {
+            code: windows_io_code(&error),
+        }
+    })?;
     if !root.is_dir() {
-        return Err(DiscoveryError::PackageLocationUnavailable);
+        return Err(DiscoveryError::PackageLocationUnavailable {
+            code: "registered location is not a directory".to_owned(),
+        });
     }
     let executable = find_gui_executable(&root).ok_or(DiscoveryError::PackageExecutableMissing)?;
     let app_server = contained_file(&root, &root.join("resources").join("codex.exe"))
@@ -1140,6 +1248,22 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn package_query_failure_preserves_codes_without_paths_or_messages() {
+        let stderr = br#"{"errorId":"GetAppxPackageCommandException,Microsoft.Windows.Appx.PackageManager.Commands.GetAppxPackageCommand","category":"PermissionDenied","hresult":-2147024891}"#;
+        let code = package_query_exit_code(Some(1), stderr);
+        assert!(code.contains("PowerShell exit=1"));
+        assert!(code.contains("HRESULT=0x80070005"));
+        assert!(code.contains("Category=PermissionDenied"));
+        assert!(!code.contains("C:\\Users"));
+
+        let unsafe_stderr = br#"{"errorId":"C:\\Users\\alice\\secret.txt","category":"PermissionDenied","hresult":-2147024891}"#;
+        let code = package_query_exit_code(Some(1), unsafe_stderr);
+        assert!(!code.contains("C:\\Users"));
+        assert!(!code.contains("\\"));
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn discovery_explains_missing_stable_and_beta_only_installations() {
         let directory = tempfile::TempDir::new().expect("temp dir");
         assert!(matches!(
@@ -1167,7 +1291,7 @@ mod tests {
         let missing = test_package_record("OpenAI.Codex", &directory.path().join("missing"));
         assert!(matches!(
             select_package_installations(vec![missing], ChannelPreference::Stable),
-            Err(DiscoveryError::PackageLocationUnavailable)
+            Err(DiscoveryError::PackageLocationUnavailable { .. })
         ));
 
         let incomplete = test_package_record("OpenAI.Codex", directory.path());

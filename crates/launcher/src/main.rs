@@ -205,7 +205,7 @@ impl AppError {
 
         let reason = self.to_string();
         match self {
-            Self::Discovery(DiscoveryError::PackageQueryFailed) => StartupDiagnostic::new(
+            Self::Discovery(DiscoveryError::PackageQueryFailed { .. }) => StartupDiagnostic::new(
                 "CC-START-DISCOVERY-003",
                 "Querying Codex Desktop registration",
                 "Windows could not check the Codex Desktop installation",
@@ -235,13 +235,15 @@ impl AppError {
                 reason,
                 "Repair the official Codex Desktop app. Code-Codex will not launch an unverified package.",
             ),
-            Self::Discovery(DiscoveryError::PackageLocationUnavailable) => StartupDiagnostic::new(
-                "CC-START-DISCOVERY-007",
-                "Opening Codex Desktop",
-                "The registered Codex installation directory is unavailable",
-                reason,
-                "Repair the official Codex Desktop app in Windows Settings, then start Code-Codex again.",
-            ),
+            Self::Discovery(DiscoveryError::PackageLocationUnavailable { .. }) => {
+                StartupDiagnostic::new(
+                    "CC-START-DISCOVERY-007",
+                    "Opening Codex Desktop",
+                    "The registered Codex installation directory is unavailable",
+                    reason,
+                    "Repair the official Codex Desktop app in Windows Settings, then start Code-Codex again.",
+                )
+            }
             Self::Discovery(DiscoveryError::PackageExecutableMissing) => StartupDiagnostic::new(
                 "CC-START-DISCOVERY-008",
                 "Finding the Codex executable",
@@ -1710,10 +1712,13 @@ mod tests {
         assert_eq!(unregistered.code, "CC-START-DISCOVERY-004");
         assert!(unregistered.reason.contains("this Windows user"));
 
-        let inaccessible =
-            AppError::Discovery(DiscoveryError::PackageLocationUnavailable).startup_diagnostic();
+        let inaccessible = AppError::Discovery(DiscoveryError::PackageLocationUnavailable {
+            code: "Win32=5 (0x00000005)".to_owned(),
+        })
+        .startup_diagnostic();
         assert_eq!(inaccessible.code, "CC-START-DISCOVERY-007");
         assert!(inaccessible.reason.contains("directory"));
+        assert!(inaccessible.reason.contains("5"));
         assert!(!inaccessible.reason.contains("C:\\"));
 
         let app_server =
