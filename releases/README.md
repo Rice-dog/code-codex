@@ -2,6 +2,11 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.1 — 修复 MSI 安装错误 1722
+
+- 修正 MSI 快捷方式自定义操作的安装目录参数；此前 Windows 会错误解析结尾反斜杠与引号，导致安装程序退出并显示 1722。
+- setup EXE、MSI、ZIP 和 SHA-256 校验文件已同步更新。
+
 ## v0.3.0 — 顶部菜单与启动诊断
 
 - 在 Codex 顶部 Help 右侧增加 Code-Codex 菜单，可显示或隐藏文件树、打开 Preview Market、检查 GitHub 更新并访问项目仓库；菜单样式与原生 Help 菜单保持一致。
