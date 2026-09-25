@@ -152,7 +152,8 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
   background-color: transparent !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] > [class*="bg-gradient-to-t"],
+/* Codex may nest its full-width composer fade below the footer wrapper. */
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] [class*="bg-gradient-to-t"],
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [class*="bg-gradient-to-t"] {
   background-image: none !important;
 }
@@ -267,7 +268,7 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
   background-color: transparent !important;
 }
 
-html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] > [class*="bg-gradient-to-t"],
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] [class*="bg-gradient-to-t"],
 html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [class*="bg-gradient-to-t"] {
   background-image: none !important;
 }
