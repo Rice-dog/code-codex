@@ -29,6 +29,7 @@ function consumeBootstrap(): Readonly<BootstrapConfig> {
         ...(typeof source.channel === "string" ? { channel: source.channel } : {}),
         ...(typeof source.forceDrawer === "boolean" ? { forceDrawer: source.forceDrawer } : {}),
         ...(typeof source.manualWorkspace === "boolean" ? { manualWorkspace: source.manualWorkspace } : {}),
+        ...(typeof source.startupSplashActive === "boolean" ? { startupSplashActive: source.startupSplashActive } : {}),
       }
     : {};
 

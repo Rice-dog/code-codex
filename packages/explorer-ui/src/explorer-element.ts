@@ -1,6 +1,9 @@
 import { PIXEL_SCULPT_CONTROLS_HTML, startPixelSculptRuntime } from "./pixel-sculpt-runtime";
 import { ActiveThreadTracker } from "./active-thread";
 import { BLINKING_SQUARES_DEFAULTS, BlinkingSquaresRenderer, type BlinkingSquaresSettings } from "./blinking-squares-host";
+import { DEFAULT_STARTUP_TRANSITION_SETTINGS, previewStartupTransition, readStartupTransitionSettings, writeStartupTransitionSettings, type StartupTransitionSettings } from "./startup-transition-plugin";
+import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVideo } from "./startup-transition-media";
+import type { StartupTransitionController } from "./startup-transition";
 import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
@@ -11356,6 +11359,41 @@ function pixelSculptCardMarkup(): string {
 function blinkingSquaresCardMarkup(): string {
   return `<article class="preview-extension appearance-extension" data-appearance-plugin="${BLINKING_SQUARES_BACKGROUND_PLUGIN_ID}" aria-busy="false"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="3" height="3"/><rect x="7" y="2" width="2" height="2"/><rect x="12" y="1" width="3" height="3"/><rect x="2" y="8" width="2" height="2"/><rect x="7" y="7" width="3" height="3"/><rect x="12" y="9" width="2" height="2"/><rect x="1" y="12" width="3" height="3"/><rect x="8" y="13" width="2" height="2"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Blinking Squares Background</h4><span class="preview-extension-status blinkingSquares-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action blinkingSquares-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger blinkingSquares-settings-trigger" type="button" aria-label="Configure Blinking Squares Background" aria-haspopup="dialog" aria-controls="cle-blinkingSquares-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
 }
+function startupTransitionCardMarkup(): string {
+  return `<article class="preview-extension appearance-extension" data-appearance-plugin="code-codex.startup-transition"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 2v3m0 6v3M2 8h3m6 0h3"/><circle cx="8" cy="8" r="1.5"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Codex Startup Transition</h4><span class="preview-extension-status startupTransition-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action startupTransition-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger startupTransition-settings-trigger" type="button" aria-label="Configure Codex Startup Transition" aria-haspopup="dialog" aria-controls="cle-startupTransition-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
+}
+function startupTransitionPanelMarkup(): string {
+  const controls: readonly [keyof Pick<StartupTransitionSettings, "minimumVisibleMs" | "maximumWaitMs" | "exitDurationMs">, string, string, number, number, number][] = [
+    ["minimumVisibleMs", "最短展示时间", "Minimum visible time", 0, 15000, 50],
+    ["maximumWaitMs", "最长等待时间", "Maximum wait time", 3000, 30000, 250],
+    ["exitDurationMs", "退场时间", "Exit duration", 0, 2000, 10],
+  ];
+  const videoControls: readonly [keyof Pick<StartupTransitionSettings, "playbackRate" | "videoOpacity" | "videoBrightness">, string, string, number, number, number][] = [
+    ["playbackRate", "播放速度", "Playback speed", 0.5, 2, 0.05],
+    ["videoOpacity", "视频透明度", "Video opacity", 0.2, 1, 0.01],
+    ["videoBrightness", "视频亮度", "Video brightness", 0.4, 1.4, 0.05],
+  ];
+  return `<section class="particle-settings-panel startupTransition-settings-panel" id="cle-startupTransition-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-startupTransition-title">
+    <header class="particle-settings-header"><div class="particle-settings-heading"><p>${bilingualLabelMarkup("外观", "Appearance")}</p><h3 id="cle-startupTransition-title">${bilingualLabelMarkup("Codex 启动过渡", "Codex Startup Transition")}</h3></div><div class="particle-settings-header-actions">${backgroundLanguageSwitchMarkup("cle-startupTransition-language")}<button class="particle-settings-close startupTransition-close" type="button" aria-label="Close settings">${icons.close}</button></div></header>
+    <div class="particle-settings-scroll">
+      <p>${bilingualLabelMarkup("在此预览启动效果。自选视频只保存在本机。", "Preview the startup effect here. Your video stays on this computer.")}</p>
+      <div class="startupTransition-preview-stage" aria-label="Startup transition preview"><div class="startupTransition-preview-underlay" aria-hidden="true"><span></span><span></span><span></span></div><video class="startupTransition-video-still" muted playsinline preload="metadata" hidden></video></div>
+      <div class="glow-horizon-actions"><button class="startupTransition-preview" type="button">${bilingualLabelMarkup("重播预览", "Replay preview")}</button></div>
+      <fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("自选视频", "Custom video")}</legend>
+        <div class="startupTransition-media-actions"><button class="startupTransition-upload" type="button">${bilingualLabelMarkup("选择视频", "Choose video")}</button><button class="startupTransition-remove" type="button" disabled>${bilingualLabelMarkup("移除视频", "Remove video")}</button><input class="startupTransition-file" type="file" accept="video/*" hidden></div>
+        <p class="startupTransition-video-info" role="status">${bilingualLabelMarkup("未选择视频，使用默认动画。", "No video selected; using the default animation.")}</p>
+        <div class="startupTransition-trim" hidden><div class="particle-control-row"><label for="cle-startupTransition-clipStart">${bilingualLabelMarkup("片段起点", "Clip start")}</label><input id="cle-startupTransition-clipStart" data-startup-transition-clip="clipStart" type="range" min="0" max="5" step="0.1" value="0"><span class="particle-control-value"><output>0.0 s</output></span></div><div class="particle-control-row"><label for="cle-startupTransition-clipEnd">${bilingualLabelMarkup("片段终点", "Clip end")}</label><input id="cle-startupTransition-clipEnd" data-startup-transition-clip="clipEnd" type="range" min="0.1" max="5" step="0.1" value="5"><span class="particle-control-value"><output>5.0 s</output></span></div></div>
+      </fieldset>
+      <fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("视频外观", "Video appearance")}</legend>
+        ${videoControls.map(([key, zh, en, min, max, step]) => `<div class="particle-control-row"><label for="cle-startupTransition-${key}">${bilingualLabelMarkup(zh, en)}</label><input id="cle-startupTransition-${key}" data-startup-transition-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${DEFAULT_STARTUP_TRANSITION_SETTINGS[key]}"><span class="particle-control-value"><output></output></span></div>`).join("")}
+        <div class="particle-control-row startupTransition-fit-row"><label for="cle-startupTransition-fit">${bilingualLabelMarkup("画面适配", "Video fit")}</label><select id="cle-startupTransition-fit"><option value="cover">铺满</option><option value="contain">完整显示</option></select></div>
+      </fieldset>
+      <fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("播放时长", "Timing")}</legend>${controls.map(([key, zh, en, min, max, step]) => `<div class="particle-control-row"><label for="cle-startupTransition-${key}">${bilingualLabelMarkup(zh, en)}</label><input id="cle-startupTransition-${key}" data-startup-transition-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${DEFAULT_STARTUP_TRANSITION_SETTINGS[key]}"><span class="particle-control-value"><output>${DEFAULT_STARTUP_TRANSITION_SETTINGS[key]} ms</output></span></div>`).join("")}</fieldset>
+      <div class="glow-horizon-actions"><button class="startupTransition-reset" type="button">${bilingualLabelMarkup("重置参数", "Reset settings")}</button></div>
+      <p class="particle-plugin-error startupTransition-error" role="alert" hidden></p>
+    </div>
+  </section>`;
+}
 function blinkingSquaresPanelMarkup(): string {
   const control = ([key, zh, en, min, max, step]: (typeof BLINKING_SQUARES_CONTROLS)[number]) => `<div class="particle-control-row"><label for="cle-blinkingSquares-${key}">${bilingualLabelMarkup(zh, en)}</label><input id="cle-blinkingSquares-${key}" data-blinking-squares-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${BLINKING_SQUARES_DEFAULTS[key]}"><span class="particle-control-value"><output>${BLINKING_SQUARES_DEFAULTS[key]}</output></span></div>`;
   const toggle = (key: "mouseInteraction" | "keyboardInteraction" | "introEnabled" | "paused", zh: string, en: string) => `<label class="particle-toggle-row">${bilingualLabelMarkup(zh, en)}<input type="checkbox" data-blinking-squares-toggle="${key}"></label>`;
@@ -11475,6 +11513,14 @@ export class CodeCodexElement extends HTMLElement {
   #blinkingSquaresUnsubscribe: (() => void) | undefined;
   #blinkingSquaresInitialization: Promise<void> | undefined;
   #blinkingSquaresEventsBound = false;
+  #startupTransitionEventsBound = false;
+  #startupTransitionNativeSync: Promise<void> = Promise.resolve();
+  #startupTransitionPending = false;
+  #startupVideo: StartupVideo | null = null;
+  #startupStillUrl: string | undefined;
+  #startupPreviewController: StartupTransitionController | undefined;
+  #startupVideoGeneration = 0;
+  #startupVideoPending = false;
   #pixelSculptUnsubscribe: (() => void) | undefined;
   #pixelSculptInitialization: Promise<void> | undefined;
   #pixelSculptEventsBound = false;
@@ -11755,7 +11801,7 @@ export class CodeCodexElement extends HTMLElement {
                 <button class="preview-market-category" type="button" role="tab" aria-selected="false" aria-controls="cle-developer-tools-section" data-preview-market-category="developer-tools">Tools</button>
               </div>
               <section class="preview-market-section" id="cle-appearance-section" role="tabpanel" data-preview-market-section="appearance">
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}${blinkingSquaresCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}${blinkingSquaresCardMarkup()}${startupTransitionCardMarkup()}</div>
               </section>
               <section class="preview-market-section" id="cle-file-preview-section" role="tabpanel" data-preview-market-section="file-preview" hidden>
                 <div class="preview-market-section-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
@@ -11790,6 +11836,7 @@ export class CodeCodexElement extends HTMLElement {
       ${cloudTrainPanelMarkup()}
       ${pixelSculptPanelMarkup()}
       ${blinkingSquaresPanelMarkup()}
+      ${startupTransitionPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -11900,8 +11947,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 10) {
-      throw new Error("Background settings require ten synchronized language switches.");
+    if (this.#backgroundLanguageInputs.length !== 11) {
+      throw new Error("Background settings require eleven synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
@@ -12259,6 +12306,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderBlinkingSquares();
     });
     this.#bindBlinkingSquares();
+    this.#bindStartupTransition();
 
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
@@ -12282,6 +12330,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#setState("error", "NO_BRIDGE");
       return;
     }
+    this.#startupTransitionNativeSync = this.#syncStartupTransitionNativePreference(this.#bridge);
     void this.#start(this.#bridge, this.#generation, bootstrap.manualWorkspace === true);
   }
 
@@ -12290,6 +12339,11 @@ export class CodeCodexElement extends HTMLElement {
     if (!this.#connected) return;
     this.#closeContextMenu(false);
     this.#closePreviewMarket(false);
+    this.#startupVideoGeneration += 1;
+    this.#startupPreviewController?.dispose();
+    this.#startupPreviewController = undefined;
+    if (this.#startupStillUrl) URL.revokeObjectURL(this.#startupStillUrl);
+    this.#startupStillUrl = undefined;
     this.#closeUpdateDialog(false);
     this.#clearDragState();
     this.#cancelMarquee();
@@ -12607,13 +12661,16 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings"), this.#required<HTMLElement>("#cle-pixelSculpt-settings"), this.#required<HTMLElement>("#cle-blinkingSquares-settings")]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings"), this.#required<HTMLElement>("#cle-pixelSculpt-settings"), this.#required<HTMLElement>("#cle-blinkingSquares-settings"), this.#required<HTMLElement>("#cle-startupTransition-settings")]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
     for (const input of this.#backgroundLanguageInputs) {
       input.checked = english;
     }
+    const videoFit = this.#required<HTMLSelectElement>("#cle-startupTransition-fit");
+    videoFit.options[0]!.textContent = english ? "Fill" : "铺满";
+    videoFit.options[1]!.textContent = english ? "Contain" : "完整显示";
     this.#particleSettingsCloseButton.title = this.#backgroundText("关闭粒子设置", "Close particle settings");
     this.#particleSettingsCloseButton.setAttribute("aria-label", this.#particleSettingsCloseButton.title);
     this.#blackHoleSettingsCloseButton.title = this.#backgroundText("关闭黑洞设置", "Close black hole settings");
@@ -13163,6 +13220,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #onWindowResize = (): void => {
+    this.#positionStartupTransition();
     this.#positionBlinkingSquares();
     this.#positionMountain();
     this.#positionPixelSculpt();
@@ -13184,6 +13242,7 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowPointerDown = (event: PointerEvent): void => {
     const path = event.composedPath();
+    if (!path.includes(this.#required<HTMLElement>("#cle-startupTransition-settings")) && !path.includes(this.#required<HTMLElement>(".startupTransition-settings-trigger"))) this.#closeStartupTransition();
     if (!path.includes(this.#required<HTMLElement>("#cle-blinkingSquares-settings")) && !path.includes(this.#required<HTMLElement>(".blinkingSquares-settings-trigger"))) this.#closeBlinkingSquares();
     if(!path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))&&!path.includes(this.#required<HTMLElement>(".pixelSculpt-settings-trigger")))this.#closePixelSculpt();
     if (!path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings")) && !path.includes(this.#required<HTMLElement>(".cloudTrain-settings-trigger"))) this.#closeCloudTrain();
@@ -13238,6 +13297,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-blinkingSquares-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-startupTransition-settings"))
     ) {
       this.#closeMilkyWaySettings(false);
     }
@@ -13255,6 +13315,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-blinkingSquares-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-startupTransition-settings"))
     ) {
       this.#closePreviewMarket(false);
     }
@@ -19407,6 +19468,247 @@ export class CodeCodexElement extends HTMLElement {
   }
 
 
+  #closeStartupTransition(): void {
+    this.#startupVideoGeneration += 1;
+    this.#startupPreviewController?.dispose();
+    this.#startupPreviewController = undefined;
+    const panel = this.#shadow.querySelector<HTMLElement>("#cle-startupTransition-settings");
+    if (panel?.matches(":popover-open")) panel.hidePopover();
+    this.#shadow.querySelector(".startupTransition-settings-trigger")?.setAttribute("aria-expanded", "false");
+  }
+
+  #positionStartupTransition(): void {
+    const panel = this.#required<HTMLElement>("#cle-startupTransition-settings");
+    if (!panel.matches(":popover-open")) return;
+    const rect = this.#required<HTMLElement>(".startupTransition-settings-trigger").getBoundingClientRect();
+    panel.style.position = "fixed"; panel.style.margin = "0";
+    panel.style.maxHeight = "calc(100vh - 24px)";
+    const width = Math.min(344, window.innerWidth - 24);
+    panel.style.width = width + "px";
+    panel.style.left = Math.max(12, Math.min(rect.right + 12, window.innerWidth - width - 12)) + "px";
+    panel.style.top = Math.max(12, Math.min(rect.top, window.innerHeight - panel.getBoundingClientRect().height - 12)) + "px";
+  }
+
+  #renderStartupTransition(): void {
+    const settings = readStartupTransitionSettings();
+    const panel = this.#required<HTMLElement>("#cle-startupTransition-settings");
+    const status = this.#required<HTMLElement>(".startupTransition-status");
+    const button = this.#required<HTMLButtonElement>(".startupTransition-enable");
+    status.textContent = settings.enabled ? "Enabled" : "Disabled";
+    status.dataset.enabled = String(settings.enabled);
+    button.textContent = settings.enabled ? "Disable" : "Enable";
+    button.dataset.enabled = String(settings.enabled);
+    button.disabled = this.#startupTransitionPending;
+    button.setAttribute("aria-pressed", String(settings.enabled));
+    button.setAttribute("aria-label", `${settings.enabled ? "Disable" : "Enable"} Codex Startup Transition`);
+    for (const input of this.#shadow.querySelectorAll<HTMLInputElement>("[data-startup-transition-setting]")) {
+      const key = input.dataset.startupTransitionSetting as keyof Pick<StartupTransitionSettings, "minimumVisibleMs" | "maximumWaitMs" | "exitDurationMs" | "playbackRate" | "videoOpacity" | "videoBrightness">;
+      input.value = String(settings[key]);
+      const output = input.parentElement?.querySelector<HTMLOutputElement>("output");
+      if (output) output.value = key === "playbackRate" ? `${settings[key].toFixed(2)}×`
+        : key === "videoOpacity" || key === "videoBrightness" ? `${Math.round(settings[key] * 100)}%`
+        : `${settings[key]} ms`;
+    }
+    this.#required<HTMLSelectElement>("#cle-startupTransition-fit").value = settings.videoFit;
+    const duration = this.#startupVideo?.duration ?? 5;
+    const clipStart = Math.min(settings.clipStart, Math.max(0, duration - 0.1));
+    const clipEnd = Math.max(clipStart + 0.1, Math.min(settings.clipEnd, duration));
+    for (const input of panel.querySelectorAll<HTMLInputElement>("[data-startup-transition-clip]")) {
+      const key = input.dataset.startupTransitionClip as "clipStart" | "clipEnd";
+      input.max = String(Math.ceil(duration * 10) / 10);
+      input.value = String(key === "clipStart" ? clipStart : clipEnd);
+      const output = input.parentElement?.querySelector<HTMLOutputElement>("output");
+      if (output) output.value = `${Number(input.value).toFixed(1)} s`;
+    }
+    this.#required<HTMLElement>(".startupTransition-trim").hidden = !this.#startupVideo;
+    this.#required<HTMLButtonElement>(".startupTransition-remove").disabled = !this.#startupVideo || this.#startupVideoPending;
+    this.#required<HTMLButtonElement>(".startupTransition-upload").disabled = this.#startupVideoPending;
+    const info = this.#required<HTMLElement>(".startupTransition-video-info");
+    info.textContent = this.#startupVideoPending ? (panel.dataset.language === "en" ? "Saving video…" : "正在保存视频…")
+      : this.#startupVideo ? `${this.#startupVideo.name} · ${(this.#startupVideo.size / 1048576).toFixed(1)} MB · ${this.#startupVideo.duration.toFixed(1)} s`
+      : (panel.dataset.language === "en" ? "No video selected; using the default animation." : "未选择视频，使用默认动画。");
+  }
+
+  #setStartupVideo(video: StartupVideo | null): void {
+    this.#startupVideo = video;
+    if (this.#startupStillUrl) URL.revokeObjectURL(this.#startupStillUrl);
+    this.#startupStillUrl = video ? URL.createObjectURL(video.blob) : undefined;
+    const still = this.#required<HTMLVideoElement>(".startupTransition-video-still");
+    still.pause();
+    still.hidden = !video;
+    if (this.#startupStillUrl) {
+      still.src = this.#startupStillUrl;
+      still.onloadedmetadata = () => { still.currentTime = Math.min(readStartupTransitionSettings().clipStart, Math.max(0, still.duration - 0.1)); };
+    } else {
+      still.removeAttribute("src");
+      still.load();
+    }
+    this.#renderStartupTransition();
+  }
+
+  async #loadStartupVideoForPanel(): Promise<void> {
+    const generation = ++this.#startupVideoGeneration;
+    try {
+      const video = await loadStartupVideo();
+      if (!this.#connected || generation !== this.#startupVideoGeneration) return;
+      this.#setStartupVideo(video);
+      this.#previewStartupTransition();
+    } catch (error) {
+      if (generation === this.#startupVideoGeneration) this.#showStartupTransitionError(error);
+    }
+  }
+
+  #showStartupTransitionError(error: unknown): void {
+    const message = this.#required<HTMLElement>(".startupTransition-error");
+    message.hidden = false;
+    message.textContent = error instanceof Error ? error.message : String(error);
+  }
+
+  #previewStartupTransition(): void {
+    this.#startupPreviewController?.dispose();
+    this.#startupPreviewController = previewStartupTransition(
+      this.#required<HTMLElement>(".startupTransition-preview-stage"),
+      readStartupTransitionSettings(),
+      this.#startupVideo,
+    );
+  }
+
+  async #syncStartupTransitionNativePreference(bridge: ExplorerBridge): Promise<void> {
+    try {
+      const native = await bridge.request<{ startupTransitionEnabled?: boolean }>("explorer.settings.get");
+      if (this.#bridge !== bridge) return;
+      const enabled = readStartupTransitionSettings().enabled;
+      if (native.startupTransitionEnabled !== enabled) {
+        await bridge.request("explorer.settings.set", { settings: { startupTransitionEnabled: enabled } });
+      }
+    } catch {
+      if (this.#bridge === bridge) this.#showActionNotice("Startup transition preference could not be synchronized", "error");
+    }
+  }
+
+  #bindStartupTransition(): void {
+    if (this.#startupTransitionEventsBound) return;
+    this.#startupTransitionEventsBound = true;
+    const panel = this.#required<HTMLElement>("#cle-startupTransition-settings");
+    const trigger = this.#required<HTMLButtonElement>(".startupTransition-settings-trigger");
+    this.#required<HTMLButtonElement>(".startupTransition-enable").addEventListener("click", async () => {
+      if (this.#startupTransitionPending) return;
+      this.#startupTransitionPending = true;
+      this.#renderStartupTransition();
+      const settings = readStartupTransitionSettings();
+      const enabled = !settings.enabled;
+      try {
+        await this.#startupTransitionNativeSync;
+        if (this.#bridge?.available) {
+          await this.#bridge.request("explorer.settings.set", { settings: { startupTransitionEnabled: enabled } });
+        }
+        if (!writeStartupTransitionSettings({ ...settings, enabled })) throw new Error("Local preference unavailable");
+      } catch {
+        this.#showActionNotice("Startup transition setting could not be saved", "error");
+      } finally {
+        this.#startupTransitionPending = false;
+        this.#renderStartupTransition();
+      }
+    });
+    trigger.addEventListener("click", () => {
+      if (panel.matches(":popover-open")) { this.#closeStartupTransition(); return; }
+      for (const other of this.#shadow.querySelectorAll<HTMLElement>(".particle-settings-panel")) {
+        if (other !== panel && other.matches(":popover-open")) other.hidePopover();
+      }
+      this.#renderStartupTransition(); panel.showPopover(); this.#positionStartupTransition();
+      trigger.setAttribute("aria-expanded", "true");
+      this.#required<HTMLButtonElement>(".startupTransition-close").focus();
+      void this.#loadStartupVideoForPanel();
+    });
+    this.#required<HTMLButtonElement>(".startupTransition-close").addEventListener("click", () => { this.#closeStartupTransition(); trigger.focus(); });
+    panel.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.stopPropagation(); this.#closeStartupTransition(); trigger.focus(); } });
+    panel.addEventListener("toggle", () => trigger.setAttribute("aria-expanded", String(panel.matches(":popover-open"))));
+    this.#previewMarketPopover.addEventListener("scroll", () => this.#positionStartupTransition());
+    for (const input of panel.querySelectorAll<HTMLInputElement>("[data-startup-transition-setting]")) {
+      input.addEventListener("input", () => {
+        const key = input.dataset.startupTransitionSetting as keyof Pick<StartupTransitionSettings, "minimumVisibleMs" | "maximumWaitMs" | "exitDurationMs" | "playbackRate" | "videoOpacity" | "videoBrightness">;
+        const settings = readStartupTransitionSettings();
+        if (!writeStartupTransitionSettings({ ...settings, [key]: Number(input.value) })) {
+          this.#showActionNotice("Startup transition setting could not be saved", "error");
+        }
+        this.#renderStartupTransition();
+      });
+    }
+    this.#required<HTMLSelectElement>("#cle-startupTransition-fit").addEventListener("change", (event) => {
+      const fit = (event.currentTarget as HTMLSelectElement).value === "contain" ? "contain" : "cover";
+      writeStartupTransitionSettings({ ...readStartupTransitionSettings(), videoFit: fit });
+      this.#renderStartupTransition();
+    });
+    for (const input of panel.querySelectorAll<HTMLInputElement>("[data-startup-transition-clip]")) {
+      input.addEventListener("input", () => {
+        const key = input.dataset.startupTransitionClip as "clipStart" | "clipEnd";
+        const duration = this.#startupVideo?.duration ?? 5;
+        const value = Number(input.value);
+        const current = readStartupTransitionSettings();
+        const next = key === "clipStart"
+          ? { ...current, clipStart: Math.min(value, Math.max(0, duration - 0.1)), clipEnd: Math.max(value + 0.1, current.clipEnd) }
+          : { ...current, clipStart: Math.min(current.clipStart, value - 0.1), clipEnd: Math.min(duration, Math.max(value, 0.1)) };
+        if (!writeStartupTransitionSettings(next)) this.#showStartupTransitionError("Clip range could not be saved");
+        const still = this.#required<HTMLVideoElement>(".startupTransition-video-still");
+        if (this.#startupVideo && still.readyState >= HTMLMediaElement.HAVE_METADATA) still.currentTime = next.clipStart;
+        this.#renderStartupTransition();
+      });
+    }
+    const fileInput = this.#required<HTMLInputElement>(".startupTransition-file");
+    this.#required<HTMLButtonElement>(".startupTransition-upload").addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files?.[0];
+      fileInput.value = "";
+      if (!file) return;
+      const generation = ++this.#startupVideoGeneration;
+      this.#startupVideoPending = true;
+      this.#required<HTMLElement>(".startupTransition-error").hidden = true;
+      this.#renderStartupTransition();
+      try {
+        const video = await saveStartupVideo(file);
+        if (!this.#connected || generation !== this.#startupVideoGeneration) return;
+        const settings = readStartupTransitionSettings();
+        if (!writeStartupTransitionSettings({ ...settings, clipStart: 0, clipEnd: Math.min(5, video.duration) })) {
+          throw new Error("Video trim settings could not be saved");
+        }
+        this.#setStartupVideo(video);
+        this.#previewStartupTransition();
+      } catch (error) {
+        if (generation === this.#startupVideoGeneration) this.#showStartupTransitionError(error);
+      } finally {
+        this.#startupVideoPending = false;
+        this.#renderStartupTransition();
+      }
+    });
+    this.#required<HTMLButtonElement>(".startupTransition-remove").addEventListener("click", async () => {
+      if (this.#startupVideoPending) return;
+      this.#startupVideoPending = true;
+      this.#renderStartupTransition();
+      try {
+        await removeStartupVideo();
+        this.#startupVideoGeneration += 1;
+        this.#setStartupVideo(null);
+        this.#previewStartupTransition();
+      } catch (error) {
+        this.#showStartupTransitionError(error);
+      } finally {
+        this.#startupVideoPending = false;
+        this.#renderStartupTransition();
+      }
+    });
+    this.#required<HTMLButtonElement>(".startupTransition-reset").addEventListener("click", () => {
+      const settings = readStartupTransitionSettings();
+      if (!writeStartupTransitionSettings({ ...DEFAULT_STARTUP_TRANSITION_SETTINGS, enabled: settings.enabled, clipEnd: Math.min(5, this.#startupVideo?.duration ?? 5) })) {
+        this.#showActionNotice("Startup transition setting could not be saved", "error");
+      }
+      this.#renderStartupTransition();
+      this.#previewStartupTransition();
+    });
+    this.#required<HTMLButtonElement>(".startupTransition-preview").addEventListener("click", () => {
+      this.#previewStartupTransition();
+    });
+  }
+
   #closeBlinkingSquares(): void {
     const panel = this.#shadow.querySelector<HTMLElement>("#cle-blinkingSquares-settings");
     if (panel?.matches(":popover-open")) panel.hidePopover();
@@ -20786,6 +21088,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #closePreviewMarket(restoreFocus: boolean): void {
+    this.#closeStartupTransition();
     this.#closeBlinkingSquares();
     this.#closePixelSculpt();
     this.#closeCloudTrain();
@@ -20818,6 +21121,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderPreviewMarket(): void {
+    this.#renderStartupTransition();
     this.#renderBlinkingSquares();
     this.#renderPixelSculpt();
     this.#renderCloudTrain();

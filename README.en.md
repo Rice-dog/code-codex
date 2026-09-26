@@ -224,6 +224,10 @@ Enable Pixel Sculpt Background in Preview Market to transform images into an int
 
 Blinking Squares Background fills the Codex window with independently twinkling squares that become denser toward a selected edge. Its bilingual settings panel controls direction, density, color, mouse trails, click pulses, and random keyboard waves, including their concurrent limit and cooldown. It also supports opening animation, pause, replay, and render-quality controls. Enabling the plugin switches Codex to Dark appearance; disabling it restores the previous setting.
 
+#### Codex Startup Transition
+
+Enable it under Appearance in Preview Market. The next launch through Code-Codex shows a local loading surface confined to the new Codex window. The native surface stays until the renderer animation has painted its first frame, preventing the conversation from appearing between the two stages; the animation fades when the main view is ready. The bilingual settings panel offers a live preview, a locally stored custom video with start and end trim controls, playback speed, opacity, brightness, fit, and display timing. Reduced-motion preferences skip the renderer animation. Launching official Codex directly or attaching to an existing window does not play the startup transition.
+
 ### Tool Plugins
 
 Git History is available under Tools and shows the current branch and commit history in read-only

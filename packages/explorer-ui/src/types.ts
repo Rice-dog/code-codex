@@ -103,6 +103,7 @@ export interface BootstrapConfig {
   channel?: string;
   forceDrawer?: boolean;
   manualWorkspace?: boolean;
+  startupSplashActive?: boolean;
 }
 
 export interface ObjectBridge {

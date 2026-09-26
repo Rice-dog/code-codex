@@ -2,12 +2,16 @@ mod bootstrap;
 mod bridge;
 mod discovery;
 mod exit_codes;
+#[allow(dead_code)]
+mod gui_support;
 mod process_guard;
 mod startup_diagnostics;
+mod startup_splash;
 
 use std::path::PathBuf;
 use std::process::{ExitCode, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
@@ -33,6 +37,7 @@ use process_guard::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use startup_diagnostics::StartupDiagnostic;
+use startup_splash::StartupSplash;
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::process::Command;
@@ -501,6 +506,16 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         return Err(AppError::AlreadyRunning);
     }
 
+    let startup_enabled = SettingsStore::for_current_user()
+        .ok()
+        .and_then(|store| store.load().ok())
+        .is_some_and(|settings| settings.startup_transition_enabled);
+    let splash = if startup_enabled {
+        StartupSplash::open()
+    } else {
+        StartupSplash::disabled()
+    };
+
     let reservation = PortReservation::reserve()?;
     let port = reservation.port()?;
     let endpoint = CdpEndpoint::loopback(port);
@@ -564,6 +579,19 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     let launched_pid = child.pid();
     tracing::info!(event = "codex_launched", channel = %installation.channel);
 
+    let splash_available = splash.is_open();
+    let splash_visible = Arc::new(AtomicBool::new(false));
+    let startup_handoff = Arc::new(AtomicBool::new(false));
+    let splash_stop = Arc::new(AtomicBool::new(false));
+    let splash_task = {
+        let visible = splash_visible.clone();
+        let handoff = startup_handoff.clone();
+        let stop = splash_stop.clone();
+        tokio::task::spawn_blocking(move || {
+            splash.wait_for_handoff(launched_pid, &visible, &handoff, &stop)
+        })
+    };
+
     let result = async {
         if let Some(main_inspector_endpoint) = main_inspector_endpoint {
             initialize_electron_main_process(main_inspector_endpoint, launched_pid, launched_after)
@@ -572,13 +600,25 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         }
         wait_for_endpoint(endpoint, Duration::from_secs(30)).await?;
         tracing::info!(event = "codex_renderer_ready", resolver_start = "deferred");
+        let splash_active = if splash_available {
+            let deadline = Instant::now() + Duration::from_millis(800);
+            while Instant::now() < deadline && !splash_visible.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            splash_visible.load(Ordering::Acquire)
+        } else {
+            false
+        };
+        if splash_available && !splash_active {
+            splash_stop.store(true, Ordering::Release);
+        }
         // Start the resolver only after the official desktop has opened its
         // renderer/CDP endpoint.  The packaged resolver is a second Codex App
         // Server process and uses the same CODEX_HOME SQLite database as the
         // desktop.  Starting it before desktop activation can win the startup
         // migration/lock race and make the desktop report "database access is
         // denied" before the file tree is rendered.
-        let (bridge, injection) = prepare_runtime(
+        let (bridge, mut injection) = prepare_runtime(
             &args.common,
             Some(&installation),
             &installation.version,
@@ -586,8 +626,12 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             compatible,
             PRIMARY_BINDING_NAME,
             PRIMARY_RECEIVER_NAME,
+            splash_active,
         )
         .await?;
+        if splash_active {
+            injection.startup_handoff = Some(startup_handoff.clone());
+        }
         tokio::task::spawn_blocking(move || {
             verify_listener_owner(port, launched_pid, launched_after)
         })
@@ -623,6 +667,8 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         }
     }
     .await;
+    splash_stop.store(true, Ordering::Release);
+    let _ = splash_task.await;
     child.terminate().await;
     result
 }
@@ -658,6 +704,7 @@ async fn attach(args: AttachArgs) -> Result<(), AppError> {
         compatible,
         PRIMARY_BINDING_NAME,
         PRIMARY_RECEIVER_NAME,
+        false,
     )
     .await?;
     let executable = installation.executable.clone();
@@ -715,6 +762,7 @@ async fn activate(args: ActivateArgs) -> Result<(), AppError> {
         compatible,
         &binding_name,
         &receiver_name,
+        false,
     )
     .await?;
     let executable = installation.executable.clone();
@@ -746,6 +794,7 @@ async fn prepare_runtime(
     compatible: bool,
     binding_name: &str,
     receiver_name: &str,
+    startup_splash_active: bool,
 ) -> Result<(Arc<NativeBridge>, InjectionConfig), AppError> {
     let bundle = resolve_bundle(common.ui_bundle.as_deref())?;
     let token = CapabilityToken::generate();
@@ -758,7 +807,23 @@ async fn prepare_runtime(
         channel,
         compatible,
         common.workspace.is_some(),
+        startup_splash_active,
     )?;
+    let navigation_bootstrap = if startup_splash_active {
+        Some(build_bootstrap(
+            &bundle,
+            &token,
+            binding_name,
+            receiver_name,
+            version,
+            channel,
+            compatible,
+            common.workspace.is_some(),
+            false,
+        )?)
+    } else {
+        None
+    };
 
     let manual_workspace = if let Some(root) = common.workspace.clone() {
         Some(Arc::new(
@@ -796,6 +861,7 @@ async fn prepare_runtime(
     ));
     bridge.initialize_manual().await;
     let mut injection = InjectionConfig::new(bootstrap, token);
+    injection.navigation_bootstrap_source = navigation_bootstrap.map(Into::into);
     injection.binding_name = binding_name.to_owned();
     injection.receiver_name = receiver_name.to_owned();
     Ok((bridge, injection))

@@ -1959,6 +1959,18 @@ fn select_codex_window(pid: u32) -> Result<WindowCandidate, WindowTransparencyEr
 }
 
 #[cfg(windows)]
+pub(crate) fn startup_splash_window(pid: u32) -> Option<isize> {
+    select_codex_window(pid)
+        .ok()
+        .map(|candidate| candidate.window)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn startup_splash_window(_pid: u32) -> Option<isize> {
+    None
+}
+
+#[cfg(windows)]
 unsafe extern "system" fn collect_codex_window_candidate(window: HWND, parameter: LPARAM) -> BOOL {
     let context = unsafe { &mut *(parameter as *mut WindowEnumerationContext) };
     if let Some(candidate) = inspect_window_candidate(window, context.virtual_screen) {

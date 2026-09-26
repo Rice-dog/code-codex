@@ -405,7 +405,12 @@ pub struct InjectionConfig {
     pub binding_name: String,
     pub receiver_name: String,
     pub bootstrap_source: Arc<str>,
+    /// The source installed for later navigations, which must not replay the
+    /// initial native-to-renderer startup handoff.
+    pub navigation_bootstrap_source: Option<Arc<str>>,
     pub capability_token: CapabilityToken,
+    /// Signals that the verified renderer evaluated the bootstrap source.
+    pub startup_handoff: Option<Arc<AtomicBool>>,
 }
 
 impl InjectionConfig {
@@ -415,7 +420,9 @@ impl InjectionConfig {
             binding_name: PRIMARY_BINDING_NAME.to_owned(),
             receiver_name: PRIMARY_RECEIVER_NAME.to_owned(),
             bootstrap_source: bootstrap_source.into(),
+            navigation_bootstrap_source: None,
             capability_token: token,
+            startup_handoff: None,
         }
     }
 }
@@ -1164,7 +1171,7 @@ where
         &mut socket,
         next_id,
         "Page.addScriptToEvaluateOnNewDocument",
-        json!({ "source": injection.bootstrap_source.as_ref() }),
+        json!({ "source": injection.navigation_bootstrap_source.as_deref().unwrap_or(injection.bootstrap_source.as_ref()) }),
     )
     .await?;
     let _ = wait_for_command(&mut socket, next_id, &mut setup_events).await?;
@@ -1174,13 +1181,14 @@ where
     next_id += 1;
 
     let (mut writer, mut reader) = socket.split();
+    let initial_bootstrap_eval_id = next_id;
     send_command(
         &mut writer,
         next_id,
         "Runtime.evaluate",
         json!({
             "expression": injection.bootstrap_source.as_ref(),
-            "awaitPromise": false,
+            "awaitPromise": true,
             "returnByValue": true
         }),
     )
@@ -1310,6 +1318,15 @@ where
                 match incoming {
                     Message::Text(text) => {
                         let message = parse_cdp_message(text.as_ref())?;
+                        if message.get("id").and_then(Value::as_u64) == Some(initial_bootstrap_eval_id) {
+                            if let Some(handoff) = &injection.startup_handoff {
+                                if !bootstrap_evaluation_succeeded(&message, initial_bootstrap_eval_id) {
+                                    tracing::warn!(event = "startup_visual_handoff_failed");
+                                }
+                                handoff.store(true, AtomicOrdering::Release);
+                            }
+                            continue;
+                        }
                         let execution_context_probe_id =
                             execution_context_probe.as_ref().map(|(id, _, _, _)| *id);
                         if execution_context_probe_id.is_some()
@@ -1951,6 +1968,14 @@ fn delivery_expression(message: &Value, receiver_name: &str) -> Result<String, C
     ))
 }
 
+fn bootstrap_evaluation_succeeded(message: &Value, expected_id: u64) -> bool {
+    message.get("id").and_then(Value::as_u64) == Some(expected_id)
+        && message.get("error").is_none()
+        && message
+            .get("result")
+            .is_some_and(|result| result.get("exceptionDetails").is_none())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
@@ -1959,6 +1984,26 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
+
+    #[test]
+    fn startup_handoff_requires_successful_bootstrap_evaluation() {
+        assert!(bootstrap_evaluation_succeeded(
+            &json!({"id": 8, "result": {"result": {"type": "undefined"}}}),
+            8
+        ));
+        assert!(!bootstrap_evaluation_succeeded(
+            &json!({"id": 7, "result": {}}),
+            8
+        ));
+        assert!(!bootstrap_evaluation_succeeded(
+            &json!({"id": 8, "error": {"message": "failed"}}),
+            8
+        ));
+        assert!(!bootstrap_evaluation_succeeded(
+            &json!({"id": 8, "result": {"exceptionDetails": {"text": "failed"}}}),
+            8
+        ));
+    }
 
     struct EchoHandler;
 

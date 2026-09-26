@@ -1,4 +1,5 @@
 import { getBootstrapConfig } from "./bridge";
+import { prepareStartupTransitionHandoff, startStartupTransitionOnLaunch } from "./startup-transition-plugin";
 import { reconcileApplicationMenu } from "./application-menu";
 import {
   CodeCodexElement,
@@ -647,12 +648,15 @@ function installRemountObserver(): void {
 
 export function installInjector(): void {
   if (!claimRuntimeOwnership()) return;
+  const startupSplashActive = getBootstrapConfig().startupSplashActive === true;
+  prepareStartupTransitionHandoff(startupSplashActive);
   window.__codeCodexInject = injectExplorer;
   installTransparentBackgroundStyle();
   installParticleBackgroundStyle();
   installGlowHorizonBackgroundStyle();
   installReselectionListener();
   const start = () => {
+    const startupTransitionPromise = startStartupTransitionOnLaunch(startupSplashActive);
     removeSupersededExplorers();
     const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     const explorer = injectExplorer();
@@ -660,6 +664,23 @@ export function installInjector(): void {
       existing.reconnectNative(getBootstrapConfig());
     }
     installRemountObserver();
+    void startupTransitionPromise.then((startupTransition) => {
+      if (!startupTransition) return;
+      const revealWhenReady = () => {
+        if (document.querySelector(MAIN_SURFACE_SELECTOR)) {
+          requestAnimationFrame(() => requestAnimationFrame(() => startupTransition.signalReady()));
+        } else {
+          const observer = new MutationObserver(() => {
+            if (!document.querySelector(MAIN_SURFACE_SELECTOR)) return;
+            observer.disconnect();
+            requestAnimationFrame(() => requestAnimationFrame(() => startupTransition.signalReady()));
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+          window.setTimeout(() => observer.disconnect(), 15_000);
+        }
+      };
+      revealWhenReady();
+    });
   };
   if (document.body) start();
   else document.addEventListener("DOMContentLoaded", start, { once: true });
