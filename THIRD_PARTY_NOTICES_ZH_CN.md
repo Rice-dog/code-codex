@@ -156,6 +156,17 @@ Pixel Sculpt Background 的视觉效果与交互概念参考了 React Bits Pro �
 
 ---
 
+## Blinking Squares Background / 闪烁方块背景
+
+**改编来源：** 用户本地的 `blinking-squares-background-effect` 项目，该项目为独立编写的 React/WebGL2 实现。
+
+**视觉参考：** Blinking Squares — React Bits Pro
+**参考页面：** https://pro.reactbits.dev/docs/components/blinking-squares
+
+Code-Codex 将提供的本地实现接入全窗口背景和设置生命周期，未包含 React Bits Pro 的源码、组件或素材。视觉参考不代表其认可或关联。
+
+---
+
 ## Particle Image Background / 粒子图像
 
 **视觉参考：** Particle Image — React Bits Pro  

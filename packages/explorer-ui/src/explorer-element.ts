@@ -1,5 +1,6 @@
-﻿import { PIXEL_SCULPT_CONTROLS_HTML, startPixelSculptRuntime } from "./pixel-sculpt-runtime";
+import { PIXEL_SCULPT_CONTROLS_HTML, startPixelSculptRuntime } from "./pixel-sculpt-runtime";
 import { ActiveThreadTracker } from "./active-thread";
+import { BLINKING_SQUARES_DEFAULTS, BlinkingSquaresRenderer, type BlinkingSquaresSettings } from "./blinking-squares-host";
 import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
@@ -96,6 +97,7 @@ const MOUNTAIN_BACKGROUND_PLUGIN_ID = "code-codex.layered-mountain-background";
 const PIXEL_SCULPT_BACKGROUND_PLUGIN_ID = "code-codex.pixel-sculpt-background";
 const CLOUD_TRAIN_BACKGROUND_PLUGIN_ID = "code-codex.cloud-train-background";
 const MILKY_WAY_BACKGROUND_PLUGIN_ID = "code-codex.milky-way-background";
+const BLINKING_SQUARES_BACKGROUND_PLUGIN_ID = "code-codex.blinking-squares-background";
 const APPEARANCE_PLUGIN_IDS = new Set([
   TRANSPARENT_BACKGROUND_PLUGIN_ID,
   PARTICLE_BACKGROUND_PLUGIN_ID,
@@ -104,6 +106,7 @@ const APPEARANCE_PLUGIN_IDS = new Set([
   HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,
   AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,
   MILKY_WAY_BACKGROUND_PLUGIN_ID,
+  BLINKING_SQUARES_BACKGROUND_PLUGIN_ID,
   MOUNTAIN_BACKGROUND_PLUGIN_ID,
   CLOUD_TRAIN_BACKGROUND_PLUGIN_ID,
   PIXEL_SCULPT_BACKGROUND_PLUGIN_ID,
@@ -124,6 +127,7 @@ const GLOW_HORIZON_BACKGROUND_SETTINGS_KEY = "code-codex:glow-horizon-background
 const HEAVENLY_CLOUD_BACKGROUND_SETTINGS_KEY = "code-codex:heavenly-cloud-background:v1";
 const AURORA_IONOSPHERE_BACKGROUND_SETTINGS_KEY = "code-codex:aurora-ionosphere-background:v1";
 const MILKY_WAY_BACKGROUND_SETTINGS_KEY = "code-codex:milky-way-background:v1";
+const BLINKING_SQUARES_BACKGROUND_SETTINGS_KEY = "code-codex:blinking-squares-background:v1";
 const BACKGROUND_SETTINGS_LANGUAGE_KEY = "code-codex:background-settings-language:v1";
 const CODEX_DARK_APPLY_TIMEOUT_MS = 5_000;
 const CODEX_APPEARANCE_POLL_INTERVAL_MS = 1_500;
@@ -655,6 +659,7 @@ type DarkBackgroundPluginId =
   | typeof HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
   | typeof AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
   | typeof MILKY_WAY_BACKGROUND_PLUGIN_ID
+  | typeof BLINKING_SQUARES_BACKGROUND_PLUGIN_ID
   | typeof MOUNTAIN_BACKGROUND_PLUGIN_ID
   | typeof PIXEL_SCULPT_BACKGROUND_PLUGIN_ID
   | typeof CLOUD_TRAIN_BACKGROUND_PLUGIN_ID;
@@ -1986,6 +1991,7 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
         || lease.owner === HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID
         || lease.owner === AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
         || lease.owner === MILKY_WAY_BACKGROUND_PLUGIN_ID
+        || lease.owner === BLINKING_SQUARES_BACKGROUND_PLUGIN_ID
         || lease.owner === MOUNTAIN_BACKGROUND_PLUGIN_ID
         || lease.owner === PIXEL_SCULPT_BACKGROUND_PLUGIN_ID
         || lease.owner === CLOUD_TRAIN_BACKGROUND_PLUGIN_ID
@@ -8031,6 +8037,285 @@ function getMountainBackgroundController(): MountainBackgroundController {
 }
 
 
+const BLINKING_SQUARES_CONTROLS = [
+  ["gridSize", "网格密度", "Grid density", 8, 200, 1],
+  ["squareSize", "方块大小", "Square size", .05, .98, .01],
+  ["fadeStart", "渐隐起点", "Fade start", 0, .99, .01],
+  ["fadeEnd", "渐隐终点", "Fade end", .01, 1, .01],
+  ["falloff", "密度衰减", "Density falloff", .3, 6, .05],
+  ["minBrightness", "最低亮度", "Minimum brightness", 0, 1, .01],
+  ["twinkleSpeed", "闪烁速度", "Twinkle speed", 0, 4, .05],
+  ["twinkleStrength", "闪烁强度", "Twinkle strength", 0, 1, .01],
+  ["intensity", "整体亮度", "Intensity", 0, 2, .01],
+  ["opacity", "方块不透明度", "Square opacity", 0, 1, .01],
+  ["interactionRadius", "交互半径", "Interaction radius", 20, 500, 1],
+  ["interactionStrength", "交互强度", "Interaction strength", 0, 3, .01],
+  ["brightnessBoost", "悬停提亮", "Hover brightness", 0, 3, .01],
+  ["densityBoost", "悬停密度", "Hover density", 0, 1, .01],
+  ["inertiaDuration", "交互余迹", "Interaction inertia", 0, 4, .05],
+  ["holdLiftSpeed", "长按抬升速度", "Hold lift speed", 0, 3, .05],
+  ["pulseStrength", "脉冲强度", "Pulse strength", 0, 15, .05],
+  ["pulseLift", "脉冲抬升", "Pulse lift", 0, 90, .05],
+  ["pulseSpeed", "脉冲速度", "Pulse speed", 20, 3500, 10],
+  ["pulseDecay", "脉冲持续", "Pulse duration", .12, 20, .01],
+  ["keyboardPulseLimit", "键盘波纹上限", "Keyboard wave limit", 1, 12, 1],
+  ["keyboardPeakCooldown", "满额冷却时间", "Wave limit cooldown", 0, 10, .1],
+  ["introDuration", "开场时长", "Opening duration", .2, 10, .1],
+  ["introIntensity", "开场强度", "Opening intensity", 0, 2.5, .05],
+  ["dpr", "像素比上限", "DPR limit", 1, 3, .1],
+] as const;
+type BlinkingSquaresNumericKey = (typeof BLINKING_SQUARES_CONTROLS)[number][0];
+function normalizeBlinkingSquaresSettings(value: unknown): BlinkingSquaresSettings {
+  const record = isObjectRecord(value) ? value : {};
+  const result = { ...BLINKING_SQUARES_DEFAULTS };
+  for (const [key, , , min, max] of BLINKING_SQUARES_CONTROLS) {
+    result[key] = clampParticleNumber(record[key], min, max, BLINKING_SQUARES_DEFAULTS[key]);
+  }
+  if (record.direction === "right" || record.direction === "left" || record.direction === "top" || record.direction === "bottom") result.direction = record.direction;
+  for (const key of ["squareColor", "backgroundColor"] as const) {
+    if (typeof record[key] === "string" && /^#[0-9a-f]{6}$/i.test(record[key])) result[key] = record[key];
+  }
+  for (const key of ["mouseInteraction", "keyboardInteraction", "introEnabled", "paused"] as const) {
+    if (typeof record[key] === "boolean") result[key] = record[key];
+  }
+  result.responseSpeed = clampParticleNumber(record.responseSpeed, 1, 32, BLINKING_SQUARES_DEFAULTS.responseSpeed);
+  return result;
+}
+function readBlinkingSquaresBackgroundSettings(): BlinkingSquaresSettings {
+  try { return normalizeBlinkingSquaresSettings(JSON.parse(localStorage.getItem(BLINKING_SQUARES_BACKGROUND_SETTINGS_KEY) || "{}")); }
+  catch { return { ...BLINKING_SQUARES_DEFAULTS }; }
+}
+function writeBlinkingSquaresBackgroundSettings(settings: BlinkingSquaresSettings): void {
+  try { localStorage.setItem(BLINKING_SQUARES_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings)); }
+  catch { /* Keep session settings usable. */ }
+}
+
+class BlinkingSquaresBackgroundController {
+  readonly #listeners = new Set<() => void>();
+  #settings = readBlinkingSquaresBackgroundSettings();
+  #enabled = false;
+  #pending = false;
+  #error: string | undefined;
+  #layer: HTMLDivElement | undefined;
+  #renderer: BlinkingSquaresRenderer | undefined;
+  #disposed = false;
+  #generation = 0;
+  #enableOperation: Promise<void> | undefined;
+  #codexThemeObserver: MutationObserver | undefined;
+  #codexThemePreferenceTimer = 0;
+  #codexThemeMonitorGeneration = 0;
+  #stoppedForExternalThemeChange = false;
+
+  constructor() { window.addEventListener("pagehide", this.#onPageHide, { once: true }); }
+  get settings(): BlinkingSquaresSettings { return this.#settings; }
+  get enabled(): boolean { return this.#enabled; }
+  get pending(): boolean { return this.#pending; }
+  get error(): string | undefined { return this.#error; }
+  get stoppedForExternalThemeChange(): boolean { return this.#stoppedForExternalThemeChange; }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+  async initialize(): Promise<void> {
+    if (this.#disposed) throw new Error("Blinking Squares Background is unavailable");
+  }
+  async enable(): Promise<void> {
+    const generation = this.#generation;
+    await this.initialize();
+    if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
+    const operation = this.#performEnable(generation);
+    this.#enableOperation = operation;
+    try { await operation; } finally { if (this.#enableOperation === operation) this.#enableOperation = undefined; }
+  }
+
+  async #performEnable(generation: number): Promise<void> {
+    this.#stoppedForExternalThemeChange = false;
+    this.#pending = true;
+    this.#error = undefined;
+    this.#notify();
+    try {
+      if (!document.body) throw new Error("The Codex window is not ready");
+      await this.#ensureCodexDarkTheme();
+      if (this.#disposed || generation !== this.#generation) return;
+      const layer = document.createElement("div");
+      layer.dataset.codeCodexParticleLayer = "v1";
+      layer.dataset.codeCodexBlinkingSquaresLayer = "v1";
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.backgroundColor = this.#settings.backgroundColor;
+      document.body.prepend(layer);
+      this.#layer = layer;
+      document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, this.#settings.backgroundColor);
+      this.#renderer = new BlinkingSquaresRenderer(layer, this.#settings, (message) => {
+        this.#error = message;
+        this.#notify();
+      });
+      this.#enabled = true;
+      this.#observeCodexTheme();
+      this.#scheduleCodexThemePreferenceCheck();
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "Blinking Squares Background could not be enabled";
+      this.#teardownPresentation();
+      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      throw error;
+    } finally {
+      this.#pending = false;
+      this.#notify();
+    }
+  }
+
+  async disable(preserveTheme = false): Promise<void> {
+    const pendingEnable = this.#enableOperation;
+    this.#stoppedForExternalThemeChange = false;
+    const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    if (hadPresentation) this.#teardownPresentation();
+    if (pendingEnable) await pendingEnable.catch(() => undefined);
+    try {
+      if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
+      this.#error = undefined;
+    } catch (error) {
+      this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
+    }
+    this.#notify();
+  }
+
+  updateSettings(next: BlinkingSquaresSettings): void {
+    this.#settings = normalizeBlinkingSquaresSettings(next);
+    writeBlinkingSquaresBackgroundSettings(this.#settings);
+    this.#renderer?.setSettings(this.#settings);
+    if (this.#layer) this.#layer.style.backgroundColor = this.#settings.backgroundColor;
+    if (this.#enabled) document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, this.#settings.backgroundColor);
+    this.#notify();
+  }
+  reset(): void { this.updateSettings(BLINKING_SQUARES_DEFAULTS); }
+  replay(): void { this.#renderer?.replay(); }
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#teardownPresentation();
+    this.#listeners.clear();
+    window.removeEventListener("pagehide", this.#onPageHide);
+  }
+
+  #teardownPresentation(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = undefined;
+    this.#codexThemeMonitorGeneration += 1;
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    this.#renderer?.dispose();
+    this.#renderer = undefined;
+    this.#layer?.remove();
+    this.#layer = undefined;
+    document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, false);
+    document.documentElement.style.removeProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY);
+  }
+
+  async #ensureCodexDarkTheme(): Promise<void> {
+    const owner = BLINKING_SQUARES_BACKGROUND_PLUGIN_ID;
+    let current: CodexAppearanceTheme;
+    try { current = await readCodexAppearanceTheme(); }
+    catch (error) {
+      if (codexDarkThemeApplied()) return;
+      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+    }
+    const lease = readParticleThemeLease();
+    if (current === "dark") {
+      if (lease?.owner && lease.owner !== owner) throw new Error("Another Code-Codex background is still using Dark mode");
+      if (lease && !lease.owner) writeParticleThemeLease({ ...lease, owner });
+      if (!codexDarkThemeApplied()) await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+      return;
+    }
+    if (lease) {
+      if (lease.owner && lease.owner !== owner) throw new Error("Another Code-Codex background still owns the Dark appearance lease");
+      clearParticleThemeLease(owner);
+      this.#stoppedForExternalThemeChange = true;
+      throw new Error("Blinking Squares Background stopped because the Codex Appearance setting changed. Enable it again to use Dark mode.");
+    }
+    writeParticleThemeLease({ owner, previousPreference: current, forcedPreference: "dark" });
+    try {
+      await writeCodexAppearanceTheme("dark");
+      await waitForCodexDarkTheme();
+    } catch (error) {
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      throw new Error("Codex could not switch to Dark automatically.", { cause: error });
+    }
+  }
+
+  async #restoreCodexAppearanceTheme(): Promise<void> {
+    const owner = BLINKING_SQUARES_BACKGROUND_PLUGIN_ID;
+    const lease = readParticleThemeLease();
+    if (!lease || (lease.owner && lease.owner !== owner)) return;
+    const current = await readCodexAppearanceTheme();
+    if (current !== lease.forcedPreference) { clearParticleThemeLease(owner); return; }
+    await writeCodexAppearanceTheme(lease.previousPreference);
+    clearParticleThemeLease(owner);
+  }
+  #observeCodexTheme(): void {
+    this.#codexThemeObserver?.disconnect();
+    this.#codexThemeObserver = new MutationObserver(() => {
+      if (!this.#enabled || codexDarkThemeApplied()) return;
+      this.#stopForExternalThemeChange();
+    });
+    this.#codexThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  }
+  #scheduleCodexThemePreferenceCheck(): void {
+    window.clearTimeout(this.#codexThemePreferenceTimer);
+    this.#codexThemePreferenceTimer = 0;
+    if (!this.#enabled) return;
+    const generation = this.#codexThemeMonitorGeneration;
+    this.#codexThemePreferenceTimer = window.setTimeout(() => {
+      this.#codexThemePreferenceTimer = 0;
+      void this.#checkCodexThemePreference(generation);
+    }, CODEX_APPEARANCE_POLL_INTERVAL_MS);
+  }
+  async #checkCodexThemePreference(generation: number): Promise<void> {
+    if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+    try {
+      const preference = await readCodexAppearanceTheme();
+      if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
+      if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
+    } catch { /* A transient read failure does not tear down the presentation. */ }
+    if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
+  }
+  #stopForExternalThemeChange(): void {
+    if (!this.#enabled) return;
+    this.#enabled = false;
+    this.#pending = false;
+    this.#generation += 1;
+    this.#error = "Blinking Squares Background stopped because Codex Appearance is no longer Dark.";
+    this.#stoppedForExternalThemeChange = true;
+    this.#teardownPresentation();
+    clearParticleThemeLease(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
+    this.#notify();
+  }
+  #notify(): void { for (const listener of this.#listeners) listener(); }
+  #onPageHide = (): void => { this.dispose(); };
+}
+
+const BLINKING_SQUARES_BACKGROUND_CONTROLLER = Symbol.for("code-codex:blinking-squares-background-controller:v1");
+
+function getBlinkingSquaresBackgroundController(): BlinkingSquaresBackgroundController {
+  const globalState = window as unknown as Record<PropertyKey, unknown>;
+  const existing = globalState[BLINKING_SQUARES_BACKGROUND_CONTROLLER];
+  if (existing instanceof BlinkingSquaresBackgroundController) return existing;
+  if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
+    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+  }
+  const controller = new BlinkingSquaresBackgroundController();
+  globalState[BLINKING_SQUARES_BACKGROUND_CONTROLLER] = controller;
+  return controller;
+}
+
+
 const CLOUD_TRAIN_DEFAULTS = {speed:1,resolution:.75,feedback:.3,vignette:1,zoom:1,offset:0,amplitude:1,detail:8,exposure:1,saturation:1,hue:0,temperature:0,skyTint:"#ffffff",smokeTint:"#ffffff",trainTint:"#ffffff",introEnabled:true,introDuration:3,introFeather:.22,paused:false};
 type CloudTrainSettings = typeof CLOUD_TRAIN_DEFAULTS;
 const CLOUD_TRAIN_CONTROLS = [
@@ -11068,6 +11353,14 @@ function milkyWaySettingsPanelMarkup(): string {
 function pixelSculptCardMarkup(): string {
   return `<article class="preview-extension appearance-extension" data-appearance-plugin="${PIXEL_SCULPT_BACKGROUND_PLUGIN_ID}"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 13 6 3l4 7 2-4 3 7ZM4 7l2 2 2-2" fill="none" stroke="currentColor"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Pixel Sculpt Background</h4><span class="preview-extension-status pixelSculpt-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action pixelSculpt-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger pixelSculpt-settings-trigger" type="button" aria-label="Configure Pixel Sculpt Background" aria-haspopup="dialog" aria-controls="cle-pixelSculpt-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
 }
+function blinkingSquaresCardMarkup(): string {
+  return `<article class="preview-extension appearance-extension" data-appearance-plugin="${BLINKING_SQUARES_BACKGROUND_PLUGIN_ID}" aria-busy="false"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="3" height="3"/><rect x="7" y="2" width="2" height="2"/><rect x="12" y="1" width="3" height="3"/><rect x="2" y="8" width="2" height="2"/><rect x="7" y="7" width="3" height="3"/><rect x="12" y="9" width="2" height="2"/><rect x="1" y="12" width="3" height="3"/><rect x="8" y="13" width="2" height="2"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Blinking Squares Background</h4><span class="preview-extension-status blinkingSquares-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action blinkingSquares-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger blinkingSquares-settings-trigger" type="button" aria-label="Configure Blinking Squares Background" aria-haspopup="dialog" aria-controls="cle-blinkingSquares-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
+}
+function blinkingSquaresPanelMarkup(): string {
+  const control = ([key, zh, en, min, max, step]: (typeof BLINKING_SQUARES_CONTROLS)[number]) => `<div class="particle-control-row"><label for="cle-blinkingSquares-${key}">${bilingualLabelMarkup(zh, en)}</label><input id="cle-blinkingSquares-${key}" data-blinking-squares-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${BLINKING_SQUARES_DEFAULTS[key]}"><span class="particle-control-value"><output>${BLINKING_SQUARES_DEFAULTS[key]}</output></span></div>`;
+  const toggle = (key: "mouseInteraction" | "keyboardInteraction" | "introEnabled" | "paused", zh: string, en: string) => `<label class="particle-toggle-row">${bilingualLabelMarkup(zh, en)}<input type="checkbox" data-blinking-squares-toggle="${key}"></label>`;
+  return `<section class="particle-settings-panel blinkingSquares-settings-panel" id="cle-blinkingSquares-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-blinkingSquares-title"><header class="particle-settings-header"><div class="particle-settings-heading"><p>${bilingualLabelMarkup("外观", "Appearance")}</p><h3 id="cle-blinkingSquares-title">${bilingualLabelMarkup("闪烁方块设置", "Blinking Squares settings")}</h3></div><div class="particle-settings-header-actions">${backgroundLanguageSwitchMarkup("cle-blinkingSquares-language")}<button class="particle-settings-close blinkingSquares-close" type="button" aria-label="Close settings">${icons.close}</button></div></header><div class="particle-settings-scroll"><fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("渐隐方向", "Fade direction")}</legend><div class="heavenly-cloud-quality-toolbar">${(["right", "left", "top", "bottom"] as const).map((direction) => `<button type="button" data-blinking-squares-direction="${direction}" aria-pressed="${direction === "right"}">${bilingualLabelMarkup(({ right: "右", left: "左", top: "上", bottom: "下" })[direction], direction[0]!.toUpperCase() + direction.slice(1))}</button>`).join("")}</div></fieldset><fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("方块与闪烁", "Squares and twinkle")}</legend>${BLINKING_SQUARES_CONTROLS.slice(0, 10).map(control).join("")}</fieldset><fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("交互与脉冲", "Interaction and pulses")}</legend>${BLINKING_SQUARES_CONTROLS.slice(10, 20).map(control).join("")}${toggle("mouseInteraction", "鼠标交互", "Mouse interaction")}${toggle("keyboardInteraction", "键盘随机波纹", "Keyboard waves")}${BLINKING_SQUARES_CONTROLS.slice(20, 22).map(control).join("")}</fieldset><fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("开场与画质", "Opening and quality")}</legend>${BLINKING_SQUARES_CONTROLS.slice(22).map(control).join("")}${toggle("introEnabled", "启用开场", "Enable opening")}${toggle("paused", "暂停动画", "Pause animation")}</fieldset><fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("颜色", "Colors")}</legend><div class="particle-control-row"><label for="cle-blinkingSquares-squareColor">${bilingualLabelMarkup("方块颜色", "Square color")}</label><input id="cle-blinkingSquares-squareColor" type="color" data-blinking-squares-color="squareColor" value="${BLINKING_SQUARES_DEFAULTS.squareColor}"></div><div class="particle-control-row"><label for="cle-blinkingSquares-backgroundColor">${bilingualLabelMarkup("背景颜色", "Background color")}</label><input id="cle-blinkingSquares-backgroundColor" type="color" data-blinking-squares-color="backgroundColor" value="${BLINKING_SQUARES_DEFAULTS.backgroundColor}"></div></fieldset><div class="glow-horizon-actions"><button type="button" class="blinkingSquares-reset">${bilingualLabelMarkup("重置", "Reset")}</button><button type="button" class="blinkingSquares-replay">${bilingualLabelMarkup("重播", "Replay")}</button></div><p class="particle-plugin-error blinkingSquares-error" role="status" hidden></p></div></section>`;
+}
 function pixelSculptPanelMarkup(): string {
  return `<section class="particle-settings-panel pixelSculpt-settings-panel" id="cle-pixelSculpt-settings" data-language="zh" lang="zh-CN" popover="manual" role="dialog" aria-modal="false" aria-labelledby="cle-pixelSculpt-title"><header class="particle-settings-header"><div class="particle-settings-heading"><p>${bilingualLabelMarkup("外观","Appearance")}</p><h3 id="cle-pixelSculpt-title">${bilingualLabelMarkup("像素雕塑设置","Pixel Sculpt settings")}</h3></div><div class="particle-settings-header-actions">${backgroundLanguageSwitchMarkup("cle-pixelSculpt-language")}<button class="particle-settings-close pixelSculpt-close" type="button" aria-label="Close settings">${icons.close}</button></div></header><div class="particle-settings-scroll"><p class="pixelSculpt-disabled">${bilingualLabelMarkup("插件尚未启用；这里的设置会在下次启用时生效。","The plugin is disabled; changes here apply the next time it is enabled.")}</p><div class="pixelSculpt-controls-host"></div><label class="particle-toggle-row pixelSculpt-paused-row">${bilingualLabelMarkup("暂停动画","Pause animation")}<input type="checkbox" class="pixelSculpt-paused"></label><div class="glow-horizon-actions pixelSculpt-actions"><button type="button" class="pixelSculpt-reset">${bilingualLabelMarkup("重置参数","Reset parameters")}</button></div><p class="particle-plugin-error pixelSculpt-error" role="status" hidden></p></div></section>`;
 }
@@ -11178,6 +11471,10 @@ export class CodeCodexElement extends HTMLElement {
   readonly #enabledAppearancePlugins = new Set<string>();
   readonly #mountainController = getMountainBackgroundController();
   readonly #pixelSculptController = getPixelSculptBackgroundController();
+  readonly #blinkingSquaresController = getBlinkingSquaresBackgroundController();
+  #blinkingSquaresUnsubscribe: (() => void) | undefined;
+  #blinkingSquaresInitialization: Promise<void> | undefined;
+  #blinkingSquaresEventsBound = false;
   #pixelSculptUnsubscribe: (() => void) | undefined;
   #pixelSculptInitialization: Promise<void> | undefined;
   #pixelSculptEventsBound = false;
@@ -11458,7 +11755,7 @@ export class CodeCodexElement extends HTMLElement {
                 <button class="preview-market-category" type="button" role="tab" aria-selected="false" aria-controls="cle-developer-tools-section" data-preview-market-category="developer-tools">Tools</button>
               </div>
               <section class="preview-market-section" id="cle-appearance-section" role="tabpanel" data-preview-market-section="appearance">
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}</div>
+                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}${blinkingSquaresCardMarkup()}</div>
               </section>
               <section class="preview-market-section" id="cle-file-preview-section" role="tabpanel" data-preview-market-section="file-preview" hidden>
                 <div class="preview-market-section-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
@@ -11492,6 +11789,7 @@ export class CodeCodexElement extends HTMLElement {
       ${mountainPanelMarkup()}
       ${cloudTrainPanelMarkup()}
       ${pixelSculptPanelMarkup()}
+      ${blinkingSquaresPanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -11602,8 +11900,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 9) {
-      throw new Error("Background settings require six synchronized language switches.");
+    if (this.#backgroundLanguageInputs.length !== 10) {
+      throw new Error("Background settings require ten synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
@@ -11735,6 +12033,10 @@ export class CodeCodexElement extends HTMLElement {
     if (this.#mountainController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
     if (this.#cloudTrainController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
     if (this.#pixelSculptController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
+    if (this.#blinkingSquaresController.stoppedForExternalThemeChange) this.#enabledAppearancePlugins.delete(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
+    if (this.#enabledAppearancePlugins.has(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID)) {
+      this.#enabledAppearancePlugins.clear(); this.#enabledAppearancePlugins.add(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
+    }
     if (this.#enabledAppearancePlugins.has(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID)) {
       this.#enabledAppearancePlugins.clear(); this.#enabledAppearancePlugins.add(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
     }
@@ -11940,6 +12242,23 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderPixelSculpt();
     });
     this.#bindPixelSculpt();
+    this.#blinkingSquaresUnsubscribe?.();
+    this.#blinkingSquaresUnsubscribe = this.#blinkingSquaresController.subscribe(() => {
+      if (this.#blinkingSquaresController.stoppedForExternalThemeChange) {
+        this.#enabledAppearancePlugins.delete(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
+        this.#writeEnabledAppearancePlugins();
+      }
+      this.#renderBlinkingSquares();
+    });
+    this.#blinkingSquaresInitialization = this.#pixelSculptInitialization.then(async () => {
+      if (!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration)) return;
+      if (this.#enabledAppearancePlugins.has(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID)) {
+        try { await this.#blinkingSquaresController.enable(); }
+        catch (error) { this.#showActionNotice(String(error), "error"); }
+      }
+      this.#renderBlinkingSquares();
+    });
+    this.#bindBlinkingSquares();
 
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
@@ -11997,6 +12316,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#mountainUnsubscribe?.(); this.#mountainUnsubscribe=undefined; this.#mountainInitialization=undefined;
     this.#pixelSculptUnsubscribe?.(); this.#pixelSculptUnsubscribe=undefined; this.#pixelSculptInitialization=undefined;
     this.#closePixelSculpt();
+    this.#blinkingSquaresUnsubscribe?.(); this.#blinkingSquaresUnsubscribe=undefined; this.#blinkingSquaresInitialization=undefined;
+    this.#closeBlinkingSquares();
     this.#cloudTrainUnsubscribe?.(); this.#cloudTrainUnsubscribe=undefined; this.#cloudTrainInitialization=undefined;
     this.#closeCloudTrain();
     this.#closeMountain();
@@ -12089,6 +12410,9 @@ export class CodeCodexElement extends HTMLElement {
     const milkyWayWasEnabled = this.#enabledAppearancePlugins.delete(MILKY_WAY_BACKGROUND_PLUGIN_ID);
     const mountainWasEnabled = this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
     const pixelSculptWasEnabled = this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
+    const blinkingSquaresWasEnabled = this.#enabledAppearancePlugins.delete(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
+    if (blinkingSquaresWasEnabled) this.#writeEnabledAppearancePlugins();
+    if (blinkingSquaresWasEnabled || this.#blinkingSquaresController.enabled || this.#blinkingSquaresController.pending) await this.#blinkingSquaresController.disable();
     if(pixelSculptWasEnabled)this.#writeEnabledAppearancePlugins();
     if(pixelSculptWasEnabled||this.#pixelSculptController.enabled||this.#pixelSculptController.pending)await this.#pixelSculptController.disable();
     const cloudTrainWasEnabled = this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
@@ -12283,7 +12607,7 @@ export class CodeCodexElement extends HTMLElement {
   #syncBackgroundSettingsLanguagePresentation(): void {
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings"), this.#required<HTMLElement>("#cle-pixelSculpt-settings")]) {
+    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings"), this.#required<HTMLElement>("#cle-pixelSculpt-settings"), this.#required<HTMLElement>("#cle-blinkingSquares-settings")]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -12388,6 +12712,8 @@ export class CodeCodexElement extends HTMLElement {
     requestAnimationFrame(() => this.#positionMountain());
     this.#renderPixelSculpt();
     requestAnimationFrame(() => this.#positionPixelSculpt());
+    this.#renderBlinkingSquares();
+    requestAnimationFrame(() => this.#positionBlinkingSquares());
     this.#renderParticleBackgroundPlugin();
     this.#renderBlackHoleBackgroundPlugin();
     this.#renderGlowHorizonBackgroundPlugin();
@@ -12837,6 +13163,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #onWindowResize = (): void => {
+    this.#positionBlinkingSquares();
     this.#positionMountain();
     this.#positionPixelSculpt();
     this.#positionCloudTrain();
@@ -12857,6 +13184,7 @@ export class CodeCodexElement extends HTMLElement {
 
   #onWindowPointerDown = (event: PointerEvent): void => {
     const path = event.composedPath();
+    if (!path.includes(this.#required<HTMLElement>("#cle-blinkingSquares-settings")) && !path.includes(this.#required<HTMLElement>(".blinkingSquares-settings-trigger"))) this.#closeBlinkingSquares();
     if(!path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))&&!path.includes(this.#required<HTMLElement>(".pixelSculpt-settings-trigger")))this.#closePixelSculpt();
     if (!path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings")) && !path.includes(this.#required<HTMLElement>(".cloudTrain-settings-trigger"))) this.#closeCloudTrain();
     if (!path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
@@ -12897,6 +13225,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-blinkingSquares-settings"))
       && !path.includes(this.#auroraIonosphereSettingsTrigger)
     ) {
       this.#closeAuroraIonosphereSettings(false);
@@ -12908,6 +13237,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#milkyWaySettingsTrigger)
       && !path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-blinkingSquares-settings"))
     ) {
       this.#closeMilkyWaySettings(false);
     }
@@ -12924,6 +13254,7 @@ export class CodeCodexElement extends HTMLElement {
       && !path.includes(this.#required<HTMLElement>("#cle-mountain-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-pixelSculpt-settings"))
       && !path.includes(this.#required<HTMLElement>("#cle-cloudTrain-settings"))
+      && !path.includes(this.#required<HTMLElement>("#cle-blinkingSquares-settings"))
     ) {
       this.#closePreviewMarket(false);
     }
@@ -16274,7 +16605,7 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
-  async #awaitBackgroundInitializations(operation: number, mountainSwitch = false, cloudTrainSwitch = false, pixelSculptSwitch = false): Promise<boolean> {
+  async #awaitBackgroundInitializations(operation: number, mountainSwitch = false, cloudTrainSwitch = false, pixelSculptSwitch = false, blinkingSquaresSwitch = false): Promise<boolean> {
     const generation = this.#appearanceInitializationGeneration;
     this.#particleBackgroundInitialization ??= this.#initializeParticleBackground(generation);
     await this.#particleBackgroundInitialization;
@@ -16299,6 +16630,11 @@ export class CodeCodexElement extends HTMLElement {
     await this.#mountainInitialization;
     await this.#cloudTrainInitialization;
     await this.#pixelSculptInitialization;
+    await this.#blinkingSquaresInitialization;
+    if (!blinkingSquaresSwitch && (this.#blinkingSquaresController.enabled || this.#enabledAppearancePlugins.has(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID))) {
+      await this.#blinkingSquaresController.disable();
+      this.#enabledAppearancePlugins.delete(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID); this.#writeEnabledAppearancePlugins();
+    }
     if(!pixelSculptSwitch&&(this.#pixelSculptController.enabled||this.#enabledAppearancePlugins.has(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID))){
       await this.#pixelSculptController.disable();this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);this.#writeEnabledAppearancePlugins();
     }
@@ -19071,6 +19407,150 @@ export class CodeCodexElement extends HTMLElement {
   }
 
 
+  #closeBlinkingSquares(): void {
+    const panel = this.#shadow.querySelector<HTMLElement>("#cle-blinkingSquares-settings");
+    if (panel?.matches(":popover-open")) panel.hidePopover();
+    this.#shadow.querySelector(".blinkingSquares-settings-trigger")?.setAttribute("aria-expanded", "false");
+  }
+  #positionBlinkingSquares(): void {
+    const panel = this.#required<HTMLElement>("#cle-blinkingSquares-settings");
+    if (!panel.matches(":popover-open")) return;
+    const rect = this.#required<HTMLElement>(".blinkingSquares-settings-trigger").getBoundingClientRect();
+    panel.style.position = "fixed"; panel.style.margin = "0";
+    panel.style.maxHeight = "calc(100vh - 24px)";
+    const width = Math.min(344, window.innerWidth - 24);
+    panel.style.width = width + "px";
+    panel.style.left = Math.max(12, Math.min(rect.right + 12, window.innerWidth - width - 12)) + "px";
+    panel.style.top = Math.max(12, Math.min(rect.top, window.innerHeight - panel.getBoundingClientRect().height - 12)) + "px";
+  }
+  #bindBlinkingSquares(): void {
+    if (this.#blinkingSquaresEventsBound) return;
+    this.#blinkingSquaresEventsBound = true;
+    const panel = this.#required<HTMLElement>("#cle-blinkingSquares-settings");
+    const trigger = this.#required<HTMLButtonElement>(".blinkingSquares-settings-trigger");
+    this.#required<HTMLButtonElement>(".blinkingSquares-enable").addEventListener("click", () => void this.#toggleBlinkingSquares());
+    trigger.addEventListener("click", () => {
+      if (panel.matches(":popover-open")) { this.#closeBlinkingSquares(); return; }
+      for (const other of this.#shadow.querySelectorAll<HTMLElement>(".particle-settings-panel")) {
+        if (other !== panel && other.matches(":popover-open")) other.hidePopover();
+      }
+      this.#renderBlinkingSquares(); panel.showPopover(); this.#positionBlinkingSquares();
+      trigger.setAttribute("aria-expanded", "true");
+      this.#required<HTMLButtonElement>(".blinkingSquares-close").focus();
+    });
+    this.#required<HTMLButtonElement>(".blinkingSquares-close").addEventListener("click", () => { this.#closeBlinkingSquares(); trigger.focus(); });
+    panel.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.stopPropagation(); this.#closeBlinkingSquares(); trigger.focus(); } });
+    panel.addEventListener("toggle", () => trigger.setAttribute("aria-expanded", String(panel.matches(":popover-open"))));
+    this.#previewMarketPopover.addEventListener("scroll", () => this.#positionBlinkingSquares());
+    for (const [key] of BLINKING_SQUARES_CONTROLS) {
+      const input = this.#required<HTMLInputElement>(`#cle-blinkingSquares-${key}`);
+      input.addEventListener("input", () => this.#blinkingSquaresController.updateSettings({ ...this.#blinkingSquaresController.settings, [key]: Number(input.value) }));
+    }
+    for (const input of panel.querySelectorAll<HTMLInputElement>("[data-blinking-squares-toggle]")) {
+      input.addEventListener("change", () => {
+        const key = input.dataset.blinkingSquaresToggle as "mouseInteraction" | "keyboardInteraction" | "introEnabled" | "paused";
+        this.#blinkingSquaresController.updateSettings({ ...this.#blinkingSquaresController.settings, [key]: input.checked });
+      });
+    }
+    for (const input of panel.querySelectorAll<HTMLInputElement>("[data-blinking-squares-color]")) {
+      input.addEventListener("input", () => {
+        const key = input.dataset.blinkingSquaresColor as "squareColor" | "backgroundColor";
+        this.#blinkingSquaresController.updateSettings({ ...this.#blinkingSquaresController.settings, [key]: input.value });
+      });
+    }
+    for (const button of panel.querySelectorAll<HTMLButtonElement>("[data-blinking-squares-direction]")) {
+      button.addEventListener("click", () => this.#blinkingSquaresController.updateSettings({
+        ...this.#blinkingSquaresController.settings,
+        direction: button.dataset.blinkingSquaresDirection as BlinkingSquaresSettings["direction"],
+      }));
+    }
+    this.#required<HTMLButtonElement>(".blinkingSquares-reset").addEventListener("click", () => this.#blinkingSquaresController.reset());
+    this.#required<HTMLButtonElement>(".blinkingSquares-replay").addEventListener("click", () => this.#blinkingSquaresController.replay());
+  }
+  #renderBlinkingSquares(): void {
+    const card = this.#shadow.querySelector<HTMLElement>(`[data-appearance-plugin="${BLINKING_SQUARES_BACKGROUND_PLUGIN_ID}"]`);
+    if (!card) return;
+    const controller = this.#blinkingSquaresController;
+    const settings = controller.settings;
+    const busy = controller.pending || this.#appearanceTransitionPending || this.#appearancePluginPending;
+    const button = this.#required<HTMLButtonElement>(".blinkingSquares-enable");
+    button.textContent = controller.enabled ? "Disable" : "Enable";
+    button.disabled = busy;
+    button.setAttribute("aria-pressed", String(controller.enabled));
+    button.setAttribute("aria-label", `${controller.enabled ? "Disable" : "Enable"} Blinking Squares Background`);
+    const status = this.#required<HTMLElement>(".blinkingSquares-status");
+    status.textContent = controller.pending ? "Applying…" : controller.error ? "Unavailable" : controller.enabled ? "Enabled" : "Disabled";
+    status.dataset.enabled = String(controller.enabled);
+    for (const [key, zh, en] of BLINKING_SQUARES_CONTROLS) {
+      const input = this.#required<HTMLInputElement>(`#cle-blinkingSquares-${key}`);
+      if (this.#shadow.activeElement !== input) input.value = String(settings[key]);
+      input.disabled = busy;
+      input.setAttribute("aria-label", this.#backgroundText(zh, en));
+      input.parentElement?.querySelector("output")?.replaceChildren(document.createTextNode(String(settings[key])));
+    }
+    for (const input of this.#shadow.querySelectorAll<HTMLInputElement>("[data-blinking-squares-toggle]")) {
+      const key = input.dataset.blinkingSquaresToggle as "mouseInteraction" | "keyboardInteraction" | "introEnabled" | "paused";
+      input.checked = settings[key]; input.disabled = busy;
+    }
+    for (const input of this.#shadow.querySelectorAll<HTMLInputElement>("[data-blinking-squares-color]")) {
+      const key = input.dataset.blinkingSquaresColor as "squareColor" | "backgroundColor";
+      input.value = settings[key]; input.disabled = busy;
+    }
+    for (const direction of this.#shadow.querySelectorAll<HTMLButtonElement>("[data-blinking-squares-direction]")) {
+      direction.setAttribute("aria-pressed", String(direction.dataset.blinkingSquaresDirection === settings.direction));
+      direction.disabled = busy;
+    }
+    this.#required<HTMLButtonElement>(".blinkingSquares-reset").disabled = busy;
+    this.#required<HTMLButtonElement>(".blinkingSquares-replay").disabled = busy || !controller.enabled;
+    const error = this.#required<HTMLElement>(".blinkingSquares-error");
+    error.textContent = controller.error ?? ""; error.hidden = !controller.error;
+  }
+  async #toggleBlinkingSquares(): Promise<void> {
+    if (this.#appearanceTransitionPending || this.#appearancePluginPending || this.#blinkingSquaresController.pending) return;
+    const operation = ++this.#appearanceOperation;
+    this.#appearanceTransitionPending = true; this.#renderPreviewMarket();
+    const controllers = [this.#particleBackgroundController, this.#blackHoleBackgroundController, this.#glowHorizonBackgroundController, this.#heavenlyCloudBackgroundController, this.#auroraIonosphereBackgroundController, this.#milkyWayBackgroundController, this.#mountainController, this.#cloudTrainController, this.#pixelSculptController];
+    const ids = [PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, MILKY_WAY_BACKGROUND_PLUGIN_ID, MOUNTAIN_BACKGROUND_PLUGIN_ID, CLOUD_TRAIN_BACKGROUND_PLUGIN_ID, PIXEL_SCULPT_BACKGROUND_PLUGIN_ID];
+    let previous = -1;
+    try {
+      if (!await this.#awaitBackgroundInitializations(operation, true, true, true, true)) return;
+      if (this.#blinkingSquaresController.enabled) {
+        await this.#blinkingSquaresController.disable();
+        this.#enabledAppearancePlugins.delete(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
+      } else {
+        if (this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)) {
+          if (!this.#bridge?.available) throw new Error("Restart Codex with Code-Codex to disable transparency first.");
+          await this.#setWindowTransparency(this.#bridge, false);
+          this.#clearTransparentBackgroundPresentation();
+          this.#enabledAppearancePlugins.delete(TRANSPARENT_BACKGROUND_PLUGIN_ID);
+          this.#appearancePluginApplied = false;
+        }
+        for (let index = 0; index < controllers.length; index += 1) {
+          if (controllers[index]!.enabled) { previous = index; await controllers[index]!.disable(true); }
+          this.#enabledAppearancePlugins.delete(ids[index]!);
+        }
+        const lease = readParticleThemeLease();
+        if (lease?.owner) transferParticleThemeLease(lease.owner, BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
+        await this.#blinkingSquaresController.enable();
+        if (!this.#connected || operation !== this.#appearanceOperation) { await this.#blinkingSquaresController.disable(); return; }
+        if (!this.#blinkingSquaresController.enabled) throw new Error(this.#blinkingSquaresController.error || "Blinking Squares Background could not be enabled");
+        this.#enabledAppearancePlugins.add(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
+      }
+      this.#writeEnabledAppearancePlugins();
+      this.#announce(`Blinking Squares Background ${this.#blinkingSquaresController.enabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      this.#enabledAppearancePlugins.delete(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
+      if (previous >= 0) {
+        try { await controllers[previous]!.enable(); if (controllers[previous]!.enabled) this.#enabledAppearancePlugins.add(ids[previous]!); }
+        catch { /* Preserve the original activation failure. */ }
+      }
+      this.#writeEnabledAppearancePlugins();
+      this.#showActionNotice(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      this.#appearanceTransitionPending = false; this.#renderPreviewMarket();
+    }
+  }
+
   #closePixelSculpt(): void {
     const panel=this.#shadow.querySelector<HTMLElement>("#cle-pixelSculpt-settings");
     if(panel?.matches(":popover-open")) panel.hidePopover();
@@ -19964,6 +20444,7 @@ export class CodeCodexElement extends HTMLElement {
     }
     this.#previewMarketList.scrollTop = 0;
     if (category !== "appearance") {
+      this.#closeBlinkingSquares();
       this.#closePixelSculpt();
       this.#closeCloudTrain();
       this.#closeMountain();
@@ -20305,6 +20786,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #closePreviewMarket(restoreFocus: boolean): void {
+    this.#closeBlinkingSquares();
     this.#closePixelSculpt();
     this.#closeCloudTrain();
     this.#closeMountain();
@@ -20336,6 +20818,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderPreviewMarket(): void {
+    this.#renderBlinkingSquares();
     this.#renderPixelSculpt();
     this.#renderCloudTrain();
     this.#renderMountain();

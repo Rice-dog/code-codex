@@ -2,6 +2,16 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.8 — 闪烁方块背景 / Blinking Squares Background
+
+- Preview Market 新增 Blinking Squares Background：全窗口方向渐隐方块、独立闪烁、鼠标交互与点击脉冲、输入时的随机键盘波纹，以及可调的波纹上限和冷却时间；提供中英文设置。
+- 修复项目会话中背景插件被对话框后方深色矩形遮挡的问题。
+- 提供更新后的 setup EXE、MSI、ZIP、独立卸载程序和 SHA-256 校验文件。
+
+- Preview Market now includes Blinking Squares Background, with directional twinkling squares, pointer and click effects, random waves while typing, and bilingual controls for the wave limit and cooldown.
+- Fixes the dark rectangular occlusion behind the composer in project conversations when background effects are enabled.
+- Updated setup EXE, MSI, ZIP, standalone uninstaller, and SHA-256 checksums are included.
+
 ## v0.3.2 — 启动发现诊断增强
 
 - 启动时区分官方 Codex 包未注册、仅安装 Beta、包身份异常、安装目录不可访问及主程序缺失等原因，并自动重试短暂失败的包查询。

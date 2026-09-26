@@ -156,6 +156,17 @@ This notice identifies visual inspiration only and does not imply endorsement, s
 
 ---
 
+## Blinking Squares Background
+
+**Adapted from:** The user's local `blinking-squares-background-effect` project, an independently constructed React/WebGL2 implementation.
+
+**Visual reference:** Blinking Squares — React Bits Pro
+**Reference:** https://pro.reactbits.dev/docs/components/blinking-squares
+
+Code-Codex adapts the supplied local implementation for its full-window background and settings lifecycle. No React Bits Pro source code, components, or assets are included. The visual reference does not imply endorsement or affiliation.
+
+---
+
 ## Particle Image Background
 
 **Visual reference:** Particle Image — React Bits Pro  

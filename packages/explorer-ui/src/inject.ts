@@ -152,7 +152,10 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
   background-color: transparent !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] > [class*="bg-gradient-to-t"],
+/* Project conversations place the composer fade in the thread scroll content,
+ * beside the footer rather than inside it. Cover both native layouts. */
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body .thread-scroll-container[data-app-action-timeline-scroll] [class*="bg-gradient-to-t"],
+html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] [class*="bg-gradient-to-t"],
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [class*="bg-gradient-to-t"] {
   background-image: none !important;
 }
@@ -267,7 +270,8 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
   background-color: transparent !important;
 }
 
-html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] > [class*="bg-gradient-to-t"],
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body .thread-scroll-container[data-app-action-timeline-scroll] [class*="bg-gradient-to-t"],
+html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] [class*="bg-gradient-to-t"],
 html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [class*="bg-gradient-to-t"] {
   background-image: none !important;
 }

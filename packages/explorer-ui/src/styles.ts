@@ -2030,6 +2030,9 @@ export const styles = String.raw`
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 5px;
   }
+  .blinkingSquares-settings-panel .heavenly-cloud-quality-toolbar {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
   .heavenly-cloud-quality-toolbar button {
     min-width: 0;
     min-height: 40px;
