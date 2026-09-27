@@ -297,7 +297,7 @@ fn format_report(
         .map(|code| code.to_string())
         .unwrap_or_else(|| "unavailable".to_owned());
     format!(
-        "Code-Codex startup diagnostic\n\nCode-Codex version: {}\nSupport code: {}\nStage: {}\nSummary: {}\nReason: {}\nSuggested action: {}\nProcess exit code: {}\n\nRedacted diagnose result:\n{}\n",
+        "Code-Codex startup diagnostic\n\nCode-Codex version: {}\nSupport code: {}\nStage: {}\nSummary: {}\nReason: {}\nSuggested action: {}\nProcess exit code: {}\n\nPost-failure installation check (cdp.notRequested means this separate check was not given the launch's random port; the actual endpoint observations are in Reason above):\n{}\n",
         env!("CARGO_PKG_VERSION"),
         diagnostic.code,
         diagnostic.stage,
@@ -524,7 +524,8 @@ mod tests {
         let report = format_report(&diagnostic, Some(22), "{\"status\":\"available\"}");
         assert!(report.contains("Support code: CC-START-UNKNOWN-001"));
         assert!(report.contains("Code-Codex version:"));
-        assert!(report.contains("Redacted diagnose result:"));
+        assert!(report.contains("Post-failure installation check"));
+        assert!(report.contains("cdp.notRequested"));
     }
 
     #[test]

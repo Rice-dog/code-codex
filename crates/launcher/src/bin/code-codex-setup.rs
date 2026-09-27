@@ -42,10 +42,19 @@ struct PortableExecutableLayout {
 
 fn main() -> ExitCode {
     let arguments: Vec<_> = env::args_os().skip(1).collect();
-    let mut progress = gui_support::ProgressDialog::open(TITLE, "Preparing setup...", 5);
+    let mut progress = gui_support::ProgressDialog::open(
+        TITLE,
+        "Preparing setup...",
+        5,
+        env!("CARGO_PKG_VERSION"),
+    );
     match run_setup(&arguments, &mut progress) {
         Ok(output) if output.status.success() => {
-            progress.set_progress(100, "Installation complete");
+            progress.set_progress_detail(
+                100,
+                "Installation complete",
+                "Code-Codex is ready to use.",
+            );
             thread::sleep(Duration::from_millis(650));
             progress.close();
             gui_support::show_dialog(
@@ -77,7 +86,11 @@ fn run_setup(
     arguments: &[OsString],
     progress: &mut gui_support::ProgressDialog,
 ) -> Result<Output, String> {
-    progress.set_progress(15, "Reading installation package...");
+    progress.set_progress_detail(
+        15,
+        "Checking setup package",
+        "Locating the installer payload.",
+    );
     let executable = env::current_exe()
         .map_err(|error| format!("the setup executable could not be located: {error}"))?;
     match inspect_setup_source(&executable)? {
@@ -94,12 +107,19 @@ fn run_setup(
             progress,
         ),
         SetupSource::Sibling => {
-            progress.set_progress(60, "Preparing Code-Codex installer...");
-            progress.set_marquee("Installing Code-Codex...");
-            script_wrapper::run_sibling_script_captured(INSTALL_SCRIPT, arguments.iter().cloned())?
-                .ok_or_else(|| {
-                    "the plain setup program requires Install-CodeCodex.ps1 next to it".to_owned()
-                })
+            progress.set_progress_detail(
+                60,
+                "Starting installation",
+                "Validating the installed Codex integration.",
+            );
+            script_wrapper::run_sibling_script_with_progress(
+                INSTALL_SCRIPT,
+                arguments.iter().cloned(),
+                progress,
+            )?
+            .ok_or_else(|| {
+                "the plain setup program requires Install-CodeCodex.ps1 next to it".to_owned()
+            })
         }
     }
 }
@@ -117,7 +137,11 @@ fn run_embedded_setup(
         .tempdir()
         .map_err(|error| format!("a temporary setup directory could not be created: {error}"))?;
     let archive = temporary_directory.path().join("payload.zip");
-    progress.set_progress(25, "Extracting installation package...");
+    progress.set_progress_detail(
+        25,
+        "Extracting package",
+        "Reading the installer files from the setup executable.",
+    );
     extract_embedded_archive(
         executable,
         &archive,
@@ -126,12 +150,19 @@ fn run_embedded_setup(
         executable_length,
     )?;
 
-    progress.set_progress(40, "Expanding installation files...");
+    progress.set_progress_detail(
+        40,
+        "Expanding package",
+        "Preparing the installation files in a temporary folder.",
+    );
     expand_archive(&archive, temporary_directory.path())?;
-    progress.set_progress(60, "Preparing Code-Codex installer...");
+    progress.set_progress_detail(
+        60,
+        "Starting installation",
+        "Validating the installed Codex integration.",
+    );
     let installer = find_extracted_installer(temporary_directory.path())?;
-    progress.set_marquee("Installing Code-Codex...");
-    script_wrapper::run_script_captured(&installer, arguments.iter().cloned())
+    script_wrapper::run_script_with_progress(&installer, arguments.iter().cloned(), progress)
 }
 
 fn format_setup_failure(exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> String {

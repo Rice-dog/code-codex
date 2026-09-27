@@ -388,6 +388,35 @@ impl CodexProcessGuard {
     }
 }
 
+/// A read-only snapshot of the process returned by package activation/spawn.
+/// The handle is opened only for synchronization, so diagnostics do not need
+/// access to the process command line or private filesystem paths.
+pub fn launched_process_state(pid: u32) -> String {
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        "unavailable on this platform".to_owned()
+    }
+    #[cfg(windows)]
+    {
+        let raw_handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        if raw_handle.is_null() {
+            let error = io::Error::last_os_error();
+            return format!("could not inspect PID {pid}: {error}");
+        }
+        let handle = unsafe { OwnedHandle::from_raw_handle(raw_handle.cast()) };
+        match unsafe { WaitForSingleObject(handle.as_raw_handle().cast(), 0) } {
+            WAIT_TIMEOUT => format!("PID {pid} is still running"),
+            WAIT_OBJECT_0 => format!("PID {pid} has exited"),
+            WAIT_FAILED => format!(
+                "could not inspect PID {pid}: {}",
+                io::Error::last_os_error()
+            ),
+            status => format!("PID {pid} returned unexpected wait status {status}"),
+        }
+    }
+}
+
 #[cfg(windows)]
 async fn wait_for_process_exit(pid: u32) -> io::Result<()> {
     let raw_handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };

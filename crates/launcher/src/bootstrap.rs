@@ -27,6 +27,7 @@ struct BootstrapMetadata<'a> {
     channel: &'a str,
     compatible: bool,
     manual_workspace: bool,
+    startup_splash_active: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +66,7 @@ pub fn build_bootstrap(
     channel: &str,
     compatible: bool,
     manual_workspace: bool,
+    startup_splash_active: bool,
 ) -> Result<String, BootstrapError> {
     let development_bundle;
     let bundle = match bundle_source {
@@ -86,10 +88,11 @@ pub fn build_bootstrap(
         channel,
         compatible,
         manual_workspace,
+        startup_splash_active,
     };
     let metadata = serde_json::to_string(&metadata).map_err(|_| BootstrapError::InvalidBundle)?;
     Ok(format!(
-        "(()=>{{'use strict';if(window!==window.top||location.protocol!=='app:'||location.host!=='-'){{return;}}const bootstrap=Object.freeze({metadata});Object.defineProperty(window,'__CODE_CODEX_BOOTSTRAP__',{{value:bootstrap,writable:false,configurable:true,enumerable:false}});try{{\n{bundle}\n}}finally{{try{{delete window.__CODE_CODEX_BOOTSTRAP__;}}catch(_error){{}}}}}})();\n//# sourceURL=code-codex://explorer.js"
+        "(()=>{{'use strict';if(window!==window.top||location.protocol!=='app:'||location.host!=='-'){{return;}}const bootstrap=Object.freeze({metadata});Object.defineProperty(window,'__CODE_CODEX_BOOTSTRAP__',{{value:bootstrap,writable:false,configurable:true,enumerable:false}});try{{\n{bundle}\n}}finally{{try{{delete window.__CODE_CODEX_BOOTSTRAP__;}}catch(_error){{}}}}if(bootstrap.startupSplashActive){{return Promise.race([Promise.resolve(window.__CODE_CODEX_STARTUP_VISUAL_READY__),new Promise(resolve=>setTimeout(()=>resolve(false),5000))]);}}}})();\n//# sourceURL=code-codex://explorer.js"
     ))
 }
 
@@ -116,11 +119,13 @@ mod tests {
             "beta",
             true,
             false,
+            false,
         )
         .expect("bootstrap");
         assert!(source.contains(token.expose()));
         assert!(source.contains("26.715.3651.0"));
         assert!(source.contains("\"manualWorkspace\":false"));
+        assert!(source.contains("\"startupSplashActive\":false"));
         assert!(source.contains("__CODE_CODEX_BOOTSTRAP__"));
         assert!(source.contains("delete window.__CODE_CODEX_BOOTSTRAP__"));
         let guard = source.find("window!==window.top").expect("top-frame guard");
@@ -148,6 +153,28 @@ mod tests {
     }
 
     #[test]
+    fn startup_splash_handoff_waits_for_renderer_visual() {
+        let directory = TempDir::new().expect("temp dir");
+        let bundle = directory.path().join("explorer.js");
+        fs::write(&bundle, "window.__bundleLoaded=true;").expect("bundle");
+        let source = build_bootstrap(
+            &BundleSource::DevelopmentOverride(bundle),
+            &CapabilityToken::generate(),
+            PRIMARY_BINDING_NAME,
+            PRIMARY_RECEIVER_NAME,
+            "26.715.3651.0",
+            "beta",
+            true,
+            false,
+            true,
+        )
+        .expect("bootstrap");
+        assert!(source.contains("\"startupSplashActive\":true"));
+        assert!(source.contains("Promise.resolve(window.__CODE_CODEX_STARTUP_VISUAL_READY__)"));
+        assert!(source.contains("Promise.race"));
+    }
+
+    #[test]
     fn default_bundle_is_embedded_and_non_empty() {
         let source = resolve_bundle(None).expect("embedded source");
         assert!(matches!(source, BundleSource::Embedded));
@@ -161,6 +188,7 @@ mod tests {
             "beta",
             true,
             true,
+            false,
         )
         .expect("embedded bootstrap");
         assert!(bootstrap.len() > token.expose().len() + 1_000);

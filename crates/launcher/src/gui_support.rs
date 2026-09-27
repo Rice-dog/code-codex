@@ -401,8 +401,8 @@ Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = $env:CLE_PROGRESS_TITLE
-$form.ClientSize = New-Object System.Drawing.Size(440, 112)
+$form.Text = "$($env:CLE_PROGRESS_TITLE) v$($env:CLE_PROGRESS_VERSION)"
+$form.ClientSize = New-Object System.Drawing.Size(460, 220)
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
@@ -413,20 +413,42 @@ $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
 $form.TopMost = $true
 $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+$form.BackColor = [System.Drawing.Color]::White
 try {
     $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($env:CLE_PROGRESS_EXECUTABLE)
 } catch {}
 
+$brandIcon = New-Object System.Windows.Forms.PictureBox
+$brandIcon.Location = New-Object System.Drawing.Point(188, 14)
+$brandIcon.Size = New-Object System.Drawing.Size(84, 84)
+$brandIcon.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom
+$brandIcon.BackColor = [System.Drawing.Color]::White
+try {
+    $sourceImage = [System.Drawing.Image]::FromFile($env:CLE_PROGRESS_ICON_PATH)
+    try { $brandIcon.Image = [System.Drawing.Bitmap]::new($sourceImage) }
+    finally { $sourceImage.Dispose() }
+} catch {
+    try { $brandIcon.Image = $form.Icon.ToBitmap() } catch {}
+}
+$form.Controls.Add($brandIcon)
+
 $status = New-Object System.Windows.Forms.Label
-$status.Location = New-Object System.Drawing.Point(20, 18)
-$status.Size = New-Object System.Drawing.Size(400, 24)
+$status.Location = New-Object System.Drawing.Point(20, 113)
+$status.Size = New-Object System.Drawing.Size(420, 24)
 $status.AutoEllipsis = $true
 $status.Text = $env:CLE_PROGRESS_MESSAGE
 $form.Controls.Add($status)
 
+$detail = New-Object System.Windows.Forms.Label
+$detail.Location = New-Object System.Drawing.Point(20, 140)
+$detail.Size = New-Object System.Drawing.Size(420, 28)
+$detail.AutoEllipsis = $true
+$detail.ForeColor = [System.Drawing.SystemColors]::GrayText
+$form.Controls.Add($detail)
+
 $bar = New-Object System.Windows.Forms.ProgressBar
-$bar.Location = New-Object System.Drawing.Point(20, 55)
-$bar.Size = New-Object System.Drawing.Size(400, 23)
+$bar.Location = New-Object System.Drawing.Point(20, 177)
+$bar.Size = New-Object System.Drawing.Size(420, 22)
 $bar.Minimum = 0
 $bar.Maximum = 100
 $initialValue = 0
@@ -434,6 +456,12 @@ if ([int]::TryParse($env:CLE_PROGRESS_VALUE, [ref]$initialValue)) {
     $bar.Value = [Math]::Max(0, [Math]::Min(100, $initialValue))
 }
 $form.Controls.Add($bar)
+
+function Set-ProgressMessage([string]$Message) {
+    $lines = $Message -split "`n", 2
+    $status.Text = $lines[0]
+    $detail.Text = if ($lines.Length -gt 1) { $lines[1] } else { '' }
+}
 
 $parentId = 0
 [void][int]::TryParse($env:CLE_PROGRESS_PARENT_PID, [ref]$parentId)
@@ -476,14 +504,14 @@ $timer.Add_Tick({
                     $bar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
                     $bar.Value = [Math]::Max(0, [Math]::Min(100, $value))
                 }
-                $status.Text = [System.Text.Encoding]::UTF8.GetString(
+                Set-ProgressMessage ([System.Text.Encoding]::UTF8.GetString(
                     [Convert]::FromBase64String($parts[3])
-                )
+                ))
                 $script:lastCommand = $command
             } elseif ($parts.Length -eq 4 -and $parts[1] -eq 'marquee') {
-                $status.Text = [System.Text.Encoding]::UTF8.GetString(
+                Set-ProgressMessage ([System.Text.Encoding]::UTF8.GetString(
                     [Convert]::FromBase64String($parts[3])
-                )
+                ))
                 $bar.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
                 $bar.MarqueeAnimationSpeed = 24
                 $script:lastCommand = $command
@@ -516,7 +544,7 @@ pub(crate) struct ProgressDialog {
 
 #[allow(dead_code)]
 impl ProgressDialog {
-    pub(crate) fn open(title: &str, message: &str, value: u8) -> Self {
+    pub(crate) fn open(title: &str, message: &str, value: u8, version: &str) -> Self {
         let Ok(powershell) = trusted_system32_powershell() else {
             return Self::disabled();
         };
@@ -528,7 +556,11 @@ impl ProgressDialog {
         };
         let ready_path = state_directory.path().join("ready");
         let state_path = state_directory.path().join("state");
+        let icon_path = state_directory.path().join("CodeCodex.Brand.png");
         if fs::write(&state_path, progress_command(0, "progress", value, message)).is_err() {
+            return Self::disabled();
+        }
+        if fs::write(&icon_path, include_bytes!("../resources/code-codex.png")).is_err() {
             return Self::disabled();
         }
         let executable = env::current_exe().unwrap_or_default();
@@ -547,6 +579,8 @@ impl ProgressDialog {
             .env("CLE_PROGRESS_TITLE", title)
             .env("CLE_PROGRESS_MESSAGE", single_line_message(message))
             .env("CLE_PROGRESS_VALUE", value.min(100).to_string())
+            .env("CLE_PROGRESS_VERSION", single_line_message(version))
+            .env("CLE_PROGRESS_ICON_PATH", &icon_path)
             .env("CLE_PROGRESS_EXECUTABLE", executable)
             .env("CLE_PROGRESS_READY_PATH", &ready_path)
             .env("CLE_PROGRESS_STATE_PATH", &state_path)
@@ -586,6 +620,14 @@ impl ProgressDialog {
 
     pub(crate) fn set_progress(&mut self, value: u8, message: &str) {
         self.send("progress", value, message);
+    }
+
+    pub(crate) fn set_progress_detail(&mut self, value: u8, stage: &str, detail: &str) {
+        self.send("progress", value, &format!("{stage}\n{detail}"));
+    }
+
+    pub(crate) fn state_path(&self) -> Option<&Path> {
+        self.state_path.as_deref()
     }
 
     pub(crate) fn set_marquee(&mut self, message: &str) {

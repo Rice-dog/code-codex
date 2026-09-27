@@ -181,6 +181,10 @@
               Id="UninstallFinalizerScript"
               Source="$(var.FinalizerScriptPath)"
               Name="Finalize-Uninstall.ps1" />
+            <File
+              Id="BrandIconFile"
+              Source="$(var.BrandIconPath)"
+              Name="CodeCodex.Brand.png" />
             <File Id="CurrentVersionFile" Source="$(var.CurrentVersionPath)" Name="current-version" />
             <File Id="InstallTypeFile" Source="$(var.InstallTypePath)" Name="install-type" />
             <File Id="ReadmeFile" Source="$(var.ReadmePath)" Name="README.md" />

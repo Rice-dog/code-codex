@@ -29,6 +29,7 @@ const [legacyPowerPointWorkerBytes, legacyPowerPointWasm, legacyPowerPointStyles
   readFile(resolve(legacyPowerPointAssets, "index.css"), "utf8"),
 ]);
 const pixelSculptDefaultImage = `data:image/png;base64,${(await readFile(resolve(root, "src/pixel-sculpt-default.png"))).toString("base64")}`;
+const startupTransitionStyles = await readFile(resolve(root, "src/startup-transition.css"), "utf8");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 if (sha256(legacyPowerPointWorkerBytes) !== embeddedWasm.workerSha256 ||
     sha256(legacyPowerPointWasm) !== embeddedWasm.sha256) {
@@ -67,6 +68,7 @@ const options = {
     __CODE_CODEX_PPT_WASM_BASE64__: JSON.stringify(legacyPowerPointWasm.toString("base64")),
     __CODE_CODEX_PPT_VIEWER_STYLES__: JSON.stringify(legacyPowerPointStyles),
     __CODE_CODEX_PIXEL_SCULPT_IMAGE__: JSON.stringify(pixelSculptDefaultImage),
+    __CODE_CODEX_STARTUP_TRANSITION_CSS__: JSON.stringify(startupTransitionStyles),
   },
   sourcemap: true,
   target: ["chrome120"],

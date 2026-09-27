@@ -22,6 +22,7 @@ pub struct Settings {
     pub collapsed: bool,
     pub show_hidden: bool,
     pub show_ignored: bool,
+    pub startup_transition_enabled: bool,
 }
 
 impl Default for Settings {
@@ -31,6 +32,7 @@ impl Default for Settings {
             collapsed: false,
             show_hidden: true,
             show_ignored: true,
+            startup_transition_enabled: false,
         }
     }
 }
@@ -57,6 +59,9 @@ impl Settings {
         if let Some(value) = patch.show_ignored {
             updated.show_ignored = value;
         }
+        if let Some(value) = patch.startup_transition_enabled {
+            updated.startup_transition_enabled = value;
+        }
         updated.validate()?;
         *self = updated;
         Ok(())
@@ -70,6 +75,7 @@ pub struct SettingsPatch {
     pub collapsed: Option<bool>,
     pub show_hidden: Option<bool>,
     pub show_ignored: Option<bool>,
+    pub startup_transition_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -211,6 +217,7 @@ mod tests {
             collapsed: true,
             show_hidden: true,
             show_ignored: false,
+            startup_transition_enabled: true,
         };
         store.save(&first).expect("first save");
         assert_eq!(store.load().expect("first load"), first);
@@ -219,6 +226,7 @@ mod tests {
             collapsed: false,
             show_hidden: false,
             show_ignored: true,
+            startup_transition_enabled: false,
         };
         store.save(&replacement).expect("replacement save");
         assert_eq!(store.load().expect("replacement load"), replacement);
@@ -235,6 +243,7 @@ mod tests {
             collapsed: true,
             show_hidden: true,
             show_ignored: true,
+            startup_transition_enabled: true,
         };
 
         let abandoned = store.prepare(&replacement).expect("prepare abandoned");

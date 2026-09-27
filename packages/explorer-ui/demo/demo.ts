@@ -185,7 +185,7 @@ const demoMedia = new Map<string, { readonly kind: "image" | "video" | "pdf" | "
 ]);
 const DEMO_MEDIA_VERSION = "d".repeat(64);
 const DEMO_MEDIA_CHUNK_BYTES = 2 * 1024 * 1024;
-let settings = { width: 270, collapsed: false, showHidden: true, showIgnored: true };
+let settings = { width: 270, collapsed: false, showHidden: true, showIgnored: true, startupTransitionEnabled: false };
 let watching = false;
 let transparentBackgroundEnabled = false;
 
@@ -775,14 +775,16 @@ const bridge: ObjectBridge = {
   request(message: BridgeRequest): unknown {
     const { method, params } = message;
     if (method === "explorer.settings.get") {
-      return { panelWidth: settings.width, collapsed: settings.collapsed, showHidden: settings.showHidden, showIgnored: settings.showIgnored };
+      return { panelWidth: settings.width, collapsed: settings.collapsed, showHidden: settings.showHidden, showIgnored: settings.showIgnored, startupTransitionEnabled: settings.startupTransitionEnabled };
     }
     if (method === "explorer.settings.set") {
+      const patch = (params.settings && typeof params.settings === "object" ? params.settings : params) as Record<string, unknown>;
       settings = {
-        width: Number(params.panelWidth),
-        collapsed: params.collapsed === true,
+        width: typeof patch.panelWidth === "number" ? patch.panelWidth : settings.width,
+        collapsed: typeof patch.collapsed === "boolean" ? patch.collapsed : settings.collapsed,
         showHidden: true,
         showIgnored: true,
+        startupTransitionEnabled: typeof patch.startupTransitionEnabled === "boolean" ? patch.startupTransitionEnabled : settings.startupTransitionEnabled,
       };
       return { panelWidth: settings.width, ...settings };
     }
@@ -928,6 +930,7 @@ window.__CODE_CODEX_BOOTSTRAP__ = {
   token: "local-demo-token",
   codexVersion: "26.730.8199.0",
   channel: "demo",
+  startupSplashActive: new URLSearchParams(location.search).has("startupSplash"),
 };
 window.__codeCodex = bridge;
 
