@@ -2,6 +2,16 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.26 — 启动错误分类与诊断 / Startup Error Classification and Diagnostics
+
+- 将不同的 CDP 连接、窗口识别、进程校验、Codex 启动及工作区错误分配到更具体的支持代码，避免多种原因共用一个代码。
+- 进程校验报告提供监听端口、PID、进程关系、路径可用性和安装位置类别；Codex 启动失败显示失败阶段及安全的系统错误信息。报告不包含完整可执行文件路径。
+- 提供 setup EXE、MSI、ZIP、独立卸载程序及 SHA-256 校验文件。
+
+- CDP connection, window discovery, process verification, Codex launch, and workspace failures now have more specific support codes instead of sharing broad codes.
+- Process reports include the listener port, PIDs, ancestry, path availability, and installation-location category. Launch failures show their stage and safe OS error details without full executable paths.
+- Includes the setup EXE, MSI, ZIP, standalone uninstaller, and SHA-256 checksums.
+
 ## v0.3.23 — 启动诊断与安装体验 / Startup Diagnostics and Installer Experience
 
 - 启动失败报告记录本次启动的 CDP 端点探测、等待时间、进程状态和可用窗口信息，便于定位无法连接或找不到兼容窗口的问题。
