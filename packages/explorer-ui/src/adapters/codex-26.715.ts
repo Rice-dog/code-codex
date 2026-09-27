@@ -11,9 +11,10 @@ export const MAIN_SURFACE_SELECTOR = 'main:is(.main-surface, [data-app-shell-mai
 /**
  * Return the app-shell ancestor that owns exactly one conversation surface and
  * one direct left task rail. Older Codex builds put the rail beside `main`
- * directly; newer builds wrap `main` in a MainContentClip first. Only the
- * parent and grandparent are accepted: this covers those two known shapes
- * without accepting an unrelated page-level `aside`.
+ * directly; later legacy builds wrap `main` once. Codex 26.924 uses a
+ * separate workspace row, qualified by `qualifiedWorkspaceRowForMain` below.
+ * Only the parent and grandparent are accepted here so an unrelated aside
+ * cannot qualify a page.
  */
 export function qualifiedAppShellForMain(
   main: Element,
@@ -30,6 +31,24 @@ export function qualifiedAppShellForMain(
     if (surfaces.length === 1 && surfaces[0] === main) return shell;
   }
   return null;
+}
+
+/** Codex 26.924 places the task rail and conversation workspace in one row. */
+export function qualifiedWorkspaceRowForMain(
+  main: Element,
+  root: ParentNode = document,
+): { row: Element; workspace: Element } | null {
+  if (!root.querySelector("[data-app-shell-sidebar-trigger]")) return null;
+  const row = main.closest('[data-app-shell-workspace-row="true"]');
+  if (!row || row.querySelectorAll(MAIN_SURFACE_SELECTOR).length !== 1) return null;
+  const children = [...row.children];
+  const rails = children.filter((child) => child.matches("aside.app-shell-left-panel"));
+  const workspaces = children.filter((child) => child.hasAttribute("data-app-shell-unified-tab-strip"));
+  if (rails.length !== 1 || workspaces.length !== 1) return null;
+  const workspace = workspaces[0]!;
+  if (!workspace.contains(main) || children.indexOf(rails[0]!) >= children.indexOf(workspace)) return null;
+  if (!main.parentElement?.className.includes("MainContentClip")) return null;
+  return { row, workspace };
 }
 
 export function plausibleThreadId(value: unknown): value is string {
@@ -101,7 +120,7 @@ export const codex26715Adapter: RendererAdapter = Object.freeze({
   qualifiesRenderer: (root: ParentNode = document) => {
     const mains = root.querySelectorAll(MAIN_SURFACE_SELECTOR);
     const main = mains.length === 1 ? mains[0] : undefined;
-    return Boolean(main && qualifiedAppShellForMain(main, root));
+    return Boolean(main && (qualifiedAppShellForMain(main, root) || qualifiedWorkspaceRowForMain(main, root)));
   },
   activeThreadId: (root: ParentNode = document) => {
     if (root.querySelector(ACTIVE_THREAD_MARKER_SELECTOR)) {

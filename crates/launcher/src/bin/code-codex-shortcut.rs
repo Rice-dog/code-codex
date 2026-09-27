@@ -29,7 +29,9 @@ use std::os::windows::process::CommandExt as _;
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 #[cfg(windows)]
-use windows_sys::Win32::UI::Shell::{SHCNE_UPDATEITEM, SHCNF_FLUSH, SHCNF_PATHW, SHChangeNotify};
+use windows_sys::Win32::UI::Shell::{
+    SHCNE_ASSOCCHANGED, SHCNE_UPDATEITEM, SHCNF_FLUSH, SHCNF_IDLIST, SHCNF_PATHW, SHChangeNotify,
+};
 
 const CODEX_PACKAGE_NAME: &str = "OpenAI.Codex";
 const CODEX_PACKAGE_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
@@ -40,7 +42,9 @@ const CHATGPT_SHORTCUT_NAME: &str = "ChatGPT.lnk";
 const FALLBACK_SHORTCUT_NAME: &str = "Code-Codex.lnk";
 const LEGACY_SHORTCUT_NAME: &str = FALLBACK_SHORTCUT_NAME;
 const LAUNCHER_NAME: &str = "CodeCodex.exe";
-const DEFAULT_ICON_NAME: &str = "Codex.ico";
+// A fresh path is required when changing the artwork: Explorer can keep the
+// previous bitmap cached under the old Codex.ico path after reinstall.
+const DEFAULT_ICON_NAME: &str = "Codex-Official.ico";
 const INTEGRATION_DIRECTORY: &str = "integration";
 const BACKUP_NAME: &str = "Codex.original.lnk";
 const MANIFEST_NAME: &str = "shortcut-manifest.json";
@@ -113,7 +117,7 @@ enum Commands {
         /// Defer obsolete shortcut cleanup until commit-install (used by MSI).
         #[arg(long)]
         preserve_legacy: bool,
-        /// Stable icon file under the installation root (defaults to Codex.ico).
+        /// Stable icon file under the installation root (defaults to Codex-Official.ico).
         #[arg(long, value_name = "FILE")]
         icon: Option<PathBuf>,
     },
@@ -1980,17 +1984,16 @@ fn refresh_stable_icon(
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(source) => return Err(io_error(&paths.default_icon, source)),
     }
-    // Use the Code-Codex brand for the managed shortcut. The official package
-    // icon is white, so copying it made a successfully redirected shortcut
-    // indistinguishable from the original ChatGPT/Codex shortcut.
-    let icon = include_bytes!("../../resources/code-codex.ico");
+    // Preserve the official Codex appearance while the shortcut continues to
+    // launch through Code-Codex. Read the verified package assets at install time.
+    let icon = build_multi_image_ico(shell.official_icon_pngs()?)?;
     let mut temporary = tempfile::Builder::new()
         .prefix(".Codex.")
         .suffix(".ico")
         .tempfile_in(&paths.install_root)
         .map_err(|source| io_error(&paths.install_root, source))?;
     temporary
-        .write_all(icon)
+        .write_all(&icon)
         .map_err(|source| io_error(temporary.path(), source))?;
     temporary
         .as_file()
@@ -2677,6 +2680,19 @@ else {
                 destination_wide.as_ptr().cast(),
                 std::ptr::null(),
             );
+            if destination
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
+            {
+                // Refresh Explorer's icon cache as well as the individual link.
+                // A reused .lnk path can otherwise keep drawing the old icon.
+                SHChangeNotify(
+                    SHCNE_ASSOCCHANGED as i32,
+                    SHCNF_IDLIST | SHCNF_FLUSH,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                );
+            }
         }
         Ok(())
     }
@@ -3243,7 +3259,8 @@ mod tests {
         assert!(!fixture.paths.backup.exists());
         assert_eq!(
             fs::read(&fixture.paths.default_icon).expect("managed icon"),
-            include_bytes!("../../resources/code-codex.ico")
+            build_multi_image_ico(shell.official_icon_pngs().expect("official icon assets"))
+                .expect("official icon")
         );
         let shortcut = shell
             .inspect(&fixture.paths.fallback_shortcut)

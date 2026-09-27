@@ -42,7 +42,7 @@ const MAX_COMPATIBLE_TARGETS: usize = 8;
 const MAX_RECENTLY_QUALIFIED_TARGETS: usize = 8;
 const MAX_REJECTED_EXECUTION_CONTEXTS: usize = 128;
 const REPLAY_WINDOW: usize = 4_096;
-const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const m=document.querySelectorAll(s);if(m.length!==1||!document.querySelector('[data-app-shell-sidebar-trigger]'))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=shell.querySelectorAll(s);if(shellMains.length===1&&shellMains[0]===main)return true;}return false})()";
+const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const m=document.querySelectorAll(s);if(m.length!==1||!document.querySelector('[data-app-shell-sidebar-trigger]'))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=shell.querySelectorAll(s);if(shellMains.length===1&&shellMains[0]===main)return true;}const row=main.closest('[data-app-shell-workspace-row=\"true\"]');if(!row||row.querySelectorAll(s).length!==1||!mainParent?.className.includes('MainContentClip'))return false;const children=[...row.children];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.hasAttribute('data-app-shell-unified-tab-strip'));return rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0])&&workspaces[0].contains(main)})()";
 const DOCUMENT_READY_STATE_PROBE: &str = "document.readyState";
 const INITIAL_RENDERER_QUALIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_RENDERER_QUALIFICATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -2704,8 +2704,9 @@ mod tests {
         false
     }
 
-    // Mirror the structural part of the browser probe in a tiny DOM-shaped
-    // model so old and current shell arrangements are regression-tested.
+    // Mirror the legacy structural part of the browser probe in a tiny
+    // DOM-shaped model. The current workspace row is checked in Chrome by
+    // scripts/test-codex-layout.mjs.
     fn fixture_matches_renderer_shell(nodes: &[ProbeFixtureNode]) -> bool {
         let mains = nodes
             .iter()
@@ -2756,7 +2757,7 @@ mod tests {
     }
 
     #[test]
-    fn renderer_probe_shell_relation_covers_old_and_current_layouts() {
+    fn renderer_probe_shell_relation_covers_legacy_direct_and_wrapped_layouts() {
         let old = [
             ProbeFixtureNode {
                 parent: None,
@@ -2777,7 +2778,7 @@ mod tests {
         ];
         assert!(fixture_matches_renderer_shell(&old));
 
-        let current = [
+        let wrapped = [
             ProbeFixtureNode {
                 parent: None,
                 kind: ProbeFixtureNodeKind::Other,
@@ -2799,7 +2800,7 @@ mod tests {
                 kind: ProbeFixtureNodeKind::Trigger,
             },
         ];
-        assert!(fixture_matches_renderer_shell(&current));
+        assert!(fixture_matches_renderer_shell(&wrapped));
     }
 
     #[test]

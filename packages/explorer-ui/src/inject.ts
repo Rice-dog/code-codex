@@ -16,7 +16,9 @@ import {
   MAIN_SURFACE_SELECTOR,
   plausibleThreadId,
   qualifiedAppShellForMain,
+  qualifiedWorkspaceRowForMain,
 } from "./adapters/codex-26.715";
+import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import {
   clearExplorerDismissalForSession,
   dismissExplorerForSession,
@@ -34,8 +36,34 @@ const PARTICLE_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-particle-backg
 const GLOW_HORIZON_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-glow-horizon-background="v1"]';
 const TRANSPARENT_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-transparent-background="v1"]';
 const OWNED_EXPLORER_SELECTOR = '[data-code-codex-owned="true"]';
+const CURRENT_LAYOUT_EXPLORER_SELECTOR = `${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:workspace-row"]`;
+const CURRENT_LAYOUT_HEADER_LEFT_PROPERTY = "--code-codex-current-layout-header-left";
 const SHELL_LAYOUT_CSS = `
+/* The new page shell keeps the conversation title in a fixed body header,
+ * outside the flex row that our file tree widens. Shift that header by the
+ * measured panel width; the legacy title lives inside main and is untouched. */
+html:has(${CURRENT_LAYOUT_EXPLORER_SELECTOR}) header:has([data-app-shell-titlebar-content]) {
+  left: var(${CURRENT_LAYOUT_HEADER_LEFT_PROPERTY}) !important;
+}
+
+/* The row begins above the native sidebar and conversation surface by 8px. */
+${CURRENT_LAYOUT_EXPLORER_SELECTOR} {
+  margin-top: 8px;
+  height: calc(100% - 8px) !important;
+  min-height: 0;
+}
+
 html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"] + ${MAIN_SURFACE_SELECTOR} {
+  border-left-color: transparent !important;
+  background-clip: border-box !important;
+}
+
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:main-content-clip"] + :has(> ${MAIN_SURFACE_SELECTOR}) > ${MAIN_SURFACE_SELECTOR} {
+  border-left-color: transparent !important;
+  background-clip: border-box !important;
+}
+
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:workspace-row"] + [data-app-shell-unified-tab-strip] ${MAIN_SURFACE_SELECTOR} {
   border-left-color: transparent !important;
   background-clip: border-box !important;
 }
@@ -377,11 +405,11 @@ function qualifiedMainSurface(): HTMLElement | null {
   const mains = [...document.querySelectorAll<HTMLElement>(MAIN_SURFACE_SELECTOR)];
   if (mains.length !== 1 || !codex26715Adapter.qualifiesRenderer(document)) return null;
   const main = mains[0];
-  if (!main || !qualifiedAppShellForMain(main, document) || !isVisibleMount(main)) return null;
+  if (!main || !isVisibleMount(main)) return null;
   return main;
 }
 
-function stableInlineMount(mainSurface: HTMLElement | null): MountPoint | null {
+function stableInlineMount(mainSurface: HTMLElement | null, codexVersion: string | undefined): MountPoint | null {
   const explicit = document.querySelector<HTMLElement>("[data-code-codex-mount]");
   if (explicit && isVisibleMount(explicit)) {
     return { parent: explicit, before: null, placement: "inline", strategy: "declared-slot", mainSurface };
@@ -389,6 +417,17 @@ function stableInlineMount(mainSurface: HTMLElement | null): MountPoint | null {
 
   const verifiedMain = mainSurface;
   if (verifiedMain) {
+    if (usesClippedMainLayout(codexVersion)) {
+      const current = qualifiedWorkspaceRowForMain(verifiedMain, document);
+      if (!current || !isVisibleMount(current.row) || !isVisibleMount(current.workspace)) return null;
+      return {
+        parent: current.row,
+        before: current.workspace,
+        placement: "inline",
+        strategy: "known:workspace-row",
+        mainSurface,
+      };
+    }
     const parent = verifiedMain.parentElement;
     const verifiedShell = qualifiedAppShellForMain(verifiedMain, document);
     if (parent && verifiedShell && isVisibleMount(parent)) {
@@ -430,7 +469,7 @@ function chooseMount(): MountPoint | null {
   const bootstrap = getBootstrapConfig();
   const mainSurface = qualifiedMainSurface();
   if (!bootstrap.forceDrawer && window.innerWidth > 820) {
-    const inline = stableInlineMount(mainSurface);
+    const inline = stableInlineMount(mainSurface, bootstrap.codexVersion ?? bootstrap.version);
     if (inline) return inline;
   }
   return { parent: document.body, before: null, placement: "drawer", strategy: "safe-drawer", mainSurface };
@@ -444,6 +483,31 @@ function installShellLayoutStyle(): void {
     (document.head ?? document.documentElement).append(style);
   }
   if (style.textContent !== SHELL_LAYOUT_CSS) style.textContent = SHELL_LAYOUT_CSS;
+}
+
+let currentLayoutObservedExplorer: CodeCodexElement | null = null;
+let currentLayoutWidthObserver: ResizeObserver | null = null;
+
+function reconcileCurrentLayoutHeader(explorer: CodeCodexElement, strategy: string): void {
+  if (strategy !== "known:workspace-row") {
+    currentLayoutWidthObserver?.disconnect();
+    currentLayoutWidthObserver = null;
+    currentLayoutObservedExplorer = null;
+    document.documentElement.style.removeProperty(CURRENT_LAYOUT_HEADER_LEFT_PROPERTY);
+    return;
+  }
+  if (currentLayoutObservedExplorer === explorer) return;
+  currentLayoutWidthObserver?.disconnect();
+  currentLayoutObservedExplorer = explorer;
+  const update = () => {
+    if (!explorer.isConnected) return;
+    document.documentElement.style.setProperty(CURRENT_LAYOUT_HEADER_LEFT_PROPERTY, `${explorer.getBoundingClientRect().right}px`);
+  };
+  currentLayoutWidthObserver = new ResizeObserver(update);
+  currentLayoutWidthObserver.observe(explorer);
+  const sidebar = explorer.parentElement?.querySelector<HTMLElement>(":scope > aside.app-shell-left-panel");
+  if (sidebar) currentLayoutWidthObserver.observe(sidebar);
+  update();
 }
 
 function installTransparentBackgroundStyle(): void {
@@ -525,7 +589,7 @@ export function injectExplorer(): CodeCodexElement | null {
   if (sessionDismissed()) return existing;
   const mount = chooseMount();
   if (!mount) return existing;
-  if (mount.strategy === "known:main.main-surface") installShellLayoutStyle();
+  if (mount.strategy === "known:main.main-surface" || mount.strategy === "known:workspace-row") installShellLayoutStyle();
 
   if (existing) {
     const responsiveDrawer =
@@ -536,6 +600,7 @@ export function injectExplorer(): CodeCodexElement | null {
       existing.reconcileMount(mount.parent, mount.before, mount.placement, mount.strategy);
     }
     existing.reconcileMainPreview(mount.mainSurface);
+    reconcileCurrentLayoutHeader(existing, mount.strategy);
     return existing;
   }
 
@@ -548,6 +613,7 @@ export function injectExplorer(): CodeCodexElement | null {
   if (mount.before) mount.parent.insertBefore(explorer, mount.before);
   else mount.parent.append(explorer);
   explorer.reconcileMainPreview(mount.mainSurface);
+  reconcileCurrentLayoutHeader(explorer, mount.strategy);
   return explorer;
 }
 
