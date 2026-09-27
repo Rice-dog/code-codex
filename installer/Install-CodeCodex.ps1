@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.3.26"
+    [string]$Version = "0.3.31"
 )
 
 $ErrorActionPreference = "Stop"
@@ -402,10 +402,17 @@ New-ItemProperty -Path $uninstallKey -Name "NoRepair" -PropertyType DWord -Value
 
 $installedShortcutTool = Join-Path $InstallRoot "CodeCodex.Shortcut.exe"
 Publish-CodeCodexProgress 94 "Updating shortcuts" "Linking the Codex desktop shortcut to Code-Codex."
-& $installedShortcutTool install --install-root $InstallRoot --version $Version
-if ($LASTEXITCODE -ne 0) {
-    throw "The Codex or ChatGPT desktop shortcut could not be redirected, or the Code-Codex shortcut could not be created (exit code $LASTEXITCODE)."
+$shortcutResultJson = & $installedShortcutTool install --install-root $InstallRoot --version $Version
+$shortcutExitCode = $LASTEXITCODE
+if ($shortcutExitCode -ne 0) {
+    throw "The Codex or ChatGPT desktop shortcut could not be redirected, or the Code-Codex shortcut could not be created (exit code $shortcutExitCode)."
 }
+$shortcutResult = ($shortcutResultJson -join "`n") | ConvertFrom-Json
+$managedShortcut = [string]$shortcutResult.shortcutPath
+if (-not $managedShortcut -or -not (Test-Path -LiteralPath $managedShortcut -PathType Leaf)) {
+    throw "Code-Codex could not verify the installed desktop shortcut."
+}
+Publish-CodeCodexProgress 96 "Shortcut ready" "Code-Codex will start from $([IO.Path]::GetFileNameWithoutExtension($managedShortcut))."
 
 $installedCommandLine = Join-Path $VersionRoot "code-codex.exe"
 Publish-CodeCodexProgress 98 "Activating Code-Codex" "Refreshing any currently open Codex window."
@@ -419,4 +426,5 @@ catch {
     Write-Warning "Code-Codex was installed, but the currently open Codex window could not be updated automatically: $($_.Exception.Message)"
 }
 
-Write-Host "Installed Code-Codex $Version. The current Codex window will update automatically when Code-Codex is already active; future launches use the Codex, ChatGPT, or Code-Codex desktop shortcut."
+Write-Host "Code-Codex managed shortcut: $managedShortcut"
+Write-Host "Installed Code-Codex $Version. Open the managed desktop shortcut to start Codex with Code-Codex."

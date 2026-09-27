@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.3.26"><img alt="版本" src="https://img.shields.io/badge/version-0.3.26-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.3.31"><img alt="版本" src="https://img.shields.io/badge/version-0.3.31-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,22 +35,24 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.3.26-x64-setup.exe`
-- 备选：`CodeCodex-0.3.26-x64.msi`
-- 便携包：`CodeCodex-0.3.26-x64.zip`
+- 推荐：`CodeCodex-0.3.31-x64-setup.exe`
+- 备选：`CodeCodex-0.3.31-x64.msi`
+- 便携包：`CodeCodex-0.3.31-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.3.26-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.3.31-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
 
-如果已经安装官方 Codex/ChatGPT Desktop，安装器会先检查桌面上的 `Codex` 快捷方式，
-再检查 `ChatGPT` 快捷方式。只有这两个官方快捷方式都不存在时，才会创建新的托管
-`Code-Codex` 桌面快捷方式。
+如果已经安装官方 Codex Desktop，安装器会检查当前用户和公共桌面的快捷方式：
+优先使用指向官方 Codex 的快捷方式，也可接管用户创建的 `Codex`、`ChatGPT`
+快捷方式，或指向 `Codex.exe` / `ChatGPT.exe` 的重命名快捷方式。原快捷方式会备份，
+卸载时恢复；只有找不到这些快捷方式时，才会创建独立的 `Code-Codex` 桌面快捷方式。
+安装完成后，安装器会显示实际使用的快捷方式路径。
 
 ## 安装方式二：从源码生成 EXE
 
@@ -82,7 +84,7 @@ Get-FileHash .\CodeCodex-0.3.26-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.3.26
+./scripts/package.ps1 -Version 0.3.31
 ```
 
 生成结果会写入 `releases/`。
@@ -96,8 +98,8 @@ Get-FileHash .\CodeCodex-0.3.26-x64-setup.exe -Algorithm SHA256
 - 从源码构建时，`Uninstall-CodeCodex.exe`、`Uninstall-CodeCodex.ps1` 和
   `Finalize-Uninstall.ps1` 会位于 `target/release/`。
 
-运行 `Uninstall-CodeCodex.exe` 即可恢复原来的 Codex 或 ChatGPT 快捷方式，并移除
-Code-Codex 文件。如果安装时因为两个官方快捷方式都缺失而创建了独立的
+运行 `Uninstall-CodeCodex.exe` 即可恢复安装前的桌面快捷方式，并移除
+Code-Codex 文件。如果安装时没有可接管的快捷方式而创建了独立的
 `Code-Codex` 桌面快捷方式，卸载时会删除这个快捷方式。MSI 安装也可以从 Windows
 **已安装的应用** 中卸载。
 
