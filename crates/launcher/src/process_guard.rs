@@ -43,6 +43,8 @@ pub enum ProcessGuardError {
     OwnershipMismatch,
     #[error("the CDP listener is not owned by the verified official Codex executable")]
     ExecutableMismatch,
+    #[error("process verification failed: {0}")]
+    Detailed(String),
 }
 
 /// Owns a launched Codex process for the complete debug-enabled lifetime.
@@ -1009,12 +1011,20 @@ pub fn verify_process_identity(
         const MAX_IDENTITY_OUTPUT_BYTES: usize = 4 * 1024;
 
         if pid == 0 {
-            return Err(ProcessGuardError::OwnershipMismatch);
+            return Err(ProcessGuardError::Detailed(
+                "activation returned PID 0".into(),
+            ));
         }
-        let official_executable = dunce::canonicalize(official_executable)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        let official_executable = dunce::canonicalize(official_executable).map_err(|error| {
+            ProcessGuardError::Detailed(format!(
+                "official executable canonicalization failed: OS error {:?}",
+                error.raw_os_error()
+            ))
+        })?;
         if !official_executable.is_file() {
-            return Err(ProcessGuardError::OwnershipUnknown);
+            return Err(ProcessGuardError::Detailed(
+                "canonical official executable is not a file".into(),
+            ));
         }
         let launched_after_millis: i64 = launched_after
             .duration_since(UNIX_EPOCH)
@@ -1022,7 +1032,9 @@ pub fn verify_process_identity(
             .as_millis()
             .try_into()
             .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
-        let powershell = trusted_powershell().ok_or(ProcessGuardError::OwnershipUnknown)?;
+        let powershell = trusted_powershell().ok_or_else(|| {
+            ProcessGuardError::Detailed("trusted System32 PowerShell was not found".into())
+        })?;
         let output = StdCommand::new(powershell)
             .args([
                 "-NoLogo",
@@ -1040,31 +1052,66 @@ pub fn verify_process_identity(
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+            .map_err(|error| {
+                ProcessGuardError::Detailed(format!(
+                    "process identity query could not start: OS error {:?}",
+                    error.raw_os_error()
+                ))
+            })?;
         if !output.status.success()
             || output.stdout.is_empty()
             || output.stdout.len() > MAX_IDENTITY_OUTPUT_BYTES
         {
-            return Err(ProcessGuardError::OwnershipUnknown);
+            return Err(ProcessGuardError::Detailed(format!(
+                "process identity query failed: exit={:?}, stdout_bytes={} (limit {})",
+                output.status.code(),
+                output.stdout.len(),
+                MAX_IDENTITY_OUTPUT_BYTES
+            )));
         }
-        let snapshot: ProcessIdentitySnapshot = serde_json::from_slice(&output.stdout)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        let snapshot: ProcessIdentitySnapshot =
+            serde_json::from_slice(&output.stdout).map_err(|error| {
+                ProcessGuardError::Detailed(format!(
+                    "process identity response is invalid JSON: category={:?}, line={}, column={}",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ))
+            })?;
         if snapshot.process_id != pid
             || snapshot.creation_unix_millis < launched_after_millis
             || !snapshot.creation_matches
         {
-            return Err(ProcessGuardError::OwnershipMismatch);
+            return Err(ProcessGuardError::Detailed(format!(
+                "activated PID or creation time mismatch: expected_pid={pid}, observed_pid={}, created_after_launch={}, CIM_creation_matches={}",
+                snapshot.process_id,
+                snapshot.creation_unix_millis >= launched_after_millis,
+                snapshot.creation_matches
+            )));
         }
         if !snapshot.executable_matches {
-            return Err(ProcessGuardError::ExecutableMismatch);
+            return Err(ProcessGuardError::Detailed(format!(
+                "activated executable mismatch: pid={pid}, CIM_path_available={}, observed_location={}, official_location={}, CIM_path_matches_official=false",
+                !snapshot.executable_path.is_empty(),
+                path_location(&snapshot.executable_path),
+                path_location(&official_executable.to_string_lossy())
+            )));
         }
-        let observed_executable = dunce::canonicalize(&snapshot.executable_path)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        let observed_executable =
+            dunce::canonicalize(&snapshot.executable_path).map_err(|error| {
+                ProcessGuardError::Detailed(format!(
+                    "observed executable canonicalization failed: pid={pid}, OS error {:?}",
+                    error.raw_os_error()
+                ))
+            })?;
         if !observed_executable.is_file()
             || observed_executable.to_string_lossy().to_lowercase()
                 != official_executable.to_string_lossy().to_lowercase()
         {
-            return Err(ProcessGuardError::ExecutableMismatch);
+            return Err(ProcessGuardError::Detailed(format!(
+                "canonical executable mismatch: pid={pid}, observed_is_file={}, canonical_paths_match=false",
+                observed_executable.is_file()
+            )));
         }
         Ok(())
     }
@@ -1088,7 +1135,11 @@ pub fn verify_listener_owner(
         // Both interpolated values are integers created by this process. No
         // renderer or filesystem text enters the PowerShell program.
         let script = ownership_script(port);
-        let powershell = trusted_powershell().ok_or(ProcessGuardError::OwnershipUnknown)?;
+        let powershell = trusted_powershell().ok_or_else(|| {
+            ProcessGuardError::Detailed(
+                "listener ownership query: trusted System32 PowerShell was not found".into(),
+            )
+        })?;
         let output = StdCommand::new(powershell)
             .args([
                 "-NoLogo",
@@ -1100,19 +1151,38 @@ pub fn verify_listener_owner(
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+            .map_err(|error| {
+                ProcessGuardError::Detailed(format!(
+                    "listener ownership query could not start: port={port}, OS error {:?}",
+                    error.raw_os_error()
+                ))
+            })?;
         if !output.status.success() || output.stdout.len() > 4 * 1024 * 1024 {
-            return Err(ProcessGuardError::OwnershipUnknown);
+            return Err(ProcessGuardError::Detailed(format!(
+                "listener ownership query failed: port={port}, exit={:?}, stdout_bytes={}",
+                output.status.code(),
+                output.stdout.len()
+            )));
         }
         let snapshot: OwnershipSnapshot = serde_json::from_slice(&output.stdout)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+            .map_err(|error| ProcessGuardError::Detailed(format!("listener ownership response is invalid JSON: port={port}, category={:?}, line={}, column={}", error.classify(), error.line(), error.column())))?;
         let launched_after_millis = launched_after
             .duration_since(UNIX_EPOCH)
             .map_err(|_| ProcessGuardError::OwnershipUnknown)?
             .as_millis()
             .try_into()
             .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
-        verify_snapshot(&snapshot, launched_pid, launched_after_millis)
+        verify_snapshot(&snapshot, launched_pid, launched_after_millis).map_err(|error| {
+            ProcessGuardError::Detailed(format!(
+                "{error}; {}",
+                snapshot_observation(
+                    &snapshot,
+                    port,
+                    Some((launched_pid, launched_after_millis)),
+                    None
+                )
+            ))
+        })
     }
 }
 
@@ -1127,12 +1197,22 @@ pub fn verify_listener_executable(
     }
     #[cfg(windows)]
     {
-        let official_executable = dunce::canonicalize(official_executable)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        let official_executable = dunce::canonicalize(official_executable).map_err(|error| {
+            ProcessGuardError::Detailed(format!(
+                "official executable canonicalization failed: OS error {:?}",
+                error.raw_os_error()
+            ))
+        })?;
         if !official_executable.is_file() {
-            return Err(ProcessGuardError::OwnershipUnknown);
+            return Err(ProcessGuardError::Detailed(
+                "canonical official executable is not a file".into(),
+            ));
         }
-        let powershell = trusted_powershell().ok_or(ProcessGuardError::OwnershipUnknown)?;
+        let powershell = trusted_powershell().ok_or_else(|| {
+            ProcessGuardError::Detailed(
+                "listener executable query: trusted System32 PowerShell was not found".into(),
+            )
+        })?;
         let output = StdCommand::new(powershell)
             .args([
                 "-NoLogo",
@@ -1144,13 +1224,27 @@ pub fn verify_listener_executable(
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+            .map_err(|error| {
+                ProcessGuardError::Detailed(format!(
+                    "listener executable query could not start: port={port}, OS error {:?}",
+                    error.raw_os_error()
+                ))
+            })?;
         if !output.status.success() || output.stdout.len() > 4 * 1024 * 1024 {
-            return Err(ProcessGuardError::OwnershipUnknown);
+            return Err(ProcessGuardError::Detailed(format!(
+                "listener executable query failed: port={port}, exit={:?}, stdout_bytes={}",
+                output.status.code(),
+                output.stdout.len()
+            )));
         }
         let snapshot: OwnershipSnapshot = serde_json::from_slice(&output.stdout)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
-        verify_snapshot_executable(&snapshot, &official_executable)
+            .map_err(|error| ProcessGuardError::Detailed(format!("listener executable response is invalid JSON: port={port}, category={:?}, line={}, column={}", error.classify(), error.line(), error.column())))?;
+        verify_snapshot_executable(&snapshot, &official_executable).map_err(|error| {
+            ProcessGuardError::Detailed(format!(
+                "{error}; {}",
+                snapshot_observation(&snapshot, port, None, Some(&official_executable))
+            ))
+        })
     }
 }
 
@@ -1444,6 +1538,109 @@ fn verify_snapshot_executable(
     }
 }
 
+/// Keep support reports useful without copying CIM executable paths into them.
+fn snapshot_observation(
+    snapshot: &OwnershipSnapshot,
+    port: u16,
+    launched: Option<(u32, i64)>,
+    official_executable: Option<&Path>,
+) -> String {
+    let processes: HashMap<_, _> = snapshot
+        .processes
+        .iter()
+        .map(|process| (process.process_id, process))
+        .collect();
+    let mut details = vec![format!(
+        "port={port}, listener_count={}, process_records={}",
+        snapshot.listeners.len(),
+        snapshot.processes.len()
+    )];
+    if let Some(official) = official_executable {
+        details.push(format!(
+            "official_location={}",
+            path_location(&official.to_string_lossy())
+        ));
+    }
+    if let Some((pid, launched_after)) = launched {
+        let root = processes.get(&pid);
+        details.push(format!(
+            "launched_pid={pid}, launched_pid_in_CIM={}, launched_creation_within_tolerance={}",
+            root.is_some(),
+            root.is_some_and(
+                |record| record.creation_unix_millis >= launched_after.saturating_sub(5_000)
+            )
+        ));
+    }
+    for &listener in snapshot.listeners.iter().take(4) {
+        let mut chain = Vec::new();
+        let mut visited = HashSet::new();
+        let mut current = listener;
+        let mut child_creation = None;
+        for _ in 0..8 {
+            if current == 0 {
+                chain.push("parent=0".to_owned());
+                break;
+            }
+            if !visited.insert(current) {
+                chain.push(format!("cycle_at={current}"));
+                break;
+            }
+            let Some(process) = processes.get(&current) else {
+                chain.push(format!("missing_CIM_pid={current}"));
+                break;
+            };
+            let created_after_child =
+                child_creation.is_some_and(|created| process.creation_unix_millis > created);
+            let path_available = process
+                .executable_path
+                .as_deref()
+                .is_some_and(|path| !path.is_empty());
+            let path_matches = official_executable.is_some_and(|official| {
+                process
+                    .executable_path
+                    .as_deref()
+                    .is_some_and(|path| path.eq_ignore_ascii_case(&official.to_string_lossy()))
+            });
+            chain.push(format!(
+                "pid={current}(parent={},path_available={path_available},path_location={},official_path_match={path_matches},parent_newer_than_child={created_after_child})",
+                process.parent_process_id,
+                process.executable_path.as_deref().map(path_location).unwrap_or("unavailable")
+            ));
+            if created_after_child {
+                break;
+            }
+            child_creation = Some(process.creation_unix_millis);
+            current = process.parent_process_id;
+        }
+        details.push(format!("listener_chain=[{}]", chain.join(" -> ")));
+    }
+    if snapshot.listeners.len() > 4 {
+        details.push(format!(
+            "additional_listeners_omitted={}",
+            snapshot.listeners.len() - 4
+        ));
+    }
+    details.join("; ")
+}
+
+fn path_location(path: &str) -> &'static str {
+    if path.is_empty() {
+        return "unavailable";
+    }
+    let normalized = path.replace('/', "\\").to_ascii_lowercase();
+    if normalized.contains("\\windowsapps\\") {
+        "WindowsApps"
+    } else if normalized.contains("\\program files\\")
+        || normalized.contains("\\program files (x86)\\")
+    {
+        "Program Files"
+    } else if normalized.contains("\\users\\") {
+        "user profile"
+    } else {
+        "other"
+    }
+}
+
 fn process_chain_contains_executable(
     pid: u32,
     official_executable: &Path,
@@ -1725,6 +1922,31 @@ mod tests {
         assert!(
             verify_snapshot_executable(&snapshot, Path::new(r"C:\Official\Codex.exe")).is_err()
         );
+    }
+
+    #[test]
+    fn ownership_observation_identifies_missing_path_without_leaking_it() {
+        let snapshot = OwnershipSnapshot {
+            listeners: vec![30],
+            processes: vec![ProcessRecord {
+                process_id: 30,
+                parent_process_id: 20,
+                creation_unix_millis: 1_000,
+                executable_path: Some(r"C:\Users\secret\private.exe".to_owned()),
+            }],
+        };
+        let report = snapshot_observation(
+            &snapshot,
+            61373,
+            None,
+            Some(Path::new(r"C:\Program Files\Codex\Codex.exe")),
+        );
+        assert!(report.contains("port=61373"));
+        assert!(report.contains("missing_CIM_pid=20"));
+        assert!(report.contains("official_path_match=false"));
+        assert!(report.contains("path_location=user profile"));
+        assert!(!report.contains("secret"));
+        assert!(!report.contains(r"C:\Program Files"));
     }
 
     #[cfg(windows)]

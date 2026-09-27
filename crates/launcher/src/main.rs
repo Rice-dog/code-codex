@@ -409,7 +409,7 @@ impl AppError {
                 "Verifying the Codex process",
                 "The Codex process identity could not be verified",
                 error.to_string(),
-                "Repair the official Codex Desktop installation and try again.",
+                "Copy the full diagnostic report and send it to the Code-Codex developer. The process observations identify which check failed.",
             ),
             Self::UnsupportedVersion => StartupDiagnostic::new(
                 "CC-START-COMPAT-001",
