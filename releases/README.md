@@ -2,6 +2,16 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.23 — 启动诊断与安装体验 / Startup Diagnostics and Installer Experience
+
+- 启动失败报告记录本次启动的 CDP 端点探测、等待时间、进程状态和可用窗口信息，便于定位无法连接或找不到兼容窗口的问题。
+- 安装与卸载进度窗口增加清晰的 Code-Codex 图标、标题栏版本号和阶段说明；改进 Codex 仍在运行时的卸载流程。
+- 提供 setup EXE、MSI、ZIP、独立卸载程序及 SHA-256 校验文件。
+
+- Startup reports now include observations from the actual CDP connection attempt, including the endpoint, wait duration, process state, and available window targets.
+- Setup and uninstall progress windows show a sharp Code-Codex icon, the version in the title bar, and clearer stage details. Uninstall handling is improved while Codex remains open.
+- Includes the setup EXE, MSI, ZIP, standalone uninstaller, and SHA-256 checksums.
+
 ## v0.3.8 — 闪烁方块背景 / Blinking Squares Background
 
 - Preview Market 新增 Blinking Squares Background：全窗口方向渐隐方块、独立闪烁、鼠标交互与点击脉冲、输入时的随机键盘波纹，以及可调的波纹上限和冷却时间；提供中英文设置。

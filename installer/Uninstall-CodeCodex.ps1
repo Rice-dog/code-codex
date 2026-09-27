@@ -13,6 +13,18 @@ $InstallPrefix = $InstallFullPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO
 $ShortcutOwnerMarker = "Managed by Code-Codex (code-codex/v1)"
 $LegacyShortcutDescription = "Launch Codex Desktop with Code-Codex file preview and editing"
 
+function Publish-CodeCodexProgress([int]$Percent, [string]$Stage, [string]$Detail) {
+    if ([string]::IsNullOrWhiteSpace($env:CLE_PROGRESS_STATE_PATH)) { return }
+    try {
+        $message = [Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes($Stage + "`n" + $Detail)
+        )
+        $command = "{0}|progress|{1}|{2}" -f [DateTime]::UtcNow.Ticks, $Percent, $message
+        [IO.File]::WriteAllText($env:CLE_PROGRESS_STATE_PATH, $command, [Text.UTF8Encoding]::new($false))
+    }
+    catch {} # A display failure must not interrupt uninstallation.
+}
+
 function Test-ReparsePoint([IO.FileSystemInfo]$Item) {
     return ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
 }
@@ -39,6 +51,17 @@ function Test-SamePath([string]$Left, [string]$Right) {
     catch {
         return $false
     }
+}
+
+function Test-SameProcessIdentity([object]$Expected, [object]$Current) {
+    if ($null -eq $Expected -or $null -eq $Current -or
+        $null -eq $Expected.CreationDate -or $null -eq $Current.CreationDate) {
+        return $false
+    }
+    return [uint32]$Expected.ProcessId -eq [uint32]$Current.ProcessId -and
+        [string]$Expected.Name -ieq [string]$Current.Name -and
+        $Expected.CreationDate -eq $Current.CreationDate -and
+        (Test-SamePath ([string]$Expected.ExecutablePath) ([string]$Current.ExecutablePath))
 }
 
 function Remove-ReparsePoint([IO.FileSystemInfo]$Item) {
@@ -110,6 +133,7 @@ if (-not $InstallFullPath.StartsWith($AllowedRoot, [StringComparison]::OrdinalIg
 if ($KeepSettings -and $PurgeSettings) {
     throw "-KeepSettings and -PurgeSettings cannot be used together."
 }
+Publish-CodeCodexProgress 18 "Checking installation" "Verifying the installation path and removal options."
 
 $programsItem = Get-ExistingItem $ProgramsRoot
 if ($null -ne $programsItem -and
@@ -129,6 +153,7 @@ if ($null -ne $installItem) {
     }
     $running = @()
     $unverifiedRunning = @()
+    Publish-CodeCodexProgress 24 "Checking running processes" "Finding Code-Codex sessions that need to close."
     $processSnapshot = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     foreach ($process in $processSnapshot) {
         $knownProductName = [string]$process.Name -in @(
@@ -147,6 +172,7 @@ if ($null -ne $installItem) {
                     ProcessId = [uint32]$process.ProcessId
                     Name = [string]$process.Name
                     ExecutablePath = $processPath
+                    CreationDate = $process.CreationDate
                 }
             }
         }
@@ -208,6 +234,7 @@ if ($null -ne $installItem) {
                 @{ Expression = { if ($_.Name -ieq "CodeCodex.exe") { 0 } else { 1 } } }, `
                 ProcessId
     )
+    Publish-CodeCodexProgress 31 "Closing Code-Codex" "Stopping verified Code-Codex processes before removal."
     $stoppedProcessIds = @()
     foreach ($runningProcess in $running) {
         $currentProcess = Get-CimInstance `
@@ -216,21 +243,10 @@ if ($null -ne $installItem) {
             -ErrorAction Stop
         if ($null -eq $currentProcess) { continue }
 
-        $currentName = [string]$currentProcess.Name
-        $currentPathText = [string]$currentProcess.ExecutablePath
-        if ($currentName -notin @("code-codex.exe", "CodeCodex.exe") -or
-            [string]::IsNullOrWhiteSpace($currentPathText)) {
-            throw "A Code-Codex process changed identity while the uninstaller was preparing to stop it."
-        }
-        try {
-            $currentPath = [IO.Path]::GetFullPath($currentPathText)
-        }
-        catch {
-            throw "A Code-Codex process path could not be verified before termination."
-        }
-        if (-not (Test-SamePath $currentPath ([string]$runningProcess.ExecutablePath)) -or
-            -not $currentPath.StartsWith($InstallPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "A Code-Codex process changed identity while the uninstaller was preparing to stop it."
+        if (-not (Test-SameProcessIdentity $runningProcess $currentProcess)) {
+            # The launcher may have already closed this child. Never stop a
+            # replacement process that reused the same PID.
+            continue
         }
 
         try {
@@ -242,7 +258,7 @@ if ($null -ne $installItem) {
                 Win32_Process `
                 -Filter ("ProcessId = {0}" -f [uint32]$runningProcess.ProcessId) `
                 -ErrorAction Stop
-            if ($null -ne $afterStopFailure) {
+            if (Test-SameProcessIdentity $runningProcess $afterStopFailure) {
                 throw "Code-Codex could not be stopped automatically: $stopError"
             }
             continue
@@ -253,8 +269,14 @@ if ($null -ne $installItem) {
     if ($stoppedProcessIds.Count -gt 0) {
         Wait-Process -Id $stoppedProcessIds -Timeout 15 -ErrorAction SilentlyContinue
         $remaining = @(
-            $stoppedProcessIds |
-                Where-Object { $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue) }
+            $running |
+                Where-Object {
+                    $_.ProcessId -in $stoppedProcessIds -and
+                    (Test-SameProcessIdentity $_ (Get-CimInstance `
+                        Win32_Process `
+                        -Filter ("ProcessId = {0}" -f [uint32]$_.ProcessId) `
+                        -ErrorAction Stop))
+                }
         )
         if ($remaining.Count -gt 0) {
             throw "Code-Codex could not be stopped automatically. Restart Windows, then run the uninstaller again."
@@ -276,19 +298,7 @@ if ($null -ne $installItem) {
             -Filter ("ProcessId = {0}" -f [uint32]$ownedDescendant.ProcessId) `
             -ErrorAction Stop
         if ($null -eq $currentDescendant) { continue }
-        if ([string]$currentDescendant.Name -ine [string]$ownedDescendant.Name -or
-            $currentDescendant.CreationDate -ne $ownedDescendant.CreationDate -or
-            [string]::IsNullOrWhiteSpace([string]$ownedDescendant.ExecutablePath) -or
-            [string]::IsNullOrWhiteSpace([string]$currentDescendant.ExecutablePath)) {
-            continue
-        }
-        try {
-            $currentDescendantPath = [IO.Path]::GetFullPath([string]$currentDescendant.ExecutablePath)
-        }
-        catch {
-            continue
-        }
-        if (-not (Test-SamePath $currentDescendantPath ([string]$ownedDescendant.ExecutablePath))) {
+        if (-not (Test-SameProcessIdentity $ownedDescendant $currentDescendant)) {
             continue
         }
 
@@ -302,7 +312,7 @@ if ($null -ne $installItem) {
                 Win32_Process `
                 -Filter ("ProcessId = {0}" -f [uint32]$ownedDescendant.ProcessId) `
                 -ErrorAction Stop
-            if ($null -ne $afterStopFailure) {
+            if (Test-SameProcessIdentity $ownedDescendant $afterStopFailure) {
                 throw "The Code-Codex session could not be closed automatically: $stopError"
             }
         }
@@ -333,6 +343,7 @@ if ($null -ne $installItem) {
         }
     }
 
+    Publish-CodeCodexProgress 39 "Preparing file removal" "Verifying the separate removal helper."
     $finalizerSource = Join-Path $InstallFullPath "Finalize-Uninstall.ps1"
     $finalizerItem = Get-ExistingItem $finalizerSource
     if ($null -eq $finalizerItem) {
@@ -385,6 +396,7 @@ try {
     }
     if ($null -ne $installTypeItem -and
         (Get-Content -LiteralPath $installTypePath -Raw -Encoding UTF8).Trim() -eq "msi") {
+        Publish-CodeCodexProgress 48 "Handing off to Windows Installer" "The removal window will continue after this step closes."
         $msiProductCodePattern = '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$'
         $productCandidates = @(
             Get-ItemProperty `
@@ -427,6 +439,7 @@ try {
     }
 
 $shortcutTool = Join-Path $InstallFullPath "CodeCodex.Shortcut.exe"
+Publish-CodeCodexProgress 45 "Restoring desktop shortcuts" "Removing Code-Codex links and restoring the official Codex shortcut."
 $shortcutToolItem = Get-ExistingItem $shortcutTool
 if ($null -eq $shortcutToolItem -or $shortcutToolItem.PSIsContainer -or (Test-ReparsePoint $shortcutToolItem)) {
     throw "The verified shortcut restoration tool is missing. No files were removed."
@@ -444,6 +457,7 @@ Remove-ItemProperty `
     -ErrorAction SilentlyContinue
 
 if (-not $KeepSettings -or $PurgeSettings) {
+    Publish-CodeCodexProgress 49 "Cleaning settings" "Removing Code-Codex preferences selected for removal."
     $settingsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "CodeCodex"))
     $allowedLocal = [IO.Path]::GetFullPath($env:LOCALAPPDATA) + [IO.Path]::DirectorySeparatorChar
     if (-not $settingsRoot.StartsWith($allowedLocal, [StringComparison]::OrdinalIgnoreCase)) {
@@ -501,6 +515,7 @@ if ($uninstallerLauncherPid -gt 0) {
 }
 Start-Process -FilePath $powerShellPath -WindowStyle Hidden -ArgumentList $finalizerArguments
 $finalizerLaunched = $true
+Publish-CodeCodexProgress 54 "Handing off file removal" "The removal window will continue after this step closes."
 Write-Host "CODE_CODEX_UNINSTALL_DELEGATED"
 
 Write-Host "The Codex or ChatGPT desktop shortcut was restored, or the Code-Codex shortcut was removed. Code-Codex will be removed after this window closes."

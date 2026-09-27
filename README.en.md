@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.3.8"><img alt="Version" src="https://img.shields.io/badge/version-0.3.8-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.3.23"><img alt="Version" src="https://img.shields.io/badge/version-0.3.23-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,15 +38,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.3.8-x64-setup.exe`
-- Alternative: `CodeCodex-0.3.8-x64.msi`
-- Portable package: `CodeCodex-0.3.8-x64.zip`
+- Recommended: `CodeCodex-0.3.23-x64-setup.exe`
+- Alternative: `CodeCodex-0.3.23-x64.msi`
+- Portable package: `CodeCodex-0.3.23-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.3.8-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.3.23-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -86,7 +86,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.3.8
+./scripts/package.ps1 -Version 0.3.23
 ```
 
 The generated packages are written to `releases/`.
@@ -223,10 +223,6 @@ Enable Pixel Sculpt Background in Preview Market to transform images into an int
 ![Blinking Squares Background](docs/screenshots/blinking-squares-background.png)
 
 Blinking Squares Background fills the Codex window with independently twinkling squares that become denser toward a selected edge. Its bilingual settings panel controls direction, density, color, mouse trails, click pulses, and random keyboard waves, including their concurrent limit and cooldown. It also supports opening animation, pause, replay, and render-quality controls. Enabling the plugin switches Codex to Dark appearance; disabling it restores the previous setting.
-
-#### Codex Startup Transition
-
-Enable it under Appearance in Preview Market. The next launch through Code-Codex shows a local loading surface confined to the new Codex window. The native surface stays until the renderer animation has painted its first frame, preventing the conversation from appearing between the two stages; the animation fades when the main view is ready. The bilingual settings panel offers a live preview, a locally stored custom video with start and end trim controls, playback speed, opacity, brightness, fit, and display timing. Reduced-motion preferences skip the renderer animation. Launching official Codex directly or attaching to an existing window does not play the startup transition.
 
 ### Tool Plugins
 

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.3.14"
+    [string]$Version = "0.3.23"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,10 +12,23 @@ $SourceShortcutTool = Join-Path $SourceRoot "code-codex-shortcut.exe"
 $SourceUninstallerExecutable = Join-Path $SourceRoot "code-codex-uninstall.exe"
 $SourceUninstaller = Join-Path $SourceRoot "Uninstall-CodeCodex.ps1"
 $SourceFinalizer = Join-Path $SourceRoot "Finalize-Uninstall.ps1"
+$SourceBrandIcon = Join-Path $SourceRoot "CodeCodex.Brand.png"
 $InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Code-Codex"
 $ProgramsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
 $VersionsRoot = Join-Path $InstallRoot "versions"
 $VersionRoot = Join-Path $VersionsRoot $Version
+
+function Publish-CodeCodexProgress([int]$Percent, [string]$Stage, [string]$Detail) {
+    if ([string]::IsNullOrWhiteSpace($env:CLE_PROGRESS_STATE_PATH)) { return }
+    try {
+        $message = [Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes($Stage + "`n" + $Detail)
+        )
+        $command = "{0}|progress|{1}|{2}" -f [DateTime]::UtcNow.Ticks, $Percent, $message
+        [IO.File]::WriteAllText($env:CLE_PROGRESS_STATE_PATH, $command, [Text.UTF8Encoding]::new($false))
+    }
+    catch {} # A display failure must not interrupt installation.
+}
 
 function Test-ReparsePoint([IO.FileSystemInfo]$Item) {
     return ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
@@ -209,6 +222,7 @@ function Write-AtomicText([string]$Destination, [string]$Content) {
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' -or $Version.Length -gt 32) {
     throw "Release version must be a bounded three-part numeric version: $Version"
 }
+Publish-CodeCodexProgress 62 "Checking installation" "Verifying package files and the destination folder."
 
 $requiredPayload = @(
     $SourceBinary,
@@ -217,7 +231,8 @@ $requiredPayload = @(
     $SourceShortcutTool,
     $SourceUninstallerExecutable,
     $SourceUninstaller,
-    $SourceFinalizer
+    $SourceFinalizer,
+    $SourceBrandIcon
 )
 foreach ($payload in $requiredPayload) {
     $item = Get-ExistingItem $payload
@@ -301,6 +316,7 @@ if ($null -ne $existingMsiRegistration) {
     throw "Code-Codex is registered with Windows Installer. Uninstall it through Windows Installed apps before using the standalone installer."
 }
 
+Publish-CodeCodexProgress 68 "Checking Codex integration" "Validating the official Codex installation and shortcuts."
 & $SourceShortcutTool preflight --install-root $InstallRoot --version $Version
 if ($LASTEXITCODE -ne 0) {
     throw "Stable Codex could not be validated for Code-Codex integration. No installation files were changed."
@@ -313,6 +329,7 @@ if (-not $versionsItem.PSIsContainer -or (Test-ReparsePoint $versionsItem)) {
 }
 
 if (Test-Path -LiteralPath $VersionRoot) {
+    Publish-CodeCodexProgress 74 "Verifying application files" "Comparing the installed binaries with this package."
     $versionItem = Get-Item -LiteralPath $VersionRoot -Force
     if (-not $versionItem.PSIsContainer -or (Test-ReparsePoint $versionItem)) {
         throw "The release path must be a regular directory: $VersionRoot"
@@ -328,6 +345,7 @@ if (Test-Path -LiteralPath $VersionRoot) {
     }
 }
 else {
+    Publish-CodeCodexProgress 74 "Installing application files" "Copying the Code-Codex binaries into the version folder."
     $stagingVersion = Join-Path $VersionsRoot (".{0}.{1}.tmp" -f $Version, [Guid]::NewGuid().ToString("N"))
     try {
         New-Item -ItemType Directory -Path $stagingVersion | Out-Null
@@ -342,11 +360,13 @@ else {
     }
 }
 
+Publish-CodeCodexProgress 81 "Installing support files" "Updating the launcher, uninstaller, and documentation."
 Copy-AtomicFile $SourceShim (Join-Path $InstallRoot "CodeCodex.exe")
 Copy-AtomicFile $SourceShortcutTool (Join-Path $InstallRoot "CodeCodex.Shortcut.exe")
 Copy-AtomicFile $SourceUninstallerExecutable (Join-Path $InstallRoot "Uninstall-CodeCodex.exe")
 Copy-AtomicFile $SourceUninstaller (Join-Path $InstallRoot "Uninstall-CodeCodex.ps1")
 Copy-AtomicFile $SourceFinalizer (Join-Path $InstallRoot "Finalize-Uninstall.ps1")
+Copy-AtomicFile $SourceBrandIcon (Join-Path $InstallRoot "CodeCodex.Brand.png")
 
 foreach ($documentCopy in $documentCopies) {
     Assert-SafeFileCopy $documentCopy.Source $documentCopy.Destination
@@ -359,6 +379,7 @@ if ($installDocumentation) {
 Write-AtomicText (Join-Path $InstallRoot "current-version") ($Version + "`n")
 Write-AtomicText (Join-Path $InstallRoot "install-type") "portable`n"
 
+Publish-CodeCodexProgress 88 "Registering installation" "Updating the Windows installed-app entry."
 # Remove the obsolete sign-in launch entry. The existing Codex or ChatGPT
 # shortcut is now the single user-controlled entry point for both the official
 # app and Code-Codex.
@@ -380,12 +401,14 @@ New-ItemProperty -Path $uninstallKey -Name "NoModify" -PropertyType DWord -Value
 New-ItemProperty -Path $uninstallKey -Name "NoRepair" -PropertyType DWord -Value 1 -Force | Out-Null
 
 $installedShortcutTool = Join-Path $InstallRoot "CodeCodex.Shortcut.exe"
+Publish-CodeCodexProgress 94 "Updating shortcuts" "Linking the Codex desktop shortcut to Code-Codex."
 & $installedShortcutTool install --install-root $InstallRoot --version $Version
 if ($LASTEXITCODE -ne 0) {
     throw "The Codex or ChatGPT desktop shortcut could not be redirected, or the Code-Codex shortcut could not be created (exit code $LASTEXITCODE)."
 }
 
 $installedCommandLine = Join-Path $VersionRoot "code-codex.exe"
+Publish-CodeCodexProgress 98 "Activating Code-Codex" "Refreshing any currently open Codex window."
 try {
     Start-Process `
         -FilePath $installedCommandLine `

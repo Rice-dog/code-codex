@@ -4,7 +4,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Output, Stdio};
 
-use crate::gui_support::{configure_hidden, trusted_system32_powershell};
+use crate::gui_support::{ProgressDialog, configure_hidden, trusted_system32_powershell};
 
 // This source is included by both the setup and uninstaller binaries; each
 // binary uses only the execution mode that matches its user experience.
@@ -30,6 +30,17 @@ pub(crate) fn run_sibling_script_captured(
     run_script_captured(&script, script_arguments).map(Some)
 }
 
+pub(crate) fn run_sibling_script_with_progress(
+    script_name: &str,
+    script_arguments: impl IntoIterator<Item = OsString>,
+    progress: &ProgressDialog,
+) -> Result<Option<Output>, String> {
+    let Some(script) = resolve_sibling_script(script_name)? else {
+        return Ok(None);
+    };
+    run_script_with_progress(&script, script_arguments, progress).map(Some)
+}
+
 #[allow(dead_code)]
 pub(crate) fn run_script(
     script: &Path,
@@ -48,6 +59,22 @@ pub(crate) fn run_script_captured(
     script_arguments: impl IntoIterator<Item = OsString>,
 ) -> Result<Output, String> {
     build_script_command(script, script_arguments)?
+        .output()
+        .map_err(|error| format!("Windows PowerShell could not be started: {error}"))
+}
+
+pub(crate) fn run_script_with_progress(
+    script: &Path,
+    script_arguments: impl IntoIterator<Item = OsString>,
+    progress: &ProgressDialog,
+) -> Result<Output, String> {
+    let mut command = build_script_command(script, script_arguments)?;
+    if let Some(state_path) = progress.state_path() {
+        command.env("CLE_PROGRESS_STATE_PATH", state_path);
+    } else {
+        command.env_remove("CLE_PROGRESS_STATE_PATH");
+    }
+    command
         .output()
         .map_err(|error| format!("Windows PowerShell could not be started: {error}"))
 }

@@ -5,6 +5,7 @@
 //! It is not a general-purpose remote debugging client.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::error::Error as _;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
@@ -183,6 +184,14 @@ impl TargetDiscovery {
         self.get_json(endpoint.http_url("/json/version")).await
     }
 
+    /// Include the local HTTP/OS cause for a startup report without exposing
+    /// any response body or weakening the normal fail-closed CDP API.
+    pub async fn version_detailed(&self, endpoint: CdpEndpoint) -> Result<BrowserVersion, String> {
+        self.get_json_detailed(endpoint.http_url("/json/version"))
+            .await
+            .map_err(|(_, detail)| detail)
+    }
+
     pub async fn targets(&self, endpoint: CdpEndpoint) -> Result<Vec<CdpTarget>, CdpError> {
         self.get_json(endpoint.http_url("/json/list")).await
     }
@@ -191,33 +200,67 @@ impl TargetDiscovery {
     where
         T: serde::de::DeserializeOwned,
     {
-        let mut response = self
-            .client
-            .get(url)
-            .send()
+        self.get_json_detailed(url)
             .await
-            .map_err(|_| CdpError::EndpointUnavailable)?;
+            .map_err(|(error, _)| error)
+    }
+
+    async fn get_json_detailed<T>(&self, url: String) -> Result<T, (CdpError, String)>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let mut response = self.client.get(url).send().await.map_err(|error| {
+            let mut detail = error.to_string();
+            let mut source = error.source();
+            for _ in 0..4 {
+                let Some(cause) = source else { break };
+                detail.push_str("; caused by: ");
+                detail.push_str(&cause.to_string());
+                source = cause.source();
+            }
+            detail = detail.chars().take(1024).collect();
+            (CdpError::EndpointUnavailable, detail)
+        })?;
         if !response.status().is_success() {
-            return Err(CdpError::EndpointUnavailable);
+            return Err((
+                CdpError::EndpointUnavailable,
+                format!(
+                    "HTTP {} returned status {}",
+                    response.url().path(),
+                    response.status()
+                ),
+            ));
         }
         if response
             .content_length()
             .is_some_and(|length| length > MAX_DISCOVERY_RESPONSE_BYTES as u64)
         {
-            return Err(CdpError::InvalidEndpoint);
+            return Err((
+                CdpError::InvalidEndpoint,
+                "CDP response exceeded the size limit".to_owned(),
+            ));
         }
         let mut body = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| CdpError::InvalidEndpoint)?
-        {
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            (
+                CdpError::InvalidEndpoint,
+                format!("CDP response body failed: {error}"),
+            )
+        })? {
             if body.len().saturating_add(chunk.len()) > MAX_DISCOVERY_RESPONSE_BYTES {
-                return Err(CdpError::InvalidEndpoint);
+                return Err((
+                    CdpError::InvalidEndpoint,
+                    "CDP response exceeded the size limit".to_owned(),
+                ));
             }
             body.extend_from_slice(&chunk);
         }
-        serde_json::from_slice(&body).map_err(|_| CdpError::InvalidEndpoint)
+        serde_json::from_slice(&body).map_err(|error| {
+            (
+                CdpError::InvalidEndpoint,
+                format!("CDP response was not valid JSON: {error}"),
+            )
+        })
     }
 }
 
@@ -3067,6 +3110,21 @@ mod tests {
         let result = discovery.version(CdpEndpoint::loopback(port)).await;
         assert!(matches!(result, Err(CdpError::EndpointUnavailable)));
         server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn detailed_version_probe_preserves_local_connection_failure() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let port = listener.local_addr().expect("address").port();
+        drop(listener);
+
+        let discovery = TargetDiscovery::new().expect("discovery");
+        let detail = discovery
+            .version_detailed(CdpEndpoint::loopback(port))
+            .await
+            .expect_err("no listener");
+        assert!(detail.contains(&port.to_string()));
+        assert!(detail.contains("caused by:"));
     }
 
     #[test]

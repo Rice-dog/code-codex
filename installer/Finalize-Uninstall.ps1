@@ -142,11 +142,15 @@ function Remove-SafeTree([string]$Root) {
     [IO.Directory]::Delete($rootFull, $false)
 }
 
-function Wait-ForProcessExit([int]$ProcessId, [string]$Description) {
+function Wait-ForProcessExit([int]$ProcessId, [string]$Description, [object]$Dialog) {
     if ($ProcessId -le 0) { return }
-    Wait-Process -Id $ProcessId -Timeout 30 -ErrorAction SilentlyContinue
-    if ($null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
-        throw "$Description did not exit before the uninstall timeout."
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ($null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "$Description did not exit before the uninstall timeout."
+        }
+        Invoke-UninstallProgressEvents $Dialog
+        Start-Sleep -Milliseconds 100
     }
 }
 
@@ -158,7 +162,7 @@ function New-UninstallProgressDialog {
 
         $form = New-Object System.Windows.Forms.Form
         $form.Text = "Code-Codex uninstall"
-        $form.ClientSize = New-Object System.Drawing.Size(420, 116)
+        $form.ClientSize = New-Object System.Drawing.Size(460, 220)
         $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
         $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
         $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -167,23 +171,71 @@ function New-UninstallProgressDialog {
         $form.ControlBox = $false
         $form.ShowInTaskbar = $true
         $form.TopMost = $true
+        $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+        $form.BackColor = [System.Drawing.Color]::White
+
+        $versionPath = Join-Path $InstallFullPath 'current-version'
+        try {
+            $versionItem = Get-ExistingItem $versionPath
+            if ($versionItem -is [IO.FileInfo] -and -not (Test-ReparsePoint $versionItem)) {
+                $installedVersion = [IO.File]::ReadAllText($versionPath).Trim()
+                if ($installedVersion -match '^[0-9]+\.[0-9]+\.[0-9]+$' -and $installedVersion.Length -le 32) {
+                    $form.Text = 'Code-Codex uninstall v' + $installedVersion
+                }
+            }
+        }
+        catch {} # An unreadable version marker must not block removal.
+
+        $brandIcon = New-Object System.Windows.Forms.PictureBox
+        $brandIcon.Location = New-Object System.Drawing.Point(188, 14)
+        $brandIcon.Size = New-Object System.Drawing.Size(84, 84)
+        $brandIcon.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom
+        $brandIcon.BackColor = [System.Drawing.Color]::White
+        $brandIconPath = Join-Path $InstallFullPath 'CodeCodex.Brand.png'
+        $brandIconItem = Get-ExistingItem $brandIconPath
+        if ($brandIconItem -is [IO.FileInfo] -and -not (Test-ReparsePoint $brandIconItem)) {
+            try {
+                $sourceImage = [System.Drawing.Image]::FromFile($brandIconPath)
+                try { $brandIcon.Image = [System.Drawing.Bitmap]::new($sourceImage) }
+                finally { $sourceImage.Dispose() }
+            }
+            catch {}
+        }
+        $uninstallerPath = Join-Path $InstallFullPath 'Uninstall-CodeCodex.exe'
+        $uninstallerItem = Get-ExistingItem $uninstallerPath
+        if ($uninstallerItem -is [IO.FileInfo] -and -not (Test-ReparsePoint $uninstallerItem)) {
+            try {
+                $form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($uninstallerPath)
+                if ($null -eq $brandIcon.Image) {
+                    $brandIcon.Image = $form.Icon.ToBitmap()
+                }
+            }
+            catch {}
+        }
 
         $label = New-Object System.Windows.Forms.Label
         $label.AutoSize = $false
-        $label.Location = New-Object System.Drawing.Point(24, 20)
-        $label.Size = New-Object System.Drawing.Size(372, 24)
-        $label.Text = "Removing Code-Codex..."
+        $label.Location = New-Object System.Drawing.Point(20, 113)
+        $label.Size = New-Object System.Drawing.Size(420, 24)
+        $label.Text = "Preparing Code-Codex removal..."
         $label.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 
+        $detail = New-Object System.Windows.Forms.Label
+        $detail.Location = New-Object System.Drawing.Point(20, 140)
+        $detail.Size = New-Object System.Drawing.Size(420, 28)
+        $detail.ForeColor = [System.Drawing.SystemColors]::GrayText
+        $detail.AutoEllipsis = $true
+
         $progressBar = New-Object System.Windows.Forms.ProgressBar
-        $progressBar.Location = New-Object System.Drawing.Point(24, 58)
-        $progressBar.Size = New-Object System.Drawing.Size(372, 22)
+        $progressBar.Location = New-Object System.Drawing.Point(20, 177)
+        $progressBar.Size = New-Object System.Drawing.Size(420, 22)
         $progressBar.Minimum = 0
         $progressBar.Maximum = 100
-        $progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
-        $progressBar.MarqueeAnimationSpeed = 30
+        $progressBar.Value = 55
 
+        $form.Controls.Add($brandIcon)
         $form.Controls.Add($label)
+        $form.Controls.Add($detail)
         $form.Controls.Add($progressBar)
         $form.Show()
         $form.Activate()
@@ -192,7 +244,9 @@ function New-UninstallProgressDialog {
 
         return [PSCustomObject]@{
             Form = $form
+            BrandIcon = $brandIcon
             Label = $label
+            Detail = $detail
             ProgressBar = $progressBar
         }
     }
@@ -203,6 +257,32 @@ function New-UninstallProgressDialog {
         }
         return $null
     }
+}
+
+function Set-UninstallProgress(
+    [object]$Dialog,
+    [int]$Value,
+    [string]$Stage,
+    [string]$Detail,
+    [switch]$Indeterminate
+) {
+    if ($null -eq $Dialog) { return }
+    try {
+        if ($Dialog.Form.IsDisposed) { return }
+        $Dialog.Label.Text = $Stage
+        $Dialog.Detail.Text = $Detail
+        if ($Indeterminate) {
+            $Dialog.ProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
+            $Dialog.ProgressBar.MarqueeAnimationSpeed = 30
+        }
+        else {
+            $Dialog.ProgressBar.MarqueeAnimationSpeed = 0
+            $Dialog.ProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+            $Dialog.ProgressBar.Value = [Math]::Max(0, [Math]::Min(100, $Value))
+        }
+        Invoke-UninstallProgressEvents $Dialog
+    }
+    catch {}
 }
 
 function Invoke-UninstallProgressEvents([object]$Dialog) {
@@ -217,19 +297,7 @@ function Invoke-UninstallProgressEvents([object]$Dialog) {
 }
 
 function Complete-UninstallProgress([object]$Dialog) {
-    if ($null -eq $Dialog) { return }
-    try {
-        if (-not $Dialog.Form.IsDisposed) {
-            $Dialog.Label.Text = "Code-Codex was removed successfully."
-            $Dialog.ProgressBar.MarqueeAnimationSpeed = 0
-            $Dialog.ProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
-            $Dialog.ProgressBar.Value = 100
-            $Dialog.Form.Activate()
-            $Dialog.Form.BringToFront()
-            [System.Windows.Forms.Application]::DoEvents()
-        }
-    }
-    catch {}
+    Set-UninstallProgress $Dialog 100 "Uninstallation complete" "Code-Codex was removed successfully."
 }
 
 function Close-UninstallProgress([object]$Dialog) {
@@ -701,11 +769,13 @@ try {
         }
     }
 
-    Wait-ForProcessExit $ParentPid "The uninstall script"
-    Wait-ForProcessExit $LauncherPid "The installed uninstaller"
     $progressDialog = New-UninstallProgressDialog
+    Set-UninstallProgress $progressDialog 56 "Waiting for uninstaller" "Allowing the previous removal step to close."
+    Wait-ForProcessExit $ParentPid "The uninstall script" $progressDialog
+    Wait-ForProcessExit $LauncherPid "The installed uninstaller" $progressDialog
 
     if (-not [string]::IsNullOrWhiteSpace($MsiProductCode)) {
+        Set-UninstallProgress $progressDialog 60 "Starting Windows Installer" "Checking the registered Code-Codex package."
         $msiProductCodePattern = '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$'
         if ($MsiProductCode -notmatch $msiProductCodePattern) {
             throw "Invalid Windows Installer product code."
@@ -723,6 +793,7 @@ try {
             -FilePath $msiexec `
             -ArgumentList @("/x", $MsiProductCode, "/qn") `
             -PassThru
+        Set-UninstallProgress $progressDialog 60 "Removing Windows Installer package" "Windows is uninstalling the registered Code-Codex files." -Indeterminate
         while (-not $msiProcess.WaitForExit(100)) {
             Invoke-UninstallProgressEvents $progressDialog
         }
@@ -731,13 +802,21 @@ try {
         if ([int]$msiProcess.ExitCode -notin @(0, 1641, 3010)) {
             throw "Windows Installer could not remove Code-Codex (exit code $($msiProcess.ExitCode))."
         }
+        Set-UninstallProgress $progressDialog 94 "Cleaning desktop shortcuts" "Removing shortcuts owned by Code-Codex."
         Remove-VerifiedCodeCodexDesktopShortcut
     }
     else {
+        Set-UninstallProgress $progressDialog 60 "Cleaning desktop shortcuts" "Removing shortcuts owned by Code-Codex."
         Remove-VerifiedCodeCodexDesktopShortcut
         $removed = $null -eq (Get-ExistingItem $InstallFullPath)
         $lastFailure = "Installed files may still be in use."
         for ($attempt = 1; -not $removed -and $attempt -le 30; $attempt++) {
+            if ($attempt -eq 1) {
+                Set-UninstallProgress $progressDialog 70 "Removing application files" "Deleting the installed Code-Codex versions and support files."
+            }
+            else {
+                Set-UninstallProgress $progressDialog 70 "Waiting for files to unlock" "Retrying file removal (attempt $attempt of 30)."
+            }
             try {
                 Remove-SafeTree $InstallFullPath
             }
@@ -757,6 +836,7 @@ try {
         }
 
         # Keep the recovery entry until installed files are confirmed gone.
+        Set-UninstallProgress $progressDialog 94 "Removing Windows registration" "Deleting the Code-Codex installed-app entry."
         $portableUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex"
         if (Test-Path -LiteralPath $portableUninstallKey) {
             Remove-Item `

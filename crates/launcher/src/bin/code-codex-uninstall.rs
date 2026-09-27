@@ -25,17 +25,27 @@ const EMBEDDED_UNINSTALL_SCRIPT: &str = include_str!(concat!(
 
 fn main() -> ExitCode {
     let arguments: Vec<_> = env::args_os().skip(1).collect();
-    let mut progress = gui_support::ProgressDialog::open(TITLE, "Preparing uninstall...", 5);
+    let version = installed_version();
+    let mut progress =
+        gui_support::ProgressDialog::open(TITLE, "Preparing uninstall...", 5, &version);
     let result = run_uninstall(&arguments, &mut progress);
     match result {
         Ok(output) if output.status.success() => {
             if stdout_indicates_delegation(&output.stdout) {
-                progress.set_progress(55, "Continuing uninstall...");
+                progress.set_progress_detail(
+                    55,
+                    "Finishing removal",
+                    "A separate window will show file removal progress.",
+                );
                 thread::sleep(Duration::from_millis(250));
                 progress.close();
                 return ExitCode::SUCCESS;
             }
-            progress.set_progress(100, "Uninstallation complete");
+            progress.set_progress_detail(
+                100,
+                "Uninstallation complete",
+                "Code-Codex has been removed.",
+            );
             thread::sleep(Duration::from_millis(650));
             progress.close();
             gui_support::show_dialog(TITLE, "Code-Codex was uninstalled successfully.", false);
@@ -69,20 +79,51 @@ fn main() -> ExitCode {
     }
 }
 
+fn installed_version() -> String {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .and_then(|local_app_data| {
+            fs::read_to_string(
+                local_app_data
+                    .join("Programs")
+                    .join("Code-Codex")
+                    .join("current-version"),
+            )
+            .ok()
+        })
+        .map(|value| value.trim().to_owned())
+        .filter(|value| {
+            value.len() <= 32
+                && value.split('.').count() == 3
+                && value
+                    .split('.')
+                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned())
+}
+
 fn run_uninstall(
     arguments: &[OsString],
     progress: &mut gui_support::ProgressDialog,
 ) -> Result<Output, String> {
-    progress.set_progress(15, "Checking the installed files...");
-    progress.set_marquee("Preparing Code-Codex removal...");
-    if let Some(output) = script_wrapper::run_sibling_script_captured(
+    progress.set_progress_detail(
+        15,
+        "Checking installation",
+        "Verifying the installed files and running processes.",
+    );
+    if let Some(output) = script_wrapper::run_sibling_script_with_progress(
         UNINSTALL_SCRIPT_NAME,
         arguments.iter().cloned(),
+        progress,
     )? {
         return Ok(output);
     }
 
-    progress.set_progress(25, "Preparing the uninstaller...");
+    progress.set_progress_detail(
+        25,
+        "Preparing uninstaller",
+        "Loading the bundled removal script.",
+    );
     let script = embedded_script_path()?;
     fs::write(&script, EMBEDDED_UNINSTALL_SCRIPT).map_err(|error| {
         format!(
@@ -90,8 +131,8 @@ fn run_uninstall(
             script.display()
         )
     })?;
-    progress.set_marquee("Preparing Code-Codex removal...");
-    let result = script_wrapper::run_script_captured(&script, arguments.iter().cloned());
+    let result =
+        script_wrapper::run_script_with_progress(&script, arguments.iter().cloned(), progress);
     let _ = fs::remove_file(&script);
     result
 }

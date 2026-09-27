@@ -31,8 +31,8 @@ use discovery::{
 use futures_util::{SinkExt, StreamExt};
 use process_guard::{
     CodexProcessGuard, PortReservation, ProcessGuardError, discover_listener_port,
-    is_executable_running, verify_listener_executable, verify_listener_owner,
-    verify_process_identity,
+    is_executable_running, launched_process_state, verify_listener_executable,
+    verify_listener_owner, verify_process_identity,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -165,6 +165,10 @@ enum AppError {
     Resolver(#[from] ResolverError),
     #[error(transparent)]
     Cdp(#[from] CdpError),
+    #[error("Codex debugging endpoint did not become available: {0}")]
+    CdpStartup(String),
+    #[error("no compatible Codex renderer target was found: {0}")]
+    CdpTarget(String),
     #[error(transparent)]
     ProcessGuard(#[from] ProcessGuardError),
     #[error("this Codex Desktop version is not in the compatibility matrix")]
@@ -194,6 +198,8 @@ impl AppError {
             | Self::Resolver(_)
             | Self::Launch => exit_codes::STARTUP_FAILURE,
             Self::Cdp(_)
+            | Self::CdpStartup(_)
+            | Self::CdpTarget(_)
             | Self::ProcessGuard(_)
             | Self::InvalidLaunchArgument
             | Self::UnverifiedAttach
@@ -354,6 +360,13 @@ impl AppError {
                 reason,
                 "Restart Codex Desktop from the Code-Codex shortcut and try again.",
             ),
+            Self::CdpStartup(details) => StartupDiagnostic::new(
+                "CC-START-CDP-001",
+                "Connecting to Codex Desktop",
+                "The Codex debugging endpoint was unavailable",
+                details.clone(),
+                "Close Codex Desktop completely and start Code-Codex again. If this repeats, send the full diagnostic report to the developer.",
+            ),
             Self::Cdp(CdpError::NoCompatibleTarget | CdpError::IncompatibleRenderer) => {
                 StartupDiagnostic::new(
                     "CC-START-CDP-002",
@@ -363,6 +376,13 @@ impl AppError {
                     "Update Code-Codex or use a supported Codex Desktop version.",
                 )
             }
+            Self::CdpTarget(details) => StartupDiagnostic::new(
+                "CC-START-CDP-002",
+                "Finding the Codex window",
+                "A compatible Codex window was not found",
+                details.clone(),
+                "Send the full diagnostic report to the developer so the actual Codex target URL and layout can be checked.",
+            ),
             Self::Cdp(CdpError::AmbiguousRenderer) => StartupDiagnostic::new(
                 "CC-START-CDP-003",
                 "Selecting the Codex window",
@@ -506,10 +526,14 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         return Err(AppError::AlreadyRunning);
     }
 
-    let startup_enabled = SettingsStore::for_current_user()
-        .ok()
-        .and_then(|store| store.load().ok())
-        .is_some_and(|settings| settings.startup_transition_enabled);
+    // The unfinished transition is retained for later work, but must not run
+    // while its market entry is hidden (including for existing enabled users).
+    const STARTUP_TRANSITION_AVAILABLE: bool = false;
+    let startup_enabled = STARTUP_TRANSITION_AVAILABLE
+        && SettingsStore::for_current_user()
+            .ok()
+            .and_then(|store| store.load().ok())
+            .is_some_and(|settings| settings.startup_transition_enabled);
     let splash = if startup_enabled {
         StartupSplash::open()
     } else {
@@ -598,7 +622,7 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
                 .await?;
             tracing::info!(event = "electron_main_transparency_initialized");
         }
-        wait_for_endpoint(endpoint, Duration::from_secs(30)).await?;
+        wait_for_launched_endpoint(endpoint, launched_pid, Duration::from_secs(30)).await?;
         tracing::info!(event = "codex_renderer_ready", resolver_start = "deferred");
         let splash_active = if splash_available {
             let deadline = Instant::now() + Duration::from_millis(800);
@@ -669,6 +693,12 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     .await;
     splash_stop.store(true, Ordering::Release);
     let _ = splash_task.await;
+    let result = match result {
+        Err(AppError::Cdp(CdpError::NoCompatibleTarget | CdpError::IncompatibleRenderer)) => Err(
+            AppError::CdpTarget(target_discovery_snapshot(endpoint, launched_pid).await),
+        ),
+        other => other,
+    };
     child.terminate().await;
     result
 }
@@ -962,6 +992,94 @@ async fn wait_for_endpoint(endpoint: CdpEndpoint, timeout: Duration) -> Result<(
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+}
+
+/// Preserve the observations from this exact launch. A separate `diagnose`
+/// process cannot know the randomly selected port after the launcher exits.
+async fn wait_for_launched_endpoint(
+    endpoint: CdpEndpoint,
+    launched_pid: u32,
+    timeout: Duration,
+) -> Result<(), AppError> {
+    let discovery = TargetDiscovery::new()?;
+    let started = Instant::now();
+    let mut attempts = 0_u32;
+    loop {
+        attempts = attempts.saturating_add(1);
+        let last_error = match discovery.version_detailed(endpoint).await {
+            Ok(version) if version.is_supported() => return Ok(()),
+            Ok(_) => return Err(CdpError::UnsupportedProtocol.into()),
+            Err(error) => error.to_string(),
+        };
+        if started.elapsed() >= timeout {
+            let tcp_state = match tokio::time::timeout(
+                Duration::from_millis(500),
+                TcpStream::connect(("127.0.0.1", endpoint.port())),
+            )
+            .await
+            {
+                Ok(Ok(_)) => "TCP listener accepted a loopback connection".to_owned(),
+                Ok(Err(error)) => format!("TCP connection failed: {error}"),
+                Err(_) => "TCP connection timed out after 500 ms".to_owned(),
+            };
+            let process_state = launched_process_state(launched_pid);
+            return Err(AppError::CdpStartup(format!(
+                "Expected endpoint: http://127.0.0.1:{}/json/version\nWaited: {} ms; requests: {}\nLast CDP result: {}\nFinal loopback probe: {}\nLaunched Codex process: {}",
+                endpoint.port(),
+                started.elapsed().as_millis(),
+                attempts,
+                last_error,
+                tcp_state,
+                process_state,
+            )));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn target_discovery_snapshot(endpoint: CdpEndpoint, launched_pid: u32) -> String {
+    let Ok(discovery) = TargetDiscovery::new() else {
+        return format!("Codex PID {launched_pid}; CDP target discovery could not be initialized");
+    };
+    match discovery.targets(endpoint).await {
+        Ok(targets) => {
+            let page_count = targets
+                .iter()
+                .filter(|target| target.target_type == "page")
+                .count();
+            let pages = targets
+                .iter()
+                .filter(|target| target.target_type == "page")
+                .take(12)
+                .map(|target| safe_target_location(&target.url))
+                .collect::<Vec<_>>();
+            format!(
+                "Codex PID: {launched_pid}\nCDP port: {}\nTargets: {} total, {} pages\nPage locations (query and title removed): {}",
+                endpoint.port(),
+                targets.len(),
+                page_count,
+                if pages.is_empty() {
+                    "none".to_owned()
+                } else {
+                    pages.join(", ")
+                },
+            )
+        }
+        Err(error) => format!(
+            "Codex PID: {launched_pid}\nCDP port: {}\nThe endpoint became unavailable while collecting target locations: {error}",
+            endpoint.port(),
+        ),
+    }
+}
+
+fn safe_target_location(raw: &str) -> String {
+    let Ok(url) = Url::parse(raw) else {
+        return "invalid URL".to_owned();
+    };
+    if url.scheme() == "app" && url.host_str() == Some("-") {
+        return format!("app://-{}", url.path());
+    }
+    format!("{}: (non-app target)", url.scheme())
 }
 
 fn validate_extra_arguments(arguments: &[String]) -> Result<(), AppError> {
@@ -1502,6 +1620,39 @@ async fn diagnose_cdp(endpoint: CdpEndpoint) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn launched_endpoint_failure_keeps_port_and_process_evidence() {
+        let reservation = PortReservation::reserve().expect("loopback port");
+        let port = reservation.port().expect("reserved port");
+        drop(reservation);
+
+        let error = wait_for_launched_endpoint(
+            CdpEndpoint::loopback(port),
+            std::process::id(),
+            Duration::from_millis(50),
+        )
+        .await
+        .expect_err("endpoint has no listener");
+        let AppError::CdpStartup(details) = error else {
+            panic!("expected detailed CDP startup failure");
+        };
+        assert!(details.contains(&format!("127.0.0.1:{port}/json/version")));
+        assert!(details.contains("Final loopback probe:"));
+        assert!(details.contains(&format!("PID {}", std::process::id())));
+    }
+
+    #[test]
+    fn target_snapshot_location_excludes_query_and_external_host() {
+        assert_eq!(
+            safe_target_location("app://-/index.html?initialRoute=%2Fprivate"),
+            "app://-/index.html"
+        );
+        assert_eq!(
+            safe_target_location("https://example.com/private?token=secret"),
+            "https: (non-app target)"
+        );
+    }
 
     #[test]
     fn startup_defaults_to_stable_channel() {

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.3.14",
+    [string]$Version = "0.3.23",
     [string]$BinaryPath,
     [string]$GuiBinaryPath,
     [string]$ShimBinaryPath,
@@ -92,6 +92,7 @@ $settingsCleanupProject = Join-Path $RepoRoot "installer\SettingsCleanupCA.vcxpr
 $settingsCleanupSource = Join-Path $RepoRoot "installer\SettingsCleanupCA.cpp"
 $uninstallScriptPath = Join-Path $RepoRoot "installer\Uninstall-CodeCodex.ps1"
 $finalizerScriptPath = Join-Path $RepoRoot "installer\Finalize-Uninstall.ps1"
+$brandIconPath = Join-Path $RepoRoot "crates\launcher\resources\code-codex.png"
 
 foreach ($requiredPath in @(
     $BinaryPath,
@@ -109,7 +110,8 @@ foreach ($requiredPath in @(
     $settingsCleanupProject,
     $settingsCleanupSource,
     $uninstallScriptPath,
-    $finalizerScriptPath
+    $finalizerScriptPath,
+    $brandIconPath
 )) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required MSI input was not found: $requiredPath"
@@ -204,6 +206,7 @@ try {
         "-d", "UninstallBinaryPath=$UninstallBinaryPath",
         "-d", "UninstallScriptPath=$uninstallScriptPath",
         "-d", "FinalizerScriptPath=$finalizerScriptPath",
+        "-d", "BrandIconPath=$brandIconPath",
         "-d", "CurrentVersionPath=$currentVersionPath",
         "-d", "InstallTypePath=$installTypePath",
         "-d", "CommandLineComponentGuid=$commandLineComponentGuid",

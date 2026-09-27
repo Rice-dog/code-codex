@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.3.14",
+    [string]$Version = "0.3.23",
     [string]$WixPath
 )
 
@@ -73,6 +73,8 @@ Copy-Item -LiteralPath $shortcutBinary -Destination $StageFullPath
 Copy-Item -LiteralPath $uninstallBinary -Destination $StageFullPath
 Copy-Item -LiteralPath $installProgram -Destination $StageFullPath
 Copy-Item -LiteralPath $uninstallProgram -Destination $StageFullPath
+Copy-Item -LiteralPath (Join-Path $RepoRoot "crates\launcher\resources\code-codex.png") `
+    -Destination (Join-Path $StageFullPath "CodeCodex.Brand.png")
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.md") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.en.md") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination $StageFullPath
