@@ -2,8 +2,9 @@
 
 This folder contains ready-made downloadable packages.
 
-## v0.3.40 — 当前本地构建 / Current local build
+## v0.3.46 — 当前本地构建 / Current local build
 
+- 新版 Codex 布局的对话与文件预览标签统一为 144px 固定宽度、42px 高度和 13px 字体；文件名与文件大小信息栏紧贴标签栏，不再留 10px 空隙。选中标签显示灰色，未选中标签和剩余空白区域显示白色。旧版布局保持原样。
 - 修复 Windows 桌面缓存旧版 Code-Codex 图标的问题：官方白色 Codex 图标使用新的图标文件路径，并在替换快捷方式后刷新 Shell 图标缓存。
 - 桌面快捷方式恢复使用官方 Codex 安装包中的白色图标；快捷方式仍启动 Code-Codex。安装和升级时会重新生成多尺寸图标。
 - 根据 Codex 26.924.2738.0 的实际界面结构，修复启动时 `CC-START-CDP-014` 和文件树不显示的问题；文件树位于任务选择栏与对话区域之间。旧版本仍使用原有布局路径。
@@ -11,6 +12,7 @@ This folder contains ready-made downloadable packages.
 - 打开文件预览时，首个标签显示当前对话名称，并隐藏重复的原生标题；标签位置与新版 Codex 标题栏对齐，关闭预览后恢复原生标题。旧版布局保持原样。
 - 本地提供 setup EXE、MSI、ZIP、独立卸载程序和 `SHA256SUMS.txt`。此版本尚未发布到 GitHub。
 
+- Conversation and file-preview tabs in the new Codex layout share a 144px fixed width, 42px height, and 13px text. The filename and file-size metadata bar now meets the tab strip without the 10px gap. The selected tab is gray; unselected tabs and remaining empty space are white. The legacy layout is unchanged.
 - Fixes Windows continuing to show the old Code-Codex shortcut icon from its cache. The official white Codex icon now has a new file path, and setup refreshes the Shell icon cache after replacing the shortcut.
 - The desktop shortcut uses the white icon from the official Codex package again while still launching Code-Codex. Installation and upgrades regenerate the multi-resolution icon.
 - Uses the actual Codex 26.924.2738.0 interface structure to fix `CC-START-CDP-014` and restore the file tree between the task sidebar and conversation. Earlier versions retain their existing layout path.

@@ -3291,11 +3291,15 @@ const mainPreviewStyles = String.raw`
   .tab-strip::-webkit-scrollbar { display: none; }
 
   :host([data-clipped-layout="true"]) .surface {
-    grid-template-rows: var(--cle-native-header-height, 52px) minmax(0, 1fr);
+    --cle-preview-header-height: 42px;
+    grid-template-rows: var(--cle-preview-header-height) minmax(0, 1fr);
   }
 
   :host([data-clipped-layout="true"]) .tab-strip {
-    height: var(--cle-native-header-height, 52px);
+    height: var(--cle-preview-header-height);
+    align-self: start;
+    width: calc(100% - 124px);
+    background: var(--cle-main-bg);
   }
 
   .tab-slot {
@@ -3326,16 +3330,33 @@ const mainPreviewStyles = String.raw`
   }
 
   .tab-slot.conversation { width: 142px; }
-  :host([data-clipped-layout="true"]) .tab-slot.conversation {
-    width: min(var(--cle-conversation-tab-width, 260px), 44%);
+  :host([data-clipped-layout="true"]) .tab-slot {
+    flex: 0 0 144px;
+    width: 144px;
+  }
+  :host([data-clipped-layout="true"]) .tab-slot.active,
+  :host([data-clipped-layout="true"]) .preview-tab[aria-selected="true"] {
+    background: var(--cle-main-bar);
   }
   :host([data-clipped-layout="true"]) .preview-tab {
-    height: calc(var(--cle-native-header-height, 52px) - 1px);
-    font-size: var(--cle-native-title-font-size, 16px);
+    height: 41px;
+    gap: 6px;
+    padding-inline: 10px;
+    font-size: 13px;
     line-height: var(--cle-native-title-line-height, 24px);
   }
   :host([data-clipped-layout="true"]) .tab-slot.conversation .preview-tab {
     padding-left: 17px;
+  }
+  :host([data-clipped-layout="true"]) .tab-icon {
+    width: 14px;
+    height: 14px;
+  }
+  :host([data-clipped-layout="true"]) .tab-close {
+    width: 22px;
+    height: 22px;
+    margin: 0 3px 0 -2px;
+    padding: 5px;
   }
   .tab-slot.file { width: clamp(150px, 19vw, 238px); }
   .tab-slot.file .preview-tab { padding-right: 5px; }
@@ -5571,6 +5592,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     conversationTab.setAttribute("aria-selected", String(this.#state.activePath === null));
     conversationTab.tabIndex = this.#rovingPath === null ? 0 : -1;
     conversationTab.dataset.tabKind = "conversation";
+    conversationTab.title = this.#conversationTitle;
     conversationTab.append(this.#staticIcon(CONVERSATION_ICON, "tab-icon"), this.#textSpan(this.#conversationTitle, "tab-label"));
     conversationSlot.append(conversationTab);
     fragment.append(conversationSlot);
@@ -11543,14 +11565,13 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
         const tab = this.#tabList.querySelector<HTMLButtonElement>('[data-tab-kind="conversation"]');
         const label = tab?.querySelector<HTMLElement>(".tab-label");
         if (label) label.textContent = titleText;
+        if (tab) tab.title = titleText;
       }
       const titleRect = title?.getBoundingClientRect();
       const headerRect = header?.getBoundingClientRect();
       if (titleRect && headerRect) {
-        this.style.setProperty("--cle-conversation-tab-width", `${Math.ceil(titleRect.width + 70)}px`);
         this.style.setProperty("--cle-native-header-height", `${headerRect.height}px`);
         const titleStyle = getComputedStyle(title!);
-        this.style.setProperty("--cle-native-title-font-size", titleStyle.fontSize);
         this.style.setProperty("--cle-native-title-line-height", titleStyle.lineHeight);
         desired.add(title!);
       }
