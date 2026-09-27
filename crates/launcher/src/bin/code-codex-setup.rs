@@ -57,11 +57,19 @@ fn main() -> ExitCode {
             );
             thread::sleep(Duration::from_millis(650));
             progress.close();
-            gui_support::show_dialog(
-                TITLE,
-                "Code-Codex was installed successfully. Restart Codex to use Code-Codex.",
-                false,
-            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let shortcut = stdout
+                .lines()
+                .find_map(|line| line.strip_prefix("Code-Codex managed shortcut: "))
+                .map(str::trim)
+                .filter(|path| !path.is_empty());
+            let message = match shortcut {
+                Some(path) => format!(
+                    "Code-Codex was installed successfully.\n\nUse this desktop shortcut to start Codex with Code-Codex:\n{path}"
+                ),
+                None => "Code-Codex was installed successfully. Open the Code-Codex desktop shortcut to start Codex with Code-Codex.".to_owned(),
+            };
+            gui_support::show_dialog(TITLE, &message, false);
             ExitCode::SUCCESS
         }
         Ok(output) => {

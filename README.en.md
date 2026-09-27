@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.3.26"><img alt="Version" src="https://img.shields.io/badge/version-0.3.26-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases/tag/v0.3.31"><img alt="Version" src="https://img.shields.io/badge/version-0.3.31-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,23 +38,26 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.3.26-x64-setup.exe`
-- Alternative: `CodeCodex-0.3.26-x64.msi`
-- Portable package: `CodeCodex-0.3.26-x64.zip`
+- Recommended: `CodeCodex-0.3.31-x64-setup.exe`
+- Alternative: `CodeCodex-0.3.31-x64.msi`
+- Portable package: `CodeCodex-0.3.31-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.3.26-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.3.31-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
 
-If the official Codex/ChatGPT Desktop app is installed, the installer checks
-for a desktop `Codex` shortcut first and a desktop `ChatGPT` shortcut second.
-Only when neither shortcut exists does it create a new managed `Code-Codex`
-desktop shortcut.
+When the official Codex Desktop app is installed, setup checks both the user's
+desktop and the shared Public Desktop. It prefers a shortcut to the official
+Codex app, and can also adopt a user-created `Codex` or `ChatGPT` shortcut, or
+a renamed shortcut pointing to `Codex.exe` or `ChatGPT.exe`. Setup backs up the
+original shortcut for uninstall and creates a separate `Code-Codex` desktop
+shortcut only when none of these exists. The completion dialog shows the
+shortcut path it configured.
 
 ## Install Option 2: Build EXEs From Source
 
@@ -86,7 +89,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.3.26
+./scripts/package.ps1 -Version 0.3.31
 ```
 
 The generated packages are written to `releases/`.
@@ -100,10 +103,10 @@ Every install path includes a source-built uninstaller program:
 - Source builds place `Uninstall-CodeCodex.exe`,
   `Uninstall-CodeCodex.ps1`, and `Finalize-Uninstall.ps1` in `target/release/`.
 
-Run `Uninstall-CodeCodex.exe` to restore the original Codex or ChatGPT shortcut
-and remove Code-Codex files. If installation created a standalone `Code-Codex`
-desktop shortcut because both official shortcuts were missing, uninstall removes
-that shortcut. MSI installs can also be removed from Windows **Installed apps**.
+Run `Uninstall-CodeCodex.exe` to restore the original desktop shortcut and
+remove Code-Codex files. If installation created a standalone `Code-Codex`
+desktop shortcut because no suitable shortcut existed, uninstall removes it.
+MSI installs can also be removed from Windows **Installed apps**.
 
 ## Features
 

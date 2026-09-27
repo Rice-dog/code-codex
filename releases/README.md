@@ -2,6 +2,16 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.31 — 桌面快捷方式接管 / Desktop Shortcut Adoption
+
+- 安装器会复用当前用户或公共桌面上的 Codex/ChatGPT 快捷方式，包括用户自行创建或重命名的快捷方式；只有找不到可接管的快捷方式时才新建 Code-Codex 图标。
+- 被接管的快捷方式使用 Code-Codex 图标；安装完成时显示实际快捷方式路径，卸载时恢复原始快捷方式。升级迁移和安装回滚也保留原始快捷方式。
+- 提供 setup EXE、MSI、ZIP、独立卸载程序及 SHA-256 校验文件。
+
+- Setup reuses a Codex/ChatGPT shortcut on the user's or shared desktop, including user-created or renamed shortcuts; it creates a separate Code-Codex icon only when none is suitable.
+- The managed shortcut uses the Code-Codex icon. Setup identifies its path, and uninstall restores the original shortcut; upgrade rollback also preserves it.
+- Includes the setup EXE, MSI, ZIP, standalone uninstaller, and SHA-256 checksums.
+
 ## v0.3.26 — 启动错误分类与诊断 / Startup Error Classification and Diagnostics
 
 - 将不同的 CDP 连接、窗口识别、进程校验、Codex 启动及工作区错误分配到更具体的支持代码，避免多种原因共用一个代码。

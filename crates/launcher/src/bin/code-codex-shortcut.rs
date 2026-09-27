@@ -21,11 +21,15 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[cfg(windows)]
+use std::os::windows::ffi::OsStrExt as _;
+#[cfg(windows)]
 use std::os::windows::fs::MetadataExt as _;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt as _;
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+#[cfg(windows)]
+use windows_sys::Win32::UI::Shell::{SHCNE_UPDATEITEM, SHCNF_FLUSH, SHCNF_PATHW, SHChangeNotify};
 
 const CODEX_PACKAGE_NAME: &str = "OpenAI.Codex";
 const CODEX_PACKAGE_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
@@ -166,6 +170,7 @@ enum IntegrationError {
 struct IntegrationPaths {
     install_root: PathBuf,
     desktop: PathBuf,
+    public_desktop: Option<PathBuf>,
     start_menu: Option<PathBuf>,
     shortcut: PathBuf,
     chatgpt_shortcut: PathBuf,
@@ -374,6 +379,13 @@ impl IntegrationPaths {
             Some(path) => canonical_safe_directory(path)?,
             None => canonical_safe_directory(&resolve_desktop()?)?,
         };
+        let public_desktop = if desktop_override.is_some() {
+            None
+        } else {
+            resolve_public_desktop()
+                .and_then(|path| canonical_safe_directory(&path).ok())
+                .filter(|path| !paths_equal(path, &desktop))
+        };
         let start_menu = match start_menu_override {
             Some(path) => Some(canonical_safe_directory(path)?),
             None => resolve_start_menu().and_then(|path| canonical_safe_directory(&path).ok()),
@@ -391,6 +403,7 @@ impl IntegrationPaths {
             install_rollback: state_directory.join(INSTALL_ROLLBACK_NAME),
             install_root,
             desktop,
+            public_desktop,
             start_menu,
             state_directory,
         })
@@ -404,12 +417,57 @@ enum OfficialShortcutProbe {
     Missing,
 }
 
-fn official_shortcut_candidates(paths: &IntegrationPaths) -> [&Path; 2] {
-    [&paths.shortcut, &paths.chatgpt_shortcut]
+fn official_shortcut_candidates(
+    paths: &IntegrationPaths,
+) -> Result<Vec<PathBuf>, IntegrationError> {
+    let mut candidates = vec![paths.shortcut.clone(), paths.chatgpt_shortcut.clone()];
+    if let Some(public) = paths.public_desktop.as_ref() {
+        candidates.push(public.join(SHORTCUT_NAME));
+        candidates.push(public.join(CHATGPT_SHORTCUT_NAME));
+    }
+    let mut custom = Vec::new();
+    for desktop in std::iter::once(&paths.desktop).chain(paths.public_desktop.as_ref()) {
+        for entry in fs::read_dir(desktop).map_err(|source| io_error(desktop, source))? {
+            let entry = entry.map_err(|source| io_error(desktop, source))?;
+            let path = entry.path();
+            if is_desktop_shortcut_path(paths, &path) && !is_known_named_shortcut_path(paths, &path)
+            {
+                custom.push(path);
+            }
+        }
+    }
+    custom.sort_by_key(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_ascii_lowercase())
+    });
+    candidates.extend(custom);
+    Ok(candidates)
 }
 
-fn is_known_official_shortcut_path(paths: &IntegrationPaths, path: &Path) -> bool {
-    paths_equal(path, &paths.shortcut) || paths_equal(path, &paths.chatgpt_shortcut)
+fn is_known_named_shortcut_path(paths: &IntegrationPaths, path: &Path) -> bool {
+    is_desktop_shortcut_path(paths, path)
+        && path.file_name().is_some_and(|name| {
+            name.eq_ignore_ascii_case(SHORTCUT_NAME)
+                || name.eq_ignore_ascii_case(CHATGPT_SHORTCUT_NAME)
+        })
+}
+
+fn is_desktop_shortcut_path(paths: &IntegrationPaths, path: &Path) -> bool {
+    path.is_absolute()
+        && path.parent().is_some_and(|parent| {
+            paths_equal(parent, &paths.desktop)
+                || paths
+                    .public_desktop
+                    .as_ref()
+                    .is_some_and(|public| paths_equal(parent, public))
+        })
+        && path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
+        && path
+            .file_name()
+            .is_some_and(|name| !name.to_string_lossy().starts_with('.'))
+        && !paths_equal(path, &paths.fallback_shortcut)
 }
 
 fn known_official_shortcut_path(paths: &IntegrationPaths, path: &Path) -> Option<PathBuf> {
@@ -417,6 +475,8 @@ fn known_official_shortcut_path(paths: &IntegrationPaths, path: &Path) -> Option
         Some(paths.shortcut.clone())
     } else if paths_equal(path, &paths.chatgpt_shortcut) {
         Some(paths.chatgpt_shortcut.clone())
+    } else if is_desktop_shortcut_path(paths, path) {
+        Some(path.to_path_buf())
     } else {
         None
     }
@@ -427,18 +487,50 @@ fn probe_official_shortcuts(
     paths: &IntegrationPaths,
 ) -> Result<OfficialShortcutProbe, IntegrationError> {
     let mut first_conflict = None;
-    for shortcut in official_shortcut_candidates(paths) {
-        let Some(metadata) = inspect_optional(shell, shortcut)? else {
+    let mut named_user_shortcut = None;
+    let mut custom_user_shortcut = None;
+    for shortcut in official_shortcut_candidates(paths)? {
+        let metadata = if is_known_named_shortcut_path(paths, &shortcut) {
+            inspect_optional(shell, &shortcut)?
+        } else {
+            // An unrelated broken shortcut must not prevent Codex installation.
+            inspect_optional(shell, &shortcut).ok().flatten()
+        };
+        let Some(metadata) = metadata else {
             continue;
         };
+        if metadata.description == OWNER_MARKER {
+            if first_conflict.is_none() {
+                first_conflict = Some(shortcut);
+            }
+            continue;
+        }
         if is_official(&metadata) {
-            return Ok(OfficialShortcutProbe::Official {
-                path: shortcut.to_path_buf(),
-            });
+            return Ok(OfficialShortcutProbe::Official { path: shortcut });
+        }
+        if is_known_named_shortcut_path(paths, &shortcut) && has_launch_target(&metadata) {
+            if named_user_shortcut.is_none() {
+                named_user_shortcut = Some(shortcut);
+            }
+            continue;
+        }
+        if is_codex_executable_shortcut(&metadata) {
+            if custom_user_shortcut.is_none() {
+                custom_user_shortcut = Some(shortcut);
+            }
+            continue;
         }
         if first_conflict.is_none() {
-            first_conflict = Some(shortcut.to_path_buf());
+            if is_known_named_shortcut_path(paths, &shortcut) {
+                first_conflict = Some(shortcut);
+            }
         }
+    }
+    if let Some(path) = named_user_shortcut {
+        return Ok(OfficialShortcutProbe::Official { path });
+    }
+    if let Some(path) = custom_user_shortcut {
+        return Ok(OfficialShortcutProbe::Official { path });
     }
     Ok(first_conflict
         .map(|path| OfficialShortcutProbe::Conflict { path })
@@ -449,12 +541,12 @@ fn find_owned_official_shortcut(
     shell: &impl ShortcutShell,
     paths: &IntegrationPaths,
 ) -> Result<Option<PathBuf>, IntegrationError> {
-    for shortcut in official_shortcut_candidates(paths) {
-        if inspect_optional(shell, shortcut)?
+    for shortcut in official_shortcut_candidates(paths)? {
+        if inspect_optional(shell, &shortcut)?
             .as_ref()
             .is_some_and(|metadata| is_owned(metadata, paths))
         {
-            return Ok(Some(shortcut.to_path_buf()));
+            return Ok(Some(shortcut));
         }
     }
     Ok(None)
@@ -463,7 +555,10 @@ fn find_owned_official_shortcut(
 fn staged_shortcut_stem(paths: &IntegrationPaths, shortcut: &Path) -> &'static str {
     if paths_equal(shortcut, &paths.fallback_shortcut) {
         "Code-Codex"
-    } else if paths_equal(shortcut, &paths.chatgpt_shortcut) {
+    } else if shortcut
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case(CHATGPT_SHORTCUT_NAME))
+    {
         "ChatGPT"
     } else {
         "Codex"
@@ -672,6 +767,22 @@ fn rollback_install(
         backup_bytes.as_deref(),
     )?;
     let snapshot_shortcut = snapshot_shortcut_path(paths, &snapshot)?;
+    if let Some(current_manifest) = read_manifest_optional(&paths.manifest)? {
+        let current_shortcut = manifest_shortcut_path(paths, &current_manifest)?;
+        if !paths_equal(&current_shortcut, &snapshot_shortcut) {
+            // An upgrade can migrate the fallback link into a shortcut that
+            // appeared after prepare-install. Restore that user's original
+            // shortcut before reinstating the prior managed fallback state.
+            validate_manifest_backup_state(shell, paths, &current_manifest)?;
+            if !inspect_optional(shell, &current_shortcut)?
+                .as_ref()
+                .is_some_and(|metadata| is_owned(metadata, paths))
+            {
+                return Err(IntegrationError::ShortcutConflict);
+            }
+            restore(shell, paths)?;
+        }
+    }
     let current = inspect_optional(shell, &snapshot_shortcut)?;
     let already_restored =
         sha256_file(&snapshot_shortcut).ok().as_deref() == Some(snapshot.shortcut.sha256.as_str());
@@ -881,8 +992,15 @@ fn install_with_legacy_cleanup(
                         let previous_manifest = read_file(&paths.manifest)?;
                         let original_sha256 = sha256_file(&path)?;
                         create_original_backup(paths, &path)?;
-                        let migrated_manifest =
-                            new_manifest(paths, version, &icon, &path, original_sha256);
+                        let original = shell.inspect(&paths.backup)?;
+                        let migrated_manifest = new_manifest(
+                            paths,
+                            version,
+                            &icon,
+                            &path,
+                            original_sha256,
+                            original_target_identity(&original),
+                        );
                         migration_previous_manifest = Some(previous_manifest);
                         migration_manifest = Some(migrated_manifest.clone());
                         active_shortcut = path;
@@ -911,8 +1029,15 @@ fn install_with_legacy_cleanup(
                 active_shortcut = path;
                 let original_sha256 = sha256_file(&active_shortcut)?;
                 create_original_backup(paths, &active_shortcut)?;
-                let manifest =
-                    new_manifest(paths, version, &icon, &active_shortcut, original_sha256);
+                let original = shell.inspect(&paths.backup)?;
+                let manifest = new_manifest(
+                    paths,
+                    version,
+                    &icon,
+                    &active_shortcut,
+                    original_sha256,
+                    original_target_identity(&original),
+                );
                 fresh_manifest = Some(manifest.clone());
                 if let Err(error) = validate_manifest_backup_state(shell, paths, &manifest) {
                     let _ = cleanup_failed_fresh_install(shell, paths, &manifest);
@@ -938,6 +1063,7 @@ fn install_with_legacy_cleanup(
                     &icon,
                     &paths.fallback_shortcut,
                     MISSING_SHORTCUT_SHA256.to_owned(),
+                    CODEX_AUMID,
                 );
                 fresh_manifest = Some(manifest.clone());
                 if let Err(error) = write_manifest(shell, &paths.manifest, &manifest) {
@@ -950,7 +1076,9 @@ fn install_with_legacy_cleanup(
     };
 
     let staged = staged_path(
-        &paths.desktop,
+        active_shortcut.parent().ok_or_else(|| {
+            IntegrationError::InvalidState("desktop shortcut has no parent directory".to_owned())
+        })?,
         staged_shortcut_stem(paths, &active_shortcut),
         "lnk",
     );
@@ -958,10 +1086,7 @@ fn install_with_legacy_cleanup(
         let current = inspect_optional(shell, &active_shortcut)?;
         let replacement_guard = match current.as_ref() {
             Some(metadata) if is_owned(metadata, paths) => ReplacementGuard::Owned,
-            Some(metadata)
-                if is_known_official_shortcut_path(paths, &active_shortcut)
-                    && is_official(metadata) =>
-            {
+            Some(metadata) if is_adoptable_shortcut(paths, &active_shortcut, metadata) => {
                 ReplacementGuard::Official
             }
             None => ReplacementGuard::Missing,
@@ -1175,7 +1300,7 @@ fn is_exact_official_shortcut(
     matches!(
         inspect_optional(shell, shortcut),
         Ok(Some(metadata))
-            if is_official(&metadata)
+            if has_launch_target(&metadata)
                 && sha256_file(shortcut).ok().as_deref() == Some(expected_sha256)
     )
 }
@@ -1191,7 +1316,8 @@ fn verify_replacement_guard(
     let unchanged = match (guard, current.as_ref()) {
         (ReplacementGuard::Owned, Some(metadata)) => is_owned(metadata, paths),
         (ReplacementGuard::Official, Some(metadata)) => {
-            is_official(metadata) && sha256_file(shortcut).ok().as_deref() == Some(original_sha256)
+            is_adoptable_shortcut(paths, shortcut, metadata)
+                && sha256_file(shortcut).ok().as_deref() == Some(original_sha256)
         }
         (ReplacementGuard::Missing, None) => true,
         _ => false,
@@ -1242,7 +1368,15 @@ fn restore(
             if is_owned(metadata, paths)
                 && manifest_replaces_official_shortcut(paths, &manifest) =>
         {
-            let staged = staged_path(&paths.desktop, "Codex.restore", "lnk");
+            let staged = staged_path(
+                active_shortcut.parent().ok_or_else(|| {
+                    IntegrationError::InvalidState(
+                        "desktop shortcut has no parent directory".to_owned(),
+                    )
+                })?,
+                "Codex.restore",
+                "lnk",
+            );
             copy_file_exclusive(&paths.backup, &staged)?;
             if let Err(error) = shell.replace_file(&staged, &active_shortcut) {
                 remove_if_present(&staged);
@@ -1251,7 +1385,8 @@ fn restore(
             let restored = shell
                 .inspect(&active_shortcut)
                 .map_err(|_| IntegrationError::BackupCorrupt)?;
-            if !is_official(&restored) || sha256_file(&active_shortcut)? != manifest.original_sha256
+            if original_target_identity(&restored) != manifest.original_aumid
+                || sha256_file(&active_shortcut)? != manifest.original_sha256
             {
                 return Err(IntegrationError::BackupCorrupt);
             }
@@ -1263,7 +1398,12 @@ fn restore(
             remove_safe_regular_file_if_present(&active_shortcut)?;
             IntegrationState::Unconfigured
         }
-        Some(metadata) if is_official(metadata) => IntegrationState::Official,
+        Some(metadata)
+            if original_target_identity(metadata) == manifest.original_aumid
+                && sha256_file(&active_shortcut)? == manifest.original_sha256 =>
+        {
+            IntegrationState::Official
+        }
         None if manifest_uses_fallback_shortcut(paths, &manifest) => IntegrationState::Unconfigured,
         Some(_) | None => return Err(IntegrationError::ShortcutConflict),
     };
@@ -1357,7 +1497,7 @@ fn recover_manifest(
     let metadata = shell
         .inspect(&paths.backup)
         .map_err(|_| IntegrationError::BackupCorrupt)?;
-    if !is_official(&metadata) {
+    if !has_launch_target(&metadata) {
         return Err(IntegrationError::BackupCorrupt);
     }
     let shortcut_path = if let Some(path) = find_owned_official_shortcut(shell, paths)? {
@@ -1376,6 +1516,7 @@ fn recover_manifest(
         icon,
         &shortcut_path,
         sha256_file(&paths.backup)?,
+        original_target_identity(&metadata),
     );
     write_manifest(shell, &paths.manifest, &manifest)?;
     Ok(manifest)
@@ -1387,6 +1528,7 @@ fn new_manifest(
     icon: &Path,
     shortcut_path: &Path,
     original_sha256: String,
+    original_identity: &str,
 ) -> ShortcutManifest {
     ShortcutManifest {
         schema_version: MANIFEST_SCHEMA,
@@ -1395,7 +1537,7 @@ fn new_manifest(
         shortcut_path: shortcut_path.to_path_buf(),
         backup_path: paths.backup.clone(),
         original_sha256,
-        original_aumid: CODEX_AUMID.to_owned(),
+        original_aumid: original_identity.to_owned(),
         launcher_path: paths.launcher.clone(),
         icon_path: icon.to_path_buf(),
         owner_marker: OWNER_MARKER.to_owned(),
@@ -1408,11 +1550,11 @@ fn validate_manifest(
 ) -> Result<(), IntegrationError> {
     let icon_is_stable = manifest.icon_path.is_absolute()
         && path_starts_with(&manifest.icon_path, &paths.install_root);
-    let shortcut_is_managed = is_known_official_shortcut_path(paths, &manifest.shortcut_path)
+    let shortcut_is_managed = is_desktop_shortcut_path(paths, &manifest.shortcut_path)
         || paths_equal(&manifest.shortcut_path, &paths.fallback_shortcut);
     if manifest.schema_version != MANIFEST_SCHEMA
         || manifest.owner != MANIFEST_OWNER
-        || manifest.original_aumid != CODEX_AUMID
+        || manifest.original_aumid.trim().is_empty()
         || manifest.owner_marker != OWNER_MARKER
         || !shortcut_is_managed
         || !paths_equal(&manifest.backup_path, &paths.backup)
@@ -1452,7 +1594,7 @@ fn manifest_replaces_official_shortcut(
     paths: &IntegrationPaths,
     manifest: &ShortcutManifest,
 ) -> bool {
-    is_known_official_shortcut_path(paths, &manifest.shortcut_path)
+    is_desktop_shortcut_path(paths, &manifest.shortcut_path)
 }
 
 fn manifest_uses_fallback_shortcut(paths: &IntegrationPaths, manifest: &ShortcutManifest) -> bool {
@@ -1488,7 +1630,9 @@ fn validate_backup(
     let metadata = shell
         .inspect(&paths.backup)
         .map_err(|_| IntegrationError::BackupCorrupt)?;
-    if metadata.target_parsing_path != manifest.original_aumid || !is_official(&metadata) {
+    if original_target_identity(&metadata) != manifest.original_aumid
+        || !has_launch_target(&metadata)
+    {
         return Err(IntegrationError::BackupCorrupt);
     }
     Ok(())
@@ -1651,7 +1795,14 @@ fn reconcile_stale_install_snapshot(
             ensure_safe_regular_file(&paths.launcher)?;
             true
         }
-        (None, Some(metadata)) if is_official(metadata) && !paths.backup.exists() => true,
+        (None, Some(metadata))
+            if is_adoptable_shortcut(paths, &current_path, metadata)
+                && sha256_file(&current_path).ok().as_deref()
+                    == Some(snapshot.shortcut.sha256.as_str())
+                && !paths.backup.exists() =>
+        {
+            true
+        }
         (None, None) if snapshot.prior_state == IntegrationState::Unconfigured => true,
         _ => false,
     };
@@ -1682,7 +1833,7 @@ fn validate_install_snapshot(
         IntegrationState::Official => {
             if manifest_bytes.is_some()
                 || backup_bytes.is_some()
-                || !is_known_official_shortcut_path(paths, &snapshot.shortcut_path)
+                || !is_desktop_shortcut_path(paths, &snapshot.shortcut_path)
                 || snapshot.shortcut.bytes.is_empty()
             {
                 return Err(invalid_install_snapshot(
@@ -1746,6 +1897,8 @@ fn snapshot_shortcut_path(
         Ok(paths.chatgpt_shortcut.clone())
     } else if paths_equal(&snapshot.shortcut_path, &paths.fallback_shortcut) {
         Ok(paths.fallback_shortcut.clone())
+    } else if is_desktop_shortcut_path(paths, &snapshot.shortcut_path) {
+        Ok(snapshot.shortcut_path.clone())
     } else {
         Err(invalid_install_snapshot(
             "shortcut path is outside this installation",
@@ -1770,7 +1923,7 @@ fn verify_rollback_shortcut(
         .map_err(|_| IntegrationError::ShortcutConflict)?;
     let state_matches = match snapshot.prior_state {
         IntegrationState::Managed => is_owned(&restored, paths),
-        IntegrationState::Official => is_official(&restored),
+        IntegrationState::Official => is_adoptable_shortcut(paths, &shortcut, &restored),
         _ => false,
     };
     if !state_matches || sha256_file(&shortcut)? != snapshot.shortcut.sha256 {
@@ -1827,14 +1980,17 @@ fn refresh_stable_icon(
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(source) => return Err(io_error(&paths.default_icon, source)),
     }
-    let icon = build_multi_image_ico(shell.official_icon_pngs()?)?;
+    // Use the Code-Codex brand for the managed shortcut. The official package
+    // icon is white, so copying it made a successfully redirected shortcut
+    // indistinguishable from the original ChatGPT/Codex shortcut.
+    let icon = include_bytes!("../../resources/code-codex.ico");
     let mut temporary = tempfile::Builder::new()
         .prefix(".Codex.")
         .suffix(".ico")
         .tempfile_in(&paths.install_root)
         .map_err(|source| io_error(&paths.install_root, source))?;
     temporary
-        .write_all(&icon)
+        .write_all(icon)
         .map_err(|source| io_error(temporary.path(), source))?;
     temporary
         .as_file()
@@ -2009,6 +2165,37 @@ fn is_verified_legacy(metadata: &ShortcutMetadata, paths: &IntegrationPaths) -> 
 
 fn is_official(metadata: &ShortcutMetadata) -> bool {
     metadata.target_parsing_path == CODEX_AUMID
+}
+
+fn has_launch_target(metadata: &ShortcutMetadata) -> bool {
+    !metadata.target.trim().is_empty() || !metadata.target_parsing_path.trim().is_empty()
+}
+
+fn original_target_identity(metadata: &ShortcutMetadata) -> &str {
+    if metadata.target_parsing_path.is_empty() {
+        &metadata.target
+    } else {
+        &metadata.target_parsing_path
+    }
+}
+
+fn is_codex_executable_shortcut(metadata: &ShortcutMetadata) -> bool {
+    Path::new(&metadata.target).file_name().is_some_and(|name| {
+        name.eq_ignore_ascii_case("ChatGPT.exe") || name.eq_ignore_ascii_case("Codex.exe")
+    })
+}
+
+fn is_adoptable_shortcut(
+    paths: &IntegrationPaths,
+    path: &Path,
+    metadata: &ShortcutMetadata,
+) -> bool {
+    is_desktop_shortcut_path(paths, path)
+        && has_launch_target(metadata)
+        && metadata.description != OWNER_MARKER
+        && (is_official(metadata)
+            || is_known_named_shortcut_path(paths, path)
+            || is_codex_executable_shortcut(metadata))
 }
 
 fn is_owned(metadata: &ShortcutMetadata, paths: &IntegrationPaths) -> bool {
@@ -2271,6 +2458,18 @@ fn resolve_desktop() -> Result<PathBuf, IntegrationError> {
 }
 
 #[cfg(windows)]
+fn resolve_public_desktop() -> Option<PathBuf> {
+    use known_folders::{KnownFolder, get_known_folder_path};
+
+    get_known_folder_path(KnownFolder::PublicDesktop)
+}
+
+#[cfg(not(windows))]
+fn resolve_public_desktop() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(windows)]
 fn resolve_start_menu() -> Option<PathBuf> {
     use known_folders::{KnownFolder, get_known_folder_path};
 
@@ -2464,6 +2663,21 @@ else {
                 ("CLE_DESTINATION_PATH", destination.as_os_str()),
             ],
         )?;
+        // Explorer can retain the old image when an .ico or .lnk is atomically
+        // replaced at the same path. Notify it about the final destination.
+        let destination_wide: Vec<u16> = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        unsafe {
+            SHChangeNotify(
+                SHCNE_UPDATEITEM as i32,
+                SHCNF_PATHW | SHCNF_FLUSH,
+                destination_wide.as_ptr().cast(),
+                std::ptr::null(),
+            );
+        }
         Ok(())
     }
 
@@ -3027,6 +3241,18 @@ mod tests {
         assert!(!fixture.paths.shortcut.exists());
         assert!(fixture.paths.fallback_shortcut.exists());
         assert!(!fixture.paths.backup.exists());
+        assert_eq!(
+            fs::read(&fixture.paths.default_icon).expect("managed icon"),
+            include_bytes!("../../resources/code-codex.ico")
+        );
+        let shortcut = shell
+            .inspect(&fixture.paths.fallback_shortcut)
+            .expect("managed shortcut");
+        assert!(is_owned(&shortcut, &fixture.paths));
+        assert_eq!(
+            shortcut.icon_location,
+            format!("{},0", fixture.paths.default_icon.display())
+        );
 
         let manifest = read_manifest_optional(&fixture.paths.manifest)
             .expect("manifest read")
@@ -3102,6 +3328,136 @@ mod tests {
         assert!(!fixture.paths.fallback_shortcut.exists());
         assert!(!fixture.paths.manifest.exists());
         assert!(!fixture.paths.backup.exists());
+    }
+
+    #[test]
+    fn install_adopts_user_created_chatgpt_shortcut_and_restores_its_exact_bytes() {
+        let fixture = fixture();
+        let shell = FakeShell;
+        fs::remove_file(&fixture.paths.shortcut).expect("remove Codex shortcut");
+        write_fixture(&fixture.paths.chatgpt_shortcut, &unrelated_metadata())
+            .expect("user-created ChatGPT shortcut");
+        let original = fs::read(&fixture.paths.chatgpt_shortcut).expect("original shortcut");
+
+        let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
+        assert_eq!(installed.shortcut_path, fixture.paths.chatgpt_shortcut);
+        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert_eq!(fs::read(&fixture.paths.backup).unwrap(), original);
+        assert!(is_owned(
+            &shell.inspect(&fixture.paths.chatgpt_shortcut).unwrap(),
+            &fixture.paths
+        ));
+
+        let restored = restore(&shell, &fixture.paths).expect("restore");
+        assert_eq!(restored.state, IntegrationState::Official);
+        assert_eq!(fs::read(&fixture.paths.chatgpt_shortcut).unwrap(), original);
+    }
+
+    #[test]
+    fn install_adopts_custom_named_official_codex_shortcut() {
+        let fixture = fixture();
+        let shell = FakeShell;
+        fs::remove_file(&fixture.paths.shortcut).expect("remove Codex shortcut");
+        let custom = fixture.paths.desktop.join("My Codex.lnk");
+        write_fixture(&custom, &official_metadata()).expect("custom Codex shortcut");
+        let original = fs::read(&custom).expect("original shortcut");
+
+        let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
+        assert_eq!(installed.shortcut_path, custom);
+        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert!(is_owned(&shell.inspect(&custom).unwrap(), &fixture.paths));
+
+        restore(&shell, &fixture.paths).expect("restore");
+        assert_eq!(fs::read(&custom).unwrap(), original);
+    }
+
+    #[test]
+    fn install_adopts_renamed_user_shortcut_to_chatgpt_executable() {
+        let fixture = fixture();
+        let shell = FakeShell;
+        fs::remove_file(&fixture.paths.shortcut).expect("remove Codex shortcut");
+        let custom = fixture.paths.desktop.join("My assistant.lnk");
+        let metadata = ShortcutMetadata {
+            target: r"C:\Users\Someone\Apps\ChatGPT.exe".to_owned(),
+            description: "My shortcut".to_owned(),
+            target_parsing_path: r"C:\Users\Someone\Apps\ChatGPT.exe".to_owned(),
+            icon_location: String::new(),
+        };
+        write_fixture(&custom, &metadata).expect("custom shortcut");
+        let original = fs::read(&custom).unwrap();
+
+        let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
+        assert_eq!(installed.shortcut_path, custom);
+        assert!(!fixture.paths.fallback_shortcut.exists());
+        restore(&shell, &fixture.paths).expect("restore");
+        assert_eq!(fs::read(&custom).unwrap(), original);
+    }
+
+    #[test]
+    fn unrelated_custom_name_does_not_prevent_fallback_shortcut() {
+        let fixture = fixture();
+        let shell = FakeShell;
+        fs::remove_file(&fixture.paths.shortcut).expect("remove Codex shortcut");
+        let unrelated = fixture.paths.desktop.join("Other app.lnk");
+        write_fixture(&unrelated, &unrelated_metadata()).expect("unrelated shortcut");
+        let original = fs::read(&unrelated).unwrap();
+
+        let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
+        assert_eq!(installed.shortcut_path, fixture.paths.fallback_shortcut);
+        assert_eq!(fs::read(&unrelated).unwrap(), original);
+    }
+
+    #[test]
+    fn install_adopts_user_created_public_desktop_shortcut() {
+        let mut fixture = fixture();
+        let shell = FakeShell;
+        fs::remove_file(&fixture.paths.shortcut).expect("remove personal Codex shortcut");
+        let public = fixture._temporary.path().join("public-desktop");
+        fs::create_dir_all(&public).expect("public desktop");
+        let public_shortcut = public.join(CHATGPT_SHORTCUT_NAME);
+        write_fixture(&public_shortcut, &unrelated_metadata()).expect("user-created shortcut");
+        let original = fs::read(&public_shortcut).unwrap();
+        fixture.paths.public_desktop = Some(public);
+
+        let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
+        assert_eq!(installed.shortcut_path, public_shortcut);
+        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert!(is_owned(
+            &shell.inspect(&public_shortcut).unwrap(),
+            &fixture.paths
+        ));
+
+        restore(&shell, &fixture.paths).expect("restore");
+        assert_eq!(fs::read(&public_shortcut).unwrap(), original);
+    }
+
+    #[test]
+    fn rollback_fallback_migration_restores_user_shortcut_and_fallback() {
+        let fixture = fixture();
+        let shell = FakeShell;
+        fs::remove_file(&fixture.paths.shortcut).expect("remove Codex shortcut");
+        install(&shell, &fixture.paths, "0.1.4", None).expect("initial fallback install");
+        let original_fallback = fs::read(&fixture.paths.fallback_shortcut).unwrap();
+        write_fixture(&fixture.paths.chatgpt_shortcut, &unrelated_metadata())
+            .expect("user-created ChatGPT shortcut");
+        let original_chatgpt = fs::read(&fixture.paths.chatgpt_shortcut).unwrap();
+
+        prepare_install(&shell, &fixture.paths).expect("prepare upgrade");
+        install_with_legacy_cleanup(&shell, &fixture.paths, "0.1.5", None, false).expect("migrate");
+        rollback_install(&shell, &fixture.paths).expect("rollback upgrade");
+
+        assert_eq!(
+            fs::read(&fixture.paths.chatgpt_shortcut).unwrap(),
+            original_chatgpt
+        );
+        assert_eq!(
+            fs::read(&fixture.paths.fallback_shortcut).unwrap(),
+            original_fallback
+        );
+        assert_eq!(
+            status(&shell, &fixture.paths).unwrap().state,
+            IntegrationState::Managed
+        );
     }
 
     #[test]
@@ -3514,15 +3870,15 @@ mod tests {
     }
 
     #[test]
-    fn restore_without_a_manifest_rejects_a_conflicting_shortcut() {
+    fn restore_without_a_manifest_accepts_a_user_created_named_shortcut() {
         let fixture = fixture();
         write_fixture(&fixture.paths.shortcut, &unrelated_metadata())
             .expect("conflicting shortcut");
         let conflicting_shortcut =
             fs::read(&fixture.paths.shortcut).expect("conflicting shortcut bytes");
 
-        let error = restore(&FakeShell, &fixture.paths).expect_err("restore must report conflict");
-        assert!(matches!(error, IntegrationError::ShortcutConflict));
+        let report = restore(&FakeShell, &fixture.paths).expect("restore must accept shortcut");
+        assert_eq!(report.state, IntegrationState::Official);
         assert_eq!(
             fs::read(&fixture.paths.shortcut).expect("preserved conflicting shortcut"),
             conflicting_shortcut
@@ -3730,6 +4086,37 @@ mod tests {
             fs::read(&fixture.paths.shortcut).expect("restored official shortcut"),
             fixture.original
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn real_windows_shell_adopts_user_created_chatgpt_shortcut() {
+        let shell = PlatformShortcutShell::new().expect("Windows Shell bridge");
+        let temporary = tempfile::tempdir().expect("temporary integration root");
+        let install_root = temporary.path().join("install");
+        let desktop = temporary.path().join("desktop");
+        fs::create_dir_all(&install_root).expect("install root");
+        fs::create_dir_all(&desktop).expect("desktop");
+        fs::write(install_root.join(LAUNCHER_NAME), b"launcher fixture").expect("launcher");
+        let paths = IntegrationPaths::resolve(&install_root, Some(&desktop), None)
+            .expect("integration paths");
+        let icon = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/code-codex.ico");
+        shell
+            .create(
+                &paths.chatgpt_shortcut,
+                &std::env::current_exe().expect("test executable"),
+                &install_root,
+                &icon,
+                "User-created ChatGPT shortcut",
+            )
+            .expect("create user shortcut");
+        let original = fs::read(&paths.chatgpt_shortcut).expect("original bytes");
+
+        let report = install(&shell, &paths, "0.1.4", None).expect("install");
+        assert_eq!(report.shortcut_path, paths.chatgpt_shortcut);
+        assert!(!paths.fallback_shortcut.exists());
+        restore(&shell, &paths).expect("restore");
+        assert_eq!(fs::read(&paths.chatgpt_shortcut).unwrap(), original);
     }
 
     #[cfg(windows)]
