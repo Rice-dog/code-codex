@@ -173,8 +173,8 @@ enum AppError {
     ProcessGuard(#[from] ProcessGuardError),
     #[error("this Codex Desktop version is not in the compatibility matrix")]
     UnsupportedVersion,
-    #[error("Codex Desktop could not be launched")]
-    Launch,
+    #[error(transparent)]
+    Launch(#[from] LaunchFailure),
     #[error(
         "Codex Desktop is already running without this launcher; close it and start Code-Codex again"
     )]
@@ -187,6 +187,33 @@ enum AppError {
     AttachMetadataMismatch,
 }
 
+#[derive(Debug, Error)]
+enum LaunchFailure {
+    #[error("the registered Codex package is missing its full identity")]
+    MissingPackageIdentity,
+    #[error("the registered Codex package is missing its application ID")]
+    MissingApplicationId,
+    #[error("Windows package activation failed: OS error {os_code:?}, kind {kind:?}")]
+    PackageActivation {
+        os_code: Option<i32>,
+        kind: std::io::ErrorKind,
+    },
+    #[error("the activated package could not be supervised")]
+    PackageSupervision,
+    #[error("the Codex executable could not be started: OS error {os_code:?}, kind {kind:?}")]
+    DirectSpawn {
+        os_code: Option<i32>,
+        kind: std::io::ErrorKind,
+    },
+    #[error("the Codex process could not be monitored: OS error {os_code:?}, kind {kind:?}")]
+    ProcessWait {
+        os_code: Option<i32>,
+        kind: std::io::ErrorKind,
+    },
+    #[error("the installation diagnostic result could not be serialized")]
+    DiagnosticSerialization,
+}
+
 impl AppError {
     const fn exit_code(&self) -> u8 {
         match self {
@@ -196,7 +223,7 @@ impl AppError {
             | Self::Bootstrap(_)
             | Self::Workspace(_)
             | Self::Resolver(_)
-            | Self::Launch => exit_codes::STARTUP_FAILURE,
+            | Self::Launch(_) => exit_codes::STARTUP_FAILURE,
             Self::Cdp(_)
             | Self::CdpStartup(_)
             | Self::CdpTarget(_)
@@ -346,13 +373,16 @@ impl AppError {
                 reason,
                 "Switch to another Codex task and try again.",
             ),
-            Self::Workspace(error) => StartupDiagnostic::new(
-                "CC-START-WORKSPACE-003",
-                "Opening the workspace",
-                "The local workspace could not be opened",
-                error.to_string(),
-                "Check that the project folder still exists and that your account can access it.",
-            ),
+            Self::Workspace(error) => {
+                let (code, guidance) = workspace_diagnostic(error);
+                StartupDiagnostic::new(
+                    code,
+                    "Opening the workspace",
+                    "The local workspace could not be opened",
+                    error.to_string(),
+                    guidance,
+                )
+            }
             Self::Cdp(CdpError::EndpointUnavailable) => StartupDiagnostic::new(
                 "CC-START-CDP-001",
                 "Connecting to Codex Desktop",
@@ -361,23 +391,28 @@ impl AppError {
                 "Restart Codex Desktop from the Code-Codex shortcut and try again.",
             ),
             Self::CdpStartup(details) => StartupDiagnostic::new(
-                "CC-START-CDP-001",
+                "CC-START-CDP-013",
                 "Connecting to Codex Desktop",
                 "The Codex debugging endpoint was unavailable",
                 details.clone(),
                 "Close Codex Desktop completely and start Code-Codex again. If this repeats, send the full diagnostic report to the developer.",
             ),
-            Self::Cdp(CdpError::NoCompatibleTarget | CdpError::IncompatibleRenderer) => {
-                StartupDiagnostic::new(
-                    "CC-START-CDP-002",
-                    "Finding the Codex window",
-                    "A compatible Codex window was not found",
-                    reason,
-                    "Update Code-Codex or use a supported Codex Desktop version.",
-                )
-            }
-            Self::CdpTarget(details) => StartupDiagnostic::new(
+            Self::Cdp(CdpError::NoCompatibleTarget) => StartupDiagnostic::new(
                 "CC-START-CDP-002",
+                "Finding the Codex window",
+                "No Codex renderer target was found",
+                reason,
+                "Send the diagnostic report to the developer so the target list can be checked.",
+            ),
+            Self::Cdp(CdpError::IncompatibleRenderer) => StartupDiagnostic::new(
+                "CC-START-CDP-008",
+                "Checking the Codex window layout",
+                "The Codex renderer layout is incompatible",
+                reason,
+                "Update Code-Codex and include the diagnostic report if this Codex Desktop version is current.",
+            ),
+            Self::CdpTarget(details) => StartupDiagnostic::new(
+                "CC-START-CDP-014",
                 "Finding the Codex window",
                 "A compatible Codex window was not found",
                 details.clone(),
@@ -390,13 +425,10 @@ impl AppError {
                 reason,
                 "Close extra Codex windows and start Code-Codex again.",
             ),
-            Self::Cdp(error) => StartupDiagnostic::new(
-                "CC-START-CDP-004",
-                "Connecting to the Codex window",
-                "Code-Codex could not establish a trusted window connection",
-                error.to_string(),
-                "Restart Codex Desktop from the Code-Codex shortcut. Include the diagnostic report if it repeats.",
-            ),
+            Self::Cdp(error) => {
+                let (code, stage, summary, guidance) = cdp_diagnostic(error);
+                StartupDiagnostic::new(code, stage, summary, error.to_string(), guidance)
+            }
             Self::ProcessGuard(ProcessGuardError::PortUnavailable) => StartupDiagnostic::new(
                 "CC-START-PROCESS-001",
                 "Preparing a local connection",
@@ -404,13 +436,16 @@ impl AppError {
                 reason,
                 "Restart Windows or check whether security software is blocking local loopback connections.",
             ),
-            Self::ProcessGuard(error) => StartupDiagnostic::new(
-                "CC-START-PROCESS-002",
-                "Verifying the Codex process",
-                "The Codex process identity could not be verified",
-                error.to_string(),
-                "Copy the full diagnostic report and send it to the Code-Codex developer. The process observations identify which check failed.",
-            ),
+            Self::ProcessGuard(error) => {
+                let (code, summary) = process_diagnostic(error);
+                StartupDiagnostic::new(
+                    code,
+                    "Verifying the Codex process",
+                    summary,
+                    error.to_string(),
+                    "Copy the full diagnostic report and send it to the Code-Codex developer. The process observations identify which check failed.",
+                )
+            }
             Self::UnsupportedVersion => StartupDiagnostic::new(
                 "CC-START-COMPAT-001",
                 "Checking compatibility",
@@ -425,13 +460,16 @@ impl AppError {
                 reason,
                 "Close Codex Desktop, then start it from the Codex or Code-Codex desktop shortcut.",
             ),
-            Self::Launch => StartupDiagnostic::new(
-                "CC-START-CODEX-001",
-                "Starting Codex Desktop",
-                "Codex Desktop could not be started",
-                reason,
-                "Repair the official Codex Desktop installation and try again.",
-            ),
+            Self::Launch(error) => {
+                let (code, stage, summary) = launch_diagnostic(error);
+                StartupDiagnostic::new(
+                    code,
+                    stage,
+                    summary,
+                    error.to_string(),
+                    "Include the diagnostic report when reporting this Codex startup failure.",
+                )
+            }
             Self::InvalidLaunchArgument => StartupDiagnostic::new(
                 "CC-START-SECURITY-001",
                 "Validating startup options",
@@ -439,14 +477,281 @@ impl AppError {
                 reason,
                 "Remove custom debugging or inspection arguments and try again.",
             ),
-            Self::UnverifiedAttach | Self::AttachMetadataMismatch => StartupDiagnostic::new(
+            Self::UnverifiedAttach => StartupDiagnostic::new(
                 "CC-START-SECURITY-002",
                 "Verifying the running Codex instance",
-                "The running Codex instance could not be verified",
+                "The running Codex listener could not be verified",
+                reason,
+                "Start the official Codex Desktop app through the Code-Codex shortcut.",
+            ),
+            Self::AttachMetadataMismatch => StartupDiagnostic::new(
+                "CC-START-SECURITY-003",
+                "Checking the running Codex instance",
+                "The Codex installation metadata does not match",
                 reason,
                 "Start the official Codex Desktop app through the Code-Codex shortcut.",
             ),
         }
+    }
+}
+
+fn workspace_diagnostic(error: &WorkspaceError) -> (&'static str, &'static str) {
+    match error {
+        WorkspaceError::InvalidPath => (
+            "CC-START-WORKSPACE-004",
+            "Check the project folder path and try again.",
+        ),
+        WorkspaceError::OutsideWorkspace => (
+            "CC-START-WORKSPACE-005",
+            "Select a folder inside the active project.",
+        ),
+        WorkspaceError::NotFound => (
+            "CC-START-WORKSPACE-006",
+            "Check whether the project folder was moved or deleted.",
+        ),
+        WorkspaceError::AccessDenied => (
+            "CC-START-WORKSPACE-007",
+            "Check that this Windows account can access the project folder.",
+        ),
+        WorkspaceError::NotDirectory => (
+            "CC-START-WORKSPACE-008",
+            "Select a project directory rather than a file.",
+        ),
+        WorkspaceError::TooManyEntries => {
+            ("CC-START-WORKSPACE-009", "Choose a smaller project folder.")
+        }
+        WorkspaceError::ContentTooLarge => ("CC-START-WORKSPACE-010", "Choose a smaller file."),
+        WorkspaceError::EntryConflict => (
+            "CC-START-WORKSPACE-011",
+            "Reload the project and retry the change.",
+        ),
+        WorkspaceError::Conflict => (
+            "CC-START-WORKSPACE-012",
+            "Reload the file because it changed on disk.",
+        ),
+        WorkspaceError::NotEditable => {
+            ("CC-START-WORKSPACE-013", "Open a supported editable file.")
+        }
+        WorkspaceError::InvalidSettings => (
+            "CC-START-WORKSPACE-014",
+            "Reset the invalid project setting and retry.",
+        ),
+        WorkspaceError::Internal => (
+            "CC-START-WORKSPACE-003",
+            "Include the diagnostic report when reporting this workspace failure.",
+        ),
+    }
+}
+
+fn cdp_diagnostic(error: &CdpError) -> (&'static str, &'static str, &'static str, &'static str) {
+    match error {
+        CdpError::InvalidEndpoint => (
+            "CC-START-CDP-006",
+            "Reading the Codex debugging endpoint",
+            "The debugging endpoint returned invalid data",
+            "Restart Codex Desktop through Code-Codex and include the diagnostic report if it repeats.",
+        ),
+        CdpError::UnsupportedProtocol => (
+            "CC-START-CDP-005",
+            "Checking the debugging protocol",
+            "The Codex debugging protocol is unsupported",
+            "Update Code-Codex or use a supported Codex Desktop version.",
+        ),
+        CdpError::TooManyTargets => (
+            "CC-START-CDP-007",
+            "Listing Codex windows",
+            "The debugging endpoint reported too many targets",
+            "Close extra Codex windows and restart Code-Codex.",
+        ),
+        CdpError::InvalidWebSocketEndpoint => (
+            "CC-START-CDP-009",
+            "Checking the Codex window connection",
+            "The renderer WebSocket endpoint was rejected",
+            "Include the diagnostic report so the endpoint format can be checked.",
+        ),
+        CdpError::EndpointIdentityMismatch => (
+            "CC-START-CDP-010",
+            "Verifying the debugging listener",
+            "The debugging listener identity changed or could not be verified",
+            "Close Codex Desktop completely and start it through the Code-Codex shortcut.",
+        ),
+        CdpError::WebSocket => (
+            "CC-START-CDP-011",
+            "Connecting to the Codex renderer",
+            "The renderer WebSocket connection failed",
+            "Restart Codex Desktop and include the diagnostic report if the connection fails again.",
+        ),
+        CdpError::Protocol => (
+            "CC-START-CDP-012",
+            "Communicating with the Codex renderer",
+            "The renderer returned invalid protocol data",
+            "Update Code-Codex and include the diagnostic report if it repeats.",
+        ),
+        CdpError::EndpointUnavailable => (
+            "CC-START-CDP-001",
+            "Connecting to Codex Desktop",
+            "The Codex debugging endpoint was unavailable",
+            "Restart Codex Desktop through Code-Codex.",
+        ),
+        CdpError::NoCompatibleTarget => (
+            "CC-START-CDP-002",
+            "Finding the Codex window",
+            "No Codex renderer target was found",
+            "Include the diagnostic report when reporting the missing target.",
+        ),
+        CdpError::AmbiguousRenderer => (
+            "CC-START-CDP-003",
+            "Selecting the Codex window",
+            "More than one compatible Codex window was detected",
+            "Close extra Codex windows and try again.",
+        ),
+        CdpError::IncompatibleRenderer => (
+            "CC-START-CDP-008",
+            "Checking the Codex window layout",
+            "The Codex renderer layout is incompatible",
+            "Update Code-Codex.",
+        ),
+    }
+}
+
+fn process_diagnostic(error: &ProcessGuardError) -> (&'static str, &'static str) {
+    match error {
+        ProcessGuardError::PortUnavailable => (
+            "CC-START-PROCESS-001",
+            "A local debugging port could not be reserved",
+        ),
+        ProcessGuardError::OwnershipUnknown => (
+            "CC-START-PROCESS-002",
+            "The listener process could not be inspected",
+        ),
+        ProcessGuardError::ProcessInspectionUnknown => (
+            "CC-START-PROCESS-011",
+            "The existing Codex process state could not be inspected",
+        ),
+        ProcessGuardError::OwnershipMismatch => (
+            "CC-START-PROCESS-007",
+            "The listener does not belong to the launched Codex process",
+        ),
+        ProcessGuardError::ExecutableMismatch => (
+            "CC-START-PROCESS-009",
+            "The listener does not belong to the verified Codex executable",
+        ),
+        ProcessGuardError::Detailed(detail)
+            if detail.starts_with("activated PID or creation time mismatch")
+                || detail.starts_with("activation returned PID") =>
+        {
+            (
+                "CC-START-PROCESS-003",
+                "The activated Codex PID or creation time did not match",
+            )
+        }
+        ProcessGuardError::Detailed(detail)
+            if detail.starts_with("activated executable mismatch")
+                || detail.starts_with("canonical executable mismatch") =>
+        {
+            (
+                "CC-START-PROCESS-004",
+                "The activated Codex executable did not match",
+            )
+        }
+        ProcessGuardError::Detailed(detail)
+            if detail.starts_with("official executable")
+                || detail.starts_with("canonical official executable")
+                || detail.starts_with("observed executable canonicalization") =>
+        {
+            (
+                "CC-START-PROCESS-010",
+                "The official Codex executable path could not be verified",
+            )
+        }
+        ProcessGuardError::Detailed(detail)
+            if detail.starts_with("process identity query")
+                || detail.starts_with("process identity response")
+                || detail.starts_with("trusted System32 PowerShell") =>
+        {
+            (
+                "CC-START-PROCESS-005",
+                "The activated Codex process could not be inspected",
+            )
+        }
+        ProcessGuardError::Detailed(detail)
+            if detail.starts_with("listener ownership query")
+                || detail.starts_with("listener ownership response") =>
+        {
+            (
+                "CC-START-PROCESS-006",
+                "The debugging listener owner could not be inspected",
+            )
+        }
+        ProcessGuardError::Detailed(detail)
+            if detail.starts_with("listener executable query")
+                || detail.starts_with("listener executable response") =>
+        {
+            (
+                "CC-START-PROCESS-008",
+                "The listener executable could not be inspected",
+            )
+        }
+        ProcessGuardError::Detailed(detail)
+            if detail.starts_with("the CDP listener is not owned by the launched") =>
+        {
+            (
+                "CC-START-PROCESS-007",
+                "The listener does not belong to the launched Codex process",
+            )
+        }
+        ProcessGuardError::Detailed(detail)
+            if detail.starts_with("the CDP listener is not owned by the verified") =>
+        {
+            (
+                "CC-START-PROCESS-009",
+                "The listener does not belong to the verified Codex executable",
+            )
+        }
+        ProcessGuardError::Detailed(_) => (
+            "CC-START-PROCESS-002",
+            "The Codex process identity could not be verified",
+        ),
+    }
+}
+
+fn launch_diagnostic(error: &LaunchFailure) -> (&'static str, &'static str, &'static str) {
+    match error {
+        LaunchFailure::MissingPackageIdentity => (
+            "CC-START-CODEX-001",
+            "Reading Codex registration",
+            "The Codex package identity is missing",
+        ),
+        LaunchFailure::MissingApplicationId => (
+            "CC-START-CODEX-002",
+            "Reading Codex registration",
+            "The Codex application ID is missing",
+        ),
+        LaunchFailure::PackageActivation { .. } => (
+            "CC-START-CODEX-003",
+            "Activating Codex Desktop",
+            "Windows could not activate the Codex package",
+        ),
+        LaunchFailure::PackageSupervision => (
+            "CC-START-CODEX-004",
+            "Supervising Codex Desktop",
+            "The activated Codex process could not be supervised",
+        ),
+        LaunchFailure::DirectSpawn { .. } => (
+            "CC-START-CODEX-005",
+            "Starting Codex Desktop",
+            "The Codex executable could not be started",
+        ),
+        LaunchFailure::ProcessWait { .. } => (
+            "CC-START-CODEX-006",
+            "Monitoring Codex Desktop",
+            "The Codex process could not be monitored",
+        ),
+        LaunchFailure::DiagnosticSerialization => (
+            "CC-START-CODEX-007",
+            "Preparing diagnostics",
+            "The installation diagnostic result could not be serialized",
+        ),
     }
 }
 
@@ -563,18 +868,21 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         let package_full_name = installation
             .package_full_name
             .clone()
-            .ok_or(AppError::Launch)?;
+            .ok_or(LaunchFailure::MissingPackageIdentity)?;
         let app_user_model_id = installation
             .app_user_model_id
             .clone()
-            .ok_or(AppError::Launch)?;
+            .ok_or(LaunchFailure::MissingApplicationId)?;
         let mut child = CodexProcessGuard::activate_package(
             package_full_name,
             app_user_model_id,
             launch_arguments,
         )
         .await
-        .map_err(|_| AppError::Launch)?;
+        .map_err(|error| LaunchFailure::PackageActivation {
+            os_code: error.raw_os_error(),
+            kind: error.kind(),
+        })?;
         let launched_pid = child.pid();
         let official_executable = installation.executable.clone();
         let identity_result = tokio::task::spawn_blocking(move || {
@@ -588,7 +896,7 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         }
         if child.arm_package_termination().await.is_err() {
             child.terminate().await;
-            return Err(AppError::Launch);
+            return Err(LaunchFailure::PackageSupervision.into());
         }
         child
     } else {
@@ -598,7 +906,10 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        CodexProcessGuard::spawn(command).map_err(|_| AppError::Launch)?
+        CodexProcessGuard::spawn(command).map_err(|error| LaunchFailure::DirectSpawn {
+            os_code: error.raw_os_error(),
+            kind: error.kind(),
+        })?
     };
     let launched_pid = child.pid();
     tracing::info!(event = "codex_launched", channel = %installation.channel);
@@ -685,7 +996,10 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             job_result = child.wait_for_exit() => {
                 cancellation.cancel();
                 let supervisor_result = supervisor.await;
-                job_result.map_err(|_| AppError::Launch)?;
+                job_result.map_err(|error| LaunchFailure::ProcessWait {
+                    os_code: error.raw_os_error(),
+                    kind: error.kind(),
+                })?;
                 supervisor_result
             }
         }
@@ -1574,7 +1888,8 @@ async fn diagnose(args: DiagnoseArgs) -> Result<(), AppError> {
         ui_bundle,
         cdp,
     };
-    let output = serde_json::to_string_pretty(&report).map_err(|_| AppError::Launch)?;
+    let output = serde_json::to_string_pretty(&report)
+        .map_err(|_| LaunchFailure::DiagnosticSerialization)?;
     println!("{output}");
     Ok(())
 }
@@ -1915,7 +2230,10 @@ mod tests {
             AppError::AlreadyRunning.exit_code(),
             exit_codes::ALREADY_RUNNING
         );
-        assert_eq!(AppError::Launch.exit_code(), exit_codes::STARTUP_FAILURE);
+        assert_eq!(
+            AppError::Launch(LaunchFailure::PackageSupervision).exit_code(),
+            exit_codes::STARTUP_FAILURE
+        );
         assert_eq!(
             AppError::InvalidLaunchArgument.exit_code(),
             exit_codes::GENERIC_FAILURE
@@ -1951,6 +2269,86 @@ mod tests {
         let bundle = AppError::Bootstrap(BootstrapError::InvalidBundle).startup_diagnostic();
         assert_eq!(bundle.code, "CC-START-UI-002");
         assert!(bundle.guidance.contains("installer"));
+
+        assert_eq!(
+            AppError::Cdp(CdpError::IncompatibleRenderer)
+                .startup_diagnostic()
+                .code,
+            "CC-START-CDP-008"
+        );
+        assert_eq!(
+            AppError::Cdp(CdpError::NoCompatibleTarget)
+                .startup_diagnostic()
+                .code,
+            "CC-START-CDP-002"
+        );
+        assert_eq!(
+            AppError::Workspace(WorkspaceError::AccessDenied)
+                .startup_diagnostic()
+                .code,
+            "CC-START-WORKSPACE-007"
+        );
+        assert_eq!(
+            AppError::AttachMetadataMismatch.startup_diagnostic().code,
+            "CC-START-SECURITY-003"
+        );
+        assert_eq!(
+            AppError::ProcessGuard(ProcessGuardError::Detailed(
+                "listener executable query failed: port=61373, exit=Some(1)".into()
+            ))
+            .startup_diagnostic()
+            .code,
+            "CC-START-PROCESS-008"
+        );
+    }
+
+    #[test]
+    fn distinct_cdp_failures_have_distinct_support_codes() {
+        let errors = [
+            CdpError::EndpointUnavailable,
+            CdpError::InvalidEndpoint,
+            CdpError::UnsupportedProtocol,
+            CdpError::NoCompatibleTarget,
+            CdpError::AmbiguousRenderer,
+            CdpError::TooManyTargets,
+            CdpError::IncompatibleRenderer,
+            CdpError::InvalidWebSocketEndpoint,
+            CdpError::EndpointIdentityMismatch,
+            CdpError::WebSocket,
+            CdpError::Protocol,
+        ];
+        let codes: std::collections::HashSet<_> = errors
+            .into_iter()
+            .map(|error| AppError::Cdp(error).startup_diagnostic().code)
+            .collect();
+        assert_eq!(codes.len(), 11);
+    }
+
+    #[test]
+    fn distinct_launch_failures_have_distinct_support_codes() {
+        let errors = [
+            LaunchFailure::MissingPackageIdentity,
+            LaunchFailure::MissingApplicationId,
+            LaunchFailure::PackageActivation {
+                os_code: Some(5),
+                kind: std::io::ErrorKind::PermissionDenied,
+            },
+            LaunchFailure::PackageSupervision,
+            LaunchFailure::DirectSpawn {
+                os_code: Some(2),
+                kind: std::io::ErrorKind::NotFound,
+            },
+            LaunchFailure::ProcessWait {
+                os_code: None,
+                kind: std::io::ErrorKind::Other,
+            },
+            LaunchFailure::DiagnosticSerialization,
+        ];
+        let codes: std::collections::HashSet<_> = errors
+            .into_iter()
+            .map(|error| AppError::Launch(error).startup_diagnostic().code)
+            .collect();
+        assert_eq!(codes.len(), 7);
     }
 
     #[test]
