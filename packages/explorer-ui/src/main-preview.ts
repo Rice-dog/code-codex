@@ -3259,6 +3259,58 @@ const mainPreviewStyles = String.raw`
     backdrop-filter: none !important;
   }
 
+  /* The Codex main surface already supplies the background plugins' .58
+   * conversation mask. Clear the preview's own opaque layers so opening a
+   * file does not stack a second mask over the effect. Keep PDF pages, slides,
+   * images, and editor controls themselves legible. */
+  :host-context(html:is(
+    [data-code-codex-particle-image-background],
+    [data-code-codex-glow-horizon-background]
+  )) :is(
+    .preview-panel,
+    .preview-meta-bar,
+    .preview-content,
+    .code-line-numbers,
+    .code-editor-stack,
+    .code-editor-highlight,
+    .code-editor,
+    .editor-error,
+    .markdown-reader,
+    .markdown-truncated,
+    .csv-preview,
+    .csv-table-scroll,
+    .diagram-preview,
+    .diagram-canvas,
+    .notebook-preview,
+    .model-preview,
+    .model-preview-toolbar,
+    .model-preview-stage,
+    .media-preview[data-kind="pdf"],
+    .pdf-preview-toolbar,
+    .pdf-page-stage,
+    .office-preview,
+    .office-preview-notice,
+    .office-sheet-tabs,
+    .office-sheet-viewport,
+    .office-preview-toolbar,
+    .office-slide-viewport,
+    .rpv-root,
+    .rpv-stage,
+    .rpv-viewport,
+    .rpv-status
+  ) {
+    background-color: transparent !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  :host-context(html:is(
+    [data-code-codex-particle-image-background],
+    [data-code-codex-glow-horizon-background]
+  )) .model-preview-stage {
+    background-image: none !important;
+  }
+
   *, *::before, *::after { box-sizing: border-box; }
   button { color: inherit; font: inherit; }
 
