@@ -20476,8 +20476,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#previewMarketOpen = true;
     this.#previewMarketPopover.hidden = false;
     this.#previewMarketButton.setAttribute("aria-expanded", "true");
-    this.#selectPreviewMarketCategory("appearance", false);
     this.#renderPreviewMarket();
+    this.#selectPreviewMarketCategory("appearance", false);
     queueMicrotask(() => {
       if (this.#previewMarketOpen) this.#previewMarketCloseButton.focus();
     });
@@ -20895,6 +20895,24 @@ export class CodeCodexElement extends HTMLElement {
       this.#closeHeavenlyCloudSettings(false);
       this.#closeAuroraIonosphereSettings(false);
     }
+    this.#revealEnabledPreviewMarketCard(category);
+  }
+
+  #revealEnabledPreviewMarketCard(category: PreviewMarketCategory): void {
+    if (!this.#previewMarketOpen) return;
+    const section = this.#previewMarketList.querySelector<HTMLElement>(
+      `[data-preview-market-section="${category}"]`,
+    );
+    if (!section || section.hidden) return;
+    const card = Array.from(section.querySelectorAll<HTMLElement>(".preview-extension:not([hidden])"))
+      .find((candidate) => {
+        const action = candidate.querySelector<HTMLButtonElement>(".preview-extension-action");
+        return action?.getAttribute("aria-pressed") === "true" || action?.dataset.enabled === "true";
+      });
+    if (!card) return;
+    const list = this.#previewMarketList;
+    const top = list.scrollTop + card.getBoundingClientRect().top - list.getBoundingClientRect().top - 8;
+    list.scrollTop = Math.max(0, Math.min(top, list.scrollHeight - list.clientHeight));
   }
 
   #closeGitHistory(restoreFocus: boolean): void {

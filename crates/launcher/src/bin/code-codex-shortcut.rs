@@ -677,7 +677,12 @@ fn prepare_install(
                     )
                 }
                 None if manifest_uses_fallback_shortcut(paths, manifest) => {
-                    return Err(IntegrationError::ShortcutConflict);
+                    validate_manifest_backup_state(shell, paths, manifest)?;
+                    (
+                        IntegrationState::Missing,
+                        Some(manifest.installed_version.clone()),
+                        active_shortcut,
+                    )
                 }
                 _ => return Err(IntegrationError::ShortcutConflict),
             }
@@ -703,7 +708,9 @@ fn prepare_install(
         };
 
     let shortcut = match prior_state {
-        IntegrationState::Unconfigured => encode_snapshot_file(Vec::new()),
+        IntegrationState::Unconfigured | IntegrationState::Missing => {
+            encode_snapshot_file(Vec::new())
+        }
         _ => encode_snapshot_file(read_file(&active_shortcut)?),
     };
     let manifest_file = encode_optional_regular_file(&paths.manifest)?;
@@ -792,7 +799,7 @@ fn rollback_install(
         sha256_file(&snapshot_shortcut).ok().as_deref() == Some(snapshot.shortcut.sha256.as_str());
     if !already_restored {
         match snapshot.prior_state {
-            IntegrationState::Unconfigured => {
+            IntegrationState::Unconfigured | IntegrationState::Missing => {
                 if current
                     .as_ref()
                     .is_some_and(|metadata| !is_owned(metadata, paths))
@@ -883,6 +890,31 @@ fn rollback_install(
                 "Codex",
                 "ico",
             )?;
+        }
+        IntegrationState::Missing => {
+            if current
+                .as_ref()
+                .is_some_and(|metadata| is_owned(metadata, paths))
+            {
+                remove_safe_regular_file_if_present(&snapshot_shortcut)?;
+            }
+            restore_optional_file(
+                shell,
+                &paths.default_icon,
+                icon_bytes.as_deref(),
+                "Codex",
+                "ico",
+            )?;
+            write_atomic_bytes(
+                shell,
+                &paths.manifest,
+                manifest_bytes.as_deref().ok_or_else(|| {
+                    invalid_install_snapshot("missing shortcut manifest is absent")
+                })?,
+                "shortcut-manifest.rollback",
+                "json",
+            )?;
+            verify_rollback_shortcut(shell, paths, &snapshot)?;
         }
         _ => return Err(invalid_install_snapshot("unsupported prior state")),
     }
@@ -1808,6 +1840,13 @@ fn reconcile_stale_install_snapshot(
             true
         }
         (None, None) if snapshot.prior_state == IntegrationState::Unconfigured => true,
+        (Some(manifest), None)
+            if snapshot.prior_state == IntegrationState::Missing
+                && manifest_uses_fallback_shortcut(paths, manifest) =>
+        {
+            validate_manifest_backup_state(shell, paths, manifest)?;
+            true
+        }
         _ => false,
     };
     if !coherent {
@@ -1883,6 +1922,22 @@ fn validate_install_snapshot(
             }
             Ok(Some(manifest.installed_version))
         }
+        IntegrationState::Missing => {
+            let manifest_bytes = manifest_bytes
+                .ok_or_else(|| invalid_install_snapshot("missing shortcut manifest is absent"))?;
+            let manifest: ShortcutManifest = serde_json::from_slice(manifest_bytes)?;
+            validate_manifest(&manifest, paths)?;
+            if backup_bytes.is_some()
+                || !manifest_uses_fallback_shortcut(paths, &manifest)
+                || !paths_equal(&snapshot.shortcut_path, &paths.fallback_shortcut)
+                || !snapshot.shortcut.bytes.is_empty()
+            {
+                return Err(invalid_install_snapshot(
+                    "missing fallback shortcut has inconsistent saved state",
+                ));
+            }
+            Ok(Some(manifest.installed_version))
+        }
         _ => Err(invalid_install_snapshot("unsupported prior state")),
     }
 }
@@ -1916,7 +1971,10 @@ fn verify_rollback_shortcut(
     snapshot: &InstallRollbackSnapshot,
 ) -> Result<(), IntegrationError> {
     let shortcut = snapshot_shortcut_path(paths, snapshot)?;
-    if snapshot.prior_state == IntegrationState::Unconfigured {
+    if matches!(
+        snapshot.prior_state,
+        IntegrationState::Unconfigured | IntegrationState::Missing
+    ) {
         if inspect_optional(shell, &shortcut)?.is_some() {
             return Err(IntegrationError::ShortcutConflict);
         }
@@ -3598,6 +3656,62 @@ mod tests {
             fs::read(&fixture.paths.default_icon).expect("restored icon"),
             original_icon
         );
+    }
+
+    #[test]
+    fn missing_managed_fallback_can_upgrade_and_roll_back_to_missing_state() {
+        let fixture = fixture();
+        let shell = FakeShell;
+        fs::remove_file(&fixture.paths.shortcut).expect("remove official shortcut");
+        install(&shell, &fixture.paths, "0.3.47", None).expect("prior fallback install");
+        let original_manifest = fs::read(&fixture.paths.manifest).expect("prior manifest");
+        let original_icon = fs::read(&fixture.paths.default_icon).expect("prior icon");
+        fs::remove_file(&fixture.paths.fallback_shortcut).expect("remove managed fallback");
+
+        assert_eq!(
+            preflight(&shell, &fixture.paths, "0.3.48")
+                .expect("preflight missing managed shortcut")
+                .state,
+            IntegrationState::Missing
+        );
+        let prepared = prepare_install(&shell, &fixture.paths).expect("prepare missing shortcut");
+        assert_eq!(prepared.state, IntegrationState::Missing);
+        assert_eq!(
+            prepare_install(&shell, &fixture.paths)
+                .expect("reconcile stale missing-shortcut snapshot")
+                .state,
+            IntegrationState::Missing
+        );
+        install_with_legacy_cleanup(&shell, &fixture.paths, "0.3.48", None, false)
+            .expect("upgrade creates a replacement fallback");
+        assert!(fixture.paths.fallback_shortcut.exists());
+        assert_eq!(
+            status(&shell, &fixture.paths)
+                .expect("upgraded status")
+                .state,
+            IntegrationState::Managed
+        );
+
+        let rolled_back = rollback_install(&shell, &fixture.paths).expect("restore missing state");
+        assert_eq!(rolled_back.state, IntegrationState::Missing);
+        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert_eq!(
+            fs::read(&fixture.paths.manifest).unwrap(),
+            original_manifest
+        );
+        assert_eq!(
+            fs::read(&fixture.paths.default_icon).unwrap(),
+            original_icon
+        );
+        assert!(!fixture.paths.install_rollback.exists());
+
+        prepare_install(&shell, &fixture.paths).expect("prepare again");
+        install_with_legacy_cleanup(&shell, &fixture.paths, "0.3.48", None, false)
+            .expect("upgrade again");
+        let committed = commit_install(&shell, &fixture.paths).expect("commit upgrade");
+        assert_eq!(committed.state, IntegrationState::Managed);
+        assert_eq!(committed.installed_version.as_deref(), Some("0.3.48"));
+        assert!(!fixture.paths.install_rollback.exists());
     }
 
     #[test]

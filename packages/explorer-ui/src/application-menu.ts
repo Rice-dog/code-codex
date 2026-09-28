@@ -8,7 +8,7 @@ interface ApplicationMenuActions {
 interface MenuMount {
   topBar: HTMLElement;
   menubar: HTMLElement;
-  help: HTMLButtonElement;
+  lastNativeTrigger: HTMLButtonElement;
 }
 
 interface MenuState {
@@ -87,17 +87,24 @@ function stateStore(): Record<PropertyKey, unknown> {
 }
 
 function findMenuMount(): MenuMount | null {
-  const help = document.getElementById("application-menu-trigger-help-menu");
-  if (!(help instanceof HTMLButtonElement) || help.getAttribute("aria-label") !== "Help") return null;
-  const menubar = help.parentElement;
-  if (!(menubar instanceof HTMLElement) || menubar.getAttribute("role") !== "menubar" ||
-      menubar.getAttribute("aria-label") !== "Application menu") return null;
-  const expected = ["file", "edit", "view", "help"].map((name) =>
-    menubar.querySelector(`#application-menu-trigger-${name}-menu`));
-  if (expected.some((button) => !(button instanceof HTMLButtonElement)) || expected[3] !== help) return null;
+  // Codex localizes the menu's visible and accessible labels. Its trigger IDs
+  // and menubar role identify the native row without depending on any language.
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('[role="menubar"]'))
+    .map((menubar) => ({
+      menubar,
+      triggers: Array.from(menubar.querySelectorAll<HTMLButtonElement>(
+        'button[id^="application-menu-trigger-"][id$="-menu"]',
+      )),
+    }))
+    .filter(({ triggers }) => triggers.length >= 2);
+  const candidate = candidates.length === 1 ? candidates[0] : undefined;
+  if (!candidate) return null;
+  const { menubar, triggers } = candidate;
+  const lastNativeTrigger = triggers[triggers.length - 1];
+  if (!lastNativeTrigger) return null;
   const topBar = menubar.parentElement;
   if (!(topBar instanceof HTMLElement) || !topBar.isConnected || topBar.parentElement === null) return null;
-  return { topBar, menubar, help };
+  return { topBar, menubar, lastNativeTrigger };
 }
 
 function ensureStyle(): void {
@@ -120,7 +127,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   const trigger = document.createElement("button");
   trigger.type = "button";
   trigger.id = "code-codex-application-menu-trigger";
-  trigger.className = mount.help.className;
+  trigger.className = mount.lastNativeTrigger.className;
   trigger.textContent = "Code-Codex";
   trigger.setAttribute("aria-haspopup", "menu");
   trigger.setAttribute("aria-expanded", "false");
@@ -235,7 +242,9 @@ export function reconcileApplicationMenu(actions: ApplicationMenuActions): void 
   const previous = store[MENU_STATE] as MenuState | undefined;
   const mount = findMenuMount();
   if (previous?.owner === owner && mount && previous.mount.topBar === mount.topBar &&
-      previous.mount.menubar === mount.menubar && previous.host.isConnected && previous.popup.isConnected) return;
+      previous.mount.menubar === mount.menubar &&
+      previous.mount.lastNativeTrigger === mount.lastNativeTrigger &&
+      previous.host.isConnected && previous.popup.isConnected) return;
   previous?.dispose();
   delete store[MENU_STATE];
   for (const old of document.querySelectorAll(`${MENU_HOST_SELECTOR}, ${MENU_POPUP_SELECTOR}`)) old.remove();

@@ -2,6 +2,20 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.52 — 安装与界面适配 / Setup and interface improvements
+
+- 修复旧版安装记录仍在、`Code-Codex.lnk` 已丢失时，升级在保存快捷方式回滚状态阶段失败的问题。升级会重建可用快捷方式，失败回滚仍保留原安装记录与缺失状态。
+- 安装错误窗口保留快捷方式工具的具体错误文本，避免只显示笼统的回滚准备失败信息。
+- 打开文件预览时，动态背景继续透过与对话区一致的半透明蒙版显示。
+- 顶部 Code-Codex 菜单不再依赖英文菜单标签，会出现在原生菜单项右侧。
+- 重新打开插件市场或切换分类时，自动定位到该分类中已启用的插件。
+
+- Upgrades now recreate a missing managed `Code-Codex.lnk` while preserving the prior missing-shortcut state if installation rolls back.
+- Setup errors retain the shortcut tool's specific failure output.
+- File previews use the same translucent mask as the conversation area when a dynamic background is active.
+- The top Code-Codex menu no longer depends on English menu labels and appears after the native menu items.
+- Preview Market reveals an enabled plugin when opened or when switching categories.
+
 ## v0.3.48 — 本地诊断与安装修复 / Local diagnostics and setup fixes
 
 - 启动时从官方 Windows 安装包清单识别主程序，并在进程校验中比较规范化路径及文件身份；不放宽非官方进程拦截。

@@ -217,7 +217,8 @@ fn format_setup_failure(exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) ->
             report.line.map_or("unknown".to_owned(), |line| line.to_string()),
             decoded_message,
         ));
-    } else if !stderr.is_empty() {
+    }
+    if !stderr.is_empty() {
         sections.push(format!("PowerShell error:\n{stderr}"));
     }
     let remaining_output = stdout
@@ -859,6 +860,22 @@ mod tests {
         assert!(message.contains("Win32 code: 32"));
         assert!(message.contains("Moving version directory"));
         assert!(!message.contains("messageBase64"));
+    }
+
+    #[test]
+    fn setup_failure_keeps_shortcut_tool_error_with_structured_report() {
+        let reason = base64::engine::general_purpose::STANDARD
+            .encode("The shortcut rollback state could not be prepared.".as_bytes());
+        let report = format!(
+            "CODECODEX_INSTALL_ERROR:{{\"stage\":\"Checking Codex integration\",\"operation\":\"Saving shortcut rollback state\",\"targetName\":\"\",\"targetExists\":null,\"attempt\":0,\"exception\":\"RuntimeException\",\"hresult\":\"0x80131501\",\"win32\":null,\"line\":395,\"messageBase64\":\"{reason}\"}}"
+        );
+        let message = format_setup_failure(
+            Some(1),
+            report.as_bytes(),
+            b"code-codex-shortcut: managed fallback shortcut is missing",
+        );
+        assert!(message.contains("The shortcut rollback state could not be prepared."));
+        assert!(message.contains("managed fallback shortcut is missing"));
     }
 
     #[test]
