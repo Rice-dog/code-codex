@@ -5423,6 +5423,8 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   #childObserver: MutationObserver | null = null;
   #nativeTitleObserver: MutationObserver | null = null;
   #nativeTitleObserverRoot: Element | null = null;
+  #nativeViewportObserver: ResizeObserver | null = null;
+  #observedNativeViewport: HTMLElement | null = null;
   #conversationTitle = "Conversation";
   readonly #clippedLayout: boolean;
 
@@ -5470,6 +5472,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     this.#nativeTitleObserver?.disconnect();
     this.#nativeTitleObserver = null;
     this.#nativeTitleObserverRoot = null;
+    this.#nativeViewportObserver?.disconnect();
+    this.#nativeViewportObserver = null;
+    this.#observedNativeViewport = null;
   }
 
   get state(): MainPreviewState {
@@ -11515,12 +11520,56 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     if (typeof scrollIntoView === "function") scrollIntoView.call(slot, { block: "nearest", inline: "nearest" });
   }
 
+  #nativeConversationViewport(parent: Element): HTMLElement | null {
+    if (!this.#clippedLayout) return null;
+    const viewports = parent.querySelectorAll<HTMLElement>(
+      ':scope > div > [data-app-shell-workspace-layout]',
+    );
+    const viewport = viewports.length === 1 ? viewports[0] : null;
+    return viewport?.parentElement?.parentElement === parent ? viewport : null;
+  }
+
+  #syncNativeViewportBounds(parent: Element, viewport: HTMLElement | null): void {
+    if (!viewport) {
+      this.#nativeViewportObserver?.disconnect();
+      this.#observedNativeViewport = null;
+      this.style.removeProperty("left");
+      this.style.removeProperty("right");
+      return;
+    }
+    if (this.#observedNativeViewport !== viewport) {
+      this.#nativeViewportObserver?.disconnect();
+      this.#observedNativeViewport = viewport;
+      if (typeof ResizeObserver !== "undefined") {
+        this.#nativeViewportObserver ??= new ResizeObserver(() => {
+          const currentParent = this.parentElement;
+          const currentViewport = this.#observedNativeViewport;
+          if (this.#connected && currentParent?.matches(MAIN_SURFACE_SELECTOR) && currentViewport) {
+            this.#syncNativeViewportBounds(currentParent, currentViewport);
+          }
+        });
+        this.#nativeViewportObserver.observe(parent);
+        this.#nativeViewportObserver.observe(viewport);
+      }
+    }
+    const parentRect = parent.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
+    if (parentRect.width <= 0 || viewportRect.width <= 0) return;
+    const parentStyle = getComputedStyle(parent);
+    // Absolute offsets start at the main surface's padding edge, after its border.
+    const contentLeft = parentRect.left + (Number.parseFloat(parentStyle.borderLeftWidth) || 0);
+    const contentRight = parentRect.right - (Number.parseFloat(parentStyle.borderRightWidth) || 0);
+    this.style.left = `${Math.max(0, viewportRect.left - contentLeft)}px`;
+    this.style.right = `${Math.max(0, contentRight - viewportRect.right)}px`;
+  }
+
   #syncSuppression(): void {
     const parent = this.#connected && this.#state.tabs.length > 0 && this.parentElement?.matches(MAIN_SURFACE_SELECTOR)
       ? this.parentElement
       : null;
     if (!parent) {
       this.#restoreSuppressedChildren();
+      this.#syncNativeViewportBounds(this.parentElement ?? this, null);
       this.#nativeTitleObserver?.disconnect();
       this.#nativeTitleObserver = null;
       this.#nativeTitleObserverRoot = null;
@@ -11533,6 +11582,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       this.#childObserver.observe(parent, { childList: true, subtree: true });
     }
 
+    const nativeViewport = this.#nativeConversationViewport(parent);
+    this.#syncNativeViewportBounds(parent, nativeViewport);
+
     const directChildren = Array.from(parent.children);
     const nativeHeader = directChildren.find((child) => child.matches(
       "header[data-app-shell-application-menu-bar], header[data-app-shell-header-edge-scroll]",
@@ -11544,7 +11596,11 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     if (nativeHeaderSubject) desired.add(nativeHeaderSubject);
 
     if (this.#clippedLayout) {
-      const titles = document.querySelectorAll<HTMLElement>("header [data-app-shell-titlebar-content]");
+      const focusedTitles = document.querySelectorAll<HTMLElement>(
+        'header [data-app-shell-focus-area="main"] [data-app-shell-titlebar-content]',
+      );
+      const titles = focusedTitles.length ? focusedTitles :
+        document.querySelectorAll<HTMLElement>("header [data-app-shell-titlebar-content]");
       const title = titles.length === 1 ? titles[0] : null;
       const header = title?.closest("header") ?? null;
       const observerRoot = header?.parentElement ??
@@ -11578,8 +11634,12 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     }
 
     if (this.#state.activePath !== null) {
-      for (const child of directChildren) {
-        if (child !== this && child !== nativeHeader) desired.add(child);
+      if (this.#clippedLayout && nativeViewport) {
+        desired.add(nativeViewport);
+      } else {
+        for (const child of directChildren) {
+          if (child !== this && child !== nativeHeader) desired.add(child);
+        }
       }
     }
 
