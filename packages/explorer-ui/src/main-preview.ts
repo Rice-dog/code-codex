@@ -52,6 +52,8 @@ import TurndownService from "turndown";
 import { gfm as turndownGfm } from "turndown-plugin-gfm";
 import { getFileIcon, icons } from "./icons";
 import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
+import { usesClippedMainLayout } from "./adapters/codex-layout-version";
+import { getBootstrapConfig } from "./bridge";
 import { MAX_SYNTAX_SOURCE_UNITS, highlightSyntaxForPath, type SyntaxHighlight } from "./syntax-highlight";
 
 declare const __CODE_CODEX_PPT_WORKER_SOURCE__: string;
@@ -3288,6 +3290,18 @@ const mainPreviewStyles = String.raw`
 
   .tab-strip::-webkit-scrollbar { display: none; }
 
+  :host([data-clipped-layout="true"]) .surface {
+    --cle-preview-header-height: 42px;
+    grid-template-rows: var(--cle-preview-header-height) minmax(0, 1fr);
+  }
+
+  :host([data-clipped-layout="true"]) .tab-strip {
+    height: var(--cle-preview-header-height);
+    align-self: start;
+    width: calc(100% - 124px);
+    background: var(--cle-main-bg);
+  }
+
   .tab-slot {
     display: flex;
     flex: 0 0 auto;
@@ -3316,6 +3330,34 @@ const mainPreviewStyles = String.raw`
   }
 
   .tab-slot.conversation { width: 142px; }
+  :host([data-clipped-layout="true"]) .tab-slot {
+    flex: 0 0 144px;
+    width: 144px;
+  }
+  :host([data-clipped-layout="true"]) .tab-slot.active,
+  :host([data-clipped-layout="true"]) .preview-tab[aria-selected="true"] {
+    background: var(--cle-main-bar);
+  }
+  :host([data-clipped-layout="true"]) .preview-tab {
+    height: 41px;
+    gap: 6px;
+    padding-inline: 10px;
+    font-size: 13px;
+    line-height: var(--cle-native-title-line-height, 24px);
+  }
+  :host([data-clipped-layout="true"]) .tab-slot.conversation .preview-tab {
+    padding-left: 17px;
+  }
+  :host([data-clipped-layout="true"]) .tab-icon {
+    width: 14px;
+    height: 14px;
+  }
+  :host([data-clipped-layout="true"]) .tab-close {
+    width: 22px;
+    height: 22px;
+    margin: 0 3px 0 -2px;
+    padding: 5px;
+  }
   .tab-slot.file { width: clamp(150px, 19vw, 238px); }
   .tab-slot.file .preview-tab { padding-right: 5px; }
 
@@ -5379,9 +5421,17 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   #connected = false;
   #suppressedParent: Element | null = null;
   #childObserver: MutationObserver | null = null;
+  #nativeTitleObserver: MutationObserver | null = null;
+  #nativeTitleObserverRoot: Element | null = null;
+  #nativeViewportObserver: ResizeObserver | null = null;
+  #observedNativeViewport: HTMLElement | null = null;
+  #conversationTitle = "Conversation";
+  readonly #clippedLayout: boolean;
 
   constructor() {
     super();
+    const bootstrap = getBootstrapConfig();
+    this.#clippedLayout = usesClippedMainLayout(bootstrap.codexVersion ?? bootstrap.version);
     this.#shadow = this.attachShadow({ mode: "open" });
     this.#shadow.innerHTML = `
       <style>${mainPreviewStyles}</style>
@@ -5400,6 +5450,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   connectedCallback(): void {
     this.#connected = true;
+    if (this.#clippedLayout) this.dataset.clippedLayout = "true";
     this.#render();
     this.#syncSuppression();
     queueMicrotask(() => {
@@ -5418,6 +5469,12 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     this.#revokeAllMediaObjectUrls();
     this.#panelMount.replaceChildren();
     this.#restoreSuppressedChildren();
+    this.#nativeTitleObserver?.disconnect();
+    this.#nativeTitleObserver = null;
+    this.#nativeTitleObserverRoot = null;
+    this.#nativeViewportObserver?.disconnect();
+    this.#nativeViewportObserver = null;
+    this.#observedNativeViewport = null;
   }
 
   get state(): MainPreviewState {
@@ -5540,7 +5597,8 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     conversationTab.setAttribute("aria-selected", String(this.#state.activePath === null));
     conversationTab.tabIndex = this.#rovingPath === null ? 0 : -1;
     conversationTab.dataset.tabKind = "conversation";
-    conversationTab.append(this.#staticIcon(CONVERSATION_ICON, "tab-icon"), this.#textSpan("Conversation", "tab-label"));
+    conversationTab.title = this.#conversationTitle;
+    conversationTab.append(this.#staticIcon(CONVERSATION_ICON, "tab-icon"), this.#textSpan(this.#conversationTitle, "tab-label"));
     conversationSlot.append(conversationTab);
     fragment.append(conversationSlot);
 
@@ -11462,12 +11520,59 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     if (typeof scrollIntoView === "function") scrollIntoView.call(slot, { block: "nearest", inline: "nearest" });
   }
 
+  #nativeConversationViewport(parent: Element): HTMLElement | null {
+    if (!this.#clippedLayout) return null;
+    const viewports = parent.querySelectorAll<HTMLElement>(
+      ':scope > div > [data-app-shell-workspace-layout]',
+    );
+    const viewport = viewports.length === 1 ? viewports[0] : null;
+    return viewport?.parentElement?.parentElement === parent ? viewport : null;
+  }
+
+  #syncNativeViewportBounds(parent: Element, viewport: HTMLElement | null): void {
+    if (!viewport) {
+      this.#nativeViewportObserver?.disconnect();
+      this.#observedNativeViewport = null;
+      this.style.removeProperty("left");
+      this.style.removeProperty("right");
+      return;
+    }
+    if (this.#observedNativeViewport !== viewport) {
+      this.#nativeViewportObserver?.disconnect();
+      this.#observedNativeViewport = viewport;
+      if (typeof ResizeObserver !== "undefined") {
+        this.#nativeViewportObserver ??= new ResizeObserver(() => {
+          const currentParent = this.parentElement;
+          const currentViewport = this.#observedNativeViewport;
+          if (this.#connected && currentParent?.matches(MAIN_SURFACE_SELECTOR) && currentViewport) {
+            this.#syncNativeViewportBounds(currentParent, currentViewport);
+          }
+        });
+        this.#nativeViewportObserver.observe(parent);
+        this.#nativeViewportObserver.observe(viewport);
+      }
+    }
+    const parentRect = parent.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
+    if (parentRect.width <= 0 || viewportRect.width <= 0) return;
+    const parentStyle = getComputedStyle(parent);
+    // Absolute offsets start at the main surface's padding edge, after its border.
+    const contentLeft = parentRect.left + (Number.parseFloat(parentStyle.borderLeftWidth) || 0);
+    const contentRight = parentRect.right - (Number.parseFloat(parentStyle.borderRightWidth) || 0);
+    this.style.left = `${Math.max(0, viewportRect.left - contentLeft)}px`;
+    this.style.right = `${Math.max(0, contentRight - viewportRect.right)}px`;
+  }
+
   #syncSuppression(): void {
     const parent = this.#connected && this.#state.tabs.length > 0 && this.parentElement?.matches(MAIN_SURFACE_SELECTOR)
       ? this.parentElement
       : null;
     if (!parent) {
       this.#restoreSuppressedChildren();
+      this.#syncNativeViewportBounds(this.parentElement ?? this, null);
+      this.#nativeTitleObserver?.disconnect();
+      this.#nativeTitleObserver = null;
+      this.#nativeTitleObserverRoot = null;
       return;
     }
     if (this.#suppressedParent !== parent) {
@@ -11476,6 +11581,9 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       this.#childObserver = new MutationObserver(() => this.#syncSuppression());
       this.#childObserver.observe(parent, { childList: true, subtree: true });
     }
+
+    const nativeViewport = this.#nativeConversationViewport(parent);
+    this.#syncNativeViewportBounds(parent, nativeViewport);
 
     const directChildren = Array.from(parent.children);
     const nativeHeader = directChildren.find((child) => child.matches(
@@ -11487,9 +11595,51 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     const desired = new Set<Element>();
     if (nativeHeaderSubject) desired.add(nativeHeaderSubject);
 
+    if (this.#clippedLayout) {
+      const focusedTitles = document.querySelectorAll<HTMLElement>(
+        'header [data-app-shell-focus-area="main"] [data-app-shell-titlebar-content]',
+      );
+      const titles = focusedTitles.length ? focusedTitles :
+        document.querySelectorAll<HTMLElement>("header [data-app-shell-titlebar-content]");
+      const title = titles.length === 1 ? titles[0] : null;
+      const header = title?.closest("header") ?? null;
+      const observerRoot = header?.parentElement ??
+        (this.#nativeTitleObserverRoot?.isConnected ? this.#nativeTitleObserverRoot : document.body);
+      if (observerRoot !== this.#nativeTitleObserverRoot) {
+        this.#nativeTitleObserver?.disconnect();
+        this.#nativeTitleObserverRoot = observerRoot;
+        this.#nativeTitleObserver = observerRoot ? new MutationObserver(() => this.#syncSuppression()) : null;
+        this.#nativeTitleObserver?.observe(observerRoot!, {
+          childList: true,
+          subtree: true,
+          characterData: observerRoot !== document.body,
+        });
+      }
+      const titleText = title?.textContent?.trim() || "Conversation";
+      if (titleText !== this.#conversationTitle) {
+        this.#conversationTitle = titleText;
+        const tab = this.#tabList.querySelector<HTMLButtonElement>('[data-tab-kind="conversation"]');
+        const label = tab?.querySelector<HTMLElement>(".tab-label");
+        if (label) label.textContent = titleText;
+        if (tab) tab.title = titleText;
+      }
+      const titleRect = title?.getBoundingClientRect();
+      const headerRect = header?.getBoundingClientRect();
+      if (titleRect && headerRect) {
+        this.style.setProperty("--cle-native-header-height", `${headerRect.height}px`);
+        const titleStyle = getComputedStyle(title!);
+        this.style.setProperty("--cle-native-title-line-height", titleStyle.lineHeight);
+        desired.add(title!);
+      }
+    }
+
     if (this.#state.activePath !== null) {
-      for (const child of directChildren) {
-        if (child !== this && child !== nativeHeader) desired.add(child);
+      if (this.#clippedLayout && nativeViewport) {
+        desired.add(nativeViewport);
+      } else {
+        for (const child of directChildren) {
+          if (child !== this && child !== nativeHeader) desired.add(child);
+        }
       }
     }
 

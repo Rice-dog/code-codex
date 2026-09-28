@@ -219,6 +219,10 @@
               Name="Codex.ico"
               On="uninstall" />
             <RemoveFile
+              Id="RemoveGeneratedOfficialCodexIcon"
+              Name="Codex-Official.ico"
+              On="uninstall" />
+            <RemoveFile
               Id="RemoveLegacyRootCommandLine"
               Name="code-codex.exe"
               On="uninstall" />

@@ -6,6 +6,7 @@ import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVid
 import type { StartupTransitionController } from "./startup-transition";
 import { formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-timeline";
 import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
+import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
 import { getFileIcon, icons } from "./icons";
@@ -646,14 +647,7 @@ type CodexAppearanceAction =
     };
 
 interface CodexAppearanceAdapter {
-  readonly appActions: {
-    readonly runInPrimaryWindow: (request: {
-      readonly action: CodexAppearanceAction;
-    }) => Promise<unknown>;
-  };
-  readonly clientCoordination: {
-    readonly invalidateQueryCache: (request: { readonly queryKey: readonly string[] }) => Promise<unknown>;
-  };
+  readonly runAction: (action: CodexAppearanceAction) => Promise<unknown>;
 }
 
 type DarkBackgroundPluginId =
@@ -1937,7 +1931,10 @@ async function discoverCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter>
   const moduleUrl = findCodexAppInitialModule();
   if (!moduleUrl) throw new Error("Codex Appearance module is unavailable");
   const moduleExports = await import(moduleUrl) as unknown as Record<string, unknown>;
-  const adapters = Object.values(moduleExports).filter((value): value is CodexAppearanceAdapter => {
+  const adapters = Object.values(moduleExports).filter((value): value is {
+    appActions: { runInPrimaryWindow: (request: { action: CodexAppearanceAction }) => Promise<unknown> };
+    clientCoordination: { invalidateQueryCache: (request: { queryKey: readonly string[] }) => Promise<unknown> };
+  } => {
     if (!isObjectRecord(value) || !isCodexRpcNamespace(value.appActions) || !isCodexRpcNamespace(value.clientCoordination)) {
       return false;
     }
@@ -1945,8 +1942,22 @@ async function discoverCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter>
       && typeof value.clientCoordination.invalidateQueryCache === "function";
   });
   const adapter = adapters[0];
-  if (adapters.length !== 1 || !adapter) throw new Error("Codex Appearance controls could not be identified safely");
-  return adapter;
+  if (adapters.length === 1 && adapter) {
+    return { runAction: (action) => adapter.appActions.runInPrimaryWindow({ action }) };
+  }
+
+  // Codex 26.924 moved app actions out of the combined RPC namespace. Find
+  // the single exported dispatcher by its implementation, not its minified
+  // export name, which changes on every official build.
+  const bootstrap = getBootstrapConfig();
+  if (usesClippedMainLayout(bootstrap.codexVersion ?? bootstrap.version)) {
+    const actions = Object.values(moduleExports).filter((value): value is (action: CodexAppearanceAction) => Promise<unknown> =>
+      typeof value === "function"
+      && Function.prototype.toString.call(value).includes(".appActions")
+      && Function.prototype.toString.call(value).includes("runInPrimaryWindow({action:"));
+    if (actions.length === 1 && actions[0]) return { runAction: actions[0] };
+  }
+  throw new Error("Codex Appearance controls could not be identified safely");
 }
 
 let codexAppearanceAdapterPromise: Promise<CodexAppearanceAdapter> | undefined;
@@ -1963,7 +1974,7 @@ function getCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter> {
 
 async function runCodexAppearanceAction(action: CodexAppearanceAction): Promise<Record<string, unknown>> {
   const adapter = await getCodexAppearanceAdapter();
-  const result = await adapter.appActions.runInPrimaryWindow({ action });
+  const result = await adapter.runAction(action);
   if (!isObjectRecord(result)) throw new Error("Codex returned an invalid Appearance response");
   return result;
 }

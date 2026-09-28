@@ -2,6 +2,24 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.47 — 新版 Codex 适配 / New Codex Layout Compatibility
+
+- 新版 Codex 布局在原生 New Tab 分栏时，文件预览跟随 Codex 对话视口移动到右侧，保留左侧原生网页面板及其交互；对话与文件标签仍保持 42px 高度、选中灰色、其余白色。旧版布局保持原样。
+- 修复 Windows 桌面缓存旧版 Code-Codex 图标的问题：官方白色 Codex 图标使用新的图标文件路径，并在替换快捷方式后刷新 Shell 图标缓存。
+- 桌面快捷方式恢复使用官方 Codex 安装包中的白色图标；快捷方式仍启动 Code-Codex。安装和升级时会重新生成多尺寸图标。
+- 根据 Codex 26.924.2738.0 的实际界面结构，修复启动时 `CC-START-CDP-014` 和文件树不显示的问题；文件树位于任务选择栏与对话区域之间。旧版本仍使用原有布局路径。
+- 新版布局中，会话标题随文件树宽度移动，文件树顶部与原生侧栏及会话区域齐平；修复新版外观接口变化导致动态背景插件无法启用的问题。
+- 打开文件预览时，首个标签显示当前对话名称，并隐藏重复的原生标题；标签位置与新版 Codex 标题栏对齐，关闭预览后恢复原生标题。旧版布局保持原样。
+- 提供 setup EXE、MSI、ZIP、独立卸载程序和 `SHA256SUMS.txt`。
+
+- In the new Codex layout, file previews now follow Codex's native conversation viewport into the right pane when New Tab creates a split view, preserving the native web pane on the left. Tabs retain their 42px height and selected-gray/unselected-white appearance. The legacy layout is unchanged.
+- Fixes Windows continuing to show the old Code-Codex shortcut icon from its cache. The official white Codex icon now has a new file path, and setup refreshes the Shell icon cache after replacing the shortcut.
+- The desktop shortcut uses the white icon from the official Codex package again while still launching Code-Codex. Installation and upgrades regenerate the multi-resolution icon.
+- Uses the actual Codex 26.924.2738.0 interface structure to fix `CC-START-CDP-014` and restore the file tree between the task sidebar and conversation. Earlier versions retain their existing layout path.
+- On the new layout, the conversation title tracks the file tree width and the panel aligns with the native content area. Dynamic backgrounds can again use Codex's appearance controls.
+- File previews show the current conversation name in the first tab and suppress the duplicate native title. The tab aligns with the new Codex title bar, and closing the preview restores the native title. The legacy layout is unchanged.
+- Includes the setup EXE, MSI, ZIP, standalone uninstaller, and `SHA256SUMS.txt`.
+
 ## v0.3.31 — 桌面快捷方式接管 / Desktop Shortcut Adoption
 
 - 安装器会复用当前用户或公共桌面上的 Codex/ChatGPT 快捷方式，包括用户自行创建或重命名的快捷方式；只有找不到可接管的快捷方式时才新建 Code-Codex 图标。
