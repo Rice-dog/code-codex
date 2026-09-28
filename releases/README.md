@@ -2,6 +2,16 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.48 — 本地诊断与安装修复 / Local diagnostics and setup fixes
+
+- 启动时从官方 Windows 安装包清单识别主程序，并在进程校验中比较规范化路径及文件身份；不放宽非官方进程拦截。
+- 启动报告分别列出预期和实际程序的文件名及 WindowsApps 包目录名，便于一次反馈定位路径差异。
+- 安装器对短暂文件占用做有限重试，失败时显示步骤、操作、文件名、HRESULT、Win32 错误码和可读的原始错误；回滚快捷方式与版本标记，并在成功前校验安装文件和快捷方式。
+
+- Read the official Windows package manifest to select its application executable, and compare canonical paths and file identity without weakening nonofficial-process checks.
+- Startup reports show the expected and observed executable and WindowsApps package names.
+- Setup retries transient file sharing errors, reports the operation and OS error codes without garbled text, rolls back shortcut/version state on failure, and verifies files and shortcut before success.
+
 ## v0.3.47 — 新版 Codex 适配 / New Codex Layout Compatibility
 
 - 新版 Codex 布局在原生 New Tab 分栏时，文件预览跟随 Codex 对话视口移动到右侧，保留左侧原生网页面板及其交互；对话与文件标签仍保持 42px 高度、选中灰色、其余白色。旧版布局保持原样。

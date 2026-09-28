@@ -2,6 +2,8 @@
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+use base64::Engine as _;
+use serde::Deserialize;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File};
@@ -22,7 +24,23 @@ const FOOTER_MAGIC: &[u8; 8] = b"CLEXZIP1";
 const FOOTER_LENGTH: u64 = 24;
 const MAX_SCRIPT_DIAGNOSTIC_CHARS: usize = 4_096;
 const TRUNCATION_MARKER: &str = "\n[diagnostic output truncated]";
-const EXPAND_ARCHIVE_SCRIPT: &str = "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:CLE_ARCHIVE_PATH -DestinationPath $env:CLE_DESTINATION_PATH -Force";
+const INSTALL_ERROR_PREFIX: &str = "CODECODEX_INSTALL_ERROR:";
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallErrorReport {
+    stage: String,
+    operation: String,
+    target_name: String,
+    target_exists: Option<bool>,
+    attempt: u32,
+    exception: String,
+    hresult: String,
+    win32: Option<u32>,
+    line: Option<u32>,
+    message_base64: String,
+}
+const EXPAND_ARCHIVE_SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); try { Expand-Archive -LiteralPath $env:CLE_ARCHIVE_PATH -DestinationPath $env:CLE_DESTINATION_PATH -Force } catch { $e=$_.Exception.GetBaseException(); $hr=[Convert]::ToString($e.HResult,16).ToUpperInvariant().PadLeft(8,'0'); $detail=[ordered]@{stage='Expanding package';operation='Expand-Archive';targetName='installer payload';targetExists=$null;attempt=1;exception=$e.GetType().Name;hresult='0x'+$hr;win32=$(if($hr.StartsWith('8007')){[Convert]::ToInt32($hr.Substring(4),16)}else{$null});line=$_.InvocationInfo.ScriptLineNumber;messageBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($e.Message))}; [Console]::Out.WriteLine('CODECODEX_INSTALL_ERROR:'+(ConvertTo-Json -InputObject $detail -Compress)); exit 1 }"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SetupSource {
@@ -177,11 +195,38 @@ fn format_setup_failure(exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) ->
     let stdout = sanitize_script_output(stdout);
     let stderr = sanitize_script_output(stderr);
     let mut sections = Vec::new();
-    if !stderr.is_empty() {
+    let structured = stdout.lines().find_map(|line| {
+        serde_json::from_str::<InstallErrorReport>(line.strip_prefix(INSTALL_ERROR_PREFIX)?).ok()
+    });
+    if let Some(report) = structured {
+        let decoded_message = base64::engine::general_purpose::STANDARD
+            .decode(&report.message_base64)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .unwrap_or_else(|| "Localized error text could not be decoded".to_owned());
+        sections.push(format!(
+            "Installation stage: {}\nOperation: {}\nTarget: {} (exists: {})\nAttempt: {}\nException: {}\nHRESULT: {}\nWin32 code: {}\nScript line: {}\nReason: {}",
+            report.stage,
+            report.operation,
+            report.target_name,
+            report.target_exists.map_or("unknown".to_owned(), |exists| exists.to_string()),
+            report.attempt,
+            report.exception,
+            report.hresult,
+            report.win32.map_or("unknown".to_owned(), |code| code.to_string()),
+            report.line.map_or("unknown".to_owned(), |line| line.to_string()),
+            decoded_message,
+        ));
+    } else if !stderr.is_empty() {
         sections.push(format!("PowerShell error:\n{stderr}"));
     }
-    if !stdout.is_empty() {
-        sections.push(format!("Installer output:\n{stdout}"));
+    let remaining_output = stdout
+        .lines()
+        .filter(|line| !line.starts_with(INSTALL_ERROR_PREFIX))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !remaining_output.is_empty() {
+        sections.push(format!("Installer output:\n{remaining_output}"));
     }
     let exit_detail = exit_code.map_or_else(
         || "without an exit code".to_owned(),
@@ -801,6 +846,19 @@ mod tests {
 
         assert!(message.contains("Installer output:\ninstaller-only detail"));
         assert!(!message.contains("PowerShell error:"));
+    }
+
+    #[test]
+    fn setup_failure_decodes_chinese_structured_error_without_codepage_loss() {
+        let reason = base64::engine::general_purpose::STANDARD.encode("文件正在使用中".as_bytes());
+        let report = format!(
+            "CODECODEX_INSTALL_ERROR:{{\"stage\":\"Installing application files\",\"operation\":\"Moving version directory\",\"targetName\":\"0.3.48\",\"targetExists\":false,\"attempt\":3,\"exception\":\"IOException\",\"hresult\":\"0x80070020\",\"win32\":32,\"line\":354,\"messageBase64\":\"{reason}\"}}"
+        );
+        let message = format_setup_failure(Some(1), report.as_bytes(), b"");
+        assert!(message.contains("文件正在使用中"));
+        assert!(message.contains("Win32 code: 32"));
+        assert!(message.contains("Moving version directory"));
+        assert!(!message.contains("messageBase64"));
     }
 
     #[test]
