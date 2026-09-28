@@ -206,6 +206,8 @@ struct PackageRecord {
     publisher: String,
     package_family_name: String,
     package_full_name: String,
+    #[serde(default)]
+    application_executable: Option<String>,
 }
 
 pub fn discover_codex(
@@ -314,7 +316,7 @@ fn select_package_installations(
 
 #[cfg(windows)]
 fn query_windows_package_records() -> Result<Vec<PackageRecord>, DiscoveryError> {
-    const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new(); try { $packages=@(Get-AppxPackage -Name 'OpenAI.Codex*' -PackageTypeFilter Main -ErrorAction Stop | Where-Object { $_.Name -in @('OpenAI.Codex','OpenAI.CodexBeta') } | Select-Object Name,Version,InstallLocation,Publisher,PackageFamilyName,PackageFullName); ConvertTo-Json -InputObject $packages -Compress } catch { $failure=@{ errorId=[string]$_.FullyQualifiedErrorId; category=[string]$_.CategoryInfo.Category; hresult=[int]$_.Exception.HResult }; [Console]::Error.WriteLine((ConvertTo-Json -InputObject $failure -Compress)); exit 1 }"#;
+    const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); try { $packages=@(Get-AppxPackage -Name 'OpenAI.Codex*' -PackageTypeFilter Main -ErrorAction Stop | Where-Object { $_.Name -in @('OpenAI.Codex','OpenAI.CodexBeta') } | ForEach-Object { $package=$_; [xml]$manifest=Get-Content -LiteralPath (Join-Path $package.InstallLocation 'AppxManifest.xml') -Raw -ErrorAction Stop; $app=$manifest.SelectSingleNode("//*[local-name()='Application' and @Id='App']"); [pscustomobject]@{ Name=$package.Name;Version=[string]$package.Version;InstallLocation=$package.InstallLocation;Publisher=$package.Publisher;PackageFamilyName=$package.PackageFamilyName;PackageFullName=$package.PackageFullName;ApplicationExecutable=$(if($app){[string]$app.Executable}else{''}) } }); ConvertTo-Json -InputObject $packages -Compress } catch { $failure=@{ errorId=[string]$_.FullyQualifiedErrorId; category=[string]$_.CategoryInfo.Category; hresult=[int]$_.Exception.HResult }; [Console]::Error.WriteLine((ConvertTo-Json -InputObject $failure -Compress)); exit 1 }"#;
     let powershell = trusted_powershell().ok_or_else(|| DiscoveryError::PackageQueryFailed {
         step: "locate PowerShell",
         code: "trusted System32 PowerShell executable unavailable".to_owned(),
@@ -461,7 +463,11 @@ fn package_installation(record: PackageRecord) -> Result<CodexInstallation, Disc
             code: "registered location is not a directory".to_owned(),
         });
     }
-    let executable = find_gui_executable(&root).ok_or(DiscoveryError::PackageExecutableMissing)?;
+    let executable = match record.application_executable.as_deref() {
+        Some(relative) => package_application_executable(&root, relative),
+        None => find_gui_executable(&root),
+    }
+    .ok_or(DiscoveryError::PackageExecutableMissing)?;
     let app_server = contained_file(&root, &root.join("resources").join("codex.exe"))
         .or_else(|| contained_file(&root, &root.join("app").join("resources").join("codex.exe")));
     let channel = if record.name.to_ascii_lowercase().contains("beta") {
@@ -545,6 +551,24 @@ fn find_gui_executable(root: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(windows)]
+fn package_application_executable(root: &Path, relative: &str) -> Option<PathBuf> {
+    use std::path::Component;
+
+    let relative = Path::new(relative);
+    if relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+        || !relative
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+    {
+        return None;
+    }
+    contained_file(root, &root.join(relative))
 }
 
 fn contained_file(root: &Path, candidate: &Path) -> Option<PathBuf> {
@@ -1243,7 +1267,27 @@ mod tests {
             publisher: "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B".to_owned(),
             package_family_name: format!("{name}_2p2nqsd0c76g0"),
             package_full_name: format!("{name}_26.917.6896.0_x64__2p2nqsd0c76g0"),
+            application_executable: None,
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn package_application_manifest_selects_its_app_executable() {
+        let root = tempfile::tempdir().expect("package root");
+        let app = root.path().join("app");
+        std::fs::create_dir(&app).expect("app directory");
+        std::fs::write(app.join("ChatGPT.exe"), b"chatgpt").expect("first candidate");
+        std::fs::write(app.join("Codex.exe"), b"codex").expect("manifest candidate");
+        let mut record = test_package_record("OpenAI.Codex", root.path());
+        record.application_executable = Some("app/Codex.exe".to_owned());
+        let installation = package_installation(record).expect("official package");
+        assert_eq!(
+            installation.executable,
+            dunce::canonicalize(app.join("Codex.exe")).unwrap()
+        );
+        assert!(package_application_executable(root.path(), "../other.exe").is_none());
+        assert!(package_application_executable(root.path(), r"C:\other.exe").is_none());
     }
 
     #[cfg(windows)]
@@ -1320,6 +1364,7 @@ mod tests {
             publisher: "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B".to_owned(),
             package_family_name: "OpenAI.Codex_2p2nqsd0c76g0".to_owned(),
             package_full_name: "OpenAI.Codex_26.721.11231.0_x64__2p2nqsd0c76g0".to_owned(),
+            application_executable: None,
         };
 
         assert_eq!(
@@ -1341,6 +1386,7 @@ mod tests {
             publisher: "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B".to_owned(),
             package_family_name: "OpenAI.CodexBeta_2p2nqsd0c76g0".to_owned(),
             package_full_name: "OpenAI.CodexBeta_26.721.11231.0_x64__2p2nqsd0c76g0".to_owned(),
+            application_executable: None,
         };
 
         record.package_family_name = "Attacker_2p2nqsd0c76g0".to_owned();

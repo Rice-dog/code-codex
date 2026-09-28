@@ -7,6 +7,8 @@ use std::process::{Command as StdCommand, Stdio};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(windows)]
+use same_file::Handle as SameFileHandle;
 use serde::Deserialize;
 use thiserror::Error;
 #[cfg(windows)]
@@ -1089,28 +1091,39 @@ pub fn verify_process_identity(
                 snapshot.creation_matches
             )));
         }
-        if !snapshot.executable_matches {
-            return Err(ProcessGuardError::Detailed(format!(
-                "activated executable mismatch: pid={pid}, CIM_path_available={}, observed_location={}, official_location={}, CIM_path_matches_official=false",
-                !snapshot.executable_path.is_empty(),
-                path_location(&snapshot.executable_path),
-                path_location(&official_executable.to_string_lossy())
-            )));
-        }
         let observed_executable =
             dunce::canonicalize(&snapshot.executable_path).map_err(|error| {
                 ProcessGuardError::Detailed(format!(
-                    "observed executable canonicalization failed: pid={pid}, OS error {:?}",
-                    error.raw_os_error()
+                    "observed executable canonicalization failed: pid={pid}, observed_file={}, observed_package={}, OS error {:?}",
+                    safe_windowsapps_component(Path::new(&snapshot.executable_path), false),
+                    safe_windowsapps_component(Path::new(&snapshot.executable_path), true),
+                    error.raw_os_error(),
                 ))
             })?;
-        if !observed_executable.is_file()
-            || observed_executable.to_string_lossy().to_lowercase()
-                != official_executable.to_string_lossy().to_lowercase()
-        {
+        let canonical_paths_match = observed_executable
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&official_executable.to_string_lossy());
+        let same_file = match (
+            SameFileHandle::from_path(&observed_executable),
+            SameFileHandle::from_path(&official_executable),
+        ) {
+            (Ok(observed), Ok(official)) => observed == official,
+            _ => false,
+        };
+        // CIM may use a different spelling of the same packaged image. Only
+        // accept canonical equality or an identical file handle, never merely
+        // another executable in WindowsApps or the same package directory.
+        if !observed_executable.is_file() || !(canonical_paths_match || same_file) {
             return Err(ProcessGuardError::Detailed(format!(
-                "canonical executable mismatch: pid={pid}, observed_is_file={}, canonical_paths_match=false",
-                observed_executable.is_file()
+                "activated executable mismatch: pid={pid}, CIM_path_available={}, CIM_raw_match={}, observed_location={}, official_location={}, observed_file={}, official_file={}, observed_package={}, official_package={}, canonical_paths_match={canonical_paths_match}, same_file={same_file}",
+                !snapshot.executable_path.is_empty(),
+                snapshot.executable_matches,
+                path_location(&snapshot.executable_path),
+                path_location(&official_executable.to_string_lossy()),
+                safe_windowsapps_component(&observed_executable, false),
+                safe_windowsapps_component(&official_executable, false),
+                safe_windowsapps_component(&observed_executable, true),
+                safe_windowsapps_component(&official_executable, true),
             )));
         }
         Ok(())
@@ -1641,6 +1654,36 @@ fn path_location(path: &str) -> &'static str {
     }
 }
 
+#[cfg(windows)]
+fn safe_windowsapps_component(path: &Path, package: bool) -> String {
+    let components = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let name = if package {
+        components
+            .windows(2)
+            .find(|pair| pair[0].eq_ignore_ascii_case("WindowsApps"))
+            .map(|pair| pair[1].as_str())
+    } else if components
+        .iter()
+        .any(|component| component.eq_ignore_ascii_case("WindowsApps"))
+    {
+        components.last().map(String::as_str)
+    } else {
+        None
+    };
+    name.filter(|value| {
+        !value.is_empty()
+            && value.len() <= 128
+            && value
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "._-() ".contains(character))
+    })
+    .unwrap_or("redacted")
+    .to_owned()
+}
+
 fn process_chain_contains_executable(
     pid: u32,
     official_executable: &Path,
@@ -1820,6 +1863,23 @@ mod tests {
     fn detects_a_running_executable_by_canonical_path() {
         let current = std::env::current_exe().expect("current executable");
         assert!(is_executable_running(&current).expect("inspect running processes"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn process_diagnostic_only_exposes_windowsapps_file_and_package_names() {
+        let package = Path::new(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_26.924.2738.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe",
+        );
+        assert_eq!(safe_windowsapps_component(package, false), "ChatGPT.exe");
+        assert_eq!(
+            safe_windowsapps_component(package, true),
+            "OpenAI.Codex_26.924.2738.0_x64__2p2nqsd0c76g0"
+        );
+        assert_eq!(
+            safe_windowsapps_component(Path::new(r"C:\Users\someone\private.exe"), false),
+            "redacted"
+        );
     }
 
     #[cfg(windows)]

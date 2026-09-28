@@ -1,9 +1,14 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.3.47"
+    [string]$Version = "0.3.48"
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$script:InstallStage = "Starting installation"
+$script:InstallOperation = "Preparing installer"
+$script:InstallTarget = ""
+$script:InstallAttempt = 0
 $SourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SourceBinary = Join-Path $SourceRoot "code-codex.exe"
 $SourceRuntimeLauncher = Join-Path $SourceRoot "code-codex-launcher.exe"
@@ -19,6 +24,10 @@ $VersionsRoot = Join-Path $InstallRoot "versions"
 $VersionRoot = Join-Path $VersionsRoot $Version
 
 function Publish-CodeCodexProgress([int]$Percent, [string]$Stage, [string]$Detail) {
+    $script:InstallStage = $Stage
+    $script:InstallOperation = $Stage
+    $script:InstallTarget = ""
+    $script:InstallAttempt = 0
     if ([string]::IsNullOrWhiteSpace($env:CLE_PROGRESS_STATE_PATH)) { return }
     try {
         $message = [Convert]::ToBase64String(
@@ -28,6 +37,42 @@ function Publish-CodeCodexProgress([int]$Percent, [string]$Stage, [string]$Detai
         [IO.File]::WriteAllText($env:CLE_PROGRESS_STATE_PATH, $command, [Text.UTF8Encoding]::new($false))
     }
     catch {} # A display failure must not interrupt installation.
+}
+
+function Invoke-InstallFileOperation([string]$Operation, [string]$Target, [scriptblock]$Action) {
+    $script:InstallOperation = $Operation
+    $script:InstallTarget = $Target
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $script:InstallAttempt = $attempt
+        try {
+            & $Action
+            return
+        }
+        catch {
+            $code = [Convert]::ToString($_.Exception.GetBaseException().HResult, 16).ToUpperInvariant()
+            if ($attempt -eq 3 -or $code -notin @("80070020", "80070021")) { throw }
+            Start-Sleep -Milliseconds (150 * $attempt)
+        }
+    }
+}
+
+function Write-InstallDiagnostic($Failure) {
+    $baseError = $Failure.Exception.GetBaseException()
+    $hresult = [Convert]::ToString($baseError.HResult, 16).ToUpperInvariant().PadLeft(8, '0')
+    $win32 = if ($hresult.StartsWith('8007')) { [Convert]::ToInt32($hresult.Substring(4), 16) } else { $null }
+    $detail = [ordered]@{
+        stage = $script:InstallStage
+        operation = $script:InstallOperation
+        targetName = if ($script:InstallTarget) { Split-Path -Leaf $script:InstallTarget } else { "" }
+        targetExists = if ($script:InstallTarget) { Test-Path -LiteralPath $script:InstallTarget } else { $null }
+        attempt = $script:InstallAttempt
+        exception = $baseError.GetType().Name
+        hresult = "0x$hresult"
+        win32 = $win32
+        line = $Failure.InvocationInfo.ScriptLineNumber
+        messageBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($baseError.Message))
+    }
+    [Console]::Out.WriteLine('CODECODEX_INSTALL_ERROR:' + (ConvertTo-Json -InputObject $detail -Compress))
 }
 
 function Test-ReparsePoint([IO.FileSystemInfo]$Item) {
@@ -150,11 +195,15 @@ function Copy-AtomicFile([string]$Source, [string]$Destination) {
             throw "Copy destination must remain a regular file: $Destination"
         }
         if ($null -ne $destinationItem) {
-            [IO.File]::Replace($temporary, $Destination, $replacementBackup, $true)
+            Invoke-InstallFileOperation "Replacing support file" $Destination {
+                [IO.File]::Replace($temporary, $Destination, $replacementBackup, $true)
+            }
             Remove-Item -LiteralPath $replacementBackup -Force -ErrorAction SilentlyContinue
         }
         else {
-            [IO.File]::Move($temporary, $Destination)
+            Invoke-InstallFileOperation "Moving support file" $Destination {
+                [IO.File]::Move($temporary, $Destination)
+            }
         }
     }
     finally {
@@ -206,11 +255,15 @@ function Write-AtomicText([string]$Destination, [string]$Content) {
     try {
         [IO.File]::WriteAllText($temporary, $Content, [Text.UTF8Encoding]::new($false))
         if (Test-Path -LiteralPath $Destination -PathType Leaf) {
-            [IO.File]::Replace($temporary, $Destination, $replacementBackup, $true)
+            Invoke-InstallFileOperation "Replacing installation marker" $Destination {
+                [IO.File]::Replace($temporary, $Destination, $replacementBackup, $true)
+            }
             Remove-Item -LiteralPath $replacementBackup -Force -ErrorAction SilentlyContinue
         }
         else {
-            [IO.File]::Move($temporary, $Destination)
+            Invoke-InstallFileOperation "Moving installation marker" $Destination {
+                [IO.File]::Move($temporary, $Destination)
+            }
         }
     }
     finally {
@@ -219,6 +272,16 @@ function Write-AtomicText([string]$Destination, [string]$Content) {
     }
 }
 
+$script:InstallRollbackPrepared = $false
+$script:CreatedVersionRoot = $false
+$script:InstallCommitted = $false
+$previousVersionMarker = $null
+$previousInstallTypeMarker = $null
+$script:VersionSnapshotTaken = $false
+$script:RegistrySnapshotTaken = $false
+$previousRegistryEntry = $null
+$script:CleanupIssues = @()
+try {
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' -or $Version.Length -gt 32) {
     throw "Release version must be a bounded three-part numeric version: $Version"
 }
@@ -321,6 +384,25 @@ Publish-CodeCodexProgress 68 "Checking Codex integration" "Validating the offici
 if ($LASTEXITCODE -ne 0) {
     throw "Stable Codex could not be validated for Code-Codex integration. No installation files were changed."
 }
+$script:InstallOperation = "Creating installation directory"
+New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+$installRootItem = Get-ExistingItem $InstallRoot
+if ($null -eq $installRootItem -or -not $installRootItem.PSIsContainer -or (Test-ReparsePoint $installRootItem)) {
+    throw "The installation root must be a regular directory."
+}
+$script:InstallOperation = "Saving shortcut rollback state"
+& $SourceShortcutTool prepare-install --install-root $InstallRoot | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "The shortcut rollback state could not be prepared." }
+$script:InstallRollbackPrepared = $true
+$previousVersionPath = Join-Path $InstallRoot "current-version"
+$previousInstallTypePath = Join-Path $InstallRoot "install-type"
+if (Test-Path -LiteralPath $previousVersionPath -PathType Leaf) {
+    $previousVersionMarker = [IO.File]::ReadAllText($previousVersionPath)
+}
+if (Test-Path -LiteralPath $previousInstallTypePath -PathType Leaf) {
+    $previousInstallTypeMarker = [IO.File]::ReadAllText($previousInstallTypePath)
+}
+$script:VersionSnapshotTaken = $true
 
 New-Item -ItemType Directory -Path $VersionsRoot -Force | Out-Null
 $versionsItem = Get-Item -LiteralPath $VersionsRoot -Force
@@ -351,11 +433,15 @@ else {
         New-Item -ItemType Directory -Path $stagingVersion | Out-Null
         Copy-Item -LiteralPath $SourceBinary -Destination (Join-Path $stagingVersion "code-codex.exe")
         Copy-Item -LiteralPath $SourceRuntimeLauncher -Destination (Join-Path $stagingVersion "CodeCodex.exe")
-        [IO.Directory]::Move($stagingVersion, $VersionRoot)
+        Invoke-InstallFileOperation "Moving version directory" $VersionRoot {
+            [IO.Directory]::Move($stagingVersion, $VersionRoot)
+        }
+        $script:CreatedVersionRoot = $true
     }
     finally {
         if (Test-Path -LiteralPath $stagingVersion) {
-            Remove-Item -LiteralPath $stagingVersion -Recurse -Force
+            try { Remove-Item -LiteralPath $stagingVersion -Recurse -Force -ErrorAction Stop }
+            catch { $script:CleanupIssues += "staging directory cleanup failed" }
         }
     }
 }
@@ -389,6 +475,8 @@ Remove-ItemProperty `
     -ErrorAction SilentlyContinue
 
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex"
+$previousRegistryEntry = Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction SilentlyContinue
+$script:RegistrySnapshotTaken = $true
 New-Item -Path $uninstallKey -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "DisplayName" -PropertyType String -Value "Code-Codex" -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -PropertyType String -Value $Version -Force | Out-Null
@@ -402,7 +490,7 @@ New-ItemProperty -Path $uninstallKey -Name "NoRepair" -PropertyType DWord -Value
 
 $installedShortcutTool = Join-Path $InstallRoot "CodeCodex.Shortcut.exe"
 Publish-CodeCodexProgress 94 "Updating shortcuts" "Linking the Codex desktop shortcut to Code-Codex."
-$shortcutResultJson = & $installedShortcutTool install --install-root $InstallRoot --version $Version
+$shortcutResultJson = & $installedShortcutTool install --install-root $InstallRoot --version $Version --preserve-legacy
 $shortcutExitCode = $LASTEXITCODE
 if ($shortcutExitCode -ne 0) {
     throw "The Codex or ChatGPT desktop shortcut could not be redirected, or the Code-Codex shortcut could not be created (exit code $shortcutExitCode)."
@@ -412,6 +500,35 @@ $managedShortcut = [string]$shortcutResult.shortcutPath
 if (-not $managedShortcut -or -not (Test-Path -LiteralPath $managedShortcut -PathType Leaf)) {
     throw "Code-Codex could not verify the installed desktop shortcut."
 }
+$script:InstallOperation = "Verifying installed payload and shortcut"
+foreach ($pair in @(
+    @($SourceBinary, (Join-Path $VersionRoot "code-codex.exe")),
+    @($SourceRuntimeLauncher, (Join-Path $VersionRoot "CodeCodex.exe")),
+    @($SourceShim, (Join-Path $InstallRoot "CodeCodex.exe")),
+    @($SourceShortcutTool, $installedShortcutTool),
+    @($SourceUninstallerExecutable, (Join-Path $InstallRoot "Uninstall-CodeCodex.exe"))
+)) {
+    if (-not (Test-Path -LiteralPath $pair[1] -PathType Leaf) -or
+        (Get-Sha256Hash $pair[0]) -ne (Get-Sha256Hash $pair[1])) {
+        throw "Installed file verification failed for $([IO.Path]::GetFileName($pair[1]))."
+    }
+}
+if (([IO.File]::ReadAllText($previousVersionPath)).Trim() -ne $Version) {
+    throw "The active installed version was not updated."
+}
+$shortcutStatusJson = & $installedShortcutTool status --install-root $InstallRoot
+if ($LASTEXITCODE -ne 0) { throw "The installed shortcut status could not be verified." }
+$shortcutStatus = ($shortcutStatusJson -join "`n") | ConvertFrom-Json
+if ([string]$shortcutStatus.state -ne "managed" -or
+    [string]$shortcutStatus.installedVersion -ne $Version -or
+    [string]$shortcutStatus.shortcutPath -ne $managedShortcut) {
+    throw "The installed shortcut does not point to the verified version."
+}
+$script:InstallOperation = "Committing shortcut installation"
+& $installedShortcutTool commit-install --install-root $InstallRoot | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "The shortcut installation could not be committed." }
+$script:InstallRollbackPrepared = $false
+$script:InstallCommitted = $true
 Publish-CodeCodexProgress 96 "Shortcut ready" "Code-Codex will start from $([IO.Path]::GetFileNameWithoutExtension($managedShortcut))."
 
 $installedCommandLine = Join-Path $VersionRoot "code-codex.exe"
@@ -428,3 +545,56 @@ catch {
 
 Write-Host "Code-Codex managed shortcut: $managedShortcut"
 Write-Host "Installed Code-Codex $Version. Open the managed desktop shortcut to start Codex with Code-Codex."
+}
+catch {
+    $failure = $_
+    $rollbackIssues = @($script:CleanupIssues)
+    if (-not $script:InstallCommitted) {
+        if ($script:InstallRollbackPrepared) {
+            & $SourceShortcutTool rollback-install --install-root $InstallRoot | Out-Null
+            if ($LASTEXITCODE -ne 0) { $rollbackIssues += "shortcut rollback failed" }
+        }
+        if ($script:VersionSnapshotTaken) {
+        foreach ($marker in @(@($previousVersionPath, $previousVersionMarker), @($previousInstallTypePath, $previousInstallTypeMarker))) {
+            if (-not $marker[0]) { continue }
+            try {
+                if ($null -eq $marker[1]) {
+                    Remove-Item -LiteralPath $marker[0] -Force -ErrorAction SilentlyContinue
+                }
+                else {
+                    [IO.File]::WriteAllText($marker[0], [string]$marker[1], [Text.UTF8Encoding]::new($false))
+                }
+            }
+            catch { $rollbackIssues += "version marker rollback failed" }
+        }
+        }
+        if ($script:RegistrySnapshotTaken) {
+            try {
+                if ($null -eq $previousRegistryEntry) {
+                    Remove-Item -LiteralPath $uninstallKey -Force -ErrorAction SilentlyContinue
+                }
+                else {
+                    foreach ($name in @('DisplayName', 'DisplayVersion', 'Publisher', 'InstallLocation', 'DisplayIcon', 'UninstallString', 'NoModify', 'NoRepair')) {
+                        $property = $previousRegistryEntry.PSObject.Properties[$name]
+                        if ($null -eq $property) {
+                            Remove-ItemProperty -LiteralPath $uninstallKey -Name $name -ErrorAction SilentlyContinue
+                        }
+                        else {
+                            Set-ItemProperty -LiteralPath $uninstallKey -Name $name -Value $property.Value -ErrorAction Stop
+                        }
+                    }
+                }
+            }
+            catch { $rollbackIssues += "installed-app registration rollback failed" }
+        }
+        if ($script:CreatedVersionRoot -and $VersionRoot.StartsWith($VersionsRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            try { Remove-Item -LiteralPath $VersionRoot -Recurse -Force -ErrorAction Stop }
+            catch { $rollbackIssues += "new version directory cleanup failed" }
+        }
+    }
+    Write-InstallDiagnostic $failure
+    if ($rollbackIssues.Count -gt 0) {
+        [Console]::Out.WriteLine('CODECODEX_ROLLBACK_ERROR:' + ($rollbackIssues -join '; '))
+    }
+    exit 1
+}
