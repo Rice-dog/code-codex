@@ -10,8 +10,8 @@ mod startup_splash;
 
 use std::path::PathBuf;
 use std::process::{ExitCode, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
@@ -20,7 +20,8 @@ use bootstrap::{BootstrapError, build_bootstrap, resolve_bundle};
 use bridge::NativeBridge;
 use cdp_client::{
     CapabilityToken, CdpEndpoint, CdpError, CdpSupervisor, IdlePolicy, InjectionConfig,
-    PRIMARY_BINDING_NAME, PRIMARY_RECEIVER_NAME, SupervisorOptions, TargetDiscovery,
+    PRIMARY_BINDING_NAME, PRIMARY_RECEIVER_NAME, SupervisorOptions, SupervisorProgress,
+    TargetDiscovery, TargetFilter,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use context_resolver::{AppServerClient, AppServerCommand, ResolverError};
@@ -48,6 +49,173 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 use workspace_service::{SettingsStore, Workspace, WorkspaceError};
+
+#[derive(Default)]
+struct StartupTrace {
+    started: Option<Instant>,
+    events: Vec<String>,
+    renderer_port: Option<u16>,
+    inspector_port: Option<u16>,
+    launched_pid: Option<u32>,
+    listener_verified: bool,
+    precleanup_probe: Option<String>,
+    supervisor_progress: Option<Arc<SupervisorProgress>>,
+}
+
+static STARTUP_TRACE: OnceLock<Mutex<StartupTrace>> = OnceLock::new();
+
+fn startup_trace() -> &'static Mutex<StartupTrace> {
+    STARTUP_TRACE.get_or_init(|| Mutex::new(StartupTrace::default()))
+}
+
+fn begin_startup_trace(mode: &'static str) {
+    if let Ok(mut trace) = startup_trace().lock() {
+        *trace = StartupTrace {
+            started: Some(Instant::now()),
+            events: vec![format!("+0 ms | entry | mode={mode}")],
+            ..StartupTrace::default()
+        };
+    }
+}
+
+fn record_startup_event(stage: &'static str, outcome: &'static str) {
+    if let Ok(mut trace) = startup_trace().lock() {
+        let elapsed = trace.started.map_or(0, |start| start.elapsed().as_millis());
+        if trace.events.len() < 40 {
+            trace
+                .events
+                .push(format!("+{elapsed} ms | {stage} | {outcome}"));
+        }
+    }
+}
+
+fn record_launch_context(renderer_port: u16, inspector_port: Option<u16>, pid: u32) {
+    if let Ok(mut trace) = startup_trace().lock() {
+        trace.renderer_port = Some(renderer_port);
+        trace.inspector_port = inspector_port;
+        trace.launched_pid = Some(pid);
+    }
+}
+
+fn record_renderer_port(port: u16) {
+    if let Ok(mut trace) = startup_trace().lock() {
+        trace.renderer_port = Some(port);
+    }
+}
+
+fn record_precleanup_probe(probe: String) {
+    if let Ok(mut trace) = startup_trace().lock() {
+        trace.precleanup_probe = Some(probe);
+    }
+}
+
+fn record_listener_verified() {
+    if let Ok(mut trace) = startup_trace().lock() {
+        trace.listener_verified = true;
+    }
+}
+
+fn record_supervisor_progress(progress: Arc<SupervisorProgress>) {
+    if let Ok(mut trace) = startup_trace().lock() {
+        trace.supervisor_progress = Some(progress);
+    }
+}
+
+fn startup_trace_report() -> String {
+    let Ok(trace) = startup_trace().lock() else {
+        return "\n\nStartup trace: unavailable (trace lock failed)".to_owned();
+    };
+    let mut report = format!("\n\nStartup trace:\n{}", trace.events.join("\n"));
+    report.push_str(&format!(
+        "\nRenderer port: {}\nMain inspector port: {}\nLaunched PID: {}\nListener ownership verified: {}",
+        trace.renderer_port.map_or("not reserved".to_owned(), |port| port.to_string()),
+        trace.inspector_port.map_or("not used".to_owned(), |port| port.to_string()),
+        trace.launched_pid.map_or("not launched".to_owned(), |pid| pid.to_string()),
+        trace.listener_verified,
+    ));
+    if let Some(probe) = &trace.precleanup_probe {
+        report.push_str("\nPre-cleanup live-launch check:\n");
+        report.push_str(probe);
+    }
+    if let Some(progress) = &trace.supervisor_progress {
+        let state = progress.snapshot();
+        report.push_str(&format!(
+            "\nRenderer supervisor progress: /json/list attempts={}; successes={}; last target count={}; last filter matches={}; sessions started={}; sessions ended={}; layout rejections={}; last list error={}; last session error={}",
+            state.list_attempts,
+            state.list_successes,
+            state.last_target_count,
+            state.last_filter_match_count,
+            state.sessions_started,
+            state.sessions_ended,
+            state.layout_rejections,
+            state.last_list_error.as_deref().unwrap_or("none"),
+            state.last_session_error.as_deref().unwrap_or("none"),
+        ));
+    }
+    report
+}
+
+fn enrich_startup_diagnostic(error: &AppError) -> StartupDiagnostic {
+    let mut diagnostic = error.startup_diagnostic();
+    diagnostic.reason.push_str(&startup_trace_report());
+    diagnostic
+}
+
+async fn complete_startup_failure_probe() {
+    let (port, verified, already_captured) = match startup_trace().lock() {
+        Ok(trace) => (
+            trace.renderer_port,
+            trace.listener_verified,
+            trace.precleanup_probe.is_some(),
+        ),
+        Err(_) => return,
+    };
+    if already_captured {
+        return;
+    }
+    let Some(port) = port else { return };
+    let endpoint = CdpEndpoint::loopback(port);
+    let tcp = tokio::time::timeout(
+        Duration::from_millis(700),
+        TcpStream::connect(("127.0.0.1", port)),
+    )
+    .await;
+    let mut observations = vec![match tcp {
+        Ok(Ok(_)) => "TCP: loopback connection accepted".to_owned(),
+        Ok(Err(error)) => format!("TCP: connection failed ({error})"),
+        Err(_) => "TCP: timed out after 700 ms".to_owned(),
+    }];
+    if let Ok(discovery) = TargetDiscovery::new() {
+        observations.push(match discovery.version_detailed(endpoint).await {
+            Ok(version) => format!(
+                "GET /json/version: responded; protocol_supported={}",
+                version.is_supported()
+            ),
+            Err(error) => format!("GET /json/version: failed ({error})"),
+        });
+        if verified {
+            observations.push(
+                match tokio::time::timeout(
+                    Duration::from_secs(8),
+                    target_discovery_snapshot(endpoint, None),
+                )
+                .await
+                {
+                    Ok(details) => details,
+                    Err(_) => {
+                        "GET /json/list and layout probes: timed out after 8 seconds".to_owned()
+                    }
+                },
+            );
+        } else {
+            observations.push(
+                "Target and layout probes: skipped because listener ownership was not verified"
+                    .to_owned(),
+            );
+        }
+    }
+    record_precleanup_probe(observations.join("\n"));
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -759,10 +927,16 @@ fn launch_diagnostic(error: &LaunchFailure) -> (&'static str, &'static str, &'st
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     initialize_logging(cli.log_format);
-    let result = match cli
+    let command = cli
         .command
-        .unwrap_or_else(|| Commands::Run(default_run_args()))
-    {
+        .unwrap_or_else(|| Commands::Run(default_run_args()));
+    begin_startup_trace(match &command {
+        Commands::Run(_) => "run",
+        Commands::Attach(_) => "attach",
+        Commands::Activate(_) => "activate",
+        Commands::Diagnose(_) => "diagnose",
+    });
+    let result = match command {
         Commands::Run(args) => run(args).await,
         Commands::Attach(args) => attach(args).await,
         Commands::Activate(args) => activate(args).await,
@@ -772,7 +946,10 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(event = "launcher_failed", error = %error);
-            if let Some(line) = error.startup_diagnostic().encoded_line() {
+            record_startup_event("exit", "startup failed");
+            complete_startup_failure_probe().await;
+            let diagnostic = enrich_startup_diagnostic(&error);
+            if let Some(line) = diagnostic.encoded_line() {
                 eprintln!("{line}");
             }
             eprintln!("error: {error}");
@@ -817,19 +994,24 @@ fn initialize_logging(format: LogFormat) {
 }
 
 async fn run(args: RunArgs) -> Result<(), AppError> {
+    record_startup_event("arguments", "validating launch arguments");
     validate_extra_arguments(&args.codex_args)?;
+    record_startup_event("discovery", "finding official Codex installation");
     let installation = discover_codex(
         args.codex_exe.as_deref(),
         args.codex_version.as_deref(),
         args.channel,
     )?;
+    record_startup_event("discovery", "official Codex installation found");
     let compatible = is_supported_version(&installation.version);
     if !compatible && !args.allow_unsupported_version {
         return Err(AppError::UnsupportedVersion);
     }
+    record_startup_event("existing process", "checking for conflicting Codex process");
     if is_executable_running(&installation.executable)? {
         return Err(AppError::AlreadyRunning);
     }
+    record_startup_event("existing process", "no conflicting process");
 
     // The unfinished transition is retained for later work, but must not run
     // while its market entry is hidden (including for existing enabled users).
@@ -845,9 +1027,11 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         StartupSplash::disabled()
     };
 
+    record_startup_event("port reservation", "reserving loopback debugging port");
     let reservation = PortReservation::reserve()?;
     let port = reservation.port()?;
     let endpoint = CdpEndpoint::loopback(port);
+    record_startup_event("port reservation", "renderer port reserved");
     let main_inspector_reservation = if needs_windows_10_surface_patch() {
         Some(PortReservation::reserve()?)
     } else {
@@ -858,12 +1042,14 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         .map(PortReservation::port)
         .transpose()?;
     let main_inspector_endpoint = main_inspector_port.map(CdpEndpoint::loopback);
+    record_startup_event("launch configuration", "debugging arguments prepared");
     let launch_arguments = build_launch_arguments(port, main_inspector_port, &args.codex_args);
     reservation.release();
     if let Some(reservation) = main_inspector_reservation {
         reservation.release();
     }
     let launched_after = SystemTime::now();
+    record_startup_event("Codex activation", "starting official process");
     let mut child = if installation.source == DiscoverySource::WindowsPackageManager {
         let package_full_name = installation
             .package_full_name
@@ -884,6 +1070,8 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             kind: error.kind(),
         })?;
         let launched_pid = child.pid();
+        record_launch_context(port, main_inspector_port, launched_pid);
+        record_startup_event("process identity", "checking activated executable");
         let official_executable = installation.executable.clone();
         let identity_result = tokio::task::spawn_blocking(move || {
             verify_process_identity(launched_pid, launched_after, &official_executable)
@@ -891,10 +1079,15 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         .await
         .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
         if let Err(error) = identity_result {
+            record_startup_event("process identity", "verification failed");
+            record_precleanup_probe(format!("Process: {}", launched_process_state(launched_pid)));
             child.terminate().await;
             return Err(error.into());
         }
+        record_startup_event("process identity", "official executable verified");
         if child.arm_package_termination().await.is_err() {
+            record_startup_event("process supervision", "could not arm process guard");
+            record_precleanup_probe(format!("Process: {}", launched_process_state(launched_pid)));
             child.terminate().await;
             return Err(LaunchFailure::PackageSupervision.into());
         }
@@ -912,6 +1105,8 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         })?
     };
     let launched_pid = child.pid();
+    record_launch_context(port, main_inspector_port, launched_pid);
+    record_startup_event("Codex activation", "process handle acquired");
     tracing::info!(event = "codex_launched", channel = %installation.channel);
 
     let splash_available = splash.is_open();
@@ -929,11 +1124,15 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
 
     let result = async {
         if let Some(main_inspector_endpoint) = main_inspector_endpoint {
+            record_startup_event("main inspector", "waiting for Windows 10 surface patch");
             initialize_electron_main_process(main_inspector_endpoint, launched_pid, launched_after)
                 .await?;
+            record_startup_event("main inspector", "surface patch initialized");
             tracing::info!(event = "electron_main_transparency_initialized");
         }
+        record_startup_event("CDP version", "waiting for renderer debugging endpoint");
         wait_for_launched_endpoint(endpoint, launched_pid, Duration::from_secs(30)).await?;
+        record_startup_event("CDP version", "supported endpoint responded");
         tracing::info!(event = "codex_renderer_ready", resolver_start = "deferred");
         let splash_active = if splash_available {
             let deadline = Instant::now() + Duration::from_millis(800);
@@ -953,6 +1152,10 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         // desktop.  Starting it before desktop activation can win the startup
         // migration/lock race and make the desktop report "database access is
         // denied" before the file tree is rendered.
+        record_startup_event(
+            "runtime preparation",
+            "preparing UI bundle and App Server bridge",
+        );
         let (bridge, mut injection) = prepare_runtime(
             &args.common,
             Some(&installation),
@@ -964,15 +1167,22 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             splash_active,
         )
         .await?;
+        record_startup_event(
+            "runtime preparation",
+            "UI bundle, bridge and settings prepared",
+        );
         if splash_active {
             injection.startup_handoff = Some(startup_handoff.clone());
         }
+        record_startup_event("listener ownership", "verifying renderer port owner");
         tokio::task::spawn_blocking(move || {
             verify_listener_owner(port, launched_pid, launched_after)
         })
         .await
         .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
         tracing::info!(event = "cdp_owner_verified");
+        record_listener_verified();
+        record_startup_event("listener ownership", "verified against launched process");
         if !bridge.bind_verified_window_process(launched_pid) {
             tracing::warn!(event = "codex_window_process_binding_failed");
         }
@@ -989,6 +1199,7 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             IdlePolicy::RecoverUntilCancelled,
             cancellation.clone(),
         );
+        record_startup_event("renderer discovery", "supervisor started");
         tokio::pin!(supervisor);
         tokio::select! {
             biased;
@@ -1007,23 +1218,38 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     .await;
     splash_stop.store(true, Ordering::Release);
     let _ = splash_task.await;
+    record_startup_event(
+        "renderer supervisor",
+        if result.is_err() { "failed" } else { "ended" },
+    );
+    if result.is_err() {
+        record_precleanup_probe(
+            live_launch_snapshot(endpoint, main_inspector_port, launched_pid).await,
+        );
+    }
     let result = match result {
-        Err(AppError::Cdp(CdpError::NoCompatibleTarget | CdpError::IncompatibleRenderer)) => Err(
-            AppError::CdpTarget(target_discovery_snapshot(endpoint, launched_pid).await),
-        ),
+        Err(AppError::Cdp(CdpError::NoCompatibleTarget | CdpError::IncompatibleRenderer)) => {
+            Err(AppError::CdpTarget("Renderer qualification failed; see the pre-cleanup live-launch check below for candidate details.".to_owned()))
+        }
         other => other,
     };
+    record_startup_event("cleanup", "terminating launched Codex process");
     child.terminate().await;
     result
 }
 
 async fn attach(args: AttachArgs) -> Result<(), AppError> {
+    record_startup_event(
+        "discovery",
+        "finding official Codex installation for attach",
+    );
     let preference = match args.channel.to_ascii_lowercase().as_str() {
         "beta" => ChannelPreference::Beta,
         "stable" => ChannelPreference::Stable,
         _ => ChannelPreference::Any,
     };
     let installation = discover_codex(None, None, preference)?;
+    record_startup_event("discovery", "installation found");
     if installation.source != DiscoverySource::WindowsPackageManager {
         return Err(AppError::UnverifiedAttach);
     }
@@ -1035,11 +1261,21 @@ async fn attach(args: AttachArgs) -> Result<(), AppError> {
         return Err(AppError::UnsupportedVersion);
     }
     let endpoint = CdpEndpoint::loopback(args.port);
+    record_renderer_port(args.port);
+    record_startup_event("listener ownership", "verifying official executable");
     let executable = installation.executable.clone();
     tokio::task::spawn_blocking(move || verify_listener_executable(args.port, &executable))
         .await
         .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+    record_listener_verified();
+    record_startup_event("listener ownership", "verified official executable");
+    record_startup_event("CDP version", "waiting for attached endpoint");
     wait_for_endpoint(endpoint, Duration::from_secs(5)).await?;
+    record_startup_event("CDP version", "attached endpoint responded");
+    record_startup_event(
+        "runtime preparation",
+        "preparing UI bundle and App Server bridge",
+    );
     let (bridge, injection) = prepare_runtime(
         &args.common,
         Some(&installation),
@@ -1051,11 +1287,13 @@ async fn attach(args: AttachArgs) -> Result<(), AppError> {
         false,
     )
     .await?;
+    record_startup_event("runtime preparation", "UI bundle and bridge prepared");
     let executable = installation.executable.clone();
     tokio::task::spawn_blocking(move || verify_listener_executable(args.port, &executable))
         .await
         .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
     tracing::info!(event = "authorized_cdp_attach");
+    record_startup_event("renderer discovery", "attached supervisor started");
     supervise(
         endpoint,
         bridge,
@@ -1069,7 +1307,12 @@ async fn attach(args: AttachArgs) -> Result<(), AppError> {
 }
 
 async fn activate(args: ActivateArgs) -> Result<(), AppError> {
+    record_startup_event(
+        "discovery",
+        "finding official Codex installation for activation",
+    );
     let installation = discover_codex(None, None, args.channel)?;
+    record_startup_event("discovery", "installation found");
     if installation.source != DiscoverySource::WindowsPackageManager {
         tracing::info!(
             event = "live_activation_skipped",
@@ -1089,7 +1332,10 @@ async fn activate(args: ActivateArgs) -> Result<(), AppError> {
         return Ok(());
     };
     let endpoint = CdpEndpoint::loopback(port);
+    record_renderer_port(port);
+    record_startup_event("CDP version", "waiting for discovered listener");
     wait_for_endpoint(endpoint, Duration::from_secs(5)).await?;
+    record_startup_event("CDP version", "endpoint responded");
     let suffix = format!(
         "{}_{}",
         env!("CARGO_PKG_VERSION").replace('.', "_"),
@@ -1098,6 +1344,10 @@ async fn activate(args: ActivateArgs) -> Result<(), AppError> {
     let binding_name = format!("__codeCodexLive_{suffix}");
     let receiver_name = format!("__codeCodexReceiveLive_{suffix}");
     let compatible = is_supported_version(&installation.version);
+    record_startup_event(
+        "runtime preparation",
+        "preparing UI bundle and App Server bridge",
+    );
     let (bridge, injection) = prepare_runtime(
         &args.common,
         Some(&installation),
@@ -1109,15 +1359,19 @@ async fn activate(args: ActivateArgs) -> Result<(), AppError> {
         false,
     )
     .await?;
+    record_startup_event("runtime preparation", "UI bundle and bridge prepared");
     let executable = installation.executable.clone();
     tokio::task::spawn_blocking(move || verify_listener_executable(port, &executable))
         .await
         .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+    record_listener_verified();
+    record_startup_event("listener ownership", "verified official executable");
     tracing::info!(
         event = "live_activation_started",
         port,
         version = env!("CARGO_PKG_VERSION")
     );
+    record_startup_event("renderer discovery", "activation supervisor started");
     supervise(
         endpoint,
         bridge,
@@ -1140,8 +1394,11 @@ async fn prepare_runtime(
     receiver_name: &str,
     startup_splash_active: bool,
 ) -> Result<(Arc<NativeBridge>, InjectionConfig), AppError> {
+    record_startup_event("UI bundle", "resolving embedded renderer bundle");
     let bundle = resolve_bundle(common.ui_bundle.as_deref())?;
+    record_startup_event("UI bundle", "bundle resolved");
     let token = CapabilityToken::generate();
+    record_startup_event("UI bootstrap", "building renderer bootstrap");
     let bootstrap = build_bootstrap(
         &bundle,
         &token,
@@ -1153,6 +1410,7 @@ async fn prepare_runtime(
         common.workspace.is_some(),
         startup_splash_active,
     )?;
+    record_startup_event("UI bootstrap", "bootstrap built");
     let navigation_bootstrap = if startup_splash_active {
         Some(build_bootstrap(
             &bundle,
@@ -1170,6 +1428,7 @@ async fn prepare_runtime(
     };
 
     let manual_workspace = if let Some(root) = common.workspace.clone() {
+        record_startup_event("workspace", "opening explicitly selected workspace");
         Some(Arc::new(
             tokio::task::spawn_blocking(move || Workspace::open(root))
                 .await
@@ -1179,6 +1438,7 @@ async fn prepare_runtime(
         None
     };
     let resolver = if manual_workspace.is_none() {
+        record_startup_event("App Server", "discovering packaged App Server");
         let source = discover_app_server_source(common.app_server.as_deref(), installation)?;
         let launch = prepare_app_server_launch(source)?;
         let mut command = AppServerCommand::codex(launch.executable());
@@ -1188,15 +1448,20 @@ async fn prepare_runtime(
                 .ok_or(DiscoveryError::AppServerNotFound)?;
             command = command.with_isolated_windows_search(current_dir, trusted_path);
         }
-        Some(AppServerClient::connect_guarded(&command, launch).await?)
+        record_startup_event("App Server", "connecting guarded local bridge");
+        let client = AppServerClient::connect_guarded(&command, launch).await?;
+        record_startup_event("App Server", "guarded local bridge connected");
+        Some(client)
     } else {
         None
     };
+    record_startup_event("settings", "loading local settings");
     let settings_store = SettingsStore::for_current_user()?;
     let store = settings_store.clone();
     let settings = tokio::task::spawn_blocking(move || store.load())
         .await
         .map_err(|_| WorkspaceError::Internal)??;
+    record_startup_event("settings", "local settings loaded");
     let bridge = Arc::new(NativeBridge::new(
         resolver,
         manual_workspace,
@@ -1224,6 +1489,9 @@ async fn supervise(
     options.target_filter.allow_any_page = allow_any_page;
     options.idle_policy = idle_policy;
     options.startup_timeout = startup_timeout_for_idle_policy(idle_policy);
+    let progress = Arc::new(SupervisorProgress::default());
+    record_supervisor_progress(progress.clone());
+    options.progress = Some(progress);
     let endpoint_verifier = Arc::new(ProcessEndpointVerifier {
         identity: listener_identity,
     });
@@ -1351,39 +1619,179 @@ async fn wait_for_launched_endpoint(
     }
 }
 
-async fn target_discovery_snapshot(endpoint: CdpEndpoint, launched_pid: u32) -> String {
+async fn live_launch_snapshot(
+    endpoint: CdpEndpoint,
+    inspector_port: Option<u16>,
+    launched_pid: u32,
+) -> String {
+    let mut lines = vec![format!("Process: {}", launched_process_state(launched_pid))];
+    let tcp = tokio::time::timeout(
+        Duration::from_millis(700),
+        TcpStream::connect(("127.0.0.1", endpoint.port())),
+    )
+    .await;
+    lines.push(match tcp {
+        Ok(Ok(_)) => "TCP: loopback connection accepted".to_owned(),
+        Ok(Err(error)) => format!("TCP: connection failed ({error})"),
+        Err(_) => "TCP: timed out after 700 ms".to_owned(),
+    });
+    if let Some(inspector_port) = inspector_port {
+        let inspector = tokio::time::timeout(
+            Duration::from_millis(700),
+            TcpStream::connect(("127.0.0.1", inspector_port)),
+        )
+        .await;
+        lines.push(match inspector {
+            Ok(Ok(_)) => "Main inspector TCP: connection accepted".to_owned(),
+            Ok(Err(error)) => format!("Main inspector TCP: connection failed ({error})"),
+            Err(_) => "Main inspector TCP: timed out after 700 ms".to_owned(),
+        });
+    }
     let Ok(discovery) = TargetDiscovery::new() else {
-        return format!("Codex PID {launched_pid}; CDP target discovery could not be initialized");
+        lines.push("CDP: diagnostic client could not be initialized".to_owned());
+        return lines.join("\n");
+    };
+    lines.push(match discovery.version_detailed(endpoint).await {
+        Ok(version) => format!(
+            "GET /json/version: responded; protocol_supported={}",
+            version.is_supported()
+        ),
+        Err(error) => format!("GET /json/version: failed ({error})"),
+    });
+    let verified = startup_trace()
+        .lock()
+        .is_ok_and(|trace| trace.listener_verified);
+    if verified {
+        lines.push(
+            match tokio::time::timeout(
+                Duration::from_secs(8),
+                target_discovery_snapshot(endpoint, Some(launched_pid)),
+            )
+            .await
+            {
+                Ok(details) => details,
+                Err(_) => "GET /json/list and layout probes: timed out after 8 seconds".to_owned(),
+            },
+        );
+    } else {
+        lines.push(
+            "Target and layout probes: skipped because listener ownership was not verified"
+                .to_owned(),
+        );
+    }
+    lines.join("\n")
+}
+
+async fn target_discovery_snapshot(endpoint: CdpEndpoint, launched_pid: Option<u32>) -> String {
+    let pid_label = launched_pid.map_or("attached process".to_owned(), |pid| format!("PID {pid}"));
+    let Ok(discovery) = TargetDiscovery::new() else {
+        return format!("Codex {pid_label}; CDP target discovery could not be initialized");
     };
     match discovery.targets(endpoint).await {
         Ok(targets) => {
+            let filter = TargetFilter::default();
             let page_count = targets
                 .iter()
                 .filter(|target| target.target_type == "page")
                 .count();
-            let pages = targets
+            let mut pages = Vec::new();
+            for (index, target) in targets
                 .iter()
                 .filter(|target| target.target_type == "page")
-                .take(12)
-                .map(|target| safe_target_location(&target.url))
-                .collect::<Vec<_>>();
+                .take(8)
+                .enumerate()
+            {
+                let accepted = filter.accepts(target);
+                let mut page = format!(
+                    "Page {}: location={}; query_present={}; title_contains_Codex={}; websocket_present={}; filter_accepted={}",
+                    index + 1,
+                    safe_target_location(&target.url),
+                    Url::parse(&target.url).is_ok_and(|url| url.query().is_some()),
+                    target.title.contains("Codex"),
+                    !target.web_socket_debugger_url.is_empty(),
+                    accepted,
+                );
+                if accepted {
+                    let probe = discovery
+                        .renderer_layout_diagnostics(endpoint, target)
+                        .await;
+                    page.push_str(&format!(
+                        "; layout={}",
+                        match probe {
+                            Ok(values) => safe_layout_summary(&values),
+                            Err(error) => format!("probe unavailable ({error})"),
+                        }
+                    ));
+                } else {
+                    page.push_str("; layout=not probed because target filter rejected page");
+                }
+                pages.push(page);
+            }
             format!(
-                "Codex PID: {launched_pid}\nCDP port: {}\nTargets: {} total, {} pages\nPage locations (query and title removed): {}",
+                "Codex process: {pid_label}\nCDP port: {}\nTargets: {} total, {} pages\nCandidate details (titles, URL queries and page text omitted; at most 8 pages):\n{}",
                 endpoint.port(),
                 targets.len(),
                 page_count,
                 if pages.is_empty() {
                     "none".to_owned()
                 } else {
-                    pages.join(", ")
+                    pages.join("\n")
                 },
             )
         }
         Err(error) => format!(
-            "Codex PID: {launched_pid}\nCDP port: {}\nThe endpoint became unavailable while collecting target locations: {error}",
+            "Codex process: {pid_label}\nCDP port: {}\nThe endpoint became unavailable while collecting target locations: {error}",
             endpoint.port(),
         ),
     }
+}
+
+fn safe_layout_summary(value: &Value) -> String {
+    const BOOLEAN_FIELDS: &[&str] = &[
+        "topFrame",
+        "appOrigin",
+        "legacyShellMatch",
+        "workspaceRowPresent",
+        "mainContentClip",
+        "railBeforeWorkspace",
+        "workspaceContainsMain",
+        "accepted",
+    ];
+    const COUNT_FIELDS: &[&str] = &[
+        "mainCount",
+        "sidebarTriggerCount",
+        "rowMainCount",
+        "directRailCount",
+        "workspaceCount",
+        "unifiedTabStripCount",
+    ];
+    let mut fields = Vec::new();
+    for name in BOOLEAN_FIELDS {
+        fields.push(format!(
+            "{name}={}",
+            value
+                .get(name)
+                .and_then(Value::as_bool)
+                .map_or("unknown", |flag| if flag { "true" } else { "false" })
+        ));
+    }
+    for name in COUNT_FIELDS {
+        fields.push(format!(
+            "{name}={}",
+            value
+                .get(name)
+                .and_then(Value::as_u64)
+                .map_or_else(|| "unknown".to_owned(), |count| count.to_string())
+        ));
+    }
+    let state = match value.get("readyState").and_then(Value::as_str) {
+        Some("loading") => "loading",
+        Some("interactive") => "interactive",
+        Some("complete") => "complete",
+        _ => "unknown",
+    };
+    fields.push(format!("readyState={state}"));
+    fields.join(", ")
 }
 
 fn safe_target_location(raw: &str) -> String {
@@ -1970,6 +2378,21 @@ mod tests {
     }
 
     #[test]
+    fn layout_summary_keeps_only_known_scalar_diagnostics() {
+        let summary = safe_layout_summary(&json!({
+            "mainCount": 1,
+            "accepted": false,
+            "readyState": "complete",
+            "pageText": "private conversation",
+            "title": "private title"
+        }));
+        assert!(summary.contains("mainCount=1"));
+        assert!(summary.contains("accepted=false"));
+        assert!(summary.contains("readyState=complete"));
+        assert!(!summary.contains("private"));
+    }
+
+    #[test]
     fn startup_defaults_to_stable_channel() {
         let implicit = default_run_args();
         assert!(matches!(implicit.channel, ChannelPreference::Stable));
@@ -2238,6 +2661,22 @@ mod tests {
             AppError::InvalidLaunchArgument.exit_code(),
             exit_codes::GENERIC_FAILURE
         );
+    }
+
+    #[test]
+    fn generic_errors_receive_the_same_bounded_startup_trace() {
+        begin_startup_trace("run");
+        record_startup_event("CDP version", "supported endpoint responded");
+        record_renderer_port(13699);
+        for error in [
+            AppError::Cdp(CdpError::EndpointUnavailable),
+            AppError::UnsupportedVersion,
+        ] {
+            let report = enrich_startup_diagnostic(&error);
+            assert!(report.reason.contains("Startup trace:"));
+            assert!(report.reason.contains("supported endpoint responded"));
+            assert!(report.reason.contains("Renderer port: 13699"));
+        }
     }
 
     #[test]

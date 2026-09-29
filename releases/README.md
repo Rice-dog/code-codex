@@ -2,6 +2,37 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.60 — 修复嵌套 Workspace 布局 / Nested workspace layout compatibility
+
+- 根据 v0.3.59 的实机诊断，修正 Workspace 并非布局行直接子节点时的误判；定位唯一包含对话主界面的直接子节点，并校验它位于左侧栏之后。
+- 文件树注入使用同一结构判断；回归测试覆盖旧布局、普通对话、多标签和嵌套 Workspace，以及错误结构的拒绝行为。
+
+## v0.3.59 — Codex 常规对话布局兼容 / Regular conversation layout compatibility
+
+- 修复 Codex 26.924.2738.0 常规对话界面缺少条件性 `data-app-shell-unified-tab-strip` 属性时，误报 `CC-START-CDP-014` 且不显示文件树的问题。
+- 启动识别和文件树挂载统一校验真实 Workspace、左侧栏、主界面的层级关系；保留旧版布局和多标签页布局识别。
+- 诊断报告将真实 Workspace 数量与可选的标签栏属性数量分开列出，便于后续排查。
+
+## v0.3.58 — 全路径启动诊断 / Startup diagnostics for every captured failure
+
+- 修复 v0.3.57 中部分 `CDP-001` 仍只有一句笼统原因的问题：统一记录启动阶段、耗时、进程及端口状态。
+- 监控期间被动保存 CDP 页面发现次数、最后一次页面数、筛选结果和 renderer 会话错误；端口关闭后仍可从 `Copy details` 查看。
+- 保留只读页面布局逐项校验，未改变窗口匹配、注入及正常启动行为；此版本先在本地生成，尚未发布至 GitHub。
+
+- All captured startup failures now include a bounded phase timeline and available process/port observations, including late CDP endpoint loss.
+- Passive CDP progress survives endpoint shutdown; Copy details includes the last discovery and renderer session outcome.
+- Renderer matching and injection behavior remain unchanged. This build is local and has not been published to GitHub.
+
+## v0.3.57 — 启动诊断增强 / Startup diagnostics
+
+- 基于 v0.3.52 的现有匹配和注入逻辑，补充启动阶段耗时、进程状态及候选页面逐项校验结果；`Copy details` 会包含这些信息。
+- 诊断只记录布尔值、计数及经过清洗的页面位置，不复制页面正文、标题或 URL 查询参数。
+- 此版本先在本地生成，尚未发布至 GitHub。
+
+- Keeps v0.3.52 renderer matching and injection behavior while adding startup timings, process state, and per-candidate qualification results to Copy details.
+- Reports only booleans, counts, and sanitized page locations, without page text, titles, or URL queries.
+- Built locally first; not yet published on GitHub.
+
 ## v0.3.52 — 安装与界面适配 / Setup and interface improvements
 
 - 修复旧版安装记录仍在、`Code-Codex.lnk` 已丢失时，升级在保存快捷方式回滚状态阶段失败的问题。升级会重建可用快捷方式，失败回滚仍保留原安装记录与缺失状态。

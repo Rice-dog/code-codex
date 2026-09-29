@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error as _;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
@@ -42,7 +43,7 @@ const MAX_COMPATIBLE_TARGETS: usize = 8;
 const MAX_RECENTLY_QUALIFIED_TARGETS: usize = 8;
 const MAX_REJECTED_EXECUTION_CONTEXTS: usize = 128;
 const REPLAY_WINDOW: usize = 4_096;
-const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const m=document.querySelectorAll(s);if(m.length!==1||!document.querySelector('[data-app-shell-sidebar-trigger]'))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=shell.querySelectorAll(s);if(shellMains.length===1&&shellMains[0]===main)return true;}const row=main.closest('[data-app-shell-workspace-row=\"true\"]');if(!row||row.querySelectorAll(s).length!==1||!mainParent?.className.includes('MainContentClip'))return false;const children=[...row.children];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.hasAttribute('data-app-shell-unified-tab-strip'));return rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0])&&workspaces[0].contains(main)})()";
+const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const m=document.querySelectorAll(s);if(m.length!==1||!document.querySelector('[data-app-shell-sidebar-trigger]'))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=shell.querySelectorAll(s);if(shellMains.length===1&&shellMains[0]===main)return true;}const row=main.closest('[data-app-shell-workspace-row=\"true\"]');if(!row||row.querySelectorAll(s).length!==1||!mainParent?.className.includes('MainContentClip'))return false;const children=[...row.children];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.contains(main));return rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0])&&workspaces[0].querySelectorAll(s).length===1&&workspaces[0].contains(main)})()";
 const DOCUMENT_READY_STATE_PROBE: &str = "document.readyState";
 const INITIAL_RENDERER_QUALIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_RENDERER_QUALIFICATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -194,6 +195,70 @@ impl TargetDiscovery {
 
     pub async fn targets(&self, endpoint: CdpEndpoint) -> Result<Vec<CdpTarget>, CdpError> {
         self.get_json(endpoint.http_url("/json/list")).await
+    }
+
+    /// Read-only, bounded diagnostics for a target on the verified launch port.
+    /// The expression returns only counts and booleans, never page text or URLs.
+    pub async fn renderer_layout_diagnostics(
+        &self,
+        endpoint: CdpEndpoint,
+        target: &CdpTarget,
+    ) -> Result<Value, CdpError> {
+        let websocket_url =
+            Url::parse(&target.web_socket_debugger_url).map_err(|_| CdpError::InvalidEndpoint)?;
+        if websocket_url.scheme() != "ws"
+            || websocket_url.host_str() != Some("127.0.0.1")
+            || websocket_url.port() != Some(endpoint.port())
+        {
+            return Err(CdpError::InvalidEndpoint);
+        }
+        const DIAGNOSTIC_PROBE: &str = r#"(()=>{const s='main.main-surface,main[data-app-shell-main-surface="default"]';const mains=document.querySelectorAll(s);const main=mains.length===1?mains[0]:null;const parent=main?.parentElement;let legacy=false;for(let shell=parent,depth=0;shell&&depth<5;depth++,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length===1&&(shell===parent||shell===parent?.parentElement)&&shell.querySelectorAll(s).length===1&&shell.querySelector(s)===main)legacy=true;}const row=main?.closest('[data-app-shell-workspace-row="true"]');const children=row?[...row.children]:[];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.contains(main));const attributed=children.filter(child=>child.hasAttribute('data-app-shell-unified-tab-strip'));return {topFrame:window===window.top,appOrigin:location.protocol==='app:'&&location.host==='-',readyState:document.readyState,mainCount:mains.length,sidebarTriggerCount:document.querySelectorAll('[data-app-shell-sidebar-trigger]').length,legacyShellMatch:legacy,workspaceRowPresent:!!row,rowMainCount:row?.querySelectorAll(s).length??0,mainContentClip:!!parent?.className.includes('MainContentClip'),directRailCount:rails.length,workspaceCount:workspaces.length,unifiedTabStripCount:attributed.length,railBeforeWorkspace:rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0]),workspaceContainsMain:workspaces.length===1&&!!main&&workspaces[0].contains(main),accepted:__PREDICATE__}})()"#;
+        let expression = DIAGNOSTIC_PROBE.replace("__PREDICATE__", RENDERER_LAYOUT_PROBE);
+        let probe = async {
+            let config = WebSocketConfig::default()
+                .max_message_size(Some(64 * 1024))
+                .max_frame_size(Some(64 * 1024));
+            let (mut socket, _) =
+                connect_async_with_config(&target.web_socket_debugger_url, Some(config), false)
+                    .await
+                    .map_err(|_| CdpError::WebSocket)?;
+            send_command(
+                &mut socket,
+                1,
+                "Runtime.evaluate",
+                json!({
+                    "expression": expression,
+                    "returnByValue": true
+                }),
+            )
+            .await?;
+            for _ in 0..32 {
+                let message = socket
+                    .next()
+                    .await
+                    .ok_or(CdpError::WebSocket)?
+                    .map_err(|_| CdpError::WebSocket)?;
+                let Message::Text(text) = message else {
+                    continue;
+                };
+                let response = parse_cdp_message(text.as_ref())?;
+                if response.get("id").and_then(Value::as_u64) != Some(1) {
+                    continue;
+                }
+                if response.get("error").is_some() {
+                    return Err(CdpError::Protocol);
+                }
+                return response
+                    .pointer("/result/result/value")
+                    .filter(|value| value.is_object())
+                    .cloned()
+                    .ok_or(CdpError::Protocol);
+            }
+            Err(CdpError::Protocol)
+        };
+        tokio::time::timeout(Duration::from_secs(3), probe)
+            .await
+            .map_err(|_| CdpError::WebSocket)?
     }
 
     async fn get_json<T>(&self, url: String) -> Result<T, CdpError>
@@ -478,6 +543,41 @@ pub struct SupervisorOptions {
     pub startup_timeout: Duration,
     pub idle_timeout: Duration,
     pub idle_policy: IdlePolicy,
+    pub progress: Option<Arc<SupervisorProgress>>,
+}
+
+#[derive(Debug, Default)]
+pub struct SupervisorProgress {
+    state: StdMutex<SupervisorProgressSnapshot>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SupervisorProgressSnapshot {
+    pub list_attempts: u64,
+    pub list_successes: u64,
+    pub last_target_count: usize,
+    pub last_filter_match_count: usize,
+    pub sessions_started: u64,
+    pub sessions_ended: u64,
+    pub layout_rejections: u64,
+    pub last_list_error: Option<String>,
+    pub last_session_error: Option<String>,
+}
+
+impl SupervisorProgress {
+    #[must_use]
+    pub fn snapshot(&self) -> SupervisorProgressSnapshot {
+        self.state.lock().map_or_else(
+            |_| SupervisorProgressSnapshot::default(),
+            |state| state.clone(),
+        )
+    }
+
+    fn update(&self, action: impl FnOnce(&mut SupervisorProgressSnapshot)) {
+        if let Ok(mut state) = self.state.lock() {
+            action(&mut state)
+        }
+    }
 }
 
 /// Controls what happens after a previously-qualified renderer disappears.
@@ -499,6 +599,7 @@ impl SupervisorOptions {
             startup_timeout: Duration::from_secs(30),
             idle_timeout: Duration::from_secs(5),
             idle_policy: IdlePolicy::ExitAfterTimeout,
+            progress: None,
         }
     }
 }
@@ -568,21 +669,49 @@ where
                     &mut rejected_targets,
                 );
             }
+            if let Some(progress) = &self.options.progress {
+                progress
+                    .update(|state| state.list_attempts = state.list_attempts.saturating_add(1));
+            }
             let targets = match self.discovery.targets(self.options.endpoint).await {
-                Ok(targets) => targets,
+                Ok(targets) => {
+                    if let Some(progress) = &self.options.progress {
+                        progress.update(|state| {
+                            state.list_successes = state.list_successes.saturating_add(1);
+                            state.last_target_count = targets.len();
+                            state.last_filter_match_count = targets
+                                .iter()
+                                .filter(|target| self.options.target_filter.accepts(target))
+                                .count();
+                            state.last_list_error = None;
+                        });
+                    }
+                    targets
+                }
                 Err(error)
                     if !qualified_target_seen
                         && started.elapsed() < self.options.startup_timeout =>
                 {
+                    if let Some(progress) = &self.options.progress {
+                        progress.update(|state| state.last_list_error = Some(error.to_string()));
+                    }
                     tracing::debug!(event = "cdp_waiting", code = ?error);
                     sleep_or_cancel(self.options.poll_interval, &cancellation).await;
                     continue;
                 }
                 Err(error) if qualified_target_seen => {
+                    if let Some(progress) = &self.options.progress {
+                        progress.update(|state| state.last_list_error = Some(error.to_string()));
+                    }
                     tracing::debug!(event = "cdp_temporarily_unavailable", code = ?error);
                     Vec::new()
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    if let Some(progress) = &self.options.progress {
+                        progress.update(|state| state.last_list_error = Some(error.to_string()));
+                    }
+                    return Err(error);
+                }
             };
             let discovered_target_count = targets.len();
             if validate_target_budget(discovered_target_count, 0).is_err() {
@@ -652,7 +781,13 @@ where
                 let canonical_startup_grace =
                     canonical_renderer_startup_grace(&target, qualified_target_seen);
                 let status_sender = session_status_sender.clone();
+                let progress = self.options.progress.clone();
                 let task = tokio::spawn(async move {
+                    if let Some(progress) = &progress {
+                        progress.update(|state| {
+                            state.sessions_started = state.sessions_started.saturating_add(1)
+                        });
+                    }
                     let result = run_target_session(
                         endpoint,
                         target,
@@ -674,6 +809,16 @@ where
                         session_handler.invalidate_lifecycle();
                     }
                     let incompatible = matches!(result, Err(CdpError::IncompatibleRenderer));
+                    if let Some(progress) = &progress {
+                        progress.update(|state| {
+                            state.sessions_ended = state.sessions_ended.saturating_add(1);
+                            if incompatible {
+                                state.layout_rejections = state.layout_rejections.saturating_add(1)
+                            }
+                            state.last_session_error =
+                                result.as_ref().err().map(ToString::to_string);
+                        });
+                    }
                     if let Err(error) = &result {
                         tracing::debug!(event = "cdp_session_ended", target_id = %target_id, code = ?error);
                     }
@@ -2027,6 +2172,24 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
+
+    #[tokio::test]
+    async fn diagnostic_probe_rejects_non_launch_websocket_without_connecting() {
+        let discovery = TargetDiscovery::new().expect("discovery client");
+        let target = CdpTarget {
+            id: "target".to_owned(),
+            target_type: "page".to_owned(),
+            title: "Codex".to_owned(),
+            url: "app://-/index.html".to_owned(),
+            web_socket_debugger_url: "ws://example.com:1234/devtools/page/target".to_owned(),
+        };
+        assert!(matches!(
+            discovery
+                .renderer_layout_diagnostics(CdpEndpoint::loopback(1234), &target)
+                .await,
+            Err(CdpError::InvalidEndpoint)
+        ));
+    }
 
     #[test]
     fn startup_handoff_requires_successful_bootstrap_evaluation() {
