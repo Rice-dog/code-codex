@@ -43,10 +43,13 @@ export function qualifiedWorkspaceRowForMain(
   if (!row || row.querySelectorAll(MAIN_SURFACE_SELECTOR).length !== 1) return null;
   const children = [...row.children];
   const rails = children.filter((child) => child.matches("aside.app-shell-left-panel"));
-  const workspaces = children.filter((child) => child.hasAttribute("data-app-shell-unified-tab-strip"));
+  // The Workspace can be nested inside a direct row child. Use the unique
+  // child that owns `main`, not a conditional tab attribute or CSS class.
+  const workspaces = children.filter((child) => child.contains(main));
   if (rails.length !== 1 || workspaces.length !== 1) return null;
   const workspace = workspaces[0]!;
-  if (!workspace.contains(main) || children.indexOf(rails[0]!) >= children.indexOf(workspace)) return null;
+  if (workspace.querySelectorAll(MAIN_SURFACE_SELECTOR).length !== 1 ||
+    !workspace.contains(main) || children.indexOf(rails[0]!) >= children.indexOf(workspace)) return null;
   if (!main.parentElement?.className.includes("MainContentClip")) return null;
   return { row, workspace };
 }

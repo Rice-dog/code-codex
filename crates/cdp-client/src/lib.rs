@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error as _;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
@@ -42,7 +43,7 @@ const MAX_COMPATIBLE_TARGETS: usize = 8;
 const MAX_RECENTLY_QUALIFIED_TARGETS: usize = 8;
 const MAX_REJECTED_EXECUTION_CONTEXTS: usize = 128;
 const REPLAY_WINDOW: usize = 4_096;
-const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const m=document.querySelectorAll(s);if(m.length!==1||!document.querySelector('[data-app-shell-sidebar-trigger]'))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=shell.querySelectorAll(s);if(shellMains.length===1&&shellMains[0]===main)return true;}const row=main.closest('[data-app-shell-workspace-row=\"true\"]');if(!row||row.querySelectorAll(s).length!==1||!mainParent?.className.includes('MainContentClip'))return false;const children=[...row.children];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.hasAttribute('data-app-shell-unified-tab-strip'));return rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0])&&workspaces[0].contains(main)})()";
+const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const m=document.querySelectorAll(s);if(m.length!==1||!document.querySelector('[data-app-shell-sidebar-trigger]'))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=shell.querySelectorAll(s);if(shellMains.length===1&&shellMains[0]===main)return true;}const row=main.closest('[data-app-shell-workspace-row=\"true\"]');if(!row||row.querySelectorAll(s).length!==1||!mainParent?.className.includes('MainContentClip'))return false;const children=[...row.children];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.contains(main));return rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0])&&workspaces[0].querySelectorAll(s).length===1&&workspaces[0].contains(main)})()";
 const DOCUMENT_READY_STATE_PROBE: &str = "document.readyState";
 const INITIAL_RENDERER_QUALIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_RENDERER_QUALIFICATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -194,6 +195,70 @@ impl TargetDiscovery {
 
     pub async fn targets(&self, endpoint: CdpEndpoint) -> Result<Vec<CdpTarget>, CdpError> {
         self.get_json(endpoint.http_url("/json/list")).await
+    }
+
+    /// Read-only, bounded diagnostics for a target on the verified launch port.
+    /// The expression returns only counts and booleans, never page text or URLs.
+    pub async fn renderer_layout_diagnostics(
+        &self,
+        endpoint: CdpEndpoint,
+        target: &CdpTarget,
+    ) -> Result<Value, CdpError> {
+        let websocket_url =
+            Url::parse(&target.web_socket_debugger_url).map_err(|_| CdpError::InvalidEndpoint)?;
+        if websocket_url.scheme() != "ws"
+            || websocket_url.host_str() != Some("127.0.0.1")
+            || websocket_url.port() != Some(endpoint.port())
+        {
+            return Err(CdpError::InvalidEndpoint);
+        }
+        const DIAGNOSTIC_PROBE: &str = include_str!("renderer-layout-diagnostic.js");
+        let expression = DIAGNOSTIC_PROBE.replace("__PREDICATE__", RENDERER_LAYOUT_PROBE);
+        let probe = async {
+            let config = WebSocketConfig::default()
+                .max_message_size(Some(64 * 1024))
+                .max_frame_size(Some(64 * 1024));
+            let (mut socket, _) =
+                connect_async_with_config(&target.web_socket_debugger_url, Some(config), false)
+                    .await
+                    .map_err(|_| CdpError::WebSocket)?;
+            send_command(
+                &mut socket,
+                1,
+                "Runtime.evaluate",
+                json!({
+                    "expression": expression,
+                    "returnByValue": true
+                }),
+            )
+            .await?;
+            for _ in 0..32 {
+                let message = socket
+                    .next()
+                    .await
+                    .ok_or(CdpError::WebSocket)?
+                    .map_err(|_| CdpError::WebSocket)?;
+                let Message::Text(text) = message else {
+                    continue;
+                };
+                let response = parse_cdp_message(text.as_ref())?;
+                if response.get("id").and_then(Value::as_u64) != Some(1) {
+                    continue;
+                }
+                if response.get("error").is_some() {
+                    return Err(CdpError::Protocol);
+                }
+                return response
+                    .pointer("/result/result/value")
+                    .filter(|value| value.is_object())
+                    .cloned()
+                    .ok_or(CdpError::Protocol);
+            }
+            Err(CdpError::Protocol)
+        };
+        tokio::time::timeout(Duration::from_secs(3), probe)
+            .await
+            .map_err(|_| CdpError::WebSocket)?
     }
 
     async fn get_json<T>(&self, url: String) -> Result<T, CdpError>
@@ -478,6 +543,111 @@ pub struct SupervisorOptions {
     pub startup_timeout: Duration,
     pub idle_timeout: Duration,
     pub idle_policy: IdlePolicy,
+    pub progress: Option<Arc<SupervisorProgress>>,
+}
+
+#[derive(Debug)]
+pub struct SupervisorProgress {
+    state: StdMutex<SupervisorProgressSnapshot>,
+    started: Instant,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SupervisorProgressSnapshot {
+    pub list_attempts: u64,
+    pub list_successes: u64,
+    pub last_target_count: usize,
+    pub last_filter_match_count: usize,
+    pub sessions_started: u64,
+    pub sessions_ended: u64,
+    pub layout_rejections: u64,
+    pub last_list_error: Option<String>,
+    pub last_session_error: Option<String>,
+    pub bootstrap_attempts: u64,
+    pub bootstrap_responses: u64,
+    pub bootstrap_failures: u64,
+    pub layout_probe_attempts: u64,
+    pub layout_probe_matches: u64,
+    pub last_ready_state: &'static str,
+    pub last_phase: &'static str,
+    pub events: Vec<String>,
+    pub dropped_events: u64,
+}
+
+impl Default for SupervisorProgress {
+    fn default() -> Self {
+        Self {
+            state: StdMutex::new(SupervisorProgressSnapshot::default()),
+            started: Instant::now(),
+        }
+    }
+}
+
+impl SupervisorProgress {
+    #[must_use]
+    pub fn snapshot(&self) -> SupervisorProgressSnapshot {
+        self.state.lock().map_or_else(
+            |_| SupervisorProgressSnapshot::default(),
+            |state| state.clone(),
+        )
+    }
+
+    fn update(&self, action: impl FnOnce(&mut SupervisorProgressSnapshot)) {
+        if let Ok(mut state) = self.state.lock() {
+            action(&mut state)
+        }
+    }
+
+    fn record(&self, phase: &'static str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.last_phase = phase;
+            if state.events.len() == 32 {
+                state.events.remove(0);
+                state.dropped_events = state.dropped_events.saturating_add(1);
+            }
+            state.events.push(format!(
+                "+{} ms | {phase}",
+                self.started.elapsed().as_millis()
+            ));
+        }
+    }
+
+    fn record_target_counts(&self, total: usize, matches: usize) {
+        if let Ok(mut state) = self.state.lock() {
+            if (state.last_target_count, state.last_filter_match_count) != (total, matches) {
+                if state.events.len() == 32 {
+                    state.events.remove(0);
+                    state.dropped_events = state.dropped_events.saturating_add(1);
+                }
+                state.events.push(format!(
+                    "+{} ms | target set changed | total={total}, filter_matches={matches}",
+                    self.started.elapsed().as_millis()
+                ));
+            }
+        }
+    }
+
+    fn record_ready_state(&self, result: &Value) {
+        let state = match result
+            .get("result")
+            .and_then(|value| value.get("value"))
+            .and_then(Value::as_str)
+        {
+            Some("loading") => "loading",
+            Some("interactive") => "interactive",
+            Some("complete") => "complete",
+            _ => "unknown",
+        };
+        if self.snapshot().last_ready_state != state {
+            self.record(match state {
+                "loading" => "candidate_document_loading",
+                "interactive" => "candidate_document_interactive",
+                "complete" => "candidate_document_complete",
+                _ => "candidate_document_state_unknown",
+            });
+            self.update(|snapshot| snapshot.last_ready_state = state);
+        }
+    }
 }
 
 /// Controls what happens after a previously-qualified renderer disappears.
@@ -499,6 +669,7 @@ impl SupervisorOptions {
             startup_timeout: Duration::from_secs(30),
             idle_timeout: Duration::from_secs(5),
             idle_policy: IdlePolicy::ExitAfterTimeout,
+            progress: None,
         }
     }
 }
@@ -568,21 +739,63 @@ where
                     &mut rejected_targets,
                 );
             }
+            if let Some(progress) = &self.options.progress {
+                progress
+                    .update(|state| state.list_attempts = state.list_attempts.saturating_add(1));
+            }
             let targets = match self.discovery.targets(self.options.endpoint).await {
-                Ok(targets) => targets,
+                Ok(targets) => {
+                    if let Some(progress) = &self.options.progress {
+                        let matches = targets
+                            .iter()
+                            .filter(|target| self.options.target_filter.accepts(target))
+                            .count();
+                        if progress.snapshot().last_list_error.is_some() {
+                            progress.record("target_list_recovered");
+                        }
+                        progress.record_target_counts(targets.len(), matches);
+                        progress.update(|state| {
+                            state.list_successes = state.list_successes.saturating_add(1);
+                            state.last_target_count = targets.len();
+                            state.last_filter_match_count = matches;
+                            state.last_list_error = None;
+                        });
+                    }
+                    targets
+                }
                 Err(error)
                     if !qualified_target_seen
                         && started.elapsed() < self.options.startup_timeout =>
                 {
+                    if let Some(progress) = &self.options.progress {
+                        if progress.snapshot().last_list_error.is_none() {
+                            progress.record("target_list_unavailable");
+                        }
+                        progress.update(|state| state.last_list_error = Some(error.to_string()));
+                    }
                     tracing::debug!(event = "cdp_waiting", code = ?error);
                     sleep_or_cancel(self.options.poll_interval, &cancellation).await;
                     continue;
                 }
                 Err(error) if qualified_target_seen => {
+                    if let Some(progress) = &self.options.progress {
+                        if progress.snapshot().last_list_error.is_none() {
+                            progress.record("target_list_unavailable");
+                        }
+                        progress.update(|state| state.last_list_error = Some(error.to_string()));
+                    }
                     tracing::debug!(event = "cdp_temporarily_unavailable", code = ?error);
                     Vec::new()
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    if let Some(progress) = &self.options.progress {
+                        if progress.snapshot().last_list_error.is_none() {
+                            progress.record("target_list_unavailable");
+                        }
+                        progress.update(|state| state.last_list_error = Some(error.to_string()));
+                    }
+                    return Err(error);
+                }
             };
             let discovered_target_count = targets.len();
             if validate_target_budget(discovered_target_count, 0).is_err() {
@@ -652,7 +865,14 @@ where
                 let canonical_startup_grace =
                     canonical_renderer_startup_grace(&target, qualified_target_seen);
                 let status_sender = session_status_sender.clone();
+                let progress = self.options.progress.clone();
                 let task = tokio::spawn(async move {
+                    if let Some(progress) = &progress {
+                        progress.update(|state| {
+                            state.sessions_started = state.sessions_started.saturating_add(1)
+                        });
+                        progress.record("candidate_session_started");
+                    }
                     let result = run_target_session(
                         endpoint,
                         target,
@@ -668,12 +888,28 @@ where
                         session_generation,
                         status_sender.clone(),
                         lease_held.clone(),
+                        progress.clone(),
                     )
                     .await;
                     if lease_held.load(AtomicOrdering::Acquire) {
                         session_handler.invalidate_lifecycle();
                     }
                     let incompatible = matches!(result, Err(CdpError::IncompatibleRenderer));
+                    if let Some(progress) = &progress {
+                        progress.update(|state| {
+                            state.sessions_ended = state.sessions_ended.saturating_add(1);
+                            if incompatible {
+                                state.layout_rejections = state.layout_rejections.saturating_add(1)
+                            }
+                            state.last_session_error =
+                                result.as_ref().err().map(ToString::to_string);
+                        });
+                        progress.record(if incompatible {
+                            "layout_rejected"
+                        } else {
+                            "session_ended"
+                        });
+                    }
                     if let Err(error) = &result {
                         tracing::debug!(event = "cdp_session_ended", target_id = %target_id, code = ?error);
                     }
@@ -1003,6 +1239,7 @@ async fn run_target_session<H>(
     session_generation: u64,
     status_sender: mpsc::UnboundedSender<SessionStatus>,
     lease_held: Arc<AtomicBool>,
+    progress: Option<Arc<SupervisorProgress>>,
 ) -> Result<(), CdpError>
 where
     H: BridgeHandler,
@@ -1100,7 +1337,16 @@ where
         )
         .await?;
         next_id += 1;
-        if renderer_probe_matches(&probe) {
+        let layout_matches = renderer_probe_matches(&probe);
+        if let Some(progress) = &progress {
+            progress.update(|state| {
+                state.layout_probe_attempts = state.layout_probe_attempts.saturating_add(1);
+                if layout_matches {
+                    state.layout_probe_matches = state.layout_probe_matches.saturating_add(1);
+                }
+            });
+        }
+        if layout_matches {
             if cold_startup_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 return Err(CdpError::IncompatibleRenderer);
             }
@@ -1128,6 +1374,9 @@ where
         )
         .await?;
         next_id += 1;
+        if let Some(progress) = &progress {
+            progress.record_ready_state(&ready_state);
+        }
         observed_loading_document |= renderer_document_is_loading(&ready_state);
         let retry_timeout = initial_qualification_retry_timeout(
             observed_loading_document,
@@ -1160,6 +1409,9 @@ where
     if !renderer_matches {
         return Err(CdpError::IncompatibleRenderer);
     }
+    if let Some(progress) = &progress {
+        progress.record("layout_qualified");
+    }
     setup_events.clear();
 
     // DOM qualification only creates a candidate. The supervisor grants a
@@ -1182,6 +1434,9 @@ where
     };
     approval?;
     lease_held.store(true, AtomicOrdering::Release);
+    if let Some(progress) = &progress {
+        progress.record("renderer_lease_granted");
+    }
 
     // Re-probe after awaiting the lease. Any navigation observed during the
     // wait invalidates the candidate before token-bearing source is installed.
@@ -1209,6 +1464,9 @@ where
     )
     .await?;
     let _ = wait_for_command(&mut socket, next_id, &mut setup_events).await?;
+    if let Some(progress) = &progress {
+        progress.record("native_binding_installed");
+    }
     next_id += 1;
     send_command(
         &mut socket,
@@ -1218,6 +1476,9 @@ where
     )
     .await?;
     let _ = wait_for_command(&mut socket, next_id, &mut setup_events).await?;
+    if let Some(progress) = &progress {
+        progress.record("navigation_bootstrap_registered");
+    }
     if setup_contains_top_navigation(&setup_events)? {
         return Err(CdpError::IncompatibleRenderer);
     }
@@ -1225,6 +1486,11 @@ where
 
     let (mut writer, mut reader) = socket.split();
     let initial_bootstrap_eval_id = next_id;
+    if let Some(progress) = &progress {
+        progress
+            .update(|state| state.bootstrap_attempts = state.bootstrap_attempts.saturating_add(1));
+        progress.record("bootstrap_evaluation_started");
+    }
     send_command(
         &mut writer,
         next_id,
@@ -1362,8 +1628,18 @@ where
                     Message::Text(text) => {
                         let message = parse_cdp_message(text.as_ref())?;
                         if message.get("id").and_then(Value::as_u64) == Some(initial_bootstrap_eval_id) {
+                            let succeeded = bootstrap_evaluation_succeeded(&message, initial_bootstrap_eval_id);
+                            if let Some(progress) = &progress {
+                                progress.update(|state| {
+                                    state.bootstrap_responses = state.bootstrap_responses.saturating_add(1);
+                                    if !succeeded {
+                                        state.bootstrap_failures = state.bootstrap_failures.saturating_add(1);
+                                    }
+                                });
+                                progress.record(if succeeded { "bootstrap_evaluation_succeeded" } else { "bootstrap_evaluation_failed" });
+                            }
                             if let Some(handoff) = &injection.startup_handoff {
-                                if !bootstrap_evaluation_succeeded(&message, initial_bootstrap_eval_id) {
+                                if !succeeded {
                                     tracing::warn!(event = "startup_visual_handoff_failed");
                                 }
                                 handoff.store(true, AtomicOrdering::Release);
@@ -2027,6 +2303,48 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
+
+    #[test]
+    fn supervisor_timeline_keeps_recent_bounded_events_without_target_ids() {
+        let progress = SupervisorProgress::default();
+        for count in 0..40 {
+            progress.record_target_counts(count, 1);
+            progress.update(|state| state.last_target_count = count);
+        }
+        let snapshot = progress.snapshot();
+        assert_eq!(snapshot.events.len(), 32);
+        assert_eq!(snapshot.dropped_events, 8);
+        assert!(
+            snapshot
+                .events
+                .iter()
+                .all(|event| !event.contains("target-id"))
+        );
+        assert!(
+            snapshot
+                .events
+                .last()
+                .is_some_and(|event| event.contains("total=39"))
+        );
+    }
+
+    #[tokio::test]
+    async fn diagnostic_probe_rejects_non_launch_websocket_without_connecting() {
+        let discovery = TargetDiscovery::new().expect("discovery client");
+        let target = CdpTarget {
+            id: "target".to_owned(),
+            target_type: "page".to_owned(),
+            title: "Codex".to_owned(),
+            url: "app://-/index.html".to_owned(),
+            web_socket_debugger_url: "ws://example.com:1234/devtools/page/target".to_owned(),
+        };
+        assert!(matches!(
+            discovery
+                .renderer_layout_diagnostics(CdpEndpoint::loopback(1234), &target)
+                .await,
+            Err(CdpError::InvalidEndpoint)
+        ));
+    }
 
     #[test]
     fn startup_handoff_requires_successful_bootstrap_evaluation() {
@@ -3178,6 +3496,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         )
         .await;
         assert!(matches!(result, Err(CdpError::EndpointIdentityMismatch)));
@@ -3302,6 +3621,7 @@ mod tests {
                 1,
                 status_sender,
                 Arc::new(AtomicBool::new(false)),
+                None,
             )
             .await
         });
@@ -3408,6 +3728,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
 
         assert_eq!(
@@ -3499,6 +3820,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
 
         tokio::time::timeout(Duration::from_secs(2), first_probe_receiver)
@@ -3575,6 +3897,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         )
         .await;
 
@@ -3755,6 +4078,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
         assert_eq!(
             approve_candidate(&mut status_receiver).await,
@@ -3914,6 +4238,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
         assert_eq!(
             approve_candidate(&mut status_receiver).await,
@@ -4011,6 +4336,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
 
         let mut status_receiver = _status_receiver;

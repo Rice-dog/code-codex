@@ -63,7 +63,7 @@ html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horiz
   background-clip: border-box !important;
 }
 
-html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:workspace-row"] + [data-app-shell-unified-tab-strip] ${MAIN_SURFACE_SELECTOR} {
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:workspace-row"] + :has(${MAIN_SURFACE_SELECTOR}) ${MAIN_SURFACE_SELECTOR} {
   border-left-color: transparent !important;
   background-clip: border-box !important;
 }

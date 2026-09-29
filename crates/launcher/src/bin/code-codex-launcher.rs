@@ -12,6 +12,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::thread;
+use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
@@ -154,13 +155,27 @@ $form.Dispose()
 "#;
 
 fn main() -> ExitCode {
-    let Ok(current) = env::current_exe() else {
-        show_fallback_error();
-        return ExitCode::FAILURE;
+    let started = Instant::now();
+    let current = match env::current_exe() {
+        Ok(current) => current,
+        Err(error) => {
+            show_fallback_error(
+                &format!(
+                    "GUI executable lookup failed: os_code={:?}; kind={:?}",
+                    error.raw_os_error(),
+                    error.kind()
+                ),
+                started,
+            );
+            return ExitCode::FAILURE;
+        }
     };
     let command_line = current.with_file_name("code-codex.exe");
     if !command_line.is_file() {
-        show_fallback_error();
+        show_fallback_error(
+            "The sibling code-codex.exe is missing or is not a regular file.",
+            started,
+        );
         return ExitCode::FAILURE;
     }
 
@@ -172,10 +187,21 @@ fn main() -> ExitCode {
         .stderr(Stdio::piped());
     configure_hidden(&mut command);
 
-    let Ok(mut child) = command.spawn() else {
-        show_fallback_error();
-        return ExitCode::FAILURE;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            show_fallback_error(
+                &format!(
+                    "Console launcher spawn failed: os_code={:?}; kind={:?}",
+                    error.raw_os_error(),
+                    error.kind()
+                ),
+                started,
+            );
+            return ExitCode::FAILURE;
+        }
     };
+    let child_pid = child.id();
     let stdout_reader = child
         .stdout
         .take()
@@ -193,10 +219,23 @@ fn main() -> ExitCode {
         Ok(status) => {
             let code = status.code();
             let stderr_text = String::from_utf8_lossy(&stderr);
-            let diagnostic =
-                parse_diagnostic(&stderr_text).unwrap_or_else(|| fallback_diagnostic(code));
+            let parsed = parse_diagnostic(&stderr_text);
+            let marker_present = parsed.is_some();
+            let diagnostic = parsed.unwrap_or_else(|| fallback_diagnostic(code));
             let diagnosis = run_diagnose(&command_line);
-            let report = format_report(&diagnostic, code, &diagnosis);
+            let report = format_report(
+                &diagnostic,
+                code,
+                &diagnosis,
+                &format!(
+                    "GUI PID: {}; child PID: {}; runtime: {} ms; structured diagnostic: {}; captured stderr: {} bytes",
+                    std::process::id(),
+                    child_pid,
+                    started.elapsed().as_millis(),
+                    marker_present,
+                    stderr.len()
+                ),
+            );
             let report_path = persist_report(&report).ok();
             show_startup_error(&diagnostic, &report, report_path.as_deref());
             ExitCode::from(normalize_failure_code(code))
@@ -210,7 +249,17 @@ fn main() -> ExitCode {
                 "Run the Code-Codex installer again to repair this installation.",
             );
             let diagnosis = run_diagnose(&command_line);
-            let report = format_report(&diagnostic, None, &diagnosis);
+            let report = format_report(
+                &diagnostic,
+                None,
+                &diagnosis,
+                &format!(
+                    "GUI PID: {}; child PID: {}; runtime: {} ms; child wait failed",
+                    std::process::id(),
+                    child_pid,
+                    started.elapsed().as_millis()
+                ),
+            );
             let report_path = persist_report(&report).ok();
             show_startup_error(&diagnostic, &report, report_path.as_deref());
             ExitCode::FAILURE
@@ -292,12 +341,13 @@ fn format_report(
     diagnostic: &StartupDiagnostic,
     exit_code: Option<i32>,
     diagnosis: &str,
+    launcher_context: &str,
 ) -> String {
     let exit_code = exit_code
         .map(|code| code.to_string())
         .unwrap_or_else(|| "unavailable".to_owned());
     format!(
-        "Code-Codex startup diagnostic\n\nCode-Codex version: {}\nSupport code: {}\nStage: {}\nSummary: {}\nReason: {}\nSuggested action: {}\nProcess exit code: {}\n\nPost-failure installation check (cdp.notRequested means this separate check was not given the launch's random port; the actual endpoint observations are in Reason above):\n{}\n",
+        "Code-Codex startup diagnostic\n\nCode-Codex version: {}\nSupport code: {}\nStage: {}\nSummary: {}\nReason: {}\nSuggested action: {}\nProcess exit code: {}\nGUI launcher process: {}\n\nPost-failure installation check (cdp.notRequested means this separate check was not given the launch's random port; the actual endpoint observations are in Reason above):\n{}\n",
         env!("CARGO_PKG_VERSION"),
         diagnostic.code,
         diagnostic.stage,
@@ -305,6 +355,7 @@ fn format_report(
         diagnostic.reason,
         diagnostic.guidance,
         exit_code,
+        launcher_context,
         diagnosis.trim(),
     )
 }
@@ -436,15 +487,24 @@ fn show_startup_error(diagnostic: &StartupDiagnostic, details: &str, report_path
     );
 }
 
-fn show_fallback_error() {
+fn show_fallback_error(reason: &str, started: Instant) {
     let diagnostic = StartupDiagnostic::new(
         "CC-START-LAUNCHER-002",
         "Opening Code-Codex",
         "The Code-Codex launcher could not start",
-        "The installed console launcher was missing or could not be opened.",
+        reason,
         "Run the Code-Codex installer again to repair this installation.",
     );
-    let report = format_report(&diagnostic, None, "diagnose was unavailable");
+    let report = format_report(
+        &diagnostic,
+        None,
+        "diagnose was unavailable",
+        &format!(
+            "GUI PID: {}; child PID: not started; runtime: {} ms",
+            std::process::id(),
+            started.elapsed().as_millis()
+        ),
+    );
     let report_path = persist_report(&report).ok();
     show_startup_error(&diagnostic, &report, report_path.as_deref());
 }
@@ -521,7 +581,12 @@ mod tests {
     #[test]
     fn report_contains_support_fields_and_version() {
         let diagnostic = fallback_diagnostic(Some(i32::from(exit_codes::STARTUP_FAILURE)));
-        let report = format_report(&diagnostic, Some(22), "{\"status\":\"available\"}");
+        let report = format_report(
+            &diagnostic,
+            Some(22),
+            "{\"status\":\"available\"}",
+            "GUI PID: 1",
+        );
         assert!(report.contains("Support code: CC-START-UNKNOWN-001"));
         assert!(report.contains("Code-Codex version:"));
         assert!(report.contains("Post-failure installation check"));
