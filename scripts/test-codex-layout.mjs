@@ -20,6 +20,8 @@ const declaration = rust.split(/\r?\n/).find((line) => line.startsWith("const RE
 assert.ok(declaration, "CDP renderer probe must exist");
 const expression = JSON.parse(declaration.slice(declaration.indexOf('"'), -1))
   .replace("window===window.top&&location.protocol==='app:'&&location.host==='-'&&", "");
+const diagnosticExpression = readFileSync(join(root, "crates/cdp-client/src/renderer-layout-diagnostic.js"), "utf8")
+  .replace("__PREDICATE__", expression);
 
 const chrome = process.env.CHROME_PATH ?? "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const temp = join(root, "artifacts", "layout-probe");
@@ -42,13 +44,14 @@ for (const [name, markup] of Object.entries(fixtures)) {
     .content-holder { display: flex; flex: 1; }
     aside { width: 300px; flex: none; }
     main { flex: 1; }
-  </style></head><body>${markup}<script>
+  </style></head><body>${markup}<p>private-conversation-text-must-not-leak</p><script>
     window.exports = {};
     ${adapter}\n${versions}
     const main = document.querySelector('main');
     const legacy = Boolean(qualifiedAppShellForMain(main));
     const current = qualifiedWorkspaceRowForMain(main);
     const probe = Boolean(eval(${JSON.stringify(expression)}));
+    const diagnostic = eval(${JSON.stringify(diagnosticExpression)});
     if (current) {
       const tree = document.createElement('div');
       tree.style.cssText = 'width:260px;flex:none;height:400px';
@@ -59,7 +62,7 @@ for (const [name, markup] of Object.entries(fixtures)) {
       window.treeBetween = treeRect.left >= railRight && mainLeft >= treeRect.right;
     }
     document.documentElement.dataset.result = JSON.stringify({
-      legacy, current: Boolean(current), probe, treeBetween: window.treeBetween ?? false,
+      legacy, current: Boolean(current), probe, diagnostic, treeBetween: window.treeBetween ?? false,
       oldVersion: usesClippedMainLayout('26.923.9999.0'),
       newVersion: usesClippedMainLayout('26.924.2738.0'),
     });
@@ -72,10 +75,19 @@ for (const [name, markup] of Object.entries(fixtures)) {
   assert.ok(encoded, `${name}: browser did not run the fixture`);
   const result = JSON.parse(encoded.replaceAll("&quot;", '"'));
   assert.equal(result.probe, name.startsWith("current") || name === "old", `${name}: CDP qualification`);
+  assert.equal(result.diagnostic.accepted, result.probe, `${name}: diagnostic matches production predicate`);
+  assert.ok(result.diagnostic.checks.every((check) => typeof check.name === "string" && typeof check.actual !== "string"));
+  assert.ok(!JSON.stringify(result.diagnostic).includes("private-conversation-text"), `${name}: diagnostics must not read page text`);
+  if (name === "currentWrapped") {
+    assert.equal(result.diagnostic.rowChildren.length, 2);
+    assert.equal(result.diagnostic.rowChildren[1].containsMain, true);
+    assert.equal(result.diagnostic.rowChildren[1].workspaceClass, false);
+    assert.equal(result.diagnostic.mainAncestors.some((ancestor) => ancestor.workspaceClass), true);
+  }
   assert.equal(result.legacy, name === "old", `${name}: legacy layout`);
   assert.equal(result.current, name.startsWith("current"), `${name}: current layout`);
   assert.equal(result.treeBetween, name.startsWith("current"), `${name}: inline file tree position`);
   assert.equal(result.oldVersion, false);
   assert.equal(result.newVersion, true);
-  process.stdout.write(`${name}: ${JSON.stringify(result)}\n`);
+  process.stdout.write(`${name}: qualified=${result.probe}, rowChildren=${result.diagnostic.rowChildCount}\n`);
 }

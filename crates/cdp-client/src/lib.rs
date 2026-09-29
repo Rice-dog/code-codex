@@ -212,7 +212,7 @@ impl TargetDiscovery {
         {
             return Err(CdpError::InvalidEndpoint);
         }
-        const DIAGNOSTIC_PROBE: &str = r#"(()=>{const s='main.main-surface,main[data-app-shell-main-surface="default"]';const mains=document.querySelectorAll(s);const main=mains.length===1?mains[0]:null;const parent=main?.parentElement;let legacy=false;for(let shell=parent,depth=0;shell&&depth<5;depth++,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length===1&&(shell===parent||shell===parent?.parentElement)&&shell.querySelectorAll(s).length===1&&shell.querySelector(s)===main)legacy=true;}const row=main?.closest('[data-app-shell-workspace-row="true"]');const children=row?[...row.children]:[];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.contains(main));const attributed=children.filter(child=>child.hasAttribute('data-app-shell-unified-tab-strip'));return {topFrame:window===window.top,appOrigin:location.protocol==='app:'&&location.host==='-',readyState:document.readyState,mainCount:mains.length,sidebarTriggerCount:document.querySelectorAll('[data-app-shell-sidebar-trigger]').length,legacyShellMatch:legacy,workspaceRowPresent:!!row,rowMainCount:row?.querySelectorAll(s).length??0,mainContentClip:!!parent?.className.includes('MainContentClip'),directRailCount:rails.length,workspaceCount:workspaces.length,unifiedTabStripCount:attributed.length,railBeforeWorkspace:rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0]),workspaceContainsMain:workspaces.length===1&&!!main&&workspaces[0].contains(main),accepted:__PREDICATE__}})()"#;
+        const DIAGNOSTIC_PROBE: &str = include_str!("renderer-layout-diagnostic.js");
         let expression = DIAGNOSTIC_PROBE.replace("__PREDICATE__", RENDERER_LAYOUT_PROBE);
         let probe = async {
             let config = WebSocketConfig::default()
@@ -546,9 +546,10 @@ pub struct SupervisorOptions {
     pub progress: Option<Arc<SupervisorProgress>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SupervisorProgress {
     state: StdMutex<SupervisorProgressSnapshot>,
+    started: Instant,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -562,6 +563,24 @@ pub struct SupervisorProgressSnapshot {
     pub layout_rejections: u64,
     pub last_list_error: Option<String>,
     pub last_session_error: Option<String>,
+    pub bootstrap_attempts: u64,
+    pub bootstrap_responses: u64,
+    pub bootstrap_failures: u64,
+    pub layout_probe_attempts: u64,
+    pub layout_probe_matches: u64,
+    pub last_ready_state: &'static str,
+    pub last_phase: &'static str,
+    pub events: Vec<String>,
+    pub dropped_events: u64,
+}
+
+impl Default for SupervisorProgress {
+    fn default() -> Self {
+        Self {
+            state: StdMutex::new(SupervisorProgressSnapshot::default()),
+            started: Instant::now(),
+        }
+    }
 }
 
 impl SupervisorProgress {
@@ -576,6 +595,57 @@ impl SupervisorProgress {
     fn update(&self, action: impl FnOnce(&mut SupervisorProgressSnapshot)) {
         if let Ok(mut state) = self.state.lock() {
             action(&mut state)
+        }
+    }
+
+    fn record(&self, phase: &'static str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.last_phase = phase;
+            if state.events.len() == 32 {
+                state.events.remove(0);
+                state.dropped_events = state.dropped_events.saturating_add(1);
+            }
+            state.events.push(format!(
+                "+{} ms | {phase}",
+                self.started.elapsed().as_millis()
+            ));
+        }
+    }
+
+    fn record_target_counts(&self, total: usize, matches: usize) {
+        if let Ok(mut state) = self.state.lock() {
+            if (state.last_target_count, state.last_filter_match_count) != (total, matches) {
+                if state.events.len() == 32 {
+                    state.events.remove(0);
+                    state.dropped_events = state.dropped_events.saturating_add(1);
+                }
+                state.events.push(format!(
+                    "+{} ms | target set changed | total={total}, filter_matches={matches}",
+                    self.started.elapsed().as_millis()
+                ));
+            }
+        }
+    }
+
+    fn record_ready_state(&self, result: &Value) {
+        let state = match result
+            .get("result")
+            .and_then(|value| value.get("value"))
+            .and_then(Value::as_str)
+        {
+            Some("loading") => "loading",
+            Some("interactive") => "interactive",
+            Some("complete") => "complete",
+            _ => "unknown",
+        };
+        if self.snapshot().last_ready_state != state {
+            self.record(match state {
+                "loading" => "candidate_document_loading",
+                "interactive" => "candidate_document_interactive",
+                "complete" => "candidate_document_complete",
+                _ => "candidate_document_state_unknown",
+            });
+            self.update(|snapshot| snapshot.last_ready_state = state);
         }
     }
 }
@@ -676,13 +746,18 @@ where
             let targets = match self.discovery.targets(self.options.endpoint).await {
                 Ok(targets) => {
                     if let Some(progress) = &self.options.progress {
+                        let matches = targets
+                            .iter()
+                            .filter(|target| self.options.target_filter.accepts(target))
+                            .count();
+                        if progress.snapshot().last_list_error.is_some() {
+                            progress.record("target_list_recovered");
+                        }
+                        progress.record_target_counts(targets.len(), matches);
                         progress.update(|state| {
                             state.list_successes = state.list_successes.saturating_add(1);
                             state.last_target_count = targets.len();
-                            state.last_filter_match_count = targets
-                                .iter()
-                                .filter(|target| self.options.target_filter.accepts(target))
-                                .count();
+                            state.last_filter_match_count = matches;
                             state.last_list_error = None;
                         });
                     }
@@ -693,6 +768,9 @@ where
                         && started.elapsed() < self.options.startup_timeout =>
                 {
                     if let Some(progress) = &self.options.progress {
+                        if progress.snapshot().last_list_error.is_none() {
+                            progress.record("target_list_unavailable");
+                        }
                         progress.update(|state| state.last_list_error = Some(error.to_string()));
                     }
                     tracing::debug!(event = "cdp_waiting", code = ?error);
@@ -701,6 +779,9 @@ where
                 }
                 Err(error) if qualified_target_seen => {
                     if let Some(progress) = &self.options.progress {
+                        if progress.snapshot().last_list_error.is_none() {
+                            progress.record("target_list_unavailable");
+                        }
                         progress.update(|state| state.last_list_error = Some(error.to_string()));
                     }
                     tracing::debug!(event = "cdp_temporarily_unavailable", code = ?error);
@@ -708,6 +789,9 @@ where
                 }
                 Err(error) => {
                     if let Some(progress) = &self.options.progress {
+                        if progress.snapshot().last_list_error.is_none() {
+                            progress.record("target_list_unavailable");
+                        }
                         progress.update(|state| state.last_list_error = Some(error.to_string()));
                     }
                     return Err(error);
@@ -787,6 +871,7 @@ where
                         progress.update(|state| {
                             state.sessions_started = state.sessions_started.saturating_add(1)
                         });
+                        progress.record("candidate_session_started");
                     }
                     let result = run_target_session(
                         endpoint,
@@ -803,6 +888,7 @@ where
                         session_generation,
                         status_sender.clone(),
                         lease_held.clone(),
+                        progress.clone(),
                     )
                     .await;
                     if lease_held.load(AtomicOrdering::Acquire) {
@@ -817,6 +903,11 @@ where
                             }
                             state.last_session_error =
                                 result.as_ref().err().map(ToString::to_string);
+                        });
+                        progress.record(if incompatible {
+                            "layout_rejected"
+                        } else {
+                            "session_ended"
                         });
                     }
                     if let Err(error) = &result {
@@ -1148,6 +1239,7 @@ async fn run_target_session<H>(
     session_generation: u64,
     status_sender: mpsc::UnboundedSender<SessionStatus>,
     lease_held: Arc<AtomicBool>,
+    progress: Option<Arc<SupervisorProgress>>,
 ) -> Result<(), CdpError>
 where
     H: BridgeHandler,
@@ -1245,7 +1337,16 @@ where
         )
         .await?;
         next_id += 1;
-        if renderer_probe_matches(&probe) {
+        let layout_matches = renderer_probe_matches(&probe);
+        if let Some(progress) = &progress {
+            progress.update(|state| {
+                state.layout_probe_attempts = state.layout_probe_attempts.saturating_add(1);
+                if layout_matches {
+                    state.layout_probe_matches = state.layout_probe_matches.saturating_add(1);
+                }
+            });
+        }
+        if layout_matches {
             if cold_startup_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 return Err(CdpError::IncompatibleRenderer);
             }
@@ -1273,6 +1374,9 @@ where
         )
         .await?;
         next_id += 1;
+        if let Some(progress) = &progress {
+            progress.record_ready_state(&ready_state);
+        }
         observed_loading_document |= renderer_document_is_loading(&ready_state);
         let retry_timeout = initial_qualification_retry_timeout(
             observed_loading_document,
@@ -1305,6 +1409,9 @@ where
     if !renderer_matches {
         return Err(CdpError::IncompatibleRenderer);
     }
+    if let Some(progress) = &progress {
+        progress.record("layout_qualified");
+    }
     setup_events.clear();
 
     // DOM qualification only creates a candidate. The supervisor grants a
@@ -1327,6 +1434,9 @@ where
     };
     approval?;
     lease_held.store(true, AtomicOrdering::Release);
+    if let Some(progress) = &progress {
+        progress.record("renderer_lease_granted");
+    }
 
     // Re-probe after awaiting the lease. Any navigation observed during the
     // wait invalidates the candidate before token-bearing source is installed.
@@ -1354,6 +1464,9 @@ where
     )
     .await?;
     let _ = wait_for_command(&mut socket, next_id, &mut setup_events).await?;
+    if let Some(progress) = &progress {
+        progress.record("native_binding_installed");
+    }
     next_id += 1;
     send_command(
         &mut socket,
@@ -1363,6 +1476,9 @@ where
     )
     .await?;
     let _ = wait_for_command(&mut socket, next_id, &mut setup_events).await?;
+    if let Some(progress) = &progress {
+        progress.record("navigation_bootstrap_registered");
+    }
     if setup_contains_top_navigation(&setup_events)? {
         return Err(CdpError::IncompatibleRenderer);
     }
@@ -1370,6 +1486,11 @@ where
 
     let (mut writer, mut reader) = socket.split();
     let initial_bootstrap_eval_id = next_id;
+    if let Some(progress) = &progress {
+        progress
+            .update(|state| state.bootstrap_attempts = state.bootstrap_attempts.saturating_add(1));
+        progress.record("bootstrap_evaluation_started");
+    }
     send_command(
         &mut writer,
         next_id,
@@ -1507,8 +1628,18 @@ where
                     Message::Text(text) => {
                         let message = parse_cdp_message(text.as_ref())?;
                         if message.get("id").and_then(Value::as_u64) == Some(initial_bootstrap_eval_id) {
+                            let succeeded = bootstrap_evaluation_succeeded(&message, initial_bootstrap_eval_id);
+                            if let Some(progress) = &progress {
+                                progress.update(|state| {
+                                    state.bootstrap_responses = state.bootstrap_responses.saturating_add(1);
+                                    if !succeeded {
+                                        state.bootstrap_failures = state.bootstrap_failures.saturating_add(1);
+                                    }
+                                });
+                                progress.record(if succeeded { "bootstrap_evaluation_succeeded" } else { "bootstrap_evaluation_failed" });
+                            }
                             if let Some(handoff) = &injection.startup_handoff {
-                                if !bootstrap_evaluation_succeeded(&message, initial_bootstrap_eval_id) {
+                                if !succeeded {
                                     tracing::warn!(event = "startup_visual_handoff_failed");
                                 }
                                 handoff.store(true, AtomicOrdering::Release);
@@ -2172,6 +2303,30 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
+
+    #[test]
+    fn supervisor_timeline_keeps_recent_bounded_events_without_target_ids() {
+        let progress = SupervisorProgress::default();
+        for count in 0..40 {
+            progress.record_target_counts(count, 1);
+            progress.update(|state| state.last_target_count = count);
+        }
+        let snapshot = progress.snapshot();
+        assert_eq!(snapshot.events.len(), 32);
+        assert_eq!(snapshot.dropped_events, 8);
+        assert!(
+            snapshot
+                .events
+                .iter()
+                .all(|event| !event.contains("target-id"))
+        );
+        assert!(
+            snapshot
+                .events
+                .last()
+                .is_some_and(|event| event.contains("total=39"))
+        );
+    }
 
     #[tokio::test]
     async fn diagnostic_probe_rejects_non_launch_websocket_without_connecting() {
@@ -3341,6 +3496,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         )
         .await;
         assert!(matches!(result, Err(CdpError::EndpointIdentityMismatch)));
@@ -3465,6 +3621,7 @@ mod tests {
                 1,
                 status_sender,
                 Arc::new(AtomicBool::new(false)),
+                None,
             )
             .await
         });
@@ -3571,6 +3728,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
 
         assert_eq!(
@@ -3662,6 +3820,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
 
         tokio::time::timeout(Duration::from_secs(2), first_probe_receiver)
@@ -3738,6 +3897,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         )
         .await;
 
@@ -3918,6 +4078,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
         assert_eq!(
             approve_candidate(&mut status_receiver).await,
@@ -4077,6 +4238,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
         assert_eq!(
             approve_candidate(&mut status_receiver).await,
@@ -4174,6 +4336,7 @@ mod tests {
             1,
             status_sender,
             Arc::new(AtomicBool::new(false)),
+            None,
         ));
 
         let mut status_receiver = _status_receiver;

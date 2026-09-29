@@ -2,6 +2,12 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.61 — 布局不匹配诊断增强 / Detailed renderer layout diagnostics
+
+- `CC-START-CDP-014` 明确说明已找到 Codex 页面、但其布局不匹配；提示 Codex 更新或窗口模式改变均可能导致此现象，而不武断归因。
+- `Copy details` 增加逐条校验的预期值与实际值、失败规则、限定深度的脱敏节点关系、文件树挂载状态，以及候选窗口加载、布局探测和注入脚本的过程记录。
+- 所有新增信息均有数量上限；不采集对话文字、标题、原始类名、页面 URL 查询参数或本地路径。
+
 ## v0.3.60 — 修复嵌套 Workspace 布局 / Nested workspace layout compatibility
 
 - 根据 v0.3.59 的实机诊断，修正 Workspace 并非布局行直接子节点时的误判；定位唯一包含对话主界面的直接子节点，并校验它位于左侧栏之后。

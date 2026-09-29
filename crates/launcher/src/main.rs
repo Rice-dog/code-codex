@@ -125,7 +125,10 @@ fn startup_trace_report() -> String {
     let Ok(trace) = startup_trace().lock() else {
         return "\n\nStartup trace: unavailable (trace lock failed)".to_owned();
     };
-    let mut report = format!("\n\nStartup trace:\n{}", trace.events.join("\n"));
+    let mut report = format!(
+        "\n\nStartup trace:\nRenderer layout diagnostic schema: v2\n{}",
+        trace.events.join("\n")
+    );
     report.push_str(&format!(
         "\nRenderer port: {}\nMain inspector port: {}\nLaunched PID: {}\nListener ownership verified: {}",
         trace.renderer_port.map_or("not reserved".to_owned(), |port| port.to_string()),
@@ -140,7 +143,7 @@ fn startup_trace_report() -> String {
     if let Some(progress) = &trace.supervisor_progress {
         let state = progress.snapshot();
         report.push_str(&format!(
-            "\nRenderer supervisor progress: /json/list attempts={}; successes={}; last target count={}; last filter matches={}; sessions started={}; sessions ended={}; layout rejections={}; last list error={}; last session error={}",
+            "\nRenderer supervisor progress: /json/list attempts={}; successes={}; last target count={}; last filter matches={}; sessions started={}; sessions ended={}; layout rejections={}; layout probes={}; layout matches={}; last document state={}; bootstrap attempts={}; bootstrap responses={}; bootstrap failures={}; last phase={}; last list error={}; last session error={}",
             state.list_attempts,
             state.list_successes,
             state.last_target_count,
@@ -148,9 +151,23 @@ fn startup_trace_report() -> String {
             state.sessions_started,
             state.sessions_ended,
             state.layout_rejections,
+            state.layout_probe_attempts,
+            state.layout_probe_matches,
+            if state.last_ready_state.is_empty() { "not_observed" } else { state.last_ready_state },
+            state.bootstrap_attempts,
+            state.bootstrap_responses,
+            state.bootstrap_failures,
+            if state.last_phase.is_empty() { "not_started" } else { state.last_phase },
             state.last_list_error.as_deref().unwrap_or("none"),
             state.last_session_error.as_deref().unwrap_or("none"),
         ));
+        if !state.events.is_empty() {
+            report.push_str(&format!(
+                "\nRenderer event timeline (latest 32, no target IDs; earlier events omitted={}):\n",
+                state.dropped_events
+            ));
+            report.push_str(&state.events.join("\n"));
+        }
     }
     report
 }
@@ -581,10 +598,10 @@ impl AppError {
             ),
             Self::CdpTarget(details) => StartupDiagnostic::new(
                 "CC-START-CDP-014",
-                "Finding the Codex window",
-                "A compatible Codex window was not found",
+                "Checking the Codex window layout",
+                "A Codex page was found, but its renderer layout did not match",
                 details.clone(),
-                "Send the full diagnostic report to the developer so the actual Codex target URL and layout can be checked.",
+                "Copy details and send the report to the developer. A Codex update or a different window mode may have changed the layout; the report lists each failed rule and a text-free structural snapshot.",
             ),
             Self::Cdp(CdpError::AmbiguousRenderer) => StartupDiagnostic::new(
                 "CC-START-CDP-003",
@@ -1711,6 +1728,16 @@ async fn target_discovery_snapshot(endpoint: CdpEndpoint, launched_pid: Option<u
                     !target.web_socket_debugger_url.is_empty(),
                     accepted,
                 );
+                if !accepted {
+                    let filter_reason = if target.web_socket_debugger_url.is_empty() {
+                        "no renderer WebSocket"
+                    } else if target.url.starts_with("app://-/") {
+                        "noncanonical app URL without Codex title"
+                    } else {
+                        "URL is outside accepted Codex app pages"
+                    };
+                    page.push_str(&format!("; filter_reason={filter_reason}"));
+                }
                 if accepted {
                     let probe = discovery
                         .renderer_layout_diagnostics(endpoint, target)
@@ -1791,7 +1818,143 @@ fn safe_layout_summary(value: &Value) -> String {
         _ => "unknown",
     };
     fields.push(format!("readyState={state}"));
-    fields.join(", ")
+    let mut report = fields.join(", ");
+    const RULES: &[&str] = &[
+        "top_frame",
+        "app_origin",
+        "unique_main",
+        "sidebar_trigger_present",
+        "legacy_shell_or_workspace_row",
+        "row_unique_main",
+        "main_content_clip",
+        "one_direct_rail",
+        "one_main_owner_child",
+        "rail_before_main_owner",
+        "owner_unique_main",
+    ];
+    if let Some(checks) = value.get("checks").and_then(Value::as_array) {
+        let failed = checks
+            .iter()
+            .filter_map(|check| {
+                let name = check.get("name").and_then(Value::as_str)?;
+                if RULES.contains(&name)
+                    && safe_layout_scalar(check.get("expected"))
+                        != safe_layout_scalar(check.get("actual"))
+                {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .take(RULES.len())
+            .collect::<Vec<_>>();
+        report.push_str(&format!(
+            "\n  Failed rules: {}",
+            if failed.is_empty() {
+                "none".to_owned()
+            } else {
+                failed.join(", ")
+            }
+        ));
+        report.push_str("\n  Qualification rules (expected -> actual):");
+        for check in checks.iter().take(RULES.len()) {
+            let Some(name) = check.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if !RULES.contains(&name) {
+                continue;
+            }
+            let expected = safe_layout_scalar(check.get("expected"));
+            let actual = safe_layout_scalar(check.get("actual"));
+            report.push_str(&format!(
+                "\n    {name}: {expected} -> {actual} [{}]",
+                if expected == actual { "pass" } else { "FAIL" }
+            ));
+        }
+    }
+    let row_count = value
+        .get("rowChildCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    report.push_str(&format!("\n  Row direct children: {row_count}"));
+    if let Some(children) = value.get("rowChildren").and_then(Value::as_array) {
+        for child in children.iter().take(8) {
+            let index = child.get("index").and_then(Value::as_u64).unwrap_or(0);
+            let tag = safe_layout_tag(child.get("tag"));
+            let count = child.get("childCount").and_then(Value::as_u64).unwrap_or(0);
+            report.push_str(&format!(
+                "\n    child {index}: tag={tag}, children={count}, containsMain={}, directRail={}, workspaceClass={}, unifiedTabAttribute={}",
+                safe_layout_scalar(child.get("containsMain")),
+                safe_layout_scalar(child.get("directRail")),
+                safe_layout_scalar(child.get("workspaceClass")),
+                safe_layout_scalar(child.get("unifiedTabAttribute")),
+            ));
+        }
+    }
+    if let Some(ancestors) = value.get("mainAncestors").and_then(Value::as_array) {
+        report.push_str("\n  Main-to-row ancestry (bounded, no text or class names):");
+        for ancestor in ancestors.iter().take(8) {
+            let depth = ancestor.get("depth").and_then(Value::as_u64).unwrap_or(0);
+            let tag = safe_layout_tag(ancestor.get("tag"));
+            let count = ancestor
+                .get("childCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            report.push_str(&format!(
+                "\n    depth {depth}: tag={tag}, children={count}, workspaceRow={}, directRowChild={}, mainClip={}, workspaceClass={}",
+                safe_layout_scalar(ancestor.get("workspaceRow")),
+                safe_layout_scalar(ancestor.get("directRowChild")),
+                safe_layout_scalar(ancestor.get("mainClip")),
+                safe_layout_scalar(ancestor.get("workspaceClass")),
+            ));
+        }
+    }
+    if let Some(explorer) = value.get("explorer") {
+        let count = explorer.get("count").and_then(Value::as_u64).unwrap_or(0);
+        let placement = match explorer.get("placement").and_then(Value::as_str) {
+            Some("inline") => "inline",
+            Some("drawer") => "drawer",
+            _ => "unknown",
+        };
+        let display = match explorer.get("display").and_then(Value::as_str) {
+            Some("none") => "none",
+            Some("shown") => "shown",
+            _ => "unknown",
+        };
+        let visibility = match explorer.get("visibility").and_then(Value::as_str) {
+            Some("hidden") => "hidden",
+            Some("visible") => "visible",
+            _ => "unknown",
+        };
+        report.push_str(&format!(
+            "\n  Explorer mount: count={count}, placement={placement}, display={display}, visibility={visibility}"
+        ));
+    }
+    report
+}
+
+fn safe_layout_scalar(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::Bool(value)) => value.to_string(),
+        Some(Value::Number(value)) => value
+            .as_u64()
+            .filter(|number| *number <= 10_000)
+            .map_or("unknown".to_owned(), |number| number.to_string()),
+        _ => "unknown".to_owned(),
+    }
+}
+
+fn safe_layout_tag(value: Option<&Value>) -> &'static str {
+    match value.and_then(Value::as_str) {
+        Some("DIV") => "DIV",
+        Some("ASIDE") => "ASIDE",
+        Some("MAIN") => "MAIN",
+        Some("SECTION") => "SECTION",
+        Some("ARTICLE") => "ARTICLE",
+        Some("HEADER") => "HEADER",
+        Some("NAV") => "NAV",
+        _ => "OTHER",
+    }
 }
 
 fn safe_target_location(raw: &str) -> String {
@@ -2384,11 +2547,24 @@ mod tests {
             "accepted": false,
             "readyState": "complete",
             "pageText": "private conversation",
-            "title": "private title"
+            "title": "private title",
+            "checks": [
+                {"name": "main_content_clip", "expected": true, "actual": false},
+                {"name": "private conversation", "expected": true, "actual": false}
+            ],
+            "rowChildren": [{"index": 0, "tag": "DIV", "childCount": 2,
+                "containsMain": true, "directRail": false, "workspaceClass": false,
+                "unifiedTabAttribute": false, "text": "private conversation"}],
+            "mainAncestors": [{"depth": 0, "tag": "PRIVATE", "childCount": 1,
+                "workspaceRow": false, "directRowChild": false, "mainClip": false,
+                "workspaceClass": false, "className": "private conversation"}]
         }));
         assert!(summary.contains("mainCount=1"));
         assert!(summary.contains("accepted=false"));
         assert!(summary.contains("readyState=complete"));
+        assert!(summary.contains("main_content_clip: true -> false [FAIL]"));
+        assert!(summary.contains("child 0: tag=DIV"));
+        assert!(summary.contains("depth 0: tag=OTHER"));
         assert!(!summary.contains("private"));
     }
 
