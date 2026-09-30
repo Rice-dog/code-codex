@@ -2,6 +2,31 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.66 — Home 文件树保留与市场按钮状态 / Home-only explorer and consistent plugin toggles
+
+- 文件树仅在 Home 显示；切到 Scheduled、Library、Images 或设置时完全隐藏，不转为抽屉，也不占用原生页面空间。
+- 离开 Home 时保留项目连接、文件监听、目录展开、滚动位置、文件预览和编辑草稿；切回同一项目直接恢复。原生 Home 缓存被移除后也可恢复；真正更换项目仍按原有流程读取。
+- 适配原生设置页替换整行布局且不提供侧栏按钮的情况；保留结构和官方来源校验，避免正常切页被误判并断开连接。
+- 外观插件的启用按钮统一复用现有已启用样式；使用 `aria-pressed` 状态的新插件也自动获得相同样式。
+- 浏览器回归覆盖页面切换、Home 缓存移除、离开期间文件变化、草稿保留、真实项目切换，以及所有外观插件在明暗主题下的按钮样式。
+
+## v0.3.64 — 隐藏启动动画市场入口 / Hide startup transition in Preview Market
+
+- 仅隐藏预览市场中的 Codex Startup Transition 入口，保留插件代码与已保存设置；保留 v0.3.63 的布局适配修复。
+
+## v0.3.63 — Codex 26.928 布局适配 / Current page layout compatibility
+
+- 识别新版的活动页与缓存页；启动检测、文件树、对话名称和文件预览统一跟随活动页，保留旧布局。
+- 项目切换时更新文件树挂载和顶部标题位置，避免侧栏重叠；新版缓存页不再依赖入场动画完成才显示文件树。
+- 清除动态背景下重复叠加的侧栏蒙版、顶部渐变和底部实体背景，保留原有对话蒙版与输入框背景。
+- 先展示项目根目录再建立递归监听，监听建立后补读一次，兼顾首次读取速度和变化同步。
+- 布局诊断增加总主界面数、缓存主界面数和活动页数；新增浏览器回归覆盖缓存页切换、预览透明度、点击恢复和延迟监听。
+
+## v0.3.62 — 恢复 Codex 启动过渡插件 / Restore startup transition
+
+- 在插件市场的 Appearance 类别中重新显示 Codex Startup Transition。
+- 启用后，启动器按已保存的设置显示启动等待动画；默认仍为关闭。
+
 ## v0.3.61 — 布局不匹配诊断增强 / Detailed renderer layout diagnostics
 
 - `CC-START-CDP-014` 明确说明已找到 Codex 页面、但其布局不匹配；提示 Codex 更新或窗口模式改变均可能导致此现象，而不武断归因。

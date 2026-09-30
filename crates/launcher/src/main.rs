@@ -126,7 +126,7 @@ fn startup_trace_report() -> String {
         return "\n\nStartup trace: unavailable (trace lock failed)".to_owned();
     };
     let mut report = format!(
-        "\n\nStartup trace:\nRenderer layout diagnostic schema: v2\n{}",
+        "\n\nStartup trace:\nRenderer layout diagnostic schema: v3\n{}",
         trace.events.join("\n")
     );
     report.push_str(&format!(
@@ -1030,14 +1030,10 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     }
     record_startup_event("existing process", "no conflicting process");
 
-    // The unfinished transition is retained for later work, but must not run
-    // while its market entry is hidden (including for existing enabled users).
-    const STARTUP_TRANSITION_AVAILABLE: bool = false;
-    let startup_enabled = STARTUP_TRANSITION_AVAILABLE
-        && SettingsStore::for_current_user()
-            .ok()
-            .and_then(|store| store.load().ok())
-            .is_some_and(|settings| settings.startup_transition_enabled);
+    let startup_enabled = SettingsStore::for_current_user()
+        .ok()
+        .and_then(|store| store.load().ok())
+        .is_some_and(|settings| settings.startup_transition_enabled);
     let splash = if startup_enabled {
         StartupSplash::open()
     } else {
@@ -1786,6 +1782,9 @@ fn safe_layout_summary(value: &Value) -> String {
     ];
     const COUNT_FIELDS: &[&str] = &[
         "mainCount",
+        "totalMainCount",
+        "inactiveMainCount",
+        "activePageCount",
         "sidebarTriggerCount",
         "rowMainCount",
         "directRailCount",

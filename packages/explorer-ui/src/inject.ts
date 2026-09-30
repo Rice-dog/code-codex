@@ -12,6 +12,7 @@ import {
 } from "./explorer-element";
 import {
   codex26715Adapter,
+  activePageElements,
   isTemporaryLocalThreadAlias,
   MAIN_SURFACE_SELECTOR,
   plausibleThreadId,
@@ -19,6 +20,7 @@ import {
   qualifiedWorkspaceRowForMain,
 } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
+import { isHomeWorkspaceView } from "./home-view";
 import {
   clearExplorerDismissalForSession,
   dismissExplorerForSession,
@@ -36,13 +38,30 @@ const PARTICLE_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-particle-backg
 const GLOW_HORIZON_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-glow-horizon-background="v1"]';
 const TRANSPARENT_BACKGROUND_STYLE_SELECTOR = 'style[data-code-codex-transparent-background="v1"]';
 const OWNED_EXPLORER_SELECTOR = '[data-code-codex-owned="true"]';
+// New page surfaces add a second translucent sidebar, opaque workspace
+// pseudo-surface and gradient fades. Keep one mask on each outer surface.
+const PAGE_SURFACE_BACKGROUND_CSS = `
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) [data-app-shell-page-surface="true"] :is(
+  .sidebar-navigation,
+  [data-app-shell-main-content-top-fade] [class*="MainContentTopFade"],
+  [data-thread-scroll-footer="true"],
+  [data-thread-scroll-footer="true"] > .pointer-events-none.bg-surface
+) {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) [data-app-shell-page-surface="true"] [class*="WorkspaceContent"]::before {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+`;
 const CURRENT_LAYOUT_EXPLORER_SELECTOR = `${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:workspace-row"]`;
 const CURRENT_LAYOUT_HEADER_LEFT_PROPERTY = "--code-codex-current-layout-header-left";
 const SHELL_LAYOUT_CSS = `
 /* The new page shell keeps the conversation title in a fixed body header,
  * outside the flex row that our file tree widens. Shift that header by the
  * measured panel width; the legacy title lives inside main and is untouched. */
-html:has(${CURRENT_LAYOUT_EXPLORER_SELECTOR}) header:has([data-app-shell-titlebar-content]) {
+html:has(${CURRENT_LAYOUT_EXPLORER_SELECTOR}:not([data-home-view-hidden])) header:has([data-app-shell-titlebar-content]):not([data-app-shell-active-page="false"] *) {
   left: var(${CURRENT_LAYOUT_HEADER_LEFT_PROPERTY}) !important;
 }
 
@@ -51,6 +70,13 @@ ${CURRENT_LAYOUT_EXPLORER_SELECTOR} {
   margin-top: 8px;
   height: calc(100% - 8px) !important;
   min-height: 0;
+}
+
+/* Cached pages can mount while Chromium pauses their animation timeline.
+ * Keep the inline tree at its flex position instead of leaving it at the
+ * entrance animation's translated, transparent first frame. */
+[data-app-shell-workspace-row="true"]:has(> [data-app-shell-active-page]) > ${CURRENT_LAYOUT_EXPLORER_SELECTOR} {
+  animation: none !important;
 }
 
 html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"] + ${MAIN_SURFACE_SELECTOR} {
@@ -395,14 +421,15 @@ function isVisibleMount(element: Element): boolean {
   let current: Element | null = element;
   while (current && current !== document.documentElement) {
     const style = getComputedStyle(current);
-    if ((current as HTMLElement).hidden || style.display === "none" || style.visibility === "hidden") return false;
+    if (current.getAttribute("data-app-shell-active-page") === "false" ||
+      (current as HTMLElement).hidden || style.display === "none" || style.visibility === "hidden") return false;
     current = current.parentElement;
   }
   return true;
 }
 
 function qualifiedMainSurface(): HTMLElement | null {
-  const mains = [...document.querySelectorAll<HTMLElement>(MAIN_SURFACE_SELECTOR)];
+  const mains = activePageElements<HTMLElement>(document, MAIN_SURFACE_SELECTOR);
   if (mains.length !== 1 || !codex26715Adapter.qualifiesRenderer(document)) return null;
   const main = mains[0];
   if (!main || !isVisibleMount(main)) return null;
@@ -465,7 +492,7 @@ function stableInlineMount(mainSurface: HTMLElement | null, codexVersion: string
 }
 
 function chooseMount(): MountPoint | null {
-  if (!document.body) return null;
+  if (!document.body || !isHomeWorkspaceView()) return null;
   const bootstrap = getBootstrapConfig();
   const mainSurface = qualifiedMainSurface();
   if (!bootstrap.forceDrawer && window.innerWidth > 820) {
@@ -488,20 +515,28 @@ function installShellLayoutStyle(): void {
 let currentLayoutObservedExplorer: CodeCodexElement | null = null;
 let currentLayoutWidthObserver: ResizeObserver | null = null;
 
-function reconcileCurrentLayoutHeader(explorer: CodeCodexElement, strategy: string): void {
-  if (strategy !== "known:workspace-row") {
+function updateCurrentLayoutHeader(explorer: CodeCodexElement): void {
+  const main = qualifiedMainSurface();
+  if (!explorer.isConnected || explorer.hasAttribute("data-home-view-hidden") || !main) return;
+  document.documentElement.style.setProperty(CURRENT_LAYOUT_HEADER_LEFT_PROPERTY, `${main.getBoundingClientRect().left}px`);
+}
+
+function reconcileCurrentLayoutHeader(explorer: CodeCodexElement | null, strategy: string): void {
+  if (!explorer || strategy !== "known:workspace-row") {
     currentLayoutWidthObserver?.disconnect();
     currentLayoutWidthObserver = null;
     currentLayoutObservedExplorer = null;
     document.documentElement.style.removeProperty(CURRENT_LAYOUT_HEADER_LEFT_PROPERTY);
     return;
   }
-  if (currentLayoutObservedExplorer === explorer) return;
+  if (currentLayoutObservedExplorer === explorer) {
+    updateCurrentLayoutHeader(explorer);
+    return;
+  }
   currentLayoutWidthObserver?.disconnect();
   currentLayoutObservedExplorer = explorer;
   const update = () => {
-    if (!explorer.isConnected) return;
-    document.documentElement.style.setProperty(CURRENT_LAYOUT_HEADER_LEFT_PROPERTY, `${explorer.getBoundingClientRect().right}px`);
+    updateCurrentLayoutHeader(explorer);
   };
   currentLayoutWidthObserver = new ResizeObserver(update);
   currentLayoutWidthObserver.observe(explorer);
@@ -527,7 +562,8 @@ function installParticleBackgroundStyle(): void {
     style.dataset.codeCodexParticleBackground = "v1";
     (document.head ?? document.documentElement).append(style);
   }
-  if (style.textContent !== PARTICLE_BACKGROUND_CSS) style.textContent = PARTICLE_BACKGROUND_CSS;
+  const css = PARTICLE_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS;
+  if (style.textContent !== css) style.textContent = css;
 }
 
 function installGlowHorizonBackgroundStyle(): void {
@@ -537,7 +573,8 @@ function installGlowHorizonBackgroundStyle(): void {
     style.dataset.codeCodexGlowHorizonBackground = "v1";
     (document.head ?? document.documentElement).append(style);
   }
-  if (style.textContent !== GLOW_HORIZON_BACKGROUND_CSS) style.textContent = GLOW_HORIZON_BACKGROUND_CSS;
+  const css = GLOW_HORIZON_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS;
+  if (style.textContent !== css) style.textContent = css;
 }
 
 function revealExplorer(): CodeCodexElement | null {
@@ -545,16 +582,17 @@ function revealExplorer(): CodeCodexElement | null {
   remountEnabled = true;
   installRemountObserver();
   const explorer = injectExplorer();
-  if (explorer?.isConnected && explorer.dataset.collapsed === "true") explorer.collapse(false);
+  if (isHomeWorkspaceView() && explorer?.isConnected && explorer.dataset.collapsed === "true") explorer.collapse(false);
   return explorer;
 }
 
 const applicationMenuActions = {
   isExplorerVisible: () => {
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
-    return !sessionDismissed() && Boolean(explorer?.isConnected && explorer.dataset.collapsed !== "true");
+    return !sessionDismissed() && Boolean(explorer?.isConnected && !explorer.hasAttribute("data-home-view-hidden") && explorer.dataset.collapsed !== "true");
   },
   toggleExplorer: () => {
+    if (!isHomeWorkspaceView()) return;
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     if (sessionDismissed() || !explorer?.isConnected) {
       revealExplorer();
@@ -564,17 +602,17 @@ const applicationMenuActions = {
   },
   openPreviewMarket: () => {
     const explorer = revealExplorer();
-    if (explorer?.isConnected) {
+    if (explorer?.isConnected && isHomeWorkspaceView()) {
       requestAnimationFrame(() => {
-        if (explorer.isConnected) explorer.openPreviewMarket();
+        if (explorer.isConnected && isHomeWorkspaceView()) explorer.openPreviewMarket();
       });
     }
   },
   checkForUpdates: () => {
     const explorer = revealExplorer();
-    if (explorer?.isConnected) {
+    if (explorer?.isConnected && isHomeWorkspaceView()) {
       requestAnimationFrame(() => {
-        if (explorer.isConnected) explorer.checkForUpdates();
+        if (explorer.isConnected && isHomeWorkspaceView()) explorer.checkForUpdates();
       });
     }
   },
@@ -587,6 +625,12 @@ export function injectExplorer(): CodeCodexElement | null {
   installGlowHorizonBackgroundStyle();
   const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
   if (sessionDismissed()) return existing;
+  const homeView = isHomeWorkspaceView();
+  existing?.setHomeViewActive(homeView);
+  if (!homeView) {
+    reconcileCurrentLayoutHeader(existing, "");
+    return existing;
+  }
   const mount = chooseMount();
   if (!mount) return existing;
   if (mount.strategy === "known:main.main-surface" || mount.strategy === "known:workspace-row") installShellLayoutStyle();
@@ -705,7 +749,10 @@ function scheduleMountReconciliation(): void {
 function installRemountObserver(): void {
   if (remountObserver || !document.documentElement || !remountEnabled) return;
   remountObserver = new MutationObserver(() => scheduleMountReconciliation());
-  remountObserver.observe(document.documentElement, { childList: true, subtree: true });
+  remountObserver.observe(document.documentElement, {
+    childList: true, subtree: true, attributes: true,
+    attributeFilter: ["data-app-shell-active-page", "aria-current", "data-sidebar-destination"],
+  });
   if (!dismissListenerInstalled) {
     dismissListenerInstalled = true;
     window.addEventListener(DISMISS_EVENT, disableRemount);

@@ -2,15 +2,21 @@
   // Read-only structural probe. Never return text, titles, URLs, IDs, raw
   // class names, attributes containing user data, or local file paths.
   const selector = 'main.main-surface,main[data-app-shell-main-surface="default"]';
-  const mains = [...document.querySelectorAll(selector)];
+  const active = root => [...root.querySelectorAll(selector)].filter(e => !e.closest('[data-app-shell-active-page="false"]'));
+  const allMains = [...document.querySelectorAll(selector)];
+  const mains = active(document);
   const main = mains.length === 1 ? mains[0] : null;
   const parent = main?.parentElement ?? null;
   const triggerCount = document.querySelectorAll('[data-app-shell-sidebar-trigger]').length;
+  const navs = document.querySelectorAll('nav[data-app-navigation-rail="true"]');
+  const homes = [...document.querySelectorAll('nav[data-app-navigation-rail="true"] [data-sidebar-destination="builtin:home"]')]
+    .filter(e => !e.closest('[data-app-shell-active-page="false"]'));
+  const nativeFeaturePage = navs.length === 1 && homes.length === 1 && homes[0].getAttribute('aria-current') !== 'page';
   let legacy = false;
   for (let shell = parent, depth = 0; shell && depth < 5; depth++, shell = shell.parentElement) {
     if (shell !== parent && shell !== parent?.parentElement) continue;
     const rails = shell.querySelectorAll(':scope > aside.app-shell-left-panel');
-    if (rails.length === 1 && shell.querySelectorAll(selector).length === 1 && shell.querySelector(selector) === main) {
+    if (rails.length === 1 && active(shell).length === 1 && active(shell)[0] === main) {
       legacy = true;
     }
   }
@@ -21,8 +27,8 @@
   const owner = owners.length === 1 ? owners[0] : null;
   const railBeforeOwner = rails.length === 1 && !!owner && children.indexOf(rails[0]) < children.indexOf(owner);
   const clip = !!parent?.className.includes('MainContentClip');
-  const rowMainCount = row?.querySelectorAll(selector).length ?? 0;
-  const ownerMainCount = owner?.querySelectorAll(selector).length ?? 0;
+  const rowMainCount = row ? active(row).length : 0;
+  const ownerMainCount = owner ? active(owner).length : 0;
   const tag = element => ['DIV', 'ASIDE', 'MAIN', 'SECTION', 'ARTICLE', 'HEADER', 'NAV'].includes(element.tagName) ? element.tagName : 'OTHER';
   const workspaceClass = element => [...element.classList].some(name => name === 'Workspace' || name.startsWith('_Workspace_'));
   const clippedCount = count => Math.min(count, 32);
@@ -34,6 +40,8 @@
     directRail: child.matches('aside.app-shell-left-panel'),
     workspaceClass: workspaceClass(child),
     unifiedTabAttribute: child.hasAttribute('data-app-shell-unified-tab-strip'),
+    activePage: child.getAttribute('data-app-shell-active-page') === 'true',
+    inactivePage: child.getAttribute('data-app-shell-active-page') === 'false',
   }));
   const mainAncestors = [];
   for (let node = main, depth = 0; node && depth < 8; node = node.parentElement, depth++) {
@@ -52,7 +60,7 @@
     { name: 'top_frame', expected: true, actual: window === window.top },
     { name: 'app_origin', expected: true, actual: location.protocol === 'app:' && location.host === '-' },
     { name: 'unique_main', expected: 1, actual: mains.length },
-    { name: 'sidebar_trigger_present', expected: true, actual: triggerCount > 0 },
+    { name: 'sidebar_trigger_or_native_feature_rail', expected: true, actual: triggerCount > 0 || nativeFeaturePage },
     { name: 'legacy_shell_or_workspace_row', expected: true, actual: legacy || !!row },
   ];
   if (row && !legacy) checks.push(
@@ -66,12 +74,16 @@
   const explorer = document.querySelector('[data-code-codex-owned="true"]');
   const explorerStyle = explorer ? getComputedStyle(explorer) : null;
   return {
-    diagnosticVersion: 2,
+    diagnosticVersion: 3,
     topFrame: window === window.top,
     appOrigin: location.protocol === 'app:' && location.host === '-',
     readyState: document.readyState,
     mainCount: mains.length,
+    totalMainCount: allMains.length,
+    inactiveMainCount: allMains.length - mains.length,
+    activePageCount: document.querySelectorAll('[data-app-shell-active-page="true"]').length,
     sidebarTriggerCount: triggerCount,
+    nativeFeaturePage,
     legacyShellMatch: legacy,
     workspaceRowPresent: !!row,
     rowMainCount,

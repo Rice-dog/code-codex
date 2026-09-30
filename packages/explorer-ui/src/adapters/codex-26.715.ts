@@ -8,6 +8,14 @@ export const COMPOSER_THREAD_SELECTOR = "[data-above-composer-conversation-id]";
 export const RESPONSE_THREAD_SELECTOR = "[data-response-annotation-conversation]";
 export const MAIN_SURFACE_SELECTOR = 'main:is(.main-surface, [data-app-shell-main-surface="default"])';
 
+/** Codex keeps inactive pages mounted from 26.928 onward. They are not
+ * competing renderers, thread signals, or mount targets. Older shells have
+ * no active-page marker and keep their existing qualification rules. */
+export function activePageElements<T extends Element = Element>(root: ParentNode, selector: string): T[] {
+  return [...root.querySelectorAll<T>(selector)]
+    .filter((element) => !element.closest('[data-app-shell-active-page="false"]'));
+}
+
 /**
  * Return the app-shell ancestor that owns exactly one conversation surface and
  * one direct left task rail. Older Codex builds put the rail beside `main`
@@ -27,7 +35,7 @@ export function qualifiedAppShellForMain(
     if (shell !== mainParent && shell !== mainParent?.parentElement) continue;
     const directRails = [...shell.children].filter((child) => child.matches("aside.app-shell-left-panel"));
     if (directRails.length !== 1) continue;
-    const surfaces = [...shell.querySelectorAll(MAIN_SURFACE_SELECTOR)];
+    const surfaces = activePageElements(shell, MAIN_SURFACE_SELECTOR);
     if (surfaces.length === 1 && surfaces[0] === main) return shell;
   }
   return null;
@@ -40,7 +48,8 @@ export function qualifiedWorkspaceRowForMain(
 ): { row: Element; workspace: Element } | null {
   if (!root.querySelector("[data-app-shell-sidebar-trigger]")) return null;
   const row = main.closest('[data-app-shell-workspace-row="true"]');
-  if (!row || row.querySelectorAll(MAIN_SURFACE_SELECTOR).length !== 1) return null;
+  if (!row || main.closest('[data-app-shell-active-page="false"]') ||
+    activePageElements(row, MAIN_SURFACE_SELECTOR).length !== 1) return null;
   const children = [...row.children];
   const rails = children.filter((child) => child.matches("aside.app-shell-left-panel"));
   // The Workspace can be nested inside a direct row child. Use the unique
@@ -48,7 +57,7 @@ export function qualifiedWorkspaceRowForMain(
   const workspaces = children.filter((child) => child.contains(main));
   if (rails.length !== 1 || workspaces.length !== 1) return null;
   const workspace = workspaces[0]!;
-  if (workspace.querySelectorAll(MAIN_SURFACE_SELECTOR).length !== 1 ||
+  if (activePageElements(workspace, MAIN_SURFACE_SELECTOR).length !== 1 ||
     !workspace.contains(main) || children.indexOf(rails[0]!) >= children.indexOf(workspace)) return null;
   if (!main.parentElement?.className.includes("MainContentClip")) return null;
   return { row, workspace };
@@ -65,7 +74,7 @@ export function isTemporaryLocalThreadAlias(value: unknown): value is string {
 }
 
 function verifiedActiveLocalThreadIds(root: ParentNode): string[] | null {
-  const activeElements = [...root.querySelectorAll(ACTIVE_THREAD_MARKER_SELECTOR)];
+  const activeElements = activePageElements(root, ACTIVE_THREAD_MARKER_SELECTOR);
   if (!activeElements.length) return null;
   const values = activeElements.map((element) => {
     const encoded = element.getAttribute("data-app-action-sidebar-thread-id");
@@ -104,9 +113,9 @@ export function annotationConsensusThreadId(
   root: ParentNode = document,
   allowMissingResponses = false,
 ): string | null {
-  const composer = [...root.querySelectorAll(COMPOSER_THREAD_SELECTOR)]
+  const composer = activePageElements(root, COMPOSER_THREAD_SELECTOR)
     .map((element) => element.getAttribute("data-above-composer-conversation-id"));
-  const responses = [...root.querySelectorAll(RESPONSE_THREAD_SELECTOR)]
+  const responses = activePageElements(root, RESPONSE_THREAD_SELECTOR)
     .map((element) => element.getAttribute("data-response-annotation-conversation"));
   if (composer.some((value) => !plausibleThreadId(value)) || responses.some((value) => !plausibleThreadId(value))) return null;
   if (composer.length !== 1 || (!allowMissingResponses && responses.length === 0)) return null;
@@ -121,12 +130,12 @@ export const codex26715Adapter: RendererAdapter = Object.freeze({
   id: "codex-runtime-qualified",
   supportsVersion: (_version: string) => true,
   qualifiesRenderer: (root: ParentNode = document) => {
-    const mains = root.querySelectorAll(MAIN_SURFACE_SELECTOR);
+    const mains = activePageElements(root, MAIN_SURFACE_SELECTOR);
     const main = mains.length === 1 ? mains[0] : undefined;
     return Boolean(main && (qualifiedAppShellForMain(main, root) || qualifiedWorkspaceRowForMain(main, root)));
   },
   activeThreadId: (root: ParentNode = document) => {
-    if (root.querySelector(ACTIVE_THREAD_MARKER_SELECTOR)) {
+    if (activePageElements(root, ACTIVE_THREAD_MARKER_SELECTOR).length) {
       return activeLocalThreadId(root) ??
         (activeLocalThreadUsesTemporaryAlias(root) ? annotationConsensusThreadId(root, true) : null);
     }

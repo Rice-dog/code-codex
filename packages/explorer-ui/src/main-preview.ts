@@ -51,7 +51,7 @@ import TurndownService from "turndown";
 // @ts-expect-error turndown-plugin-gfm does not publish TypeScript declarations.
 import { gfm as turndownGfm } from "turndown-plugin-gfm";
 import { getFileIcon, icons } from "./icons";
-import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
+import { activePageElements, MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { getBootstrapConfig } from "./bridge";
 import { MAX_SYNTAX_SOURCE_UNITS, highlightSyntaxForPath, type SyntaxHighlight } from "./syntax-highlight";
@@ -3124,6 +3124,7 @@ markdownSerializer.addRule("gfmStrikethrough", {
 });
 
 const mainPreviewStyles = String.raw`
+  :host([data-home-suspended]) { display: none !important; }
   :host {
     --cle-main-bg: #ffffff;
     --cle-main-bar: #f7f7f5;
@@ -5471,6 +5472,8 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   #rovingPath: string | null = null;
   #nextTabId = 0;
   #connected = false;
+  #reparenting = false;
+  #suspended = false;
   #suppressedParent: Element | null = null;
   #childObserver: MutationObserver | null = null;
   #nativeTitleObserver: MutationObserver | null = null;
@@ -5501,6 +5504,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   }
 
   connectedCallback(): void {
+    if (this.#connected) return;
     this.#connected = true;
     if (this.#clippedLayout) this.dataset.clippedLayout = "true";
     this.#render();
@@ -5511,6 +5515,13 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    if (this.#reparenting) return;
+    setTimeout(() => {
+      if (!this.isConnected) this.#disposeDisconnected();
+    }, 0);
+  }
+
+  #disposeDisconnected(): void {
     this.#connected = false;
     this.#cancelPdfPreview();
     this.#cancelNotebookPreview();
@@ -5527,6 +5538,24 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     this.#nativeViewportObserver?.disconnect();
     this.#nativeViewportObserver = null;
     this.#observedNativeViewport = null;
+  }
+
+  setSuspended(suspended: boolean): void {
+    this.#suspended = suspended;
+    this.toggleAttribute("data-home-suspended", suspended);
+    this.#syncSuppression();
+  }
+
+  reparent(parent: Element): void {
+    if (this.parentElement === parent) return;
+    this.#restoreSuppressedChildren();
+    this.#reparenting = true;
+    try {
+      parent.append(this);
+    } finally {
+      this.#reparenting = false;
+    }
+    this.#syncSuppression();
   }
 
   get state(): MainPreviewState {
@@ -11616,7 +11645,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   }
 
   #syncSuppression(): void {
-    const parent = this.#connected && this.#state.tabs.length > 0 && this.parentElement?.matches(MAIN_SURFACE_SELECTOR)
+    const parent = this.#connected && !this.#suspended && this.#state.tabs.length > 0 && this.parentElement?.matches(MAIN_SURFACE_SELECTOR)
       ? this.parentElement
       : null;
     if (!parent) {
@@ -11648,11 +11677,12 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     if (nativeHeaderSubject) desired.add(nativeHeaderSubject);
 
     if (this.#clippedLayout) {
-      const focusedTitles = document.querySelectorAll<HTMLElement>(
+      const titleRoot = parent.closest('[data-app-shell-active-page="true"]') ?? document;
+      const focusedTitles = activePageElements<HTMLElement>(titleRoot,
         'header [data-app-shell-focus-area="main"] [data-app-shell-titlebar-content]',
       );
       const titles = focusedTitles.length ? focusedTitles :
-        document.querySelectorAll<HTMLElement>("header [data-app-shell-titlebar-content]");
+        activePageElements<HTMLElement>(titleRoot, "header [data-app-shell-titlebar-content]");
       const title = titles.length === 1 ? titles[0] : null;
       const header = title?.closest("header") ?? null;
       const observerRoot = header?.parentElement ??
