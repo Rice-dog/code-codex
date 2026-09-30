@@ -5,7 +5,7 @@ import { DEFAULT_STARTUP_TRANSITION_SETTINGS, previewStartupTransition, readStar
 import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVideo } from "./startup-transition-media";
 import type { StartupTransitionController } from "./startup-transition";
 import { formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-timeline";
-import { MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
+import { activePageElements, MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
 import { countLoadedTreeMatches, filterLoadedTreeRows, normalizeFileFilter } from "./file-filter";
@@ -40,7 +40,7 @@ import {
   type MainPreviewLineEnding,
   type MainPreviewModelResource,
 } from "./main-preview";
-import { dismissExplorerForSession } from "./session-state";
+import { dismissExplorerForSession, isExplorerDismissedForSession } from "./session-state";
 import { styles, TREE_ROW_HEIGHT } from "./styles";
 import { parentPath, TreeModel } from "./tree-model";
 import type {
@@ -11371,7 +11371,6 @@ function pixelSculptCardMarkup(): string {
 function blinkingSquaresCardMarkup(): string {
   return `<article class="preview-extension appearance-extension" data-appearance-plugin="${BLINKING_SQUARES_BACKGROUND_PLUGIN_ID}" aria-busy="false"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="3" height="3"/><rect x="7" y="2" width="2" height="2"/><rect x="12" y="1" width="3" height="3"/><rect x="2" y="8" width="2" height="2"/><rect x="7" y="7" width="3" height="3"/><rect x="12" y="9" width="2" height="2"/><rect x="1" y="12" width="3" height="3"/><rect x="8" y="13" width="2" height="2"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Blinking Squares Background</h4><span class="preview-extension-status blinkingSquares-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action blinkingSquares-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger blinkingSquares-settings-trigger" type="button" aria-label="Configure Blinking Squares Background" aria-haspopup="dialog" aria-controls="cle-blinkingSquares-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
 }
-// Keep the unfinished plugin implementation intact for later development.
 const STARTUP_TRANSITION_MARKET_VISIBLE = false;
 
 function startupTransitionCardMarkup(): string {
@@ -11475,6 +11474,8 @@ export class CodeCodexElement extends HTMLElement {
   #refreshCommit: Promise<void> = Promise.resolve();
   #refreshRevision = 0;
   #connected = false;
+  #homeViewActive = true;
+  #homeScrollTop = 0;
   #domEventsBound = false;
   #generation = 0;
   #threadId: string | null = null;
@@ -12372,6 +12373,21 @@ export class CodeCodexElement extends HTMLElement {
   disconnectedCallback(): void {
     if (this.#reparenting) return;
     if (!this.#connected) return;
+    // Native Settings can replace the entire workspace row during one React
+    // commit. Decide after that commit, before disposing the retained bridge.
+    queueMicrotask(() => {
+      if (this.isConnected || !this.#connected) return;
+      if (!this.#dismissed && !isExplorerDismissedForSession() &&
+        window.__codeCodexRuntimeOwner?.tagName === this.localName && document.body) {
+        this.setHomeViewActive(false);
+        if (!this.isConnected) this.#moveHost(document.body, null);
+        return;
+      }
+      this.#disposeDisconnected();
+    });
+  }
+
+  #disposeDisconnected(): void {
     this.#closeContextMenu(false);
     this.#closePreviewMarket(false);
     this.#startupVideoGeneration += 1;
@@ -12551,6 +12567,34 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
+  setHomeViewActive(active: boolean): void {
+    if (this.#homeViewActive === active) return;
+    this.#homeViewActive = active;
+    if (!active) this.#homeScrollTop = this.#treeShell.scrollTop;
+    this.toggleAttribute("data-home-view-hidden", !active);
+    this.toggleAttribute("inert", !active);
+    if (active) this.removeAttribute("aria-hidden");
+    else this.setAttribute("aria-hidden", "true");
+    if (!active) {
+      this.#closeContextMenu(false);
+      this.#closePreviewMarket(false);
+      this.#closeUpdateDialog(false);
+      this.#clearDragState();
+      this.#cancelMarquee();
+      this.#mainPreview?.setSuspended(true);
+      if (document.body) {
+        this.#mainPreview?.reparent(document.body);
+        this.#moveHost(document.body, null);
+      }
+    } else {
+      requestAnimationFrame(() => {
+        if (!this.#homeViewActive || !this.#connected) return;
+        this.#treeShell.scrollTop = this.#homeScrollTop;
+        this.#renderVisible();
+      });
+    }
+  }
+
   reconcileMount(parent: Element, before: ChildNode | null, placement: "inline" | "drawer", strategy: string): void {
     this.dataset.placement = placement;
     this.dataset.mountStrategy = strategy;
@@ -12566,6 +12610,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   reconcileMainPreview(surface: HTMLElement | null): void {
+    if (!this.#homeViewActive) return;
     const nextSurface = surface?.isConnected ? surface : undefined;
     const alreadyReconciled = nextSurface === this.#mainPreviewSurface &&
       (!this.#mainPreview || this.#mainPreview.parentElement === nextSurface);
@@ -12574,8 +12619,9 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
     if (alreadyReconciled) return;
-    this.#detachMainPreview();
+    this.#mainPreview?.setSuspended(true);
     this.#mainPreviewSurface = nextSurface;
+    if (!nextSurface && document.body) this.#mainPreview?.reparent(document.body);
     if (nextSurface && this.#context && !this.#previewTabs.length && this.#restoreDetachedDraft(this.#context)) return;
     if (nextSurface && this.#previewTabs.length) {
       this.#ensureMainPreview();
@@ -12662,7 +12708,10 @@ export class CodeCodexElement extends HTMLElement {
       await this.#switchThread("manual-workspace");
       return;
     }
-    this.#tracker.start((threadId) => void this.#switchThread(threadId));
+    this.#tracker.start((threadId, homeView) => {
+      this.setHomeViewActive(homeView);
+      if (homeView) void this.#switchThread(threadId);
+    });
   }
 
   #required<T extends Element>(selector: string): T {
@@ -13469,6 +13518,7 @@ export class CodeCodexElement extends HTMLElement {
   };
 
   #applyResponsivePlacement(): void {
+    if (!this.#homeViewActive) return;
     const inlineHidden = this.#inlineParent ? this.#isHidden(this.#inlineParent) : false;
     const drawer = window.innerWidth <= 820 || inlineHidden || this.#requestedPlacement === "drawer";
     this.dataset.placement = drawer ? "drawer" : this.#requestedPlacement;
@@ -13567,15 +13617,6 @@ export class CodeCodexElement extends HTMLElement {
       this.#context = context;
       this.#setHeader(context.projectName, context.rootName);
 
-      try {
-        await bridge.request("explorer.watch.start", {});
-        if (generation !== this.#generation) return;
-        this.#watching = true;
-      } catch {
-        if (generation !== this.#generation) return;
-        this.#watching = false;
-      }
-
       const rawList = await this.#requestBootstrap<unknown>(bridge, generation, "explorer.list", { relativePath: "", limit: PAGE_SIZE });
       if (generation !== this.#generation) return;
       const list = normalizeList(rawList);
@@ -13586,6 +13627,19 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderTree();
       if (!this.#restoreDetachedDraft(context)) this.#announce(`${context.projectName} loaded`);
       if (this.#gitHistoryOpen) void this.#loadGitHistory(true);
+
+      // Show the root before installing a recursive watcher (large projects
+      // can take time to subscribe). Re-read after subscription to close the
+      // gap between the initial listing and the first watched event.
+      try {
+        await bridge.request("explorer.watch.start", {});
+        if (generation !== this.#generation) return;
+        this.#watching = true;
+      } catch {
+        if (generation !== this.#generation) return;
+        this.#watching = false;
+      }
+      if (this.#watching) await this.#loadDirectory("");
     } catch (error) {
       if (generation !== this.#generation) return;
       if (error instanceof ExplorerBridgeError && error.code === "NO_CONTEXT") {
@@ -16511,10 +16565,14 @@ export class CodeCodexElement extends HTMLElement {
 
   #ensureMainPreview(): CodeCodexMainPreviewElement | undefined {
     const surface = this.#mainPreviewSurface;
-    if (!surface?.isConnected || this.#dismissed) return undefined;
-    const qualifiedSurfaces = document.querySelectorAll(MAIN_SURFACE_SELECTOR);
+    if (!this.#homeViewActive || !surface?.isConnected || this.#dismissed) return undefined;
+    const qualifiedSurfaces = activePageElements(document, MAIN_SURFACE_SELECTOR);
     if (qualifiedSurfaces.length !== 1 || qualifiedSurfaces[0] !== surface) return undefined;
-    if (this.#mainPreview?.parentElement === surface) return this.#mainPreview;
+    if (this.#mainPreview) {
+      this.#mainPreview.reparent(surface);
+      this.#mainPreview.setSuspended(false);
+      return this.#mainPreview;
+    }
     this.#detachMainPreview(false);
     registerMainPreviewElement();
     const preview = document.createElement(MAIN_PREVIEW_TAG) as CodeCodexMainPreviewElement;

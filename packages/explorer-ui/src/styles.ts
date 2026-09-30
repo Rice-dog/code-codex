@@ -1,6 +1,7 @@
 export const TREE_ROW_HEIGHT = 28;
 
 export const styles = String.raw`
+  :host([data-home-view-hidden]) { display: none !important; }
   :host {
     --cle-width: 260px;
     --cle-row: ${TREE_ROW_HEIGHT}px;
@@ -1319,7 +1320,7 @@ export const styles = String.raw`
     filter: none;
     opacity: .56;
   }
-  .preview-extension-action[data-enabled="true"] {
+  .preview-extension-action:is([data-enabled="true"], [aria-pressed="true"]) {
     color: var(--cle-muted);
     background: transparent;
     border-color: var(--cle-rule-strong);

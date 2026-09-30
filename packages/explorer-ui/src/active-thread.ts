@@ -3,10 +3,12 @@ import {
   COMPOSER_THREAD_SELECTOR,
   RESPONSE_THREAD_SELECTOR,
   activeLocalThreadId,
+  activePageElements,
   activeLocalThreadUsesTemporaryAlias,
   annotationConsensusThreadId,
   plausibleThreadId,
 } from "./adapters/codex-26.715";
+import { isHomeWorkspaceView } from "./home-view";
 
 const ROUTE_EVENT = "code-codex:route";
 const EXPLICIT_EVENT = "code-codex:thread-change";
@@ -82,7 +84,7 @@ function idFromElement(element: Element): string | null {
 }
 
 function documentThreadSignal(root: ParentNode = document): DocumentThreadSignal {
-  if (root.querySelector(ACTIVE_THREAD_MARKER_SELECTOR)) {
+  if (activePageElements(root, ACTIVE_THREAD_MARKER_SELECTOR).length) {
     const canonical = activeLocalThreadId(root);
     if (canonical) return { markerPresent: true, threadId: canonical };
     return {
@@ -91,11 +93,11 @@ function documentThreadSignal(root: ParentNode = document): DocumentThreadSignal
     };
   }
 
-  if (root.querySelector(`${COMPOSER_THREAD_SELECTOR},${RESPONSE_THREAD_SELECTOR}`)) {
+  if (activePageElements(root, `${COMPOSER_THREAD_SELECTOR},${RESPONSE_THREAD_SELECTOR}`).length) {
     return { markerPresent: true, threadId: annotationConsensusThreadId(root) };
   }
 
-  const selected = [...root.querySelectorAll(SELECTED_THREAD_SELECTORS)];
+  const selected = activePageElements(root, SELECTED_THREAD_SELECTORS);
   if (!selected.length) return { markerPresent: false, threadId: null };
   const candidates = selected.map(idFromElement);
   if (candidates.some((value) => value === null)) return { markerPresent: true, threadId: null };
@@ -117,15 +119,16 @@ export function resolveActiveThread(root: ParentNode = document): string | null 
 
 export class ActiveThreadTracker {
   #observer: MutationObserver | undefined;
-  #listener: ((threadId: string | null) => void) | undefined;
+  #listener: ((threadId: string | null, homeView: boolean) => void) | undefined;
   #last: string | null | undefined;
+  #lastHomeView: boolean | undefined;
   #queued = false;
   #originalPushState: History["pushState"] | undefined;
   #originalReplaceState: History["replaceState"] | undefined;
   #pushWrapper: History["pushState"] | undefined;
   #replaceWrapper: History["replaceState"] | undefined;
 
-  start(listener: (threadId: string | null) => void): void {
+  start(listener: (threadId: string | null, homeView: boolean) => void): void {
     this.stop();
     this.#listener = listener;
     this.#patchHistory();
@@ -153,6 +156,8 @@ export class ActiveThreadTracker {
         "data-app-action-sidebar-thread-kind",
         "data-above-composer-conversation-id",
         "data-response-annotation-conversation",
+        "data-app-shell-active-page",
+        "data-sidebar-destination",
         "href",
       ],
     });
@@ -169,6 +174,7 @@ export class ActiveThreadTracker {
     this.#restoreHistory();
     this.#listener = undefined;
     this.#last = undefined;
+    this.#lastHomeView = undefined;
     this.#queued = false;
   }
 
@@ -191,10 +197,12 @@ export class ActiveThreadTracker {
   };
 
   #emit(): void {
+    const homeView = isHomeWorkspaceView();
     const next = resolveActiveThread();
-    if (next === this.#last) return;
+    if (next === this.#last && homeView === this.#lastHomeView) return;
     this.#last = next;
-    this.#listener?.(next);
+    this.#lastHomeView = homeView;
+    this.#listener?.(next, homeView);
   }
 
   #patchHistory(): void {
