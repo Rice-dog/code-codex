@@ -8,7 +8,6 @@ This folder contains ready-made downloadable packages.
 - Enable 仅切换启用状态；没有背景时只显示提示，不打开设置面板。调节按钮独立负责打开和关闭面板。
 - 操作提示使用顶层弹层，显示在 Preview Market 及已有设置面板之上，按可视区域定位，保留原有自动消失和读屏提示。
 - 浏览器验证覆盖提示真实可见、中英文切换、共享字体、按钮行为，以及已有蒙版和登录背景回归。
-- 本地版本，尚未发布至 GitHub。
 
 ## v0.3.67 — 分区蒙版调节与登录页背景 / Surface opacity and sign-in backgrounds
 
