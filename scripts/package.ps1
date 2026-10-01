@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.3.66",
+    [string]$Version = "0.3.68",
     [string]$WixPath
 )
 

@@ -21,6 +21,8 @@ import {
 } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { isHomeWorkspaceView } from "./home-view";
+import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground } from "./native-login";
+import { SURFACE_OPACITY_NATIVE_CSS } from "./surface-opacity";
 import {
   clearExplorerDismissalForSession,
   dismissExplorerForSession,
@@ -562,7 +564,7 @@ function installParticleBackgroundStyle(): void {
     style.dataset.codeCodexParticleBackground = "v1";
     (document.head ?? document.documentElement).append(style);
   }
-  const css = PARTICLE_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS;
+  const css = PARTICLE_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS + SURFACE_OPACITY_NATIVE_CSS;
   if (style.textContent !== css) style.textContent = css;
 }
 
@@ -573,7 +575,7 @@ function installGlowHorizonBackgroundStyle(): void {
     style.dataset.codeCodexGlowHorizonBackground = "v1";
     (document.head ?? document.documentElement).append(style);
   }
-  const css = GLOW_HORIZON_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS;
+  const css = GLOW_HORIZON_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS + SURFACE_OPACITY_NATIVE_CSS;
   if (style.textContent !== css) style.textContent = css;
 }
 
@@ -619,6 +621,7 @@ const applicationMenuActions = {
 };
 
 export function injectExplorer(): CodeCodexElement | null {
+  reconcileLoginBackground();
   reconcileApplicationMenu(applicationMenuActions);
   installTransparentBackgroundStyle();
   installParticleBackgroundStyle();
@@ -629,7 +632,16 @@ export function injectExplorer(): CodeCodexElement | null {
   existing?.setHomeViewActive(homeView);
   if (!homeView) {
     reconcileCurrentLayoutHeader(existing, "");
-    return existing;
+    if (existing || !document.body) return existing;
+    // The hidden host restores saved background controllers even when the
+    // application starts at sign-in. It must never create a login drawer.
+    if (!customElements.get(EXPLORER_TAG)) customElements.define(EXPLORER_TAG, CodeCodexElement);
+    const backgroundHost = document.createElement(EXPLORER_TAG) as CodeCodexElement;
+    backgroundHost.reconnectNative(getBootstrapConfig());
+    backgroundHost.dataset.codeCodexOwned = "true";
+    backgroundHost.setHomeViewActive(false);
+    if (!backgroundHost.isConnected) document.body.append(backgroundHost);
+    return backgroundHost;
   }
   const mount = chooseMount();
   if (!mount) return existing;

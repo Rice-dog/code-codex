@@ -47,6 +47,12 @@ fixtures.nativeFeature = featureRail + featureShell;
 fixtures.homeMissingTrigger = featureRail.replace('builtin:home"', 'builtin:home" aria-current="page"') + featureShell;
 fixtures.featureWrongOrder = featureRail + fixtures.wrongOrder.replace('<button data-app-shell-sidebar-trigger></button>', '');
 fixtures.featureDuplicateRail = featureRail + featureRail + featureShell;
+const login = '<div class="flex h-full w-full items-center justify-center overflow-hidden bg-surface pb-6 text-default"><div class="flex w-[340px] flex-col items-center gap-8"><svg></svg><h1>Sign in to ChatGPT</h1><button>Continue to sign in</button></div></div>';
+fixtures.nativeLogin = login;
+fixtures.nativeLoginChinese = login.replace('Sign in to ChatGPT','登录 ChatGPT').replace('Continue to sign in','继续登录');
+fixtures.loginDuplicate = login + login;
+fixtures.loginWithRail = featureRail + login;
+fixtures.loginMissingButton = login.replace('<button>Continue to sign in</button>','');
 
 for (const [name, markup] of Object.entries(fixtures)) {
   const file = join(temp, `${name}.html`);
@@ -112,7 +118,7 @@ for (const [name, markup] of Object.entries(fixtures)) {
   const encoded = output.match(/data-result="([^"]+)"/)?.[1];
   assert.ok(encoded, `${name}: browser did not run the fixture`);
   const result = JSON.parse(encoded.replaceAll("&quot;", '"'));
-  assert.equal(result.probe, name.startsWith("current") || name === "old" || name === "nativeFeature", `${name}: CDP qualification`);
+  assert.equal(result.probe, name.startsWith("current") || name === "old" || name === "nativeFeature" || name.startsWith("nativeLogin"), `${name}: CDP qualification`);
   assert.equal(result.diagnostic.accepted, result.probe, `${name}: diagnostic matches production predicate`);
   assert.ok(result.diagnostic.checks.every((check) => typeof check.name === "string" && typeof check.actual !== "string"));
   assert.ok(!JSON.stringify(result.diagnostic).includes("private-conversation-text"), `${name}: diagnostics must not read page text`);

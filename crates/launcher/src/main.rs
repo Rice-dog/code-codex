@@ -126,7 +126,7 @@ fn startup_trace_report() -> String {
         return "\n\nStartup trace: unavailable (trace lock failed)".to_owned();
     };
     let mut report = format!(
-        "\n\nStartup trace:\nRenderer layout diagnostic schema: v3\n{}",
+        "\n\nStartup trace:\nRenderer layout diagnostic schema: v4\n{}",
         trace.events.join("\n")
     );
     report.push_str(&format!(
@@ -1778,6 +1778,8 @@ fn safe_layout_summary(value: &Value) -> String {
         "mainContentClip",
         "railBeforeWorkspace",
         "workspaceContainsMain",
+        "nativeFeaturePage",
+        "nativeLoginPage",
         "accepted",
     ];
     const COUNT_FIELDS: &[&str] = &[
