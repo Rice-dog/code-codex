@@ -2,6 +2,23 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.68 — 蒙版面板样式和提示层级 / Consistent opacity controls and visible notices
+
+- 市场名称固定为英文 UI Surface Opacity；设置面板复用其他外观插件的中英语言开关、标题、参数行、字体和按钮样式。
+- Enable 仅切换启用状态；没有背景时只显示提示，不打开设置面板。调节按钮独立负责打开和关闭面板。
+- 操作提示使用顶层弹层，显示在 Preview Market 及已有设置面板之上，按可视区域定位，保留原有自动消失和读屏提示。
+- 浏览器验证覆盖提示真实可见、中英文切换、共享字体、按钮行为，以及已有蒙版和登录背景回归。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.67 — 分区蒙版调节与登录页背景 / Surface opacity and sign-in backgrounds
+
+- 在 Appearance 第一位加入界面蒙版不透明度插件，分别调节导航栏、任务与项目选择栏、文件树、对话区、文件预览、标签栏、输入框、右侧工具栏和登录页；设置实时生效并自动保存，可单项或全部恢复默认值。
+- 启用前检查是否已有背景插件；没有背景时弹出提示。关闭背景后暂停调节，再次启用背景时恢复设置，不改变文字和图标的透明度。
+- 登录和账号退出页面隐藏文件树，不占用原生登录页空间；保留当前背景，直接从登录页启动也能恢复已保存的背景。
+- 原生登录页按官方布局识别，兼容中英文，保留官方来源、窗口唯一性等启动校验。
+- Codex Startup Transition 仅从预览市场隐藏，保留代码和已有设置。
+- 本地版本，尚未发布至 GitHub。
+
 ## v0.3.66 — Home 文件树保留与市场按钮状态 / Home-only explorer and consistent plugin toggles
 
 - 文件树仅在 Home 显示；切到 Scheduled、Library、Images 或设置时完全隐藏，不转为抽屉，也不占用原生页面空间。

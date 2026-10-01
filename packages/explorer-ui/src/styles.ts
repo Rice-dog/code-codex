@@ -897,9 +897,10 @@ export const styles = String.raw`
   .context-dialog-button:disabled { opacity: .52; cursor: default; }
 
   .action-notice {
-    position: absolute;
-    inset: auto 8px 36px;
-    z-index: 9;
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    z-index: 2147483647;
     min-width: 0;
     min-height: 30px;
     padding: 7px 9px 7px 11px;

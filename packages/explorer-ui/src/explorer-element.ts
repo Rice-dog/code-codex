@@ -1,5 +1,6 @@
 import { PIXEL_SCULPT_CONTROLS_HTML, startPixelSculptRuntime } from "./pixel-sculpt-runtime";
 import { ActiveThreadTracker } from "./active-thread";
+import { SurfaceOpacityPlugin, surfaceOpacityCardMarkup, surfaceOpacityPanelMarkup, SURFACE_OPACITY_TREE_CSS } from "./surface-opacity";
 import { BLINKING_SQUARES_DEFAULTS, BlinkingSquaresRenderer, type BlinkingSquaresSettings } from "./blinking-squares-host";
 import { DEFAULT_STARTUP_TRANSITION_SETTINGS, previewStartupTransition, readStartupTransitionSettings, writeStartupTransitionSettings, type StartupTransitionSettings } from "./startup-transition-plugin";
 import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVideo } from "./startup-transition-media";
@@ -11459,6 +11460,7 @@ function mediaPreviewRoute(path: string): MediaPreviewRoute | undefined {
 
 export class CodeCodexElement extends HTMLElement {
   readonly #shadow: ShadowRoot;
+  readonly #surfaceOpacity: SurfaceOpacityPlugin;
   readonly #model = new TreeModel();
   readonly #tracker = new ActiveThreadTracker();
   readonly #changeTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -11795,7 +11797,7 @@ export class CodeCodexElement extends HTMLElement {
     super();
     this.#shadow = this.attachShadow({ mode: "open" });
     this.#shadow.innerHTML = `
-      <style>${styles}</style>
+      <style>${styles}${SURFACE_OPACITY_TREE_CSS}</style>
       <div class="frame">
         <div class="activity-bus" aria-hidden="true"></div>
         <header class="masthead" data-root-visible="true">
@@ -11837,7 +11839,7 @@ export class CodeCodexElement extends HTMLElement {
                 <button class="preview-market-category" type="button" role="tab" aria-selected="false" aria-controls="cle-developer-tools-section" data-preview-market-category="developer-tools">Tools</button>
               </div>
               <section class="preview-market-section" id="cle-appearance-section" role="tabpanel" data-preview-market-section="appearance">
-                <div class="preview-market-section-list">${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}${blinkingSquaresCardMarkup()}${startupTransitionCardMarkup()}</div>
+                <div class="preview-market-section-list">${surfaceOpacityCardMarkup()}${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}${blinkingSquaresCardMarkup()}${startupTransitionCardMarkup()}</div>
               </section>
               <section class="preview-market-section" id="cle-file-preview-section" role="tabpanel" data-preview-market-section="file-preview" hidden>
                 <div class="preview-market-section-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
@@ -11858,7 +11860,7 @@ export class CodeCodexElement extends HTMLElement {
           </div>
           <button class="status-code" type="button" title="Check GitHub for updates" aria-label="Check GitHub for updates" aria-haspopup="dialog" aria-controls="cle-update-dialog" aria-expanded="false">WAIT</button>
         </footer>
-        <div class="action-notice" hidden></div>
+        <div class="action-notice" popover="manual" role="status" hidden></div>
         <div class="context-menu" role="menu" aria-label="Explorer actions" aria-busy="false" hidden></div>
         <div class="resize-handle" role="separator" aria-label="Resize explorer" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="260" tabindex="0"></div>
       </div>
@@ -11873,10 +11875,12 @@ export class CodeCodexElement extends HTMLElement {
       ${pixelSculptPanelMarkup()}
       ${blinkingSquaresPanelMarkup()}
       ${startupTransitionPanelMarkup()}
+      ${surfaceOpacityPanelMarkup(backgroundLanguageSwitchMarkup("cle-surface-opacity-settings-language"), bilingualLabelMarkup)}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
 
+    this.#surfaceOpacity = new SurfaceOpacityPlugin(this.#shadow, (zh,en)=>this.#backgroundText(zh,en), message=>this.#showActionNotice(message,"error"));
     this.#frame = this.#required<HTMLElement>(".frame");
     this.#treeShell = this.#required<HTMLElement>(".tree-shell");
     this.#treeSpacer = this.#required<HTMLElement>(".tree-spacer");
@@ -11932,7 +11936,7 @@ export class CodeCodexElement extends HTMLElement {
       `[data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}"] .preview-extension-status`,
     );
     this.#particleSettingsPanel = this.#required<HTMLElement>(".particle-settings-panel");
-    this.#particleSettingsTrigger = this.#required<HTMLButtonElement>(".particle-settings-trigger");
+    this.#particleSettingsTrigger = this.#required<HTMLButtonElement>(`[data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}"] .particle-settings-trigger`);
     this.#particleSettingsCloseButton = this.#required<HTMLButtonElement>(".particle-settings-close");
     for (const definition of PARTICLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
@@ -11983,8 +11987,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#backgroundLanguageInputs = Array.from(
       this.#shadow.querySelectorAll<HTMLInputElement>(".background-language-toggle"),
     );
-    if (this.#backgroundLanguageInputs.length !== 11) {
-      throw new Error("Background settings require eleven synchronized language switches.");
+    if (this.#backgroundLanguageInputs.length !== 12) {
+      throw new Error("Background settings require twelve synchronized language switches.");
     }
     for (const definition of BLACK_HOLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
@@ -12343,6 +12347,7 @@ export class CodeCodexElement extends HTMLElement {
     });
     this.#bindBlinkingSquares();
     this.#bindStartupTransition();
+    this.#surfaceOpacity.start();
 
     this.#appearancePluginApplied = undefined;
     this.#appearancePluginError = undefined;
@@ -12388,6 +12393,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #disposeDisconnected(): void {
+    this.#surfaceOpacity.stop();
     this.#closeContextMenu(false);
     this.#closePreviewMarket(false);
     this.#startupVideoGeneration += 1;
@@ -12744,9 +12750,10 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #syncBackgroundSettingsLanguagePresentation(): void {
+    this.#surfaceOpacity.render();
     const language = this.#backgroundSettingsLanguage;
     const english = language === "en";
-    for (const panel of [this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings"), this.#required<HTMLElement>("#cle-pixelSculpt-settings"), this.#required<HTMLElement>("#cle-blinkingSquares-settings"), this.#required<HTMLElement>("#cle-startupTransition-settings")]) {
+    for (const panel of [this.#required<HTMLElement>("#cle-surface-opacity-settings"), this.#particleSettingsPanel, this.#blackHoleSettingsPanel, this.#glowHorizonSettingsPanel, this.#heavenlyCloudSettingsPanel, this.#auroraIonosphereSettingsPanel, this.#milkyWaySettingsPanel, this.#required<HTMLElement>("#cle-mountain-settings"), this.#required<HTMLElement>("#cle-cloudTrain-settings"), this.#required<HTMLElement>("#cle-pixelSculpt-settings"), this.#required<HTMLElement>("#cle-blinkingSquares-settings"), this.#required<HTMLElement>("#cle-startupTransition-settings")]) {
       panel.dataset.language = language;
       panel.lang = language === "zh" ? "zh-CN" : "en";
     }
@@ -13327,6 +13334,9 @@ export class CodeCodexElement extends HTMLElement {
   };
 
   #onWindowPointerDown = (event: PointerEvent): void => {
+    if (event.composedPath().includes(this.#actionNotice)) return;
+    if (this.#surfaceOpacity.containsEvent(event)) return;
+    this.#surfaceOpacity.close();
     const path = event.composedPath();
     if (!path.includes(this.#required<HTMLElement>("#cle-startupTransition-settings")) && !path.includes(this.#required<HTMLElement>(".startupTransition-settings-trigger"))) this.#closeStartupTransition();
     if (!path.includes(this.#required<HTMLElement>("#cle-blinkingSquares-settings")) && !path.includes(this.#required<HTMLElement>(".blinkingSquares-settings-trigger"))) this.#closeBlinkingSquares();
@@ -21302,6 +21312,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #closePreviewMarket(restoreFocus: boolean): void {
+    this.#surfaceOpacity.close();
     this.#closeStartupTransition();
     this.#closeBlinkingSquares();
     this.#closePixelSculpt();
@@ -21335,6 +21346,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderPreviewMarket(): void {
+    this.#surfaceOpacity.render();
     this.#renderStartupTransition();
     this.#renderBlinkingSquares();
     this.#renderPixelSculpt();
@@ -21632,6 +21644,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#actionNotice.textContent = message;
     this.#actionNotice.dataset.tone = tone;
     this.#actionNotice.hidden = false;
+    this.#presentActionNotice();
     this.#announce(message);
     this.#actionNoticeTimer = setTimeout(() => this.#hideActionNotice(), ACTION_NOTICE_DURATION_MS);
   }
@@ -21639,18 +21652,36 @@ export class CodeCodexElement extends HTMLElement {
   #showActionProgress(message: string): void {
     if (!this.#actionNotice.hidden && this.#actionNotice.dataset.tone === "progress") {
       this.#actionNotice.textContent = message;
+      this.#presentActionNotice();
       return;
     }
     this.#hideActionNotice();
     this.#actionNotice.textContent = message;
     this.#actionNotice.dataset.tone = "progress";
     this.#actionNotice.hidden = false;
+    this.#presentActionNotice();
     this.#announce(message);
+  }
+
+  #presentActionNotice(): void {
+    if (!this.#actionNotice.isConnected) return;
+    // Reinsert at the end of the top layer so even an open settings popover
+    // cannot obscure a newly generated message.
+    if (this.#actionNotice.matches(":popover-open")) this.#actionNotice.hidePopover();
+    this.#actionNotice.showPopover();
+    const anchor = this.#previewMarketOpen ? this.#previewMarketPopover : this;
+    const rect = anchor.getBoundingClientRect();
+    const width = Math.max(160, Math.min(rect.width - 16, window.innerWidth - 24));
+    this.#actionNotice.style.width = `${width}px`;
+    this.#actionNotice.style.left = `${Math.max(12, Math.min(rect.left + 8, window.innerWidth - width - 12))}px`;
+    const height = this.#actionNotice.getBoundingClientRect().height;
+    this.#actionNotice.style.top = `${Math.max(12, Math.min(rect.bottom - (this.#previewMarketOpen ? 8 : 36) - height, window.innerHeight - height - 12))}px`;
   }
 
   #hideActionNotice(): void {
     if (this.#actionNoticeTimer) clearTimeout(this.#actionNoticeTimer);
     this.#actionNoticeTimer = undefined;
+    if (this.#actionNotice.matches(":popover-open")) this.#actionNotice.hidePopover();
     this.#actionNotice.hidden = true;
     this.#actionNotice.textContent = "";
     delete this.#actionNotice.dataset.tone;

@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify";
+import { SURFACE_OPACITY_PREVIEW_CSS } from "./surface-opacity";
 import { PptxViewer, RECOMMENDED_ZIP_LIMITS } from "@aiden0z/pptx-renderer";
 import {
   ReactPptxViewer,
@@ -5489,7 +5490,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     this.#clippedLayout = usesClippedMainLayout(bootstrap.codexVersion ?? bootstrap.version);
     this.#shadow = this.attachShadow({ mode: "open" });
     this.#shadow.innerHTML = `
-      <style>${mainPreviewStyles}</style>
+      <style>${mainPreviewStyles}${SURFACE_OPACITY_PREVIEW_CSS}</style>
       <div class="surface">
         <div class="tab-strip" role="tablist" aria-label="Conversation and file previews"></div>
         <div class="panel-mount"></div>

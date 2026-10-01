@@ -5,6 +5,11 @@
   const active = root => [...root.querySelectorAll(selector)].filter(e => !e.closest('[data-app-shell-active-page="false"]'));
   const allMains = [...document.querySelectorAll(selector)];
   const mains = active(document);
+  const loginPanels = [...document.querySelectorAll('div.flex.h-full.w-full.items-center.justify-center.overflow-hidden.bg-surface')].filter(e =>
+    !e.closest('[data-app-shell-active-page="false"]') && (e.classList.contains('pb-6') || e.classList.contains('pb-12')) &&
+    [...e.children].some(c => c.classList.contains('w-[340px]') && c.classList.contains('flex-col') && c.querySelector('button') && c.querySelector('svg')));
+  const nativeLoginPage = mains.length === 0 && loginPanels.length === 1 &&
+    !document.querySelector('nav[data-app-navigation-rail],aside.app-shell-left-panel,[data-app-shell-sidebar-trigger]');
   const main = mains.length === 1 ? mains[0] : null;
   const parent = main?.parentElement ?? null;
   const triggerCount = document.querySelectorAll('[data-app-shell-sidebar-trigger]').length;
@@ -59,9 +64,11 @@
   const checks = [
     { name: 'top_frame', expected: true, actual: window === window.top },
     { name: 'app_origin', expected: true, actual: location.protocol === 'app:' && location.host === '-' },
-    { name: 'unique_main', expected: 1, actual: mains.length },
-    { name: 'sidebar_trigger_or_native_feature_rail', expected: true, actual: triggerCount > 0 || nativeFeaturePage },
-    { name: 'legacy_shell_or_workspace_row', expected: true, actual: legacy || !!row },
+    ...(nativeLoginPage ? [{ name: 'native_login_surface', expected: true, actual: nativeLoginPage }] : [
+      { name: 'unique_main', expected: 1, actual: mains.length },
+      { name: 'sidebar_trigger_or_native_feature_rail', expected: true, actual: triggerCount > 0 || nativeFeaturePage },
+      { name: 'legacy_shell_or_workspace_row', expected: true, actual: legacy || !!row },
+    ]),
   ];
   if (row && !legacy) checks.push(
     { name: 'row_unique_main', expected: 1, actual: rowMainCount },
@@ -74,7 +81,7 @@
   const explorer = document.querySelector('[data-code-codex-owned="true"]');
   const explorerStyle = explorer ? getComputedStyle(explorer) : null;
   return {
-    diagnosticVersion: 3,
+    diagnosticVersion: 4,
     topFrame: window === window.top,
     appOrigin: location.protocol === 'app:' && location.host === '-',
     readyState: document.readyState,
@@ -84,6 +91,7 @@
     activePageCount: document.querySelectorAll('[data-app-shell-active-page="true"]').length,
     sidebarTriggerCount: triggerCount,
     nativeFeaturePage,
+    nativeLoginPage,
     legacyShellMatch: legacy,
     workspaceRowPresent: !!row,
     rowMainCount,
