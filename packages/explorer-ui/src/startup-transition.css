@@ -21,7 +21,7 @@
 .codex-startup--exiting { opacity: 0; filter: blur(13px); pointer-events: none; }
 
 .codex-startup__video { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
-.codex-startup--has-video .codex-startup__video { opacity: var(--codex-startup-video-opacity, .82); }
+.codex-startup--has-video .codex-startup__video { opacity: 1; }
 .codex-startup__video video { width: 100%; height: 100%; object-fit: cover; filter: brightness(var(--codex-startup-video-brightness, .8)); }
 @media (prefers-reduced-motion: reduce) {
   .codex-startup { transition: none; }

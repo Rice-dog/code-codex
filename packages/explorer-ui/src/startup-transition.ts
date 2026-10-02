@@ -1,18 +1,19 @@
-import { clipFadeOpacity } from "./startup-transition-timeline";
 import { runtimeEvent } from "./runtime-events";
+import { mountStartupBackground } from "./startup-background";
 declare const __CODE_CODEX_STARTUP_TRANSITION_CSS__: string;
 
 export interface StartupTransitionOptions {
   target: HTMLElement;
   videoSrc?: string;
+  backgroundId?: string;
   clipStart?: number;
   clipEnd?: number;
   playbackRate?: number;
-  videoOpacity?: number;
   videoBrightness?: number;
   videoFit?: "cover" | "contain";
   minimumVisiblePercent?: number;
   fadePercent?: number;
+  fadeDurationMs?: number;
   fullScreen?: boolean;
   onComplete?: (reason: "ready" | "reduced-motion" | "disposed") => void;
 }
@@ -34,7 +35,9 @@ function boundedMs(value: number | undefined, fallback: number): number {
 export function mountStartupTransition(options: StartupTransitionOptions): StartupTransitionController {
   const clipMilliseconds = Math.max(100, ((options.clipEnd ?? 5) - (options.clipStart ?? 0)) / (options.playbackRate ?? 1) * 1000);
   const minimumVisibleMs = clipMilliseconds * Math.min(100, boundedMs(options.minimumVisiblePercent, 25)) / 100;
-  const exitDurationMs = clipMilliseconds * Math.min(100, boundedMs(options.fadePercent, 15)) / 100;
+  const exitDurationMs = options.fadeDurationMs === undefined
+    ? clipMilliseconds * Math.min(100, boundedMs(options.fadePercent, 15)) / 100
+    : Math.min(10000, boundedMs(options.fadeDurationMs, 1000));
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const host = document.createElement("div");
   host.className = "code-codex-startup-host";
@@ -50,7 +53,6 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
   const overlay = document.createElement("div");
   overlay.className = `codex-startup${options.fullScreen ? " codex-startup--fullscreen" : " codex-startup--inline"}`;
   overlay.style.setProperty("--codex-startup-exit-ms", `${exitDurationMs}ms`);
-  overlay.style.setProperty("--codex-startup-video-opacity", String(options.videoOpacity ?? 0.82));
   overlay.style.setProperty("--codex-startup-video-brightness", String(options.videoBrightness ?? 0.8));
   overlay.setAttribute("role", "status");
   overlay.setAttribute("aria-live", "polite");
@@ -68,13 +70,26 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
   let readyTimer: number | undefined;
   let exitTimer: number | undefined;
   let video: HTMLVideoElement | undefined;
+  let background: {dispose():void} | undefined;
   let frame: number | undefined;
   let exitArmed = false;
+  let exitStartedAt: number | undefined;
   let exitReason: "ready" = "ready";
   const clipStart = Math.max(0, options.clipStart ?? 0);
   const clipEnd = Math.max(clipStart + 0.1, options.clipEnd ?? Number.POSITIVE_INFINITY);
 
   const mediaReady = new Promise<void>((resolve) => {
+    if (options.backgroundId && !reducedMotion) {
+      try {
+        background = mountStartupBackground(overlay.querySelector<HTMLElement>('.codex-startup__video')!, options.backgroundId, message => {
+          if(message) {runtimeEvent('startup-animation','background renderer','failed',{id:options.backgroundId,reason:message});finish('disposed');}
+        });
+        if(phase === 'complete') { background.dispose(); resolve();return; }
+        overlay.classList.add('codex-startup--has-video');
+        runtimeEvent('startup-animation','background renderer','started',{id:options.backgroundId});
+        resolve();return;
+      } catch(error) {runtimeEvent('startup-animation','background renderer','failed',{id:options.backgroundId,reason:String(error)});finish('disposed');resolve();return;}
+    }
     if (!options.videoSrc || reducedMotion) { resolve(); return; }
     video = document.createElement("video");
     video.muted = true;
@@ -104,22 +119,17 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
       if (clipStart < currentVideo.duration) currentVideo.currentTime = clipStart;
     }, { once: true });
     currentVideo.addEventListener("timeupdate", () => {
-      if (!exitArmed && currentVideo.currentTime >= Math.min(clipEnd, currentVideo.duration)) currentVideo.currentTime = clipStart;
+      if (phase !== "complete" && currentVideo.currentTime >= Math.min(clipEnd, currentVideo.duration)) currentVideo.currentTime = clipStart;
     });
     currentVideo.addEventListener("ended", () => {
-      if (exitArmed) finish(exitReason);
-      else { currentVideo.currentTime = clipStart; void currentVideo.play().catch(() => { runtimeEvent("startup-animation","video play","failed",{preview:!options.fullScreen,reason:"loop restart rejected"}); finish("disposed"); }); }
+      if (phase === "complete") return;
+      currentVideo.currentTime = clipStart; void currentVideo.play().catch(() => { runtimeEvent("startup-animation","video play","failed",{preview:!options.fullScreen,reason:"loop restart rejected"}); finish("disposed"); });
     });
     const tick = () => {
       if (phase === "complete") return;
-      if (exitArmed && currentVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        const end = Math.min(clipEnd, currentVideo.duration);
-        const opacity = clipFadeOpacity(currentVideo.currentTime, clipStart, end, exitDurationMs, currentVideo.playbackRate);
-        if (opacity < 1) {
-          phase = "exiting";
-          overlay.style.transition = "none";
-          overlay.style.opacity = String(opacity);
-        }
+      if (exitStartedAt !== undefined) {
+        const opacity = Math.max(0, 1 - (performance.now() - exitStartedAt) / exitDurationMs);
+        overlay.style.opacity = String(opacity);
         if (opacity === 0) { finish(exitReason); return; }
       }
       frame = requestAnimationFrame(tick);
@@ -140,6 +150,7 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     clearTimers();
     if (frame !== undefined) cancelAnimationFrame(frame);
     video?.pause();
+    background?.dispose();
     video?.removeAttribute("src");
     video?.load();
     if (host.matches(":popover-open")) host.hidePopover();
@@ -149,18 +160,21 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
 
   function beginExit(reason: "ready"): void {
     if (phase === "complete" || exitArmed) return;
-    runtimeEvent("startup-animation", "fade", "armed", {reason,preview:!options.fullScreen});
+    runtimeEvent("startup-animation", "fade", "armed", {reason,preview:!options.fullScreen,currentVideoTime:video?.currentTime,durationMs:exitDurationMs,minimumVisibleMs});
     if (reducedMotion) { finish("reduced-motion"); return; }
     exitReason = reason;
-    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.error) {
+    if (!background && (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.error)) {
       finish(reason); return;
     }
+    if (exitDurationMs === 0) { finish(reason); return; }
     exitArmed = true;
-    const end = Math.min(clipEnd, video.duration);
-    const remaining = Math.max(0, (end - video.currentTime) / video.playbackRate * 1000);
-    // A stalled decoder cannot keep the startup layer blocking the app forever.
+    phase = "exiting";
+    exitStartedAt = performance.now();
+    overlay.style.transition = background ? `opacity ${exitDurationMs}ms linear` : "none";
+    overlay.style.opacity = background ? "0" : "1";
+    // Use elapsed time so fade continues across clip loops or a stalled decoder.
     if (exitTimer !== undefined) window.clearTimeout(exitTimer);
-    exitTimer = window.setTimeout(() => finish(reason), remaining + 1500);
+    exitTimer = window.setTimeout(() => finish(reason), exitDurationMs);
   }
 
   function markRevealed(): void {
@@ -175,6 +189,7 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     ready = true;
     if (revealedAt === undefined || readyTimer !== undefined) return;
     const remainingMs = reducedMotion ? 0 : Math.max(0, minimumVisibleMs - (performance.now() - revealedAt));
+    runtimeEvent("startup-animation", "readiness exit", remainingMs === 0 ? "starting" : "waiting for minimum", {currentVideoTime:video?.currentTime,remainingMinimumMs:Math.round(remainingMs),fadeDurationMs:exitDurationMs});
     if (remainingMs === 0) beginExit("ready");
     else readyTimer = window.setTimeout(() => beginExit("ready"), remainingMs);
   }

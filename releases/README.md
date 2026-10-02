@@ -2,6 +2,35 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.83 — Background startup fade and centered transport
+
+- Background startup retains its four-second minimum and readiness gate, then fades into Codex over a separately configurable duration (default one second).
+- Video transport controls stay centered within the timeline header; the clip duration stays at the right.
+
+## v0.3.82 — Simplified startup animation controls
+
+- Background startup mode only requires selecting a plugin; its preview starts automatically and keeps running while the panel is open.
+- Background startup displays for at least four seconds, waits for Codex readiness, then exits immediately; video timing parameters do not affect background mode.
+- Localized source choices and one source label. Video timeline label, time and borderless transport controls now share one compact row.
+
+## v0.3.81 — Background plugins as startup animations
+
+- Choose Video or Background plugin in Codex Startup Transition; keep the selected video when switching sources.
+- Reuse eight existing independent renderers and their saved settings without changing the normal background's enabled state.
+- Preview background startup, keep minimum-display and readiness-driven fade, and log the chosen source and renderer lifecycle.
+- A background timing reference defines the percentages while the effect continues until Codex is ready.
+
+## v0.3.80 — Remove startup video opacity control
+
+- Remove Video opacity from startup transition settings and fix video opacity at 100%.
+- Ignore legacy saved opacity values in both playback and preview; preserve the readiness-driven fade.
+
+## v0.3.79 — Fade from the current frame when ready
+
+- Once native readiness and minimum visibility are satisfied, fade immediately from the current playback position.
+- Measure fade duration from the selected clip percentage; continue video playback across clip boundaries until fade completes.
+- Log readiness timing, remaining minimum visibility and fade trigger position/duration.
+
 ## v0.3.78 — Loading-screen animation supervision
 
 - Supervise the optional startup player concurrently from activation through page discovery and navigation.

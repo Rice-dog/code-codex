@@ -14,7 +14,7 @@ const current='1790900000000-1',old='1790800000000-2';
 RuntimeTest.connectRuntimeInformation(async(method,params)=>{
  if(method==='explorer.runtime.append'){if(window.rejectLogs)throw Error('Temporary connection failure');if(new TextEncoder().encode(JSON.stringify(params)).length>96*1024)throw Error('Binding payload too large');events.push(...params.events);return {accepted:params.events.length};}
  if(method==='explorer.runtime.list')return {currentRun:current,runs:[{id:current,current:true,bytes:100},{id:old,current:false,bytes:100}]};
- if(method==='explorer.runtime.read'){const e=params.id===current?events:[{source:'launcher',action:'previous launch',outcome:'failed',details:{supportCode:'CC-START-CDP-014'}}];return {text:JSON.stringify({version:'0.3.78',droppedEvents:0})+'\\n'+e.map((e,i)=>JSON.stringify({sequence:i+1,elapsedMs:i*100,...e})).join('\\n')+'\\n'};}
+ if(method==='explorer.runtime.read'){const e=params.id===current?events:[{source:'launcher',action:'previous launch',outcome:'failed',details:{supportCode:'CC-START-CDP-014'}}];return {text:JSON.stringify({version:'0.3.83',droppedEvents:0})+'\\n'+e.map((e,i)=>JSON.stringify({sequence:i+1,elapsedMs:i*100,...e})).join('\\n')+'\\n'};}
  throw Error(method);
 });
 RuntimeTest.observeCodexRuntime();

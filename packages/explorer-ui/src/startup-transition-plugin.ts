@@ -1,6 +1,7 @@
 import { loadStartupVideo, type StartupVideo } from "./startup-transition-media";
 import { runtimeEvent } from "./runtime-events";
 import { mountStartupTransition, type StartupTransitionController } from "./startup-transition";
+import { STARTUP_BACKGROUNDS } from './startup-background';
 
 const STORAGE_KEY = "code-codex:startup-transition:v1";
 const LAUNCH_STATE = Symbol.for("code-codex:startup-transition:launch:v1");
@@ -9,24 +10,28 @@ const VISUAL_READY_PROPERTY = "__CODE_CODEX_STARTUP_VISUAL_READY__";
 
 export interface StartupTransitionSettings {
   enabled: boolean;
+  source: 'video' | 'background';
+  backgroundId: string;
+  backgroundFadeSeconds: number;
   minimumVisiblePercent: number;
   fadePercent: number;
   clipStart: number;
   clipEnd: number;
   playbackRate: number;
-  videoOpacity: number;
   videoBrightness: number;
   videoFit: "cover" | "contain";
 }
 
 export const DEFAULT_STARTUP_TRANSITION_SETTINGS: StartupTransitionSettings = {
   enabled: false,
+  source: 'video',
+  backgroundId: 'glow-horizon',
+  backgroundFadeSeconds: 1,
   minimumVisiblePercent: 25,
   fadePercent: 15,
   clipStart: 0,
   clipEnd: 5,
   playbackRate: 1,
-  videoOpacity: 0.82,
   videoBrightness: 0.8,
   videoFit: "cover",
 };
@@ -43,12 +48,14 @@ export function readStartupTransitionSettings(): StartupTransitionSettings {
     if (!saved || typeof saved !== "object") return { ...DEFAULT_STARTUP_TRANSITION_SETTINGS };
     return {
       enabled: saved.enabled === true,
+      source: saved.source === 'background' ? 'background' : 'video',
+      backgroundId: STARTUP_BACKGROUNDS.some(([id])=>id===saved.backgroundId) ? saved.backgroundId! : 'glow-horizon',
+      backgroundFadeSeconds: bounded(saved.backgroundFadeSeconds, 1, 0.1, 10),
       minimumVisiblePercent: bounded(saved.minimumVisiblePercent ?? (typeof saved.minimumVisibleMs === "number" ? saved.minimumVisibleMs / Math.max(100, ((saved.clipEnd ?? 5) - (saved.clipStart ?? 0)) / (saved.playbackRate ?? 1) * 1000) * 100 : undefined), 25, 0, 100),
       fadePercent: bounded(saved.fadePercent ?? (typeof saved.exitDurationMs === "number" ? saved.exitDurationMs / Math.max(100, ((saved.clipEnd ?? 5) - (saved.clipStart ?? 0)) / (saved.playbackRate ?? 1) * 1000) * 100 : undefined), 15, 0, 100),
       clipStart: bounded(saved.clipStart, 0, 0, 3600),
       clipEnd: bounded(saved.clipEnd, 5, 0.1, 3600),
       playbackRate: bounded(saved.playbackRate, 1, 0.5, 2),
-      videoOpacity: bounded(saved.videoOpacity, 0.82, 0.2, 1),
       videoBrightness: bounded(saved.videoBrightness, 0.8, 0.4, 1.4),
       videoFit: saved.videoFit === "contain" ? "contain" : "cover",
     };
@@ -94,7 +101,6 @@ function videoOptions(settings: StartupTransitionSettings, video: StartupVideo |
     clipStart: Math.min(settings.clipStart, Math.max(0, (video?.duration ?? 0) - 0.1)),
     clipEnd: Math.min(settings.clipEnd, video?.duration ?? settings.clipEnd),
     playbackRate: settings.playbackRate,
-    videoOpacity: settings.videoOpacity,
     videoBrightness: settings.videoBrightness,
     videoFit: settings.videoFit,
   };
@@ -114,6 +120,11 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
   let url: string | undefined;
   let controller: StartupTransitionController | undefined;
   try {
+    runtimeEvent('startup-animation','source','selected',{source:settings.source,backgroundId:settings.source==='background'?settings.backgroundId:null});
+    if(settings.source === 'background') {
+      if(loadingOnly&&startupDocumentReady()) {resolveVisualReady?.(false);return undefined;}
+      controller=mountStartupTransition({target:document.body,fullScreen:true,backgroundId:settings.backgroundId,clipStart:0,clipEnd:4,playbackRate:1,minimumVisiblePercent:100,fadeDurationMs:settings.backgroundFadeSeconds*1000});
+    } else {
     runtimeEvent("startup-animation","video lookup","started",{timeoutMs:10000,loadingOnly,enabled:settings.enabled});
     let lookupReason = "no stored video";
     let lookupTimer: number | undefined;
@@ -123,7 +134,7 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
     ]);
     if (lookupTimer!==undefined) clearTimeout(lookupTimer);
     if (!video) { runtimeEvent("startup-animation","video lookup","failed",{reason:lookupReason}); resolveVisualReady?.(false); return undefined; }
-    runtimeEvent("startup-animation","video lookup","passed",{bytes:video.blob.size,duration:video.duration,clipStart:settings.clipStart,clipEnd:settings.clipEnd,playbackRate:settings.playbackRate,minimumVisiblePercent:settings.minimumVisiblePercent,fadePercent:settings.fadePercent,videoOpacity:settings.videoOpacity});
+    runtimeEvent("startup-animation","video lookup","passed",{bytes:video.blob.size,duration:video.duration,clipStart:settings.clipStart,clipEnd:settings.clipEnd,playbackRate:settings.playbackRate,minimumVisiblePercent:settings.minimumVisiblePercent,fadePercent:settings.fadePercent});
     if (loadingOnly && startupDocumentReady()) { runtimeEvent("startup-animation","launch playback","skipped",{reason:"native document already ready"}); resolveVisualReady?.(false); return undefined; }
     url = URL.createObjectURL(video.blob);
     controller = mountStartupTransition({
@@ -135,6 +146,7 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
       fadePercent: settings.fadePercent,
       onComplete: () => { if (url) URL.revokeObjectURL(url); },
     });
+    }
     state[CONTROLLER_STATE] = controller;
     await controller.mediaReady;
     if (controller.phase === "complete") {

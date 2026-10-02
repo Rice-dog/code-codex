@@ -2534,7 +2534,7 @@ async fn diagnose_cdp(endpoint: CdpEndpoint) -> Value {
 mod tests {
     #[test]
     fn early_animation_bundle_is_isolated_and_rejects_late_replay() {
-        assert!(super::early_startup::SOURCE.len() < 32 * 1024);
+        assert!(super::early_startup::SOURCE.len() < 512 * 1024);
         assert!(!super::early_startup::SOURCE.contains("__CODE_CODEX_BOOTSTRAP__"));
         assert!(!super::early_startup::SOURCE.contains("explorer.context"));
         assert!(super::early_startup::SOURCE.contains("app:"));

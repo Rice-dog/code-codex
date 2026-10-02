@@ -3386,6 +3386,7 @@ export const styles = String.raw`
     border-radius: 10px;
     background: #202124;
   }
+  #cle-startupTransition-settings [hidden] { display: none !important; }
   .startupTransition-preview-stage {
     position: relative;
     aspect-ratio: 16 / 9;
@@ -3411,8 +3412,8 @@ export const styles = String.raw`
     color: #d3d4d7;
     background: #202124;
   }
-  .startupTransition-transport { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 3px 0 6px; }
-  .startupTransition-transport button { display: grid; place-items: center; width: 30px; height: 28px; padding: 5px; color: #dddde0; background: #292a2e; border: 1px solid #48494e; border-radius: 5px; cursor: pointer; }
+  .startupTransition-transport { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0; flex-shrink: 0; }
+  .startupTransition-transport button { display: grid; place-items: center; width: 30px; height: 28px; padding: 5px; color: #dddde0; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
   .startupTransition-transport button:hover { background: #37383d; }
   .startupTransition-transport button:focus-visible { outline: 2px solid var(--cle-focus); outline-offset: 2px; }
   .startupTransition-transport button:disabled { opacity: .4; cursor: default; }
@@ -3429,6 +3430,10 @@ export const styles = String.raw`
     min-width: 0;
     font-size: 9px;
   }
+  .startupTransition-timeline-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; }
+  .startupTransition-timeline-heading .startupTransition-transport { grid-column: 2; grid-row: 1; }
+  .startupTransition-timeline-heading strong { white-space: nowrap; }
+  .startupTransition-timeline-heading output { grid-column: 3; grid-row: 1; min-width: 0; text-align: right; }
   .startupTransition-timeline-heading strong { font-size: 10px; font-weight: 600; line-height: 1.3; }
   .startupTransition-timeline-heading output,
   .startupTransition-timeline-timing output,
@@ -3473,7 +3478,8 @@ export const styles = String.raw`
   }
   .startupTransition-media-actions button:disabled { opacity: .5; cursor: default; }
   .startupTransition-video-info { margin: 4px 0 0; color: var(--cle-muted); font-size: 11px; overflow-wrap: anywhere; }
-  .startupTransition-fit-row select {
+  .startupTransition-fit-row select,
+  #cle-startupTransition-settings .particle-control-row select {
     grid-column: 2 / 4;
     width: 100%;
     min-width: 0;
@@ -3484,6 +3490,7 @@ export const styles = String.raw`
     background: var(--cle-input);
     font: inherit;
   }
+  .startupTransition-background-controls p { color: var(--cle-muted); font-size: 11px; line-height: 1.5; }
   @keyframes cle-version-check { to { transform: rotate(360deg); } }
   @keyframes cle-particle-settings-in {
     from { opacity: 0; transform: translateY(3px) scale(.99); }
