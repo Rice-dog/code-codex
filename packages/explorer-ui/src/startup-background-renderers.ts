@@ -1,3 +1,4 @@
+import { requestBackgroundFrame, cancelBackgroundFrame } from './background-startup-hold';
 import { BLINKING_SQUARES_DEFAULTS, type BlinkingSquaresSettings } from "./blinking-squares-host";
 
 export const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1";
@@ -589,7 +590,7 @@ export function startGlowHorizonRenderer(
 
   const schedule = (): void => {
     if (!running || animationFrame) return;
-    animationFrame = requestAnimationFrame(tick);
+    animationFrame = requestBackgroundFrame(horizon, tick);
   };
 
   const finishWheel = (): void => {
@@ -760,7 +761,7 @@ export function startGlowHorizonRenderer(
   const dispose = (): void => {
     if (!running) return;
     running = false;
-    if (animationFrame) cancelAnimationFrame(animationFrame);
+    if (animationFrame) cancelBackgroundFrame(animationFrame);
     animationFrame = 0;
     if (wheelReleaseTimer !== undefined) window.clearTimeout(wheelReleaseTimer);
     window.removeEventListener("wheel", handleWheel);
@@ -1044,13 +1045,13 @@ export function startHeavenlyCloudRenderer(
   };
 
   const stopLoop = (): void => {
-    if (animationFrame) cancelAnimationFrame(animationFrame);
+    if (animationFrame) cancelBackgroundFrame(animationFrame);
     animationFrame = 0;
   };
 
   const schedule = (): void => {
     if (!animationFrame && running && contextReady && documentVisible) {
-      animationFrame = requestAnimationFrame(draw);
+      animationFrame = requestBackgroundFrame(canvas, draw);
     }
   };
 
@@ -1764,13 +1765,13 @@ export class AuroraIonosphereRenderer {
   }
 
   #stopLoop(): void {
-    if (this.#animationFrame) cancelAnimationFrame(this.#animationFrame);
+    if (this.#animationFrame) cancelBackgroundFrame(this.#animationFrame);
     this.#animationFrame = 0;
   }
 
   #schedule(): void {
     if (!this.#animationFrame && this.#running && this.#contextReady && this.#documentVisible) {
-      this.#animationFrame = requestAnimationFrame(this.#draw);
+      this.#animationFrame = requestBackgroundFrame(this.#canvas, this.#draw);
     }
   }
 
@@ -2104,9 +2105,9 @@ export class MilkyWayRenderer {
     this.#resetClock();
   }
   #request = (): void => {
-    if (!this.#disposed && !this.#lost && this.#visible && !document.hidden && !this.#frame) this.#frame = requestAnimationFrame(this.#draw);
+    if (!this.#disposed && !this.#lost && this.#visible && !document.hidden && !this.#frame) this.#frame = requestBackgroundFrame(this.#canvas, this.#draw);
   };
-  #resetClock = (): void => { cancelAnimationFrame(this.#frame); this.#frame=0; this.#last=0; this.#request(); };
+  #resetClock = (): void => { cancelBackgroundFrame(this.#frame); this.#frame=0; this.#last=0; this.#request(); };
   #draw = (now: number): void => {
     this.#frame = 0;
     if (this.#disposed || this.#lost || !this.#visible || document.hidden) { this.#last=0; return; }
@@ -2137,10 +2138,10 @@ export class MilkyWayRenderer {
     if (running) this.#request();
   };
   #cleanupGpu(): void { if(this.#buffer)this.#gl.deleteBuffer(this.#buffer); if(this.#program)this.#gl.deleteProgram(this.#program); this.#buffer=undefined; this.#program=undefined; }
-  #contextLost = (event: Event): void => { event.preventDefault(); this.#lost=true; cancelAnimationFrame(this.#frame); this.#frame=0; this.#last=0; this.#onError("Milky Way graphics context interrupted. Waiting to restore…"); };
+  #contextLost = (event: Event): void => { event.preventDefault(); this.#lost=true; cancelBackgroundFrame(this.#frame); this.#frame=0; this.#last=0; this.#onError("Milky Way graphics context interrupted. Waiting to restore…"); };
   #contextRestored = (): void => { if(this.#disposed)return; try { this.#cleanupGpu(); this.#initGpu(); this.#lost=false; this.#onError(undefined); this.#resetClock(); } catch(error) { this.#cleanupGpu(); this.#onError(error instanceof Error ? error.message : "Milky Way graphics recovery failed"); } };
   dispose(): void {
-    this.#disposed=true; cancelAnimationFrame(this.#frame);
+    this.#disposed=true; cancelBackgroundFrame(this.#frame);
     this.#resize.disconnect(); this.#intersection.disconnect();
     document.removeEventListener("visibilitychange",this.#resetClock); window.removeEventListener("resize",this.#resetClock);
     this.#motion.removeEventListener("change",this.#resetClock);
@@ -2188,6 +2189,7 @@ export function readMountainBackgroundSettings(): MountainSettings {
 export class MountainRenderer {
   #settings: { current: MountainSettings };
   #wake = { current: () => {} };
+  #opening = { current: () => {} };
   #cleanup: (() => void) | undefined;
   #canvas: HTMLCanvasElement;
   #onError: (message: string | undefined) => void;
@@ -2198,7 +2200,7 @@ export class MountainRenderer {
     canvas.addEventListener("webglcontextrestored", this.#restored);
   }
   #start(): (() => void) | undefined {
-    const canvas=this.#canvas, settings=this.#settings, wake=this.#wake, onError=this.#onError;
+    const canvas=this.#canvas, settings=this.#settings, wake=this.#wake, opening=this.#opening, onError=this.#onError;
     const vertex = `#version 300 es
 in vec2 position;
 void main(){gl_Position=vec4(position,0.,1.);}`;
@@ -2333,7 +2335,7 @@ function link(gl: WebGL2RenderingContext, fragment: string) {
       const appearance = ["mountainHeight","zoom","horizon","softness","exposure","saturation","vignette"] as const;
       const sceneUniforms=Object.fromEntries(["resolution","ridgeAtlas","time","intro","depth","haze","light","warmth","steps",...appearance].map(name=>[name,gl.getUniformLocation(sceneProgram!,name)]));
       const maxViewport=gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
-      const request=()=>{if(!frame&&!disposed&&visible&&!document.hidden)frame=requestAnimationFrame(draw);};
+      const request=()=>{if(!frame&&!disposed&&visible&&!document.hidden)frame=requestBackgroundFrame(canvas, draw);};
       const draw=(now:number)=>{
         frame=0; const s=settings.current;
         const introDt=Math.min((now-(last||now))/1000,.1);
@@ -2362,12 +2364,13 @@ function link(gl: WebGL2RenderingContext, fragment: string) {
         gl.drawArrays(gl.TRIANGLES,0,3);
         if(!s.paused&&!media.matches&&(s.speed!==0||introElapsed<3))request();
       };
-      const reset=()=>{cancelAnimationFrame(frame);frame=0;last=0;request();};
+      const reset=()=>{cancelBackgroundFrame(frame);frame=0;last=0;request();};
       const resize=new ResizeObserver(([entry])=>{if(!entry)return;width=entry.contentRect.width;height=entry.contentRect.height;request();});
       const intersection=new IntersectionObserver(([entry])=>{if(!entry)return;visible=entry.isIntersecting;reset();});
       resize.observe(canvas);intersection.observe(canvas);document.addEventListener("visibilitychange",reset);media.addEventListener("change",reset);
+      opening.current=()=>{elapsed=0;drift=0;introElapsed=0;reset();};
       wake.current=reset;request();
-      return()=>{disposed=true;cancelAnimationFrame(frame);resize.disconnect();intersection.disconnect();document.removeEventListener("visibilitychange",reset);media.removeEventListener("change",reset);wake.current=()=>undefined;if(framebuffer)gl.deleteFramebuffer(framebuffer);if(atlasTexture)gl.deleteTexture(atlasTexture);if(buffer)gl.deleteBuffer(buffer);if(atlasProgram)gl.deleteProgram(atlasProgram);if(sceneProgram)gl.deleteProgram(sceneProgram);};
+      return()=>{disposed=true;cancelBackgroundFrame(frame);resize.disconnect();intersection.disconnect();document.removeEventListener("visibilitychange",reset);media.removeEventListener("change",reset);wake.current=()=>undefined;opening.current=()=>{};if(framebuffer)gl.deleteFramebuffer(framebuffer);if(atlasTexture)gl.deleteTexture(atlasTexture);if(buffer)gl.deleteBuffer(buffer);if(atlasProgram)gl.deleteProgram(atlasProgram);if(sceneProgram)gl.deleteProgram(sceneProgram);};
     } catch(reason) {
       onError(reason instanceof Error?reason.message:String(reason));
       if(framebuffer)gl.deleteFramebuffer(framebuffer);if(atlasTexture)gl.deleteTexture(atlasTexture);if(buffer)gl.deleteBuffer(buffer);if(atlasProgram)gl.deleteProgram(atlasProgram);if(sceneProgram)gl.deleteProgram(sceneProgram);
@@ -2377,6 +2380,7 @@ function link(gl: WebGL2RenderingContext, fragment: string) {
   #lost = (event: Event): void => { event.preventDefault(); this.#cleanup?.(); this.#cleanup=undefined; this.#onError("Mountain graphics context interrupted. Waiting to restore…"); };
   #restored = (): void => { try { this.#cleanup=this.#start(); this.#onError(undefined); } catch(error) { this.#onError(String(error)); } };
   setSettings(settings: MountainSettings): void { this.#settings.current=settings; this.#wake.current(); }
+  resumeOpening(): void { this.#opening.current(); }
   replay(): void { this.#cleanup?.(); this.#cleanup=this.#start(); }
   dispose(): void { this.#cleanup?.(); this.#cleanup=undefined; this.#canvas.removeEventListener("webglcontextlost",this.#lost); this.#canvas.removeEventListener("webglcontextrestored",this.#restored); }
 }
@@ -2504,10 +2508,10 @@ export function cloudTrainTintRgb(hex: string): [number, number, number] {
 }
 
 export class CloudTrainRenderer {
-#canvas:HTMLCanvasElement; #settings:{current:CloudTrainSettings}; #wake={current:()=>{}}; #cleanup:(()=>void)|undefined; #onError:(message:string|undefined)=>void;
+#canvas:HTMLCanvasElement; #settings:{current:CloudTrainSettings}; #wake={current:()=>{}}; #opening={current:()=>{}}; #cleanup:(()=>void)|undefined; #onError:(message:string|undefined)=>void;
 constructor(_layer:HTMLElement,canvas:HTMLCanvasElement,settings:CloudTrainSettings,onError:(message:string|undefined)=>void){this.#canvas=canvas;this.#settings={current:settings};this.#onError=onError;this.#cleanup=this.#start();canvas.addEventListener("webglcontextlost",this.#lost);canvas.addEventListener("webglcontextrestored",this.#restored);}
 #start(): (()=>void)|undefined {
-const state=this.#settings,wake=this.#wake;
+const state=this.#settings,wake=this.#wake,opening=this.#opening,canvas=this.#canvas;
 const original="float noise(vec2 x){\n    vec2 f = fract(x);\n    vec2 u = f*f*f*(f*(f*6.0-15.0)+10.0);\n    vec2 du = 30.0*f*f*(f*(f-2.0)+1.0);\n    \n    vec2 p = floor(x);\n\tfloat a = texture(iChannel0, (p+vec2(0.0, 0.0))/1024.0).x;\n\tfloat b = texture(iChannel0, (p+vec2(1.0,0.0))/1024.0).x;\n\tfloat c = texture(iChannel0, (p+vec2(0.0,1.0))/1024.0).x;\n\tfloat d = texture(iChannel0, (p+vec2(1.0,1.0))/1024.0).x;\n\n    \n\treturn a+(b-a)*u.x+(c-a)*u.y+(a-b-c+d)*u.x*u.y;\n}\n\nfloat fbm(vec2 x, int detail){\n    float a = 0.0;\n    float b = 1.0;\n    float t = 0.0;\n    for(int i = 0; i < detail; i++){\n        float n = noise(x);\n        a += b*n;\n        t += b;\n        b *= 0.7;\n        x *= 2.0; \n    \n    }\n    return a/t;\n}\n\nfloat fbm2(vec2 x, int detail){\n    float a = 0.0;\n    float b = 1.0;\n    float t = 0.0;\n    for(int i = 0; i < detail; i++){\n        float n = noise(x);\n        a += b*n;\n        t += b;\n        b *= 0.9;\n        x *= 2.0; \n    \n    }\n    return a/t;\n}\n\nfloat box(vec2 uv, float x1, float x2, float y1, float y2){\n    return (uv.x > x1 && uv.x < x2 && uv.y > y1 && uv.y < y2)?1.0:0.0;\n} \n\n#define dot2(v) dot(v, v)\n#define layer(dh, v)  if (uv.y < h + midlevel - (dh) ) return vec4(v, 1.);\n\nvec4 foreground(vec2 uv, float t){\n    float midlevel;\n    float h;\n    float disp;\n    float dist;\n    vec2 uv2;\n    \n    uv.y -= 0.2;\n    // clouds foreground //////////////////////////////////////////////////////////////\n    \n    // c14\n    midlevel = -0.1;\n    disp = 1.7;\n    dist = 1.0;\n    uv2 = uv + vec2(t/dist + 40.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.12, vec3(0.43, 0.32, 0.31));\n    layer(0.08, vec3(0.55, 0.42, 0.41));\n    layer(0.04, vec3(0.66, 0.42, 0.40));\n    layer(0., vec3(0.77, 0.48, 0.46));\n    \n    // c13\n    \n    midlevel = 0.05;\n    disp = 1.7;\n    dist = 2.0;\n    uv2 = uv + vec2(t/dist + 38.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.95, 0.66, 0.48));\n    layer(0.04, vec3(0.98, 0.76, 0.64));\n    layer(0., vec3(0.95, 0.80, 0.77));\n    \n    return vec4(0.95, 0.80, 0.77, 0.);\n}\n\nvec4 background(vec2 uv, float t){\n    float midlevel;\n    float h;\n    float disp;\n    float dist;\n    vec2 uv2;\n    \n    // clouds ///////////////////////////////////////////////////////\n    \n    // c12\n    midlevel = 0.3;\n    disp = 0.9;\n    dist = 10.0;\n    uv2 = uv + vec2(t/dist + 32.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.14, vec3(0.48, 0.19, 0.20));\n    layer(0.1, vec3(0.68, 0.28, 0.19));\n    layer(0.07, vec3(0.88, 0.38, 0.24));\n    layer(0., vec3(0.95, 0.45, 0.30));\n    \n    // c11\n    midlevel = 0.35;\n    disp = 1.0;\n    dist = 15.0;\n    uv2 = uv + vec2(t/dist + 30.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.04, vec3(0.98, 0.76, 0.64));\n    layer(0., vec3(0.95, 0.80, 0.77));\n    \n    // c10\n    midlevel = 0.35;\n    disp = 3.5;\n    dist = 20.0;\n    uv2 = uv + vec2(t/dist + 27.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.12, vec3(0.43, 0.32, 0.31));\n    layer(0.08, vec3(0.55, 0.42, 0.41));\n    layer(0.04, vec3(0.66, 0.42, 0.40));\n    layer(0., vec3(0.77, 0.48, 0.46));\n    \n    // c9\n    midlevel = 0.45;\n    disp = 2.0;\n    dist = 25.0;\n    uv2 = uv + vec2(t/dist + 23.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.04, vec3(0.98, 0.57, 0.36));\n    layer(0., vec3(1.0, 0.62, 0.44));\n    \n    // c8\n    midlevel = 0.5;\n    disp = 2.3;\n    dist = 30.0;\n    uv2 = uv + vec2(t/dist + 20.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.12, vec3(0.41, 0.27, 0.27));\n    layer(0.08, vec3(0.53, 0.35, 0.32));\n    layer(0.04, vec3(0.80, 0.24, 0.17));\n    layer(0., vec3(0.99, 0.29, 0.20));\n    \n    // c7\n    midlevel = 0.5;\n    disp = 2.5;\n    dist = 35.0;\n    uv2 = uv + vec2(t/dist + 18.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.88, 0.38, 0.24));\n    layer(0.05, vec3(0.98, 0.42, 0.28));\n    layer(0., vec3(1.0, 0.48, 0.35));\n    \n    // c6\n    midlevel = 0.6;\n    disp = 2.0;\n    dist = 40.0;\n    uv2 = uv + vec2(t/dist + 18.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.95, 0.66, 0.48));\n    layer(0., vec3(1.0, 0.76, 0.60));\n    \n    // c5\n    midlevel = 0.75;\n    disp = 3.5;\n    dist = 45.0;\n    uv2 = uv + vec2(t/dist + 15.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.2, vec3(1.0, 0.55, 0.33));\n    layer(0.15, vec3(0.98, 0.50, 0.24));\n    layer(0.1, vec3(0.90, 0.55, 0.40));\n    layer(0., vec3(1.0, 0.62, 0.44));\n    \n    // c4\n    midlevel = 0.7;\n    disp = 2.7;\n    dist = 50.0;\n    uv2 = uv + vec2(t/dist + 12.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.04, vec3(0.73, 0.36, 0.30));\n    layer(0., vec3(0.80, 0.40, 0.34));\n    \n    // c3\n    midlevel = 0.8;\n    disp = 2.7;\n    dist = 60.0;\n    uv2 = uv + vec2(t/dist + 9.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.93, 0.58, 0.35));\n    layer(0., vec3(1.0, 0.76, 0.60));\n    \n    // c2\n    midlevel = 0.9;\n    disp = 3.0;\n    dist = 70.0;\n    uv2 = uv + vec2(t/dist + 7.0, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.56, 0.25, 0.22));\n    layer(0.05, vec3(0.60, 0.30, 0.27));\n    layer(0., vec3(0.74, 0.35, 0.30));\n    \n    // c1\n    midlevel = 1.0;\n    disp = 5.0;\n    dist = 100.0;\n    uv2 = uv + vec2(t/dist + 3.5, 0.0);\n    h = (fbm(uv2, 8) - 0.5)*disp;\n    layer(0.1, vec3(0.92, 0.85, 0.82));\n    layer(0., vec3(1.0, 0.94, 0.91));\n    \n    return vec4(0.58, 0.7, 1.0, 1.);\n}\n\nvoid mainImage( out vec4 fragColor, in vec2 fragCoord )\n{\n    vec2 uv = fragCoord/iResolution.y;\n    //uv.x += iTime;\n    float t = iTime*4.0;\n    vec4 bg = background(uv, t);\n    \n    vec4 fg = vec4(0.);\n    int n = 5;\n    if (uv.y < 0.5)\n    for (int i = 0; i < n; i++){\n        fg += foreground(uv, t+4.*float(i)/float(n)/60.) / (float(n));\n    }\n    \n    vec3 col = bg.rgb;\n    // train /////////////////////////////////////////////////////////////////////\n    float k;\n    float midlevel;\n    float h;\n    float disp;\n    float dist;\n    vec2 uv2;\n    uv.y -= 0.2;\n    // choo choo\n    k = 1.0;\n    uv2 = fract(uv*9.0);\n    float wagon = 1.0;\n    wagon *= 1.0 - step(0.45, uv.x);\n    wagon *= 1.0 - step(0.115, uv.y);\n    wagon *= step(0.103, uv.y);\n    wagon *= step(0.05, 1.0 - abs(uv2.x*2.0 - 1.0));\n    \n    float join = 1.0; \n    join *= 1.0 - step(0.45, uv.x);\n    join *= 1.0 - step(0.11, uv.y);\n    join *= step(0.107, uv.y);\n    \n    \n    float roof = 1.0;\n    roof *= 1.0 - step(0.45, uv.x);\n    roof *= 1.0 - step(0.117, uv.y);\n    roof *= step(0.11, uv.y);\n    roof *= step(0.15, 1.0 - abs(uv2.x*2.0 - 1.0));\n    \n    float loco = box(uv, 0.45, 0.5, 0.103, 0.112);\n    float chem1 = box(uv, 0.49, 0.495, 0.103, 0.12);\n    float chem2 = box(uv, 0.488, 0.496, 0.12, 0.123);\n    float locoRoof = box(uv, 0.443, 0.47, 0.11, 0.117);\n    \n    float wheel = 1.0 - step(0.00004, dot2(uv - vec2(0.457, 0.106)));\n    wheel += 1.0 - step(0.00002, dot2(uv - vec2(0.487, 0.105)));\n    wheel += 1.0 - step(0.00002, dot2(uv - vec2(0.497, 0.105)));\n    \n    if (uv.x < 0.45 && uv.y > 0.025 && uv.y < 0.2){\n        wheel += 1.0 - step(0.002, dot2(uv2 - vec2(0.2, 0.95)));\n        wheel += 1.0 - step(0.002, dot2(uv2 - vec2(0.8, 0.95)));\n    }\n    col = mix(col, vec3(0.18, 0.12, 0.15), join);\n    col =  mix(col, vec3(0.48, 0.19, 0.20), wagon);\n    col = mix(col, vec3(0.18, 0.12, 0.15), roof);\n    \n    col = mix(col, vec3(0.38, 0.19, 0.20), loco);\n    col = mix(col, vec3(0.38, 0.19, 0.20), chem1);\n    col = mix(col, vec3(0.18, 0.12, 0.15), locoRoof);\n    col = mix(col, vec3(0.18, 0.12, 0.15), chem2 + wheel);\n    // loco smoke //////\n    \n    dist = 5.0;\n    uv2 = uv + vec2(t/dist + 3.5, 0.0);\n    uv2.x -= t/dist*0.2;\n    h = fbm2(uv2, 8) - 0.55;\n    \n    if(uv.x < 0.49){\n        float x = -uv.x + 0.49;\n        float y = abs(uv.y + h*0.4 - 0.16*sqrt(x) - 0.12) - 0.8*x*exp(-x*10.0);\n        if(y < 0.0) col = vec3(1.0, 0.94, 0.91);\n        if(y < - 0.02) col = vec3(0.92, 0.85, 0.82);\n    }\n    \n    //bridge ///////\n    dist = 5.0;\n    uv2 = uv + vec2(t/dist + 32.5, 0.0);\n    uv2.x = fract(uv2.x*3.0);\n    k = 1.0;\n    k *= smoothstep(0.001, 0.003, abs(uv2.y - pow(uv2.x - 0.5, 2.0)*0.15 - 0.12));\n    k *= min(step(0.05, 1.0 - abs(uv2.x*2.0 - 1.0))\n         +   step(0.17, uv2.y), 1.0);\n    k *= min(smoothstep(0.02, 0.05, 1.0 - abs(uv2.x*2.0 - 1.0))\n         +   step(0.177, uv2.y), 1.0);\n         \n    k *= min(step(0.1, uv2.y)\n           + smoothstep(-0.09, -0.085, -uv2.y - 0.001/(1.0 - abs(uv2.x*2.0 - 1.0))), 1.0);\n           \n    k *= min(smoothstep(0.05, 0.2, 1.0 - abs(fract(uv2.x*16.0)*2.0 - 1.0))\n         +   step(0.12, uv2.y - pow(uv2.x - 0.5, 2.0)*0.15)\n         +   step(-0.1, -uv2.y), 1.0);\n    col = mix(vec3(0.29, 0.09, 0.08)*smoothstep(-0.08, 0.08, uv.y), col, k);\n    \n    \n    \n    col = mix(col, fg.rgb, fg.a);\n\n    // Output to screen\n    uv = fragCoord/iResolution.xy;\n    col = mix(col, texture(iChannel1, uv).rgb, 0.3);\n    fragColor = vec4(col,1.0);\n}\n\n";
 const imageSource="#version 300 es\nprecision highp float;\nuniform sampler2D scene;\nuniform vec2 resolution;\nuniform float vignette;\nuniform float exposure, saturation;\nuniform float hue, temperature;\nuniform float intro, introFeather;\nout vec4 color;\nvoid main(){\nvec2 uv=gl_FragCoord.xy/resolution;\nvec3 col=texture(scene,uv).rgb;\nif(hue!=0.){\n  vec3 axis=normalize(vec3(1.));\n  float angle=radians(hue);\n  col=col*cos(angle)+cross(axis,col)*sin(angle)+axis*dot(axis,col)*(1.-cos(angle));\n}\ncol*=vec3(1.+temperature*.25,1.,1.-temperature*.25);\ncol=max(col,vec3(0.));\ncol=mix(vec3(dot(col,vec3(.2126,.7152,.0722))),col,saturation)*exposure;\ncol*=mix(1.,.5+.5*pow(max(16.*uv.x*uv.y*(1.-uv.x)*(1.-uv.y),0.),.2),vignette);\nif(intro<1.){\n  float eased=intro*intro*(3.-2.*intro);\n  float edge=mix(-introFeather,1.+introFeather,eased);\n  float reveal=1.-smoothstep(edge-introFeather,edge+introFeather,uv.x);\n  col=mix(vec3(.008,.035,.051),col,reveal);\n}\ncolor=vec4(col,1.);\n}\n";
 const vertex='#version 300 es\nin vec2 p;void main(){gl_Position=vec4(p,0,1);}';
@@ -2525,7 +2529,7 @@ if(!gl!.getShaderParameter(s,gl!.COMPILE_STATUS)){const e=gl!.getShaderInfoLog(s
 gl!.attachShader(p,s);gl!.deleteShader(s);}
 gl!.bindAttribLocation(p,0,'p');gl!.linkProgram(p);if(!gl!.getProgramParameter(p,gl!.LINK_STATUS))throw Error(gl!.getProgramInfoLog(p)||'Link error');return p;}
 function texture(){const t=gl!.createTexture()!;textures.push(t);gl!.bindTexture(gl!.TEXTURE_2D,t);gl!.texParameteri(gl!.TEXTURE_2D,gl!.TEXTURE_MIN_FILTER,gl!.LINEAR);gl!.texParameteri(gl!.TEXTURE_2D,gl!.TEXTURE_MAG_FILTER,gl!.LINEAR);return t;}
-function clean(){dead=true;cancelAnimationFrame(raf);programs.forEach(p=>gl!.deleteProgram(p));textures.forEach(t=>gl!.deleteTexture(t));buffers.forEach(b=>gl!.deleteBuffer(b));fbos.forEach(f=>gl!.deleteFramebuffer(f));}
+function clean(){dead=true;cancelBackgroundFrame(raf);programs.forEach(p=>gl!.deleteProgram(p));textures.forEach(t=>gl!.deleteTexture(t));buffers.forEach(b=>gl!.deleteBuffer(b));fbos.forEach(f=>gl!.deleteFramebuffer(f));}
 try{
 // Keep five foreground samples, but reduce their temporal spread to one third.
 const scene=program(fragment.replace('t+4.*float(i)/float(n)/60.', 't+(4./3.)*float(i)/float(n)/60.')),post=program(imageSource);
@@ -2540,7 +2544,7 @@ gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,1024,1024,0,gl.RED,gl.UNSIGNED_BYTE,data);
 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
 const targets=[texture(),texture()];for(const t of targets){gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);fbos.push(gl.createFramebuffer()!);}
 const media=matchMedia('(prefers-reduced-motion: reduce)');
-function request(){if(!dead&&!raf&&!document.hidden)raf=requestAnimationFrame(draw);}
+function request(){if(!dead&&!raf&&!document.hidden)raf=requestBackgroundFrame(canvas, draw);}
 const uniformCache=new Map<WebGLUniformLocation,number|string>();
 function scalar(location:WebGLUniformLocation|null,value:number){if(location&&uniformCache.get(location)!==value){gl!.uniform1f(location,value);uniformCache.set(location,value);}}
 function tint(location:WebGLUniformLocation|null,value:string){if(location&&uniformCache.get(location)!==value){gl!.uniform3f(location,...cloudTrainTintRgb(value));uniformCache.set(location,value);}}
@@ -2582,18 +2586,19 @@ scalar(a.intro,introProgress);scalar(a.introFeather,s.introFeather);scalar(a.iTi
 gl!.bindFramebuffer(gl!.FRAMEBUFFER,null);gl!.useProgram(post);gl!.uniform1i(b.scene,write+1);scalar(b.intro,1);scalar(b.introFeather,s.introFeather);scalar(b.vignette,s.vignette);scalar(b.exposure,s.exposure);scalar(b.saturation,s.saturation);scalar(b.hue,s.hue);scalar(b.temperature,s.temperature);gl!.drawArrays(gl!.TRIANGLES,0,3);read=write;history=true;
 if(!s.paused&&!media.matches&&(s.speed!==0||introProgress<1))request();
 }
-const reset=()=>{cancelAnimationFrame(raf);raf=0;last=0;history=false;if(scale!==state.current.resolution){scale=state.current.resolution;updatePixelSize();}request();};wake.current=reset;
+const reset=()=>{cancelBackgroundFrame(raf);raf=0;last=0;history=false;if(scale!==state.current.resolution){scale=state.current.resolution;updatePixelSize();}request();};opening.current=()=>{time=0;introProgress=state.current.paused?1:0;reset();};wake.current=reset;
 let dprQuery:MediaQueryList;
 const dprChanged=()=>{dprQuery?.removeEventListener('change',dprChanged);dprQuery=matchMedia('(resolution: '+(devicePixelRatio||1)+'dppx)');dprQuery.addEventListener('change',dprChanged);updatePixelSize();reset();};
 dprChanged();
 const resize=new ResizeObserver(([entry])=>{if(!entry)return;cssWidth=entry.contentRect.width;cssHeight=entry.contentRect.height;updatePixelSize();reset();});resize.observe(el);document.addEventListener('visibilitychange',reset);media.addEventListener('change',reset);request();
-return()=>{resize.disconnect();dprQuery.removeEventListener('change',dprChanged);document.removeEventListener('visibilitychange',reset);media.removeEventListener('change',reset);wake.current=()=>{};clean();};
+return()=>{resize.disconnect();dprQuery.removeEventListener('change',dprChanged);document.removeEventListener('visibilitychange',reset);media.removeEventListener('change',reset);wake.current=()=>{};opening.current=()=>{};clean();};
 }catch(e){clean();throw e;}
 
 }
 #lost=(e:Event):void=>{e.preventDefault();this.#cleanup?.();this.#cleanup=undefined;this.#onError("Cloud Train graphics context interrupted. Waiting to restore…");};
 #restored=():void=>{try{this.#cleanup=this.#start();this.#onError(undefined);}catch(e){this.#onError(String(e));}};
 setSettings(s:CloudTrainSettings):void{this.#settings.current=s;this.#wake.current();}
+resumeOpening():void{this.#opening.current();}
 replay():void{this.#cleanup?.();this.#cleanup=this.#start();}
 dispose():void{this.#cleanup?.();this.#cleanup=undefined;this.#canvas.removeEventListener("webglcontextlost",this.#lost);this.#canvas.removeEventListener("webglcontextrestored",this.#restored);}
 }
@@ -3693,10 +3698,10 @@ export function startBlackHoleRenderer(
   const canRun = (): boolean => running && contextReady && inViewport && documentVisible;
   function schedule(): void {
     if (!canRun() || animationFrame || (allocationFailed && !resizePending)) return;
-    animationFrame = requestAnimationFrame(tick);
+    animationFrame = requestBackgroundFrame(canvas, tick);
   }
   const stopLoop = (): void => {
-    if (animationFrame) cancelAnimationFrame(animationFrame);
+    if (animationFrame) cancelBackgroundFrame(animationFrame);
     animationFrame = 0;
     lastFrame = 0;
   };

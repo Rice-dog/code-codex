@@ -1,3 +1,5 @@
+import { setStartupBackgroundHold } from './background-startup-hold';
+import { monitorStartupReadiness, startupContentVisible } from './startup-readiness';
 import { loadStartupVideo, type StartupVideo } from "./startup-transition-media";
 import { runtimeEvent } from "./runtime-events";
 import { mountStartupTransition, type StartupTransitionController } from "./startup-transition";
@@ -117,13 +119,14 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
     resolveVisualReady?.(false);
     return undefined;
   }
+  setStartupBackgroundHold(true);
   let url: string | undefined;
   let controller: StartupTransitionController | undefined;
   try {
     runtimeEvent('startup-animation','source','selected',{source:settings.source,backgroundId:settings.source==='background'?settings.backgroundId:null});
     if(settings.source === 'background') {
       if(loadingOnly&&startupDocumentReady()) {resolveVisualReady?.(false);return undefined;}
-      controller=mountStartupTransition({target:document.body,fullScreen:true,backgroundId:settings.backgroundId,clipStart:0,clipEnd:4,playbackRate:1,minimumVisiblePercent:100,fadeDurationMs:settings.backgroundFadeSeconds*1000});
+      controller=mountStartupTransition({target:document.body,fullScreen:true,backgroundId:settings.backgroundId,clipStart:0,clipEnd:4,playbackRate:1,minimumVisiblePercent:100,fadeDurationMs:settings.backgroundFadeSeconds*1000,onComplete:()=>setStartupBackgroundHold(false)});
     } else {
     runtimeEvent("startup-animation","video lookup","started",{timeoutMs:10000,loadingOnly,enabled:settings.enabled});
     let lookupReason = "no stored video";
@@ -144,7 +147,7 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
       ...videoOptions(settings, video),
       minimumVisiblePercent: settings.minimumVisiblePercent,
       fadePercent: settings.fadePercent,
-      onComplete: () => { if (url) URL.revokeObjectURL(url); },
+      onComplete: () => { setStartupBackgroundHold(false); if (url) URL.revokeObjectURL(url); },
     });
     }
     state[CONTROLLER_STATE] = controller;
@@ -171,6 +174,8 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
     else if (url) URL.revokeObjectURL(url);
     resolveVisualReady?.(false);
     return undefined;
+  } finally {
+    if (!controller || controller.phase === "complete") setStartupBackgroundHold(false);
   }
 }
 
@@ -187,10 +192,7 @@ export function startEarlyStartupTransition(): Promise<StartupTransitionControll
   prepareStartupTransitionHandoff(true);
   const pending = startStartupTransitionOnLaunch(true, true).then(controller => {
     if (!controller) return undefined;
-    const ready = () => { runtimeEvent("startup-animation", "native document", "ready", {phase:controller.phase}); controller.signalReady(); };
-    const observer = new MutationObserver(() => { if (startupDocumentReady()) { observer.disconnect(); ready(); } });
-    if (startupDocumentReady()) ready();
-    else observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-app-shell-main-surface"] });
+    monitorStartupReadiness(controller);
     return controller;
   });
   state[pendingKey] = pending;
@@ -203,6 +205,5 @@ export function getEarlyStartupTransition(): Promise<StartupTransitionController
 }
 
 export function startupDocumentReady(): boolean {
-  return !!document.querySelector('main:is(.main-surface, [data-app-shell-main-surface="default"])') && !!document.querySelector('nav[data-app-navigation-rail], [data-app-shell-sidebar-trigger], aside.app-shell-left-panel')
-    || !!document.querySelector('div.flex.h-full.w-full.items-center.justify-center.overflow-hidden.bg-surface button');
+  return document.readyState === 'complete' && startupContentVisible();
 }

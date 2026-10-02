@@ -1,3 +1,4 @@
+import { requestBackgroundFrame, cancelBackgroundFrame } from './background-startup-hold';
 "use client";
 
 // Adapted from the user's local blinking-squares-background-effect project.
@@ -195,11 +196,12 @@ export interface BlinkingSquaresProps {
   introDuration?: number;
   introIntensity?: number;
   introKey?: string | number;
+  onOpeningReady?: (replay: (() => void) | undefined) => void;
   paused?: boolean;
   onError?: (message?: string) => void;
 }
 
-type RuntimeConfig = Required<Omit<BlinkingSquaresProps, "width" | "height" | "className" | "children" | "introKey" | "onError">>;
+type RuntimeConfig = Required<Omit<BlinkingSquaresProps, "width" | "height" | "className" | "children" | "introKey" | "onError" | "onOpeningReady">>;
 
 export default function BlinkingSquares({
   width = "100%", height = "100%", className = "", children,
@@ -209,7 +211,7 @@ export default function BlinkingSquares({
   mouseInteraction = true, keyboardInteraction = true, keyboardPulseLimit = 5, keyboardPeakCooldown = 2,
   interactionRadius = 140, interactionStrength = 1, brightnessBoost = .85, densityBoost = .42,
   responseSpeed = 14, inertiaDuration = .65, holdLiftSpeed = .65, pulseStrength = 1.35, pulseLift = .75, pulseSpeed = 280, pulseDecay = 1.35,
-  introEnabled = true, introDuration = 1.8, introIntensity = 1, introKey = 0,
+  introEnabled = true, introDuration = 1.8, introIntensity = 1, introKey = 0, onOpeningReady,
   paused = false, onError,
 }: BlinkingSquaresProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -297,7 +299,7 @@ export default function BlinkingSquares({
     };
     const render = (now: number) => {
       if (!running || !program || !vertexArray) return;
-      frameId = requestAnimationFrame(render); resize();
+      frameId = requestBackgroundFrame(canvas, render); resize();
       const config = configRef.current;
       const delta = Math.min(.05, Math.max(0, (now - previousTime) / 1000)); previousTime = now;
       if (introStartedAt === null) introStartedAt = now;
@@ -384,8 +386,8 @@ export default function BlinkingSquares({
       gl.uniform3f(locations.backgroundColor, background[0], background[1], background[2]);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
-    const start = () => { if (running || !pageVisible || !onScreen) return; running = true; previousTime = performance.now(); frameId = requestAnimationFrame(render); };
-    const stop = () => { running = false; cancelAnimationFrame(frameId); };
+    const start = () => { if (running || !pageVisible || !onScreen) return; running = true; previousTime = performance.now(); frameId = requestBackgroundFrame(canvas, render); };
+    const stop = () => { running = false; cancelBackgroundFrame(frameId); };
     const updatePointer = (event: PointerEvent) => {
       const bounds = canvas.getBoundingClientRect();
       const x = event.clientX - bounds.left;
@@ -472,6 +474,7 @@ export default function BlinkingSquares({
     const lost = (event: Event) => { event.preventDefault(); stop(); const message = "WebGL context lost. Waiting for recovery…"; setError(message); onError?.(message); };
     const restored = () => setRendererEpoch((value) => value + 1);
     const resizeObserver = new ResizeObserver(resize);
+    onOpeningReady?.(() => { introStartedAt = null; previousTime = performance.now(); });
     const intersectionObserver = new IntersectionObserver(([entry]) => { onScreen = entry?.isIntersecting ?? true; if (onScreen) start(); else stop(); }, { threshold: .01 });
     resizeObserver.observe(canvas); intersectionObserver.observe(canvas); document.addEventListener("visibilitychange", visibility);
     window.addEventListener("pointermove", updatePointer);
@@ -482,6 +485,7 @@ export default function BlinkingSquares({
     window.addEventListener("keydown", addKeyboardPulse, true);
     canvas.addEventListener("webglcontextlost", lost); canvas.addEventListener("webglcontextrestored", restored); start();
     return () => {
+      onOpeningReady?.(undefined);
       stop(); resizeObserver.disconnect(); intersectionObserver.disconnect(); document.removeEventListener("visibilitychange", visibility);
       window.removeEventListener("pointermove", updatePointer);
       window.removeEventListener("pointerleave", leavePointer);

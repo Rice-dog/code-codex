@@ -1,3 +1,4 @@
+import { registerBackgroundOpening } from './background-startup-hold';
 import {
   populateGlowHorizonLayer,
   BLACK_HOLE_BACKGROUND_SETTINGS_KEY,
@@ -4638,6 +4639,7 @@ class GlowHorizonBackgroundController {
       document.body.prepend(layer);
       this.#layer = layer;
       this.#renderer = new GlowHorizonRenderer(layer, this.#settings);
+      registerBackgroundOpening(this.#layer!, this.#renderer);
       document.documentElement.toggleAttribute(GLOW_HORIZON_BACKGROUND_ATTRIBUTE, true);
       document.documentElement.style.setProperty(GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY, "#050507");
       this.#enabled = true;
@@ -4879,6 +4881,7 @@ class HeavenlyCloudBackgroundController {
         this.#error = message;
         this.#notify();
       });
+      registerBackgroundOpening(this.#layer!, this.#renderer);
       this.#enabled = true;
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
@@ -4921,6 +4924,7 @@ class HeavenlyCloudBackgroundController {
         this.#error = message;
         this.#notify();
       });
+      registerBackgroundOpening(this.#layer!, this.#renderer);
     } else {
       this.#renderer?.setSettings(this.#settings);
     }
@@ -5124,6 +5128,7 @@ class AuroraIonosphereBackgroundController {
         this.#error = message;
         this.#notify();
       });
+      registerBackgroundOpening(this.#layer!, this.#renderer);
       this.#enabled = true;
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
@@ -5358,6 +5363,7 @@ class MilkyWayBackgroundController {
         this.#error = message;
         this.#notify();
       });
+      registerBackgroundOpening(this.#layer!, this.#renderer);
       this.#enabled = true;
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
@@ -5589,6 +5595,7 @@ class MountainBackgroundController {
         this.#error = message;
         this.#notify();
       });
+      registerBackgroundOpening(this.#layer!, this.#renderer);
       this.#enabled = true;
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
@@ -5818,6 +5825,7 @@ class BlinkingSquaresBackgroundController {
         this.#error = message;
         this.#notify();
       });
+      registerBackgroundOpening(this.#layer!, this.#renderer);
       this.#enabled = true;
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
@@ -6048,6 +6056,7 @@ class CloudTrainBackgroundController {
         this.#error = message;
         this.#notify();
       });
+      registerBackgroundOpening(this.#layer!, this.#renderer);
       this.#enabled = true;
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
@@ -6601,6 +6610,7 @@ class BlackHoleBackgroundController {
         this.#error = message;
         this.#notify();
       });
+      registerBackgroundOpening(this.#layer!, this.#renderer);
       this.#enabled = true;
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();

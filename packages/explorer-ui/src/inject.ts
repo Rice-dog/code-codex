@@ -1,3 +1,4 @@
+import { monitorStartupReadiness } from './startup-readiness';
 import { getBootstrapConfig } from "./bridge";
 import { prepareStartupTransitionHandoff, getEarlyStartupTransition } from "./startup-transition-plugin";
 import { reconcileApplicationMenu } from "./application-menu";
@@ -796,20 +797,7 @@ export function installInjector(): void {
     installRemountObserver();
     void startupTransitionPromise.then((startupTransition) => {
       if (!startupTransition) return;
-      const revealWhenReady = () => {
-        if (document.querySelector(MAIN_SURFACE_SELECTOR)) {
-          requestAnimationFrame(() => requestAnimationFrame(() => startupTransition.signalReady()));
-        } else {
-          const observer = new MutationObserver(() => {
-            if (!document.querySelector(MAIN_SURFACE_SELECTOR)) return;
-            observer.disconnect();
-            requestAnimationFrame(() => requestAnimationFrame(() => startupTransition.signalReady()));
-          });
-          observer.observe(document.body, { childList: true, subtree: true });
-          // Readiness may arrive after a slow login or cold start. Keep observing until it does.
-        }
-      };
-      revealWhenReady();
+      monitorStartupReadiness(startupTransition);
     });
   };
   if (document.body) start();

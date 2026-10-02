@@ -2,6 +2,22 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.86 — Preserve background openings beneath startup animation
+
+- Main backgrounds prepare an initial frame while covered, then hold playback until the startup animation fully finishes. Opening clocks restart before playback resumes.
+- Startup backgrounds and settings previews continue independently. Hold, preparation, release and reset errors are included in runtime information.
+
+## v0.3.85 — Native Codex readiness without plugin handoff
+
+- Startup fade depends on visible native Codex content and one second of stable frames. It no longer waits for Code-Codex UI mounting.
+- Minimum display and fade settings remain unchanged; readiness evidence, stalls and explicit compatibility fallbacks are recorded.
+
+## v0.3.84 — Content and frame stability readiness
+
+- Startup fade now waits for visible native content, full UI mounting handoff, and one second of stable frames, rather than the presence of shell elements alone.
+- Long tasks and frame stalls restart the stability check. Background minimum display and configured fade, and video timing, remain unchanged.
+- Runtime information records readiness evidence, long tasks, resets, success and bounded compatibility fallbacks. Current official internal phase state is not directly exposed, so the visible-content fallback is explicitly identified.
+
 ## v0.3.83 — Background startup fade and centered transport
 
 - Background startup retains its four-second minimum and readiness gate, then fades into Codex over a separately configurable duration (default one second).

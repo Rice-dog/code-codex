@@ -23,6 +23,7 @@ export interface StartupTransitionController {
   markRevealed(): void;
   dispose(): void;
   readonly mediaReady: Promise<void>;
+  readonly minimumRemainingMs: number;
   readonly phase: "loading" | "exiting" | "complete";
 }
 
@@ -199,6 +200,7 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     markRevealed,
     dispose: () => finish("disposed"),
     mediaReady,
+    get minimumRemainingMs() { return reducedMotion ? 0 : Math.max(0, minimumVisibleMs - (revealedAt === undefined ? 0 : performance.now() - revealedAt)); },
     get phase() { return phase; },
   };
 }

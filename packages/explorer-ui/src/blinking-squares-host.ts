@@ -30,6 +30,8 @@ export class BlinkingSquaresRenderer {
   readonly #onError: (message?: string) => void;
   #settings: BlinkingSquaresSettings;
   #replayKey = 0;
+  #openingReset: (() => void) | undefined;
+  readonly #onOpeningReady = (replay: (() => void) | undefined): void => { this.#openingReset = replay; };
 
   constructor(layer: HTMLElement, settings: BlinkingSquaresSettings, onError: (message?: string) => void) {
     this.#root = createRoot(layer);
@@ -42,6 +44,8 @@ export class BlinkingSquaresRenderer {
     this.#settings = settings;
     this.#render();
   }
+
+  resumeOpening(): void { this.#openingReset?.(); }
 
   replay(): void {
     this.#replayKey += 1;
@@ -56,6 +60,7 @@ export class BlinkingSquaresRenderer {
       width: "100%",
       height: "100%",
       introKey: this.#replayKey,
+      onOpeningReady: this.#onOpeningReady,
       onError: this.#onError,
     }));
   }
