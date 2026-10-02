@@ -1,6 +1,8 @@
 import { getBootstrapConfig } from "./bridge";
-import { prepareStartupTransitionHandoff, startStartupTransitionOnLaunch } from "./startup-transition-plugin";
+import { prepareStartupTransitionHandoff, getEarlyStartupTransition } from "./startup-transition-plugin";
 import { reconcileApplicationMenu } from "./application-menu";
+import { openRuntimeInformation, observeCodexRuntime } from "./runtime-information";
+import { runtimeEvent } from "./runtime-events";
 import {
   CodeCodexElement,
   GLOW_HORIZON_BACKGROUND_ATTRIBUTE,
@@ -589,11 +591,13 @@ function revealExplorer(): CodeCodexElement | null {
 }
 
 const applicationMenuActions = {
+  openRuntimeInformation: () => { void openRuntimeInformation(); },
   isExplorerVisible: () => {
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     return !sessionDismissed() && Boolean(explorer?.isConnected && !explorer.hasAttribute("data-home-view-hidden") && explorer.dataset.collapsed !== "true");
   },
   toggleExplorer: () => {
+    runtimeEvent("renderer", "file tree", "toggle requested");
     if (!isHomeWorkspaceView()) return;
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     if (sessionDismissed() || !explorer?.isConnected) {
@@ -621,6 +625,7 @@ const applicationMenuActions = {
 };
 
 export function injectExplorer(): CodeCodexElement | null {
+  if (document.body) observeCodexRuntime();
   reconcileLoginBackground();
   reconcileApplicationMenu(applicationMenuActions);
   installTransparentBackgroundStyle();
@@ -781,7 +786,7 @@ export function installInjector(): void {
   installGlowHorizonBackgroundStyle();
   installReselectionListener();
   const start = () => {
-    const startupTransitionPromise = startStartupTransitionOnLaunch(startupSplashActive);
+    const startupTransitionPromise = getEarlyStartupTransition();
     removeSupersededExplorers();
     const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     const explorer = injectExplorer();
@@ -801,7 +806,7 @@ export function installInjector(): void {
             requestAnimationFrame(() => requestAnimationFrame(() => startupTransition.signalReady()));
           });
           observer.observe(document.body, { childList: true, subtree: true });
-          window.setTimeout(() => observer.disconnect(), 15_000);
+          // Readiness may arrive after a slow login or cold start. Keep observing until it does.
         }
       };
       revealWhenReady();

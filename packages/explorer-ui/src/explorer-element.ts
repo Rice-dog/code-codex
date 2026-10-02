@@ -2,10 +2,11 @@ import { PIXEL_SCULPT_CONTROLS_HTML, startPixelSculptRuntime } from "./pixel-scu
 import { ActiveThreadTracker } from "./active-thread";
 import { SurfaceOpacityPlugin, surfaceOpacityCardMarkup, surfaceOpacityPanelMarkup, SURFACE_OPACITY_TREE_CSS } from "./surface-opacity";
 import { BLINKING_SQUARES_DEFAULTS, BlinkingSquaresRenderer, type BlinkingSquaresSettings } from "./blinking-squares-host";
-import { DEFAULT_STARTUP_TRANSITION_SETTINGS, previewStartupTransition, readStartupTransitionSettings, writeStartupTransitionSettings, type StartupTransitionSettings } from "./startup-transition-plugin";
+import { DEFAULT_STARTUP_TRANSITION_SETTINGS, readStartupTransitionSettings, writeStartupTransitionSettings, type StartupTransitionSettings } from "./startup-transition-plugin";
 import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVideo } from "./startup-transition-media";
-import type { StartupTransitionController } from "./startup-transition";
-import { formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-timeline";
+import { observePluginControls } from "./runtime-information";
+import { runtimeEvent, runtimeTaskLabel } from "./runtime-events";
+import { clipFadeOpacity, formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-timeline";
 import { activePageElements, MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
@@ -11372,16 +11373,15 @@ function pixelSculptCardMarkup(): string {
 function blinkingSquaresCardMarkup(): string {
   return `<article class="preview-extension appearance-extension" data-appearance-plugin="${BLINKING_SQUARES_BACKGROUND_PLUGIN_ID}" aria-busy="false"><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="3" height="3"/><rect x="7" y="2" width="2" height="2"/><rect x="12" y="1" width="3" height="3"/><rect x="2" y="8" width="2" height="2"/><rect x="7" y="7" width="3" height="3"/><rect x="12" y="9" width="2" height="2"/><rect x="1" y="12" width="3" height="3"/><rect x="8" y="13" width="2" height="2"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Blinking Squares Background</h4><span class="preview-extension-status blinkingSquares-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action blinkingSquares-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger blinkingSquares-settings-trigger" type="button" aria-label="Configure Blinking Squares Background" aria-haspopup="dialog" aria-controls="cle-blinkingSquares-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
 }
-const STARTUP_TRANSITION_MARKET_VISIBLE = false;
+const STARTUP_TRANSITION_MARKET_VISIBLE = true;
 
 function startupTransitionCardMarkup(): string {
   return `<article class="preview-extension appearance-extension" data-appearance-plugin="code-codex.startup-transition" ${STARTUP_TRANSITION_MARKET_VISIBLE ? "" : "hidden aria-hidden=\"true\""}><span class="preview-extension-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 2v3m0 6v3M2 8h3m6 0h3"/><circle cx="8" cy="8" r="1.5"/></svg></span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4>Codex Startup Transition</h4><span class="preview-extension-status startupTransition-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action startupTransition-enable" aria-pressed="false">Enable</button><button class="particle-settings-trigger startupTransition-settings-trigger" type="button" aria-label="Configure Codex Startup Transition" aria-haspopup="dialog" aria-controls="cle-startupTransition-settings" aria-expanded="false">${icons.sliders}</button></div></article>`;
 }
 function startupTransitionPanelMarkup(): string {
-  const controls: readonly [keyof Pick<StartupTransitionSettings, "minimumVisibleMs" | "maximumWaitMs" | "exitDurationMs">, string, string, number, number, number][] = [
-    ["minimumVisibleMs", "最短展示时间", "Minimum visible time", 0, 15000, 50],
-    ["maximumWaitMs", "最长等待时间", "Maximum wait time", 3000, 30000, 250],
-    ["exitDurationMs", "退场时间", "Exit duration", 0, 2000, 10],
+  const controls: readonly [keyof Pick<StartupTransitionSettings, "minimumVisiblePercent" | "fadePercent">, string, string, number, number, number][] = [
+    ["minimumVisiblePercent", "最短展示比例", "Minimum display", 0, 100, 1],
+    ["fadePercent", "末尾淡出比例", "Tail fade", 0, 100, 1],
   ];
   const videoControls: readonly [keyof Pick<StartupTransitionSettings, "playbackRate" | "videoOpacity" | "videoBrightness">, string, string, number, number, number][] = [
     ["playbackRate", "播放速度", "Playback speed", 0.5, 2, 0.05],
@@ -11393,9 +11393,14 @@ function startupTransitionPanelMarkup(): string {
     <div class="particle-settings-scroll">
       <p>${bilingualLabelMarkup("在此预览启动效果。自选视频只保存在本机。", "Preview the startup effect here. Your video stays on this computer.")}</p>
       <div class="startupTransition-preview-workspace">
-        <div class="startupTransition-preview-stage" aria-label="Startup transition preview"><div class="startupTransition-preview-underlay" aria-hidden="true"><span></span><span></span><span></span></div><video class="startupTransition-video-still" muted playsinline preload="metadata" hidden></video></div>
+        <div class="startupTransition-preview-stage" aria-label="Startup transition preview"><video class="startupTransition-video-still" muted playsinline preload="metadata" hidden></video></div>
         <div class="startupTransition-timeline" role="group" aria-label="视频时间轴">
           <div class="startupTransition-timeline-heading"><strong>${bilingualLabelMarkup("视频时间轴", "Video timeline")}</strong><output class="startupTransition-timeline-range"></output></div>
+          <div class="startupTransition-transport" role="group" aria-label="Playback controls">
+            <button class="startupTransition-jump-start" type="button" aria-label="Go to clip start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14M18 5l-9 7 9 7z"/></svg></button>
+            <button class="startupTransition-play" type="button" aria-label="Play" aria-pressed="false"><svg class="startupTransition-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg><svg class="startupTransition-pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg></button>
+            <button class="startupTransition-jump-end" type="button" aria-label="Go to clip end"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14M6 5l9 7-9 7z"/></svg></button>
+          </div>
           <div class="startupTransition-timeline-ruler" aria-hidden="true"><span>0:00.0</span><span>0:01.3</span><span>0:02.5</span><span>0:03.8</span><span>0:05.0</span></div>
           <div class="startupTransition-timeline-track">
             <div class="startupTransition-timeline-frames" aria-hidden="true">${Array.from({ length: 7 }, () => '<span class="startupTransition-timeline-frame"></span>').join("")}</div>
@@ -11407,21 +11412,20 @@ function startupTransitionPanelMarkup(): string {
             <div class="startupTransition-timeline-handle" data-startup-timeline-edge="start" role="slider" tabindex="0" aria-orientation="horizontal" aria-label="片段起点" hidden><span></span></div>
             <div class="startupTransition-timeline-handle" data-startup-timeline-edge="end" role="slider" tabindex="0" aria-orientation="horizontal" aria-label="片段终点" hidden><span></span></div>
           </div>
-          <div class="startupTransition-timeline-timing"><span>${bilingualLabelMarkup("预览节奏", "Preview timing")}</span><output class="startupTransition-timeline-timing-total"></output></div>
-          <div class="startupTransition-timeline-timing-track" aria-hidden="true"><span class="startupTransition-timeline-minimum"></span><span class="startupTransition-timeline-fade"></span><span class="startupTransition-timeline-timeout"></span></div>
-          <div class="startupTransition-timeline-legend"><span class="startupTransition-timeline-minimum-label"></span><span class="startupTransition-timeline-fade-label"></span><span class="startupTransition-timeline-timeout-label"></span></div>
+          <div class="startupTransition-timeline-timing-track" role="group" aria-label="Clip timing ranges">
+            <div class="startupTransition-timeline-timing-clip"><span class="startupTransition-timeline-minimum" tabindex="0"></span><span class="startupTransition-timeline-fade" tabindex="0"></span></div>
+          </div>
         </div>
       </div>
-      <div class="glow-horizon-actions"><button class="startupTransition-preview" type="button">${bilingualLabelMarkup("重播预览", "Replay preview")}</button></div>
       <fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("自选视频", "Custom video")}</legend>
         <div class="startupTransition-media-actions"><button class="startupTransition-upload" type="button">${bilingualLabelMarkup("选择视频", "Choose video")}</button><button class="startupTransition-remove" type="button" disabled>${bilingualLabelMarkup("移除视频", "Remove video")}</button><input class="startupTransition-file" type="file" accept="video/*" hidden></div>
-        <p class="startupTransition-video-info" role="status">${bilingualLabelMarkup("未选择视频，使用默认动画。", "No video selected; using the default animation.")}</p>
+        <p class="startupTransition-video-info" role="status">${bilingualLabelMarkup("请先选择视频。未选择视频时不播放启动动画。", "Choose a video first. No startup animation plays without a video.")}</p>
       </fieldset>
-      <fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("视频外观", "Video appearance")}</legend>
+      <fieldset class="particle-settings-group startupTransition-parameter-grid"><legend>${bilingualLabelMarkup("视频外观", "Video appearance")}</legend>
         ${videoControls.map(([key, zh, en, min, max, step]) => `<div class="particle-control-row"><label for="cle-startupTransition-${key}">${bilingualLabelMarkup(zh, en)}</label><input id="cle-startupTransition-${key}" data-startup-transition-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${DEFAULT_STARTUP_TRANSITION_SETTINGS[key]}"><span class="particle-control-value"><output></output></span></div>`).join("")}
         <div class="particle-control-row startupTransition-fit-row"><label for="cle-startupTransition-fit">${bilingualLabelMarkup("画面适配", "Video fit")}</label><select id="cle-startupTransition-fit"><option value="cover">铺满</option><option value="contain">完整显示</option></select></div>
       </fieldset>
-      <fieldset class="particle-settings-group"><legend>${bilingualLabelMarkup("播放时长", "Timing")}</legend>${controls.map(([key, zh, en, min, max, step]) => `<div class="particle-control-row"><label for="cle-startupTransition-${key}">${bilingualLabelMarkup(zh, en)}</label><input id="cle-startupTransition-${key}" data-startup-transition-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${DEFAULT_STARTUP_TRANSITION_SETTINGS[key]}"><span class="particle-control-value"><output>${DEFAULT_STARTUP_TRANSITION_SETTINGS[key]} ms</output></span></div>`).join("")}</fieldset>
+      <fieldset class="particle-settings-group startupTransition-parameter-grid"><legend>${bilingualLabelMarkup("播放时长", "Timing")}</legend>${controls.map(([key, zh, en, min, max, step]) => `<div class="particle-control-row"><label for="cle-startupTransition-${key}">${bilingualLabelMarkup(zh, en)}</label><input id="cle-startupTransition-${key}" data-startup-transition-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${DEFAULT_STARTUP_TRANSITION_SETTINGS[key]}"><span class="particle-control-value"><output>${DEFAULT_STARTUP_TRANSITION_SETTINGS[key]}%</output></span></div>`).join("")}</fieldset>
       <div class="glow-horizon-actions"><button class="startupTransition-reset" type="button">${bilingualLabelMarkup("重置参数", "Reset settings")}</button></div>
       <p class="particle-plugin-error startupTransition-error" role="alert" hidden></p>
     </div>
@@ -11556,7 +11560,13 @@ export class CodeCodexElement extends HTMLElement {
   #startupStillUrl: string | undefined;
   #startupTimelineFramesAbort: AbortController | undefined;
   #startupTimelineScrubTime: number | undefined;
-  #startupPreviewController: StartupTransitionController | undefined;
+  #startupPlaybackFrame: number | undefined;
+  #startupPlaybackGeneration = 0;
+  #startupPlaybackRunning = false;
+  #startupPreviewElapsed = 0;
+  #startupPreviewLeadIn = 0;
+  #startupPreviewFadeOpacity = 1;
+  #startupPreviewComplete = false;
   #startupVideoGeneration = 0;
   #startupVideoPending = false;
   #pixelSculptUnsubscribe: (() => void) | undefined;
@@ -11796,6 +11806,7 @@ export class CodeCodexElement extends HTMLElement {
   constructor() {
     super();
     this.#shadow = this.attachShadow({ mode: "open" });
+    observePluginControls(this.#shadow);
     this.#shadow.innerHTML = `
       <style>${styles}${SURFACE_OPACITY_TREE_CSS}</style>
       <div class="frame">
@@ -12358,6 +12369,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#bindDomEvents();
 
     const bootstrap = this.#nativeReconnectMarker ?? getBootstrapConfig();
+    runtimeEvent("renderer", "bootstrap", "received", {version:bootstrap.version,codexVersion:bootstrap.codexVersion,compatible:bootstrap.compatible,supported:bootstrap.supported,appearancePlugins:[...this.#enabledAppearancePlugins],startupAnimationEnabled:readStartupTransitionSettings().enabled});
     this.#nativeReconnectMarker = bootstrap;
     const compatibility = assessBootstrapCompatibility(bootstrap);
     if (!compatibility.supported) {
@@ -12398,8 +12410,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#closePreviewMarket(false);
     this.#startupVideoGeneration += 1;
     this.#startupTimelineFramesAbort?.abort();
-    this.#startupPreviewController?.dispose();
-    this.#startupPreviewController = undefined;
+    this.#stopStartupPreview();
     if (this.#startupStillUrl) URL.revokeObjectURL(this.#startupStillUrl);
     this.#startupStillUrl = undefined;
     this.#closeUpdateDialog(false);
@@ -12480,6 +12491,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   collapse(collapsed = true): void {
+    if (this.#settings.collapsed !== collapsed) runtimeEvent("renderer","file tree",collapsed ? "collapsed" : "expanded");
     this.#settings = { ...this.#settings, collapsed };
     if (collapsed) {
       this.#closeContextMenu(false);
@@ -12575,6 +12587,7 @@ export class CodeCodexElement extends HTMLElement {
 
   setHomeViewActive(active: boolean): void {
     if (this.#homeViewActive === active) return;
+    runtimeEvent("renderer", "file tree visibility", active ? "shown" : "hidden", {reason:active ? "Home active" : "outside Home"});
     this.#homeViewActive = active;
     if (!active) this.#homeScrollTop = this.#treeShell.scrollTop;
     this.toggleAttribute("data-home-view-hidden", !active);
@@ -13569,6 +13582,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   async #switchThread(threadId: string | null, force = false): Promise<void> {
+    runtimeEvent("renderer", "workspace selection", "requested", {from:runtimeTaskLabel(this.#threadId),to:runtimeTaskLabel(threadId),hasTask:!!threadId,force,cached:threadId===this.#threadId && !!this.#context});
     this.#closeContextMenu(false);
     if (!force && threadId === this.#threadId && this.#context) {
       this.#queuedThreadSwitch = undefined;
@@ -13893,6 +13907,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #setState(state: ExplorerViewState, detail = ""): void {
+    if (this.#state !== state) runtimeEvent("renderer", "file tree state", state, {previous:this.#state});
     if (state !== "ready") this.#clearDragState();
     if ((state === "error" || state === "incompatible" || state === "no-project") && this.#previewTabs.length) {
       if (this.#isEditDirty()) {
@@ -16241,6 +16256,7 @@ export class CodeCodexElement extends HTMLElement {
     revision: number,
   ): Promise<void> {
     if (!this.#canApplyPreview(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, revision)) return;
+    runtimeEvent("renderer","file preview","requested",{tab:runtimeTaskLabel(tab.path),extension:tab.path.split(".").pop()?.slice(0,12),openTabCount:this.#previewTabs.length});
     const mediaRoute = mediaPreviewRoute(tab.path);
     if (mediaRoute && !this.#enabledPreviewers.has(mediaRoute.previewerId)) {
       tab.view = { kind: "unsupported", path: tab.path, name: tab.name, sizeBytes: 0, reason: "previewer-disabled" };
@@ -16502,6 +16518,7 @@ export class CodeCodexElement extends HTMLElement {
       return;
     }
     const [closed] = this.#previewTabs.splice(index, 1);
+    runtimeEvent("renderer","file preview","closed",{tab:runtimeTaskLabel(path),openTabCount:this.#previewTabs.length});
     if (!closed) return;
     this.#disposePreviewTab(closed);
     let activatedTab: PreviewTab | undefined;
@@ -19576,8 +19593,7 @@ export class CodeCodexElement extends HTMLElement {
   #closeStartupTransition(): void {
     this.#startupVideoGeneration += 1;
     this.#startupTimelineFramesAbort?.abort();
-    this.#startupPreviewController?.dispose();
-    this.#startupPreviewController = undefined;
+    this.#stopStartupPreview();
     const panel = this.#shadow.querySelector<HTMLElement>("#cle-startupTransition-settings");
     if (panel?.matches(":popover-open")) panel.hidePopover();
     this.#shadow.querySelector(".startupTransition-settings-trigger")?.setAttribute("aria-expanded", "false");
@@ -19589,7 +19605,7 @@ export class CodeCodexElement extends HTMLElement {
     const rect = this.#required<HTMLElement>(".startupTransition-settings-trigger").getBoundingClientRect();
     panel.style.position = "fixed"; panel.style.margin = "0";
     panel.style.maxHeight = "calc(100vh - 24px)";
-    const width = Math.min(344, window.innerWidth - 24);
+    const width = Math.min(800, window.innerWidth - 24);
     panel.style.width = width + "px";
     panel.style.left = Math.max(12, Math.min(rect.right + 12, window.innerWidth - width - 12)) + "px";
     panel.style.top = Math.max(12, Math.min(rect.top, window.innerHeight - panel.getBoundingClientRect().height - 12)) + "px";
@@ -19608,12 +19624,12 @@ export class CodeCodexElement extends HTMLElement {
     button.setAttribute("aria-pressed", String(settings.enabled));
     button.setAttribute("aria-label", `${settings.enabled ? "Disable" : "Enable"} Codex Startup Transition`);
     for (const input of this.#shadow.querySelectorAll<HTMLInputElement>("[data-startup-transition-setting]")) {
-      const key = input.dataset.startupTransitionSetting as keyof Pick<StartupTransitionSettings, "minimumVisibleMs" | "maximumWaitMs" | "exitDurationMs" | "playbackRate" | "videoOpacity" | "videoBrightness">;
+      const key = input.dataset.startupTransitionSetting as keyof Pick<StartupTransitionSettings, "minimumVisiblePercent" | "fadePercent" | "playbackRate" | "videoOpacity" | "videoBrightness">;
       input.value = String(settings[key]);
       const output = input.parentElement?.querySelector<HTMLOutputElement>("output");
       if (output) output.value = key === "playbackRate" ? `${settings[key].toFixed(2)}×`
         : key === "videoOpacity" || key === "videoBrightness" ? `${Math.round(settings[key] * 100)}%`
-        : `${settings[key]} ms`;
+        : `${settings[key]}%`;
     }
     this.#required<HTMLSelectElement>("#cle-startupTransition-fit").value = settings.videoFit;
     const english = panel.dataset.language === "en";
@@ -19626,13 +19642,12 @@ export class CodeCodexElement extends HTMLElement {
     timeline.setAttribute("aria-label", english ? "Video timeline" : "视频时间轴");
     timeline.style.setProperty("--clip-start", `${geometry.startPercent}%`);
     timeline.style.setProperty("--clip-end", `${geometry.endPercent}%`);
-    timeline.style.setProperty("--minimum-end", `${geometry.earliestFadePercent}%`);
+    timeline.style.setProperty("--minimum-end", `${geometry.minimumPercent}%`);
     timeline.style.setProperty("--fade-start", `${geometry.earliestFadePercent}%`);
     timeline.style.setProperty("--fade-end", `${geometry.earliestFadeEndPercent}%`);
-    timeline.style.setProperty("--timeout-at", `${geometry.timeoutPercent}%`);
     this.#required<HTMLOutputElement>(".startupTransition-timeline-range").value = this.#startupVideo
       ? `${formatTimelineTime(geometry.clipStart)}–${formatTimelineTime(geometry.clipEnd)} · ${geometry.clipPlaybackSeconds.toFixed(1)} s`
-      : (english ? "Default animation" : "默认动画");
+      : (english ? "No video selected" : "未选择视频");
     const ruler = this.#required<HTMLElement>(".startupTransition-timeline-ruler");
     for (const [index, tick] of Array.from(ruler.children).entries()) {
       tick.textContent = formatTimelineTime(geometry.duration * index / 4);
@@ -19653,26 +19668,35 @@ export class CodeCodexElement extends HTMLElement {
     if (this.#startupTimelineScrubTime !== undefined) {
       playhead.style.left = `${Math.max(0, Math.min(100, this.#startupTimelineScrubTime / geometry.duration * 100))}%`;
     }
-    this.#required<HTMLOutputElement>(".startupTransition-timeline-timing-total").value = english ? "ready → fade" : "就绪后淡出";
-    this.#required<HTMLElement>(".startupTransition-timeline-minimum-label").textContent = `${english ? "Minimum" : "最短"} ${(settings.minimumVisibleMs / 1000).toFixed(2)} s`;
-    this.#required<HTMLElement>(".startupTransition-timeline-fade-label").textContent = `${english ? "Fade" : "淡出"} ${(settings.exitDurationMs / 1000).toFixed(2)} s`;
-    this.#required<HTMLElement>(".startupTransition-timeline-timeout-label").textContent = `${english ? "Timeout" : "最长等待"} ${(Math.max(settings.maximumWaitMs, settings.minimumVisibleMs) / 1000).toFixed(1)} s`;
+    const relative = english ? "from clip start" : "从裁剪起点计时";
+    for (const [selector, text] of [
+      [".startupTransition-timeline-minimum", `${english ? "Minimum display" : "最短显示"}: ${settings.minimumVisiblePercent}% · ${relative}`],
+      [".startupTransition-timeline-fade", `${english ? "Fade at clip end" : "片段末尾淡出"}: ${settings.fadePercent}% · ${formatTimelineTime(geometry.clipStart + geometry.earliestFadePercent / 100 * (geometry.clipEnd - geometry.clipStart))}–${formatTimelineTime(geometry.clipEnd)}`],
+    ] as const) {
+      const marker = this.#required<HTMLElement>(selector);
+      marker.title = text; marker.setAttribute("aria-label", text);
+    }
     const still = this.#required<HTMLVideoElement>(".startupTransition-video-still");
+    still.playbackRate = settings.playbackRate;
     still.style.objectFit = settings.videoFit;
-    still.style.opacity = String(settings.videoOpacity);
+    still.style.opacity = String(settings.videoOpacity * this.#startupPreviewFadeOpacity);
     still.style.filter = `brightness(${settings.videoBrightness})`;
+    this.#renderStartupTransport();
+    for (const button of this.#shadow.querySelectorAll<HTMLButtonElement>(".startupTransition-transport button")) button.disabled = !this.#startupVideo || this.#startupVideoPending;
     this.#required<HTMLButtonElement>(".startupTransition-remove").disabled = !this.#startupVideo || this.#startupVideoPending;
     this.#required<HTMLButtonElement>(".startupTransition-upload").disabled = this.#startupVideoPending;
     const info = this.#required<HTMLElement>(".startupTransition-video-info");
     info.textContent = this.#startupVideoPending ? (panel.dataset.language === "en" ? "Saving video…" : "正在保存视频…")
       : this.#startupVideo ? `${this.#startupVideo.name} · ${(this.#startupVideo.size / 1048576).toFixed(1)} MB · ${this.#startupVideo.duration.toFixed(1)} s`
-      : (panel.dataset.language === "en" ? "No video selected; using the default animation." : "未选择视频，使用默认动画。");
+      : (panel.dataset.language === "en" ? "Choose a video first. No startup animation plays without a video." : "请先选择视频。未选择视频时不播放启动动画。");
   }
 
   #setStartupVideo(video: StartupVideo | null): void {
+    this.#stopStartupPreview();
     this.#startupTimelineFramesAbort?.abort();
     this.#startupVideo = video;
-    this.#startupTimelineScrubTime = undefined;
+    this.#resetStartupPreviewTiming();
+    this.#startupTimelineScrubTime = video ? startupTimelineGeometry(readStartupTransitionSettings(), video.duration).clipStart : undefined;
     const frames = this.#shadow.querySelectorAll<HTMLElement>(".startupTransition-timeline-frame");
     for (const frame of frames) frame.style.backgroundImage = "";
     if (video) {
@@ -19694,7 +19718,9 @@ export class CodeCodexElement extends HTMLElement {
     still.hidden = !video;
     if (this.#startupStillUrl) {
       still.src = this.#startupStillUrl;
-      still.onloadedmetadata = () => { still.currentTime = Math.min(readStartupTransitionSettings().clipStart, Math.max(0, still.duration - 0.1)); };
+      still.onloadedmetadata = () => {
+        still.currentTime = Math.min(this.#startupTimelineScrubTime ?? readStartupTransitionSettings().clipStart, Math.max(0, still.duration - 0.01));
+      };
     } else {
       still.removeAttribute("src");
       still.load();
@@ -19708,7 +19734,6 @@ export class CodeCodexElement extends HTMLElement {
       const video = await loadStartupVideo();
       if (!this.#connected || generation !== this.#startupVideoGeneration) return;
       this.#setStartupVideo(video);
-      this.#previewStartupTransition();
     } catch (error) {
       if (generation === this.#startupVideoGeneration) this.#showStartupTransitionError(error);
     }
@@ -19720,15 +19745,112 @@ export class CodeCodexElement extends HTMLElement {
     message.textContent = error instanceof Error ? error.message : String(error);
   }
 
-  #previewStartupTransition(): void {
-    this.#startupTimelineScrubTime = undefined;
-    this.#renderStartupTransition();
-    this.#startupPreviewController?.dispose();
-    this.#startupPreviewController = previewStartupTransition(
-      this.#required<HTMLElement>(".startupTransition-preview-stage"),
-      readStartupTransitionSettings(),
-      this.#startupVideo,
-    );
+  #stopStartupPreview(): void {
+    this.#startupPlaybackGeneration += 1;
+    if (this.#startupPlaybackFrame !== undefined) cancelAnimationFrame(this.#startupPlaybackFrame);
+    this.#startupPlaybackFrame = undefined;
+    this.#shadow.querySelector<HTMLVideoElement>(".startupTransition-video-still")?.pause();
+    this.#startupPlaybackRunning = false;
+    this.#renderStartupTransport();
+  }
+
+  #updateStartupPlayhead(seconds: number): void {
+    if (!this.#startupVideo) return;
+    this.#startupTimelineScrubTime = seconds;
+    const playhead = this.#required<HTMLElement>(".startupTransition-timeline-playhead");
+    playhead.hidden = false;
+    playhead.style.left = `${Math.max(0, Math.min(100, seconds / this.#startupVideo.duration * 100))}%`;
+  }
+
+  #renderStartupTransport(): void {
+    const panel = this.#shadow.querySelector<HTMLElement>("#cle-startupTransition-settings");
+    const button = this.#shadow.querySelector<HTMLButtonElement>(".startupTransition-play");
+    if (!panel || !button) return;
+    const english = panel.dataset.language === "en";
+    const label = this.#startupPlaybackRunning ? (english ? "Pause (Space)" : "暂停（空格）") : (english ? "Play (Space)" : "播放（空格）");
+    button.dataset.playing = String(this.#startupPlaybackRunning);
+    button.setAttribute("aria-pressed", String(this.#startupPlaybackRunning));
+    button.setAttribute("aria-label", label); button.title = label;
+    for (const [selector, zh, en] of [[".startupTransition-jump-start", "到片段开头", "Go to clip start"], [".startupTransition-jump-end", "到片段末尾", "Go to clip end"]] as const) {
+      const edge = panel.querySelector<HTMLButtonElement>(selector);
+      edge?.setAttribute("aria-label", english ? en : zh);
+      if (edge) edge.title = english ? en : zh;
+    }
+  }
+
+  #resetStartupPreviewTiming(): void {
+    this.#startupPreviewElapsed = 0;
+    this.#startupPreviewLeadIn = 0;
+    this.#startupPreviewFadeOpacity = 1;
+    this.#startupPreviewComplete = false;
+  }
+
+  #toggleStartupPlayback(): void {
+    if (this.#startupPlaybackRunning) { this.#stopStartupPreview(); return; }
+    this.#playStartupVideo();
+  }
+
+  #playStartupVideo(): void {
+    this.#stopStartupPreview();
+    if (!this.#startupVideo || this.#startupVideoPending) return;
+    const generation = this.#startupPlaybackGeneration;
+    const still = this.#required<HTMLVideoElement>(".startupTransition-video-still");
+    const range = startupTimelineGeometry(readStartupTransitionSettings(), this.#startupVideo.duration);
+    let start = this.#startupTimelineScrubTime ?? range.clipStart;
+    if (this.#startupPreviewComplete || start < range.clipStart || start >= range.clipEnd) {
+      start = range.clipStart; this.#resetStartupPreviewTiming();
+    }
+    if (this.#startupPreviewElapsed === 0) {
+      this.#startupPreviewLeadIn = 0;
+    }
+    still.style.opacity = String(readStartupTransitionSettings().videoOpacity * this.#startupPreviewFadeOpacity);
+    this.#updateStartupPlayhead(start);
+    this.#startupPlaybackRunning = true;
+    this.#renderStartupTransport();
+    this.#required<HTMLElement>(".startupTransition-error").hidden = true;
+    const play = async () => {
+      if (generation !== this.#startupPlaybackGeneration) return;
+      still.currentTime = Math.min(start, Math.max(0, still.duration - 0.01));
+      still.playbackRate = readStartupTransitionSettings().playbackRate;
+      try {
+        let mediaStarted = this.#startupPreviewElapsed >= this.#startupPreviewLeadIn;
+        if (mediaStarted) await still.play();
+        if (generation !== this.#startupPlaybackGeneration) return;
+        let previous = performance.now();
+        const tick = (now: number) => {
+          if (generation !== this.#startupPlaybackGeneration) return;
+          this.#startupPreviewElapsed += now - previous; previous = now;
+          const settings = readStartupTransitionSettings();
+          if (!mediaStarted && this.#startupPreviewElapsed >= this.#startupPreviewLeadIn) {
+            mediaStarted = true;
+            void still.play().catch((error) => {
+              if (generation === this.#startupPlaybackGeneration) { this.#stopStartupPreview(); this.#showStartupTransitionError(error); }
+            });
+          }
+          const effectiveEnd = range.clipEnd;
+          const ready = still.ended || still.currentTime >= effectiveEnd - 0.01;
+          this.#startupPreviewFadeOpacity = clipFadeOpacity(still.currentTime, range.clipStart, effectiveEnd, (range.clipEnd - range.clipStart) / settings.playbackRate * 1000 * settings.fadePercent / 100, settings.playbackRate);
+          if (ready) {
+            still.pause();
+            still.currentTime = Math.min(effectiveEnd, Math.max(0, still.duration - 0.01));
+            this.#startupPreviewFadeOpacity = 0;
+          }
+          this.#updateStartupPlayhead(ready ? effectiveEnd : still.currentTime);
+          still.style.opacity = String(settings.videoOpacity * this.#startupPreviewFadeOpacity);
+          if (this.#startupPreviewFadeOpacity === 0) {
+            this.#startupPreviewComplete = true;
+            this.#stopStartupPreview();
+            return;
+          }
+          this.#startupPlaybackFrame = requestAnimationFrame(tick);
+        };
+        this.#startupPlaybackFrame = requestAnimationFrame(tick);
+      } catch (error) {
+        if (generation === this.#startupPlaybackGeneration) { this.#stopStartupPreview(); this.#showStartupTransitionError(error); }
+      }
+    };
+    if (still.readyState >= HTMLMediaElement.HAVE_METADATA) void play();
+    else still.addEventListener("loadedmetadata", () => { void play(); }, { once: true });
   }
 
   async #syncStartupTransitionNativePreference(bridge: ExplorerBridge): Promise<void> {
@@ -19747,10 +19869,11 @@ export class CodeCodexElement extends HTMLElement {
   #seekStartupTimeline(seconds: number): void {
     if (!this.#startupVideo) return;
     const geometry = startupTimelineGeometry(readStartupTransitionSettings(), this.#startupVideo.duration);
-    const time = Math.max(geometry.clipStart, Math.min(geometry.clipEnd, seconds));
-    this.#startupPreviewController?.dispose();
-    this.#startupPreviewController = undefined;
+    const time = Math.max(0, Math.min(geometry.duration, seconds));
+    this.#stopStartupPreview();
+    this.#resetStartupPreviewTiming();
     this.#startupTimelineScrubTime = time;
+    this.#startupPreviewFadeOpacity = clipFadeOpacity(time, geometry.clipStart, geometry.clipEnd, geometry.fadeMs, readStartupTransitionSettings().playbackRate);
     const still = this.#required<HTMLVideoElement>(".startupTransition-video-still");
     if (still.readyState >= HTMLMediaElement.HAVE_METADATA) still.currentTime = Math.min(time, Math.max(0, still.duration - 0.01));
     this.#renderStartupTransition();
@@ -19803,12 +19926,23 @@ export class CodeCodexElement extends HTMLElement {
       void this.#loadStartupVideoForPanel();
     });
     this.#required<HTMLButtonElement>(".startupTransition-close").addEventListener("click", () => { this.#closeStartupTransition(); trigger.focus(); });
-    panel.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.stopPropagation(); this.#closeStartupTransition(); trigger.focus(); } });
-    panel.addEventListener("toggle", () => trigger.setAttribute("aria-expanded", String(panel.matches(":popover-open"))));
+    panel.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.stopPropagation(); this.#closeStartupTransition(); trigger.focus(); return; }
+      const target = event.target as HTMLElement;
+      if ((event.code === "Space" || event.key === " ") && !event.ctrlKey && !event.altKey && !event.metaKey && !target.closest('textarea, select, [contenteditable="true"], input:not([type="range"])')) {
+        event.preventDefault(); event.stopPropagation();
+        if (!event.repeat) this.#toggleStartupPlayback();
+      }
+    });
+    panel.addEventListener("toggle", () => {
+      const open = panel.matches(":popover-open");
+      trigger.setAttribute("aria-expanded", String(open));
+      if (!open) this.#stopStartupPreview();
+    });
     this.#previewMarketPopover.addEventListener("scroll", () => this.#positionStartupTransition());
     for (const input of panel.querySelectorAll<HTMLInputElement>("[data-startup-transition-setting]")) {
       input.addEventListener("input", () => {
-        const key = input.dataset.startupTransitionSetting as keyof Pick<StartupTransitionSettings, "minimumVisibleMs" | "maximumWaitMs" | "exitDurationMs" | "playbackRate" | "videoOpacity" | "videoBrightness">;
+        const key = input.dataset.startupTransitionSetting as keyof Pick<StartupTransitionSettings, "minimumVisiblePercent" | "fadePercent" | "playbackRate" | "videoOpacity" | "videoBrightness">;
         const settings = readStartupTransitionSettings();
         if (!writeStartupTransitionSettings({ ...settings, [key]: Number(input.value) })) {
           this.#showActionNotice("Startup transition setting could not be saved", "error");
@@ -19822,12 +19956,25 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderStartupTransition();
     });
     const timelineTrack = this.#required<HTMLElement>(".startupTransition-timeline-track");
-    timelineTrack.addEventListener("pointerdown", (event) => {
-      if (!this.#startupVideo || (event.target as Element).closest("[data-startup-timeline-edge]")) return;
+    const scrub = (event: PointerEvent) => {
+      if (!this.#startupVideo) return;
       const rect = timelineTrack.getBoundingClientRect();
-      const time = (event.clientX - rect.left) / rect.width * this.#startupVideo.duration;
-      this.#seekStartupTimeline(time);
+      if (rect.width > 0) this.#seekStartupTimeline((event.clientX - rect.left) / rect.width * this.#startupVideo.duration);
+    };
+    timelineTrack.addEventListener("pointerdown", (event) => {
+      if (!this.#startupVideo || event.button !== 0 || (event.target as Element).closest("[data-startup-timeline-edge]")) return;
+      event.preventDefault();
+      timelineTrack.setPointerCapture(event.pointerId);
+      scrub(event);
     });
+    timelineTrack.addEventListener("pointermove", (event) => {
+      if (timelineTrack.hasPointerCapture(event.pointerId)) scrub(event);
+    });
+    for (const type of ["pointerup", "pointercancel"] as const) {
+      timelineTrack.addEventListener(type, (event) => {
+        if (timelineTrack.hasPointerCapture(event.pointerId)) timelineTrack.releasePointerCapture(event.pointerId);
+      });
+    }
     for (const handle of panel.querySelectorAll<HTMLElement>("[data-startup-timeline-edge]")) {
       const edge = handle.dataset.startupTimelineEdge as "start" | "end";
       let grabOffset = 0;
@@ -19878,7 +20025,6 @@ export class CodeCodexElement extends HTMLElement {
           throw new Error("Video trim settings could not be saved");
         }
         this.#setStartupVideo(video);
-        this.#previewStartupTransition();
       } catch (error) {
         if (generation === this.#startupVideoGeneration) this.#showStartupTransitionError(error);
       } finally {
@@ -19894,7 +20040,6 @@ export class CodeCodexElement extends HTMLElement {
         await removeStartupVideo();
         this.#startupVideoGeneration += 1;
         this.#setStartupVideo(null);
-        this.#previewStartupTransition();
       } catch (error) {
         this.#showStartupTransitionError(error);
       } finally {
@@ -19908,10 +20053,16 @@ export class CodeCodexElement extends HTMLElement {
         this.#showActionNotice("Startup transition setting could not be saved", "error");
       }
       this.#renderStartupTransition();
-      this.#previewStartupTransition();
+      this.#stopStartupPreview();
+      this.#resetStartupPreviewTiming();
+      if (this.#startupVideo) this.#seekStartupTimeline(readStartupTransitionSettings().clipStart);
     });
-    this.#required<HTMLButtonElement>(".startupTransition-preview").addEventListener("click", () => {
-      this.#previewStartupTransition();
+    this.#required<HTMLButtonElement>(".startupTransition-play").addEventListener("click", () => this.#toggleStartupPlayback());
+    this.#required<HTMLButtonElement>(".startupTransition-jump-start").addEventListener("click", () => {
+      if (this.#startupVideo) this.#seekStartupTimeline(startupTimelineGeometry(readStartupTransitionSettings(), this.#startupVideo.duration).clipStart);
+    });
+    this.#required<HTMLButtonElement>(".startupTransition-jump-end").addEventListener("click", () => {
+      if (this.#startupVideo) this.#seekStartupTimeline(startupTimelineGeometry(readStartupTransitionSettings(), this.#startupVideo.duration).clipEnd);
     });
   }
 
@@ -20156,6 +20307,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #writeEnabledAppearancePlugins(): void {
+    runtimeEvent("renderer", "appearance plugins", "active set updated", {plugins:[...this.#enabledAppearancePlugins]});
     try {
       localStorage.setItem(APPEARANCE_PLUGIN_SETTINGS_KEY, JSON.stringify([...this.#enabledAppearancePlugins]));
     } catch {
@@ -21640,6 +21792,8 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #showActionNotice(message: string, tone: "success" | "error" = "success"): void {
+    // Only Code-Codex notices, never native conversation or form contents.
+    runtimeEvent("renderer", "action notice", tone, {message:message.slice(0,1000)});
     this.#hideActionNotice();
     this.#actionNotice.textContent = message;
     this.#actionNotice.dataset.tone = tone;

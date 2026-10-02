@@ -8,6 +8,8 @@ import type {
   ObjectBridge,
 } from "./types";
 const MESSAGE_EVENT = "code-codex:message";
+import { connectRuntimeInformation } from "./runtime-information";
+import { runtimeEvent } from "./runtime-events";
 
 function safeRuntimeName(value: string | undefined, fallback: string): string {
   return typeof value === "string" && /^__[A-Za-z][A-Za-z0-9_]{1,94}$/.test(value)
@@ -143,6 +145,7 @@ export class ExplorerBridge extends EventTarget {
       const unsubscribe = binding.subscribe(this.#receive);
       if (typeof unsubscribe === "function") this.#unsubscribeObjectBridge = unsubscribe;
     }
+    connectRuntimeInformation(this.request.bind(this));
   }
 
   get available(): boolean {
@@ -272,6 +275,7 @@ export class ExplorerBridge extends EventTarget {
     }
 
     if (isBridgeNotification(message)) {
+      runtimeEvent("native-bridge", "notification", "received", {method:message.method});
       for (const listener of this.#listeners) listener(message);
       this.dispatchEvent(new CustomEvent(message.method, { detail: message.params }));
     }

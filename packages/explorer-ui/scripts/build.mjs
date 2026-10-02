@@ -74,6 +74,8 @@ const options = {
   target: ["chrome120"],
 };
 
+await build({ ...options, entryPoints: ["src/startup-transition-early.ts"], format: "iife", minify: true, outfile: "dist/startup-early.js" });
+
 if (watch) {
   const injector = await context({
     ...options,

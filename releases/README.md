@@ -2,6 +2,84 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.78 — Loading-screen animation supervision
+
+- Supervise the optional startup player concurrently from activation through page discovery and navigation.
+- Keep the new-document hook connected; show only the selected video during loading and fade after native readiness.
+- Record candidate selection, ownership checks, CDP command failures, player state, video lookup and renderer lifecycle in Runtime Information.
+- Preserve normal startup and the existing 10-run, 5 MiB per-run log limits.
+
+## v0.3.77 — Runtime Information
+
+- Add the English Runtime Information item to the Code-Codex menu, with run selection, event filtering, Copy Details and JSONL export.
+- Reuse startup traces and collect renderer supervision, file-tree/project/preview activity, plugin state/settings, startup video lifecycle and observable native Codex page changes.
+- Automatically retain the latest 10 runs. Each JSONL file is capped at 5 MiB; oldest complete events are removed in batches and the removed count remains visible.
+- Write asynchronously with atomic file replacement, bounded renderer batches and retry after temporary connection loss. Logs stay local under `%LOCALAPPDATA%\CodeCodex\runtime-logs`.
+- Validated with Rust storage/retention tests, a native failed-launch persistence check, browser interaction/export/retry checks and existing UI regression checks.
+- Local build, not published to GitHub.
+
+## v0.3.76 — Earlier loading-screen animation
+
+- Start the lightweight animation immediately after official package activation, before the slower CIM check and App Server preparation.
+- Use a native TCP-owner and process-creation-time check for this capability-free early phase; full identity checks and privileged UI qualification remain in place.
+- A main container alone no longer means ready: the native navigation/sidebar or actual sign-in controls must be present.
+- Show the first decoded frame immediately: the tail-fade percentage no longer creates a long entrance fade.
+- Detect readiness within the early player, preserve video/trim/percentage settings, and suppress late replay.
+- Local build, not published to GitHub.
+
+## v0.3.75 — Animation during the loading screen
+
+- A separate 8.5 KB, bridge-free startup bundle runs on the verified official main loading document before App Server preparation and shell qualification.
+- The full UI adopts the same player and readiness promise; it does not replay an opening animation after the main interface appears.
+- Late loading skips animation. Existing video selection, trim, percentage timing and preview controls are preserved.
+- Added loading-page to ready-page handoff and late-replay regression checks.
+- Local version, not published to GitHub.
+
+## v0.3.74 — Percentage timing and readiness-based playback
+
+- Removed the maximum-wait control and startup timeout; the selected clip loops until Codex is ready.
+- Minimum display and tail fade now use 0–100% of the selected clip. Changing trim or playback speed preserves these proportions.
+- Preview, timing markers and actual startup share the same clip proportions; legacy saved milliseconds migrate automatically.
+- Readiness detection continues through slow startup; video decoding or playback errors dismiss the animation instead of blocking the app.
+- Validated and installed locally; not published to GitHub.
+
+## v0.3.73 — 裁剪片段尾部淡出 / Fade within the trimmed clip
+
+- 预览及实际启动的淡出作用于所选片段的尾部，视频在淡出期间继续播放，在片段终点结束，不再追加静止末帧淡出。
+- 参数范围细线以裁剪起点为零点、裁剪片段长度为尺度；超过片段长度的标记收束在片段边界。
+- 范围条减为 3px 细线，移除固定标题和颜色标签；各颜色提供悬停及键盘焦点可访问的效果与时间说明。
+- 保留播放、暂停、跳转、拖动与空格控制；最短显示超出片段播放时长时，在开头等待后再完整播放及尾部淡出。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.72 — 剪辑式播放控制 / Timeline transport controls
+
+- 时间轴区域使用深黑灰背景；其上方加入片段开头、播放/暂停及片段末尾按钮，移除重播选项。
+- 播放从当前指针继续，空格切换播放与暂停；拖动定位或跳转重置模拟计时，关闭面板停止播放。
+- 预览模拟启动：片段结束视为就绪，满足最短显示时长后淡出；达到最长等待时间则停止播放并淡出。暂停同时冻结视频、等待和淡出，参数实时生效。
+- 增大参数两列之间的空隙，缩短参数说明与滑条距离，保留统一字体、控件和窄屏单列布局。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.71 — 启动视频时间轴播放 / Startup video timeline playback
+
+- 按住时间轴拖动即可连续定位视频画面；拖出时间轴仍可定位两端，播放指针同步更新。
+- 重播从选中片段起点播放到终点并停留在末帧，不受启动等待和淡出参数截断；拖动暂停定位，再次重播返回片段起点。
+- 打开设置只显示视频首帧，关闭面板停止播放；移除启动器和播放器内置默认动画，没有自选视频时不播放动画。
+- 保留统一设置样式、宽屏预览、双列参数和窄屏排列。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.70 — 加宽启动动画设置 / Wider startup transition settings
+
+- 启动动画设置面板加宽至 800px，上方视频预览和时间轴使用整行宽度。
+- 视频外观及播放时长使用双列参数排列；窄窗口下自动恢复单列，保留统一字体、颜色、控件和中英切换。
+- 保留动画插件的市场入口、已有设置及预览行为。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.69 — 恢复启动动画市场入口 / Restore startup transition entry
+
+- 在 Preview Market 的 Appearance 中重新显示 Codex Startup Transition，保留其已有启用状态与动画设置。
+- 保留 v0.3.68 的蒙版调节、双语面板、消息提示及登录页背景行为。
+- 本地版本，尚未发布至 GitHub。
+
 ## v0.3.68 — 蒙版面板样式和提示层级 / Consistent opacity controls and visible notices
 
 - 市场名称固定为英文 UI Surface Opacity；设置面板复用其他外观插件的中英语言开关、标题、参数行、字体和按钮样式。

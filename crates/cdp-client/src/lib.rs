@@ -197,6 +197,12 @@ impl TargetDiscovery {
         self.get_json(endpoint.http_url("/json/list")).await
     }
 
+    pub async fn targets_detailed(&self, endpoint: CdpEndpoint) -> Result<Vec<CdpTarget>, String> {
+        self.get_json_detailed(endpoint.http_url("/json/list"))
+            .await
+            .map_err(|(_, detail)| detail)
+    }
+
     /// Read-only, bounded diagnostics for a target on the verified launch port.
     /// The expression returns only counts and booleans, never page text or URLs.
     pub async fn renderer_layout_diagnostics(

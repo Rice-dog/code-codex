@@ -18,18 +18,20 @@ export function startupTimelineGeometry(settings: StartupTransitionSettings, vid
   const duration = Number.isFinite(videoDuration) ? Math.max(MIN_CLIP_SECONDS, videoDuration) : 5;
   const clipStart = clamp(settings.clipStart, 0, duration - MIN_CLIP_SECONDS);
   const clipEnd = clamp(settings.clipEnd, clipStart + MIN_CLIP_SECONDS, duration);
-  const effectiveWaitMs = Math.max(settings.maximumWaitMs, settings.minimumVisibleMs);
-  const timingEndMs = effectiveWaitMs + settings.exitDurationMs;
+  const clipPlaybackSeconds = (clipEnd - clipStart) / settings.playbackRate;
+  const timingEndMs = clipPlaybackSeconds * 1000;
+  const fadeMs = settings.fadePercent / 100 * timingEndMs;
   return {
     duration,
     clipStart,
     clipEnd,
-    clipPlaybackSeconds: (clipEnd - clipStart) / settings.playbackRate,
+    clipPlaybackSeconds,
+    fadeMs,
     startPercent: clipStart / duration * 100,
     endPercent: clipEnd / duration * 100,
-    earliestFadePercent: settings.minimumVisibleMs / timingEndMs * 100,
-    earliestFadeEndPercent: (settings.minimumVisibleMs + settings.exitDurationMs) / timingEndMs * 100,
-    timeoutPercent: effectiveWaitMs / timingEndMs * 100,
+    minimumPercent: clamp(settings.minimumVisiblePercent, 0, 100),
+    earliestFadePercent: (timingEndMs - fadeMs) / timingEndMs * 100,
+    earliestFadeEndPercent: 100,
   };
 }
 
@@ -102,4 +104,11 @@ export async function sampleStartupVideoFrames(video: StartupVideo, signal: Abor
     player.load();
     URL.revokeObjectURL(source);
   }
+}
+
+/** The fade occupies the tail of the selected clip, measured in playback seconds. */
+export function clipFadeOpacity(time: number, start: number, end: number, fadeMs: number, rate: number): number {
+  const span = Math.min(Math.max(0, end - start), Math.max(0, fadeMs) / 1000 * rate);
+  if (time >= end - 0.01) return 0;
+  return span > 0 ? clamp((end - time) / span, 0, 1) : 1;
 }

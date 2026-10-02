@@ -1959,18 +1959,6 @@ fn select_codex_window(pid: u32) -> Result<WindowCandidate, WindowTransparencyEr
 }
 
 #[cfg(windows)]
-pub(crate) fn startup_splash_window(pid: u32) -> Option<isize> {
-    select_codex_window(pid)
-        .ok()
-        .map(|candidate| candidate.window)
-}
-
-#[cfg(not(windows))]
-pub(crate) fn startup_splash_window(_pid: u32) -> Option<isize> {
-    None
-}
-
-#[cfg(windows)]
 unsafe extern "system" fn collect_codex_window_candidate(window: HWND, parameter: LPARAM) -> BOOL {
     let context = unsafe { &mut *(parameter as *mut WindowEnumerationContext) };
     if let Some(candidate) = inspect_window_candidate(window, context.virtual_screen) {
@@ -3389,7 +3377,58 @@ impl BridgeHandler for NativeBridge {
     async fn handle(&self, request: BindingRequest) -> Result<Value, BridgeError> {
         let epoch = request.lifecycle_epoch;
         self.ensure_epoch(epoch)?;
-        match request.method.as_str() {
+        let method = request.method.clone();
+        let started = std::time::Instant::now();
+        let log_operation = !method.starts_with("explorer.runtime.")
+            && !method.ends_with(".chunk")
+            && !method.ends_with(".resource.chunk");
+        if log_operation {
+            crate::runtime_log::record("native-bridge", &method, "started", json!({}));
+        }
+        let result = match request.method.as_str() {
+            "explorer.runtime.list" => {
+                crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))
+            }
+            "explorer.runtime.read" => {
+                let id = request
+                    .params
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(BridgeError::invalid_request)?;
+                crate::runtime_log::read(id).map_err(|e| BridgeError::new("RUNTIME_LOG", e))
+            }
+            "explorer.runtime.append" => {
+                let events = request
+                    .params
+                    .get("events")
+                    .and_then(Value::as_array)
+                    .filter(|e| e.len() <= 128)
+                    .ok_or_else(BridgeError::invalid_request)?;
+                // Validate the whole batch before appending any event.
+                for event in events {
+                    for key in ["source", "action", "outcome"] {
+                        if !event.get(key).and_then(Value::as_str).is_some_and(|s| {
+                            !s.is_empty() && s.len() <= 160 && !s.chars().any(char::is_control)
+                        }) {
+                            return Err(BridgeError::invalid_request());
+                        }
+                    }
+                    if !event.get("details").is_some_and(Value::is_object)
+                        || event.to_string().len() > 8192
+                    {
+                        return Err(BridgeError::invalid_request());
+                    }
+                }
+                for event in events {
+                    crate::runtime_log::record(
+                        event["source"].as_str().unwrap(),
+                        event["action"].as_str().unwrap(),
+                        event["outcome"].as_str().unwrap(),
+                        event["details"].clone(),
+                    );
+                }
+                Ok(json!({"accepted":events.len()}))
+            }
             "explorer.context" => self.context(request.params, epoch).await,
             "explorer.context.clear" => self.context_clear(request.params, epoch),
             "explorer.list" => self.list(request.params, epoch).await,
@@ -3436,7 +3475,29 @@ impl BridgeHandler for NativeBridge {
                 "INVALID_REQUEST",
                 "The native method is not allowed.",
             )),
+        };
+        if log_operation {
+            let mut details = json!({"durationMs":started.elapsed().as_millis()});
+            if let Err(error) = &result {
+                details["errorCode"] = json!(error.code);
+                details["message"] = json!(error.message.chars().take(1500).collect::<String>());
+            }
+            if let Ok(value) = &result {
+                if let Some(entries) = value.get("entries").and_then(Value::as_array) {
+                    details["entryCount"] = json!(entries.len());
+                }
+                if method == "explorer.context" {
+                    details["workspaceAvailable"] = json!(value.get("rootName").is_some());
+                }
+            }
+            crate::runtime_log::record(
+                "native-bridge",
+                &method,
+                if result.is_ok() { "passed" } else { "failed" },
+                details,
+            );
         }
+        result
     }
 
     fn lifecycle_epoch(&self) -> u64 {
