@@ -1,0 +1,26 @@
+<!doctype html><html data-theme="dark"><head><meta charset="UTF-8"><style>
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0}body{font:13px 'Segoe UI';color:#ddd;background:#181818}
+[data-app-shell-workspace-row]{display:flex;width:100%;height:100%}aside{width:200px;flex:none}.sidebar-navigation{background:#181818}
+._Workspace_new{display:contents}._MainContentClip_new{display:flex;flex:1;min-width:0}main{position:relative;display:flex;flex-direction:column;flex:1;min-width:0}
+header{position:fixed;top:0;left:200px;right:0;height:52px;pointer-events:none}._WorkspaceContent_new{flex:1;display:flex;min-height:0;padding-top:52px}
+[data-app-shell-workspace-layout]{flex:1;display:flex;flex-direction:column}article{flex:1}textarea{height:90px;width:80%}
+</style></head><body><nav data-app-navigation-rail="true"><button data-sidebar-destination="builtin:home" aria-current="page">首页</button><button data-sidebar-destination="builtin:automations" >任务</button><button data-sidebar-destination="builtin:library" >资料库</button><button data-sidebar-destination="builtin:images" >图像</button></nav><button hidden data-app-shell-sidebar-trigger></button>
+<div data-app-shell-workspace-row="true"><aside class="app-shell-left-panel"><div class="sidebar-navigation"><button data-app-action-sidebar-thread-active="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-kind="local" data-app-action-sidebar-thread-id="local:thread_home_001">Project</button></div></aside><div id="home" data-app-shell-active-page="true" style="display:contents"><div class="_Workspace_new"><header><span data-app-shell-titlebar-content>Home title</span></header><div class="_MainContentClip_new"><main data-app-shell-main-surface="default"><div class="_WorkspaceContent_new"><div data-app-shell-workspace-layout="split"><article data-response-annotation-conversation="thread_home_001">Conversation</article><div data-above-composer-conversation-id="thread_home_001"><textarea>Native draft</textarea></div></div></div></main></div></div></div><div id="feature" data-app-shell-active-page="false" style="display:none"><div class="_Workspace_new"><header><span data-app-shell-titlebar-content>Native feature</span></header><div class="_MainContentClip_new"><main data-app-shell-main-surface="default"><button>Native page control</button></main></div></div></div></div>
+<script>
+const calls=[];const listeners=new Set();let changed=false;
+window.__CODE_CODEX_BOOTSTRAP__={token:'test',codexVersion:'26.928.2636.0',supported:true};
+window.__codeCodex={subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener);},request:async({method,params})=>{
+ calls.push({method,params});
+ if(method==='explorer.settings.get'||method==='explorer.settings.set')return {collapsed:false,panelWidth:260};
+ if(method==='explorer.context')return {threadId:params.threadId,projectName:'Fixture',rootName:'Fixture',compatible:true};
+ if(method==='explorer.list')return {entries:params.relativePath==='src'?[{name:'child.ts',relativePath:'src/child.ts',kind:'file'}]:[
+  {name:'src',relativePath:'src',kind:'directory'},
+  {name:'README.md',relativePath:'README.md',kind:'file'},
+  ...Array.from({length:55},(_,i)=>({name:'file'+String(i).padStart(2,'0')+'.ts',relativePath:'file'+String(i).padStart(2,'0')+'.ts',kind:'file'})),
+  ...(changed?[{name:'watched.ts',relativePath:'watched.ts',kind:'file'}]:[])]};
+ if(method==='explorer.preview')return {kind:'text',text:'# Preview',sizeBytes:9,truncated:false,editable:true,version:'a'.repeat(64),lineEnding:'lf'};
+ if(method==='explorer.watch.start')return {watching:true};
+ return {};
+}};
+const errors=[];addEventListener('error',event=>errors.push(event.message));
+</script><script src="__BUNDLE_URL__"></script></body></html>

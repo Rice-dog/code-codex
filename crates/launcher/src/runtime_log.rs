@@ -1,5 +1,7 @@
 //! Bounded, per-launch diagnostics. Logging failure never fails an application operation.
 use serde_json::{Value, json};
+#[path = "runtime_redaction.rs"]
+mod redaction;
 use std::{
     collections::VecDeque,
     fs, io,
@@ -28,7 +30,7 @@ struct RunLog {
 
 impl RunLog {
     fn document(&self) -> String {
-        let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES});
+        let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES,"redactionPolicy":1});
         format!(
             "{}\n{}",
             header,
@@ -39,7 +41,7 @@ impl RunLog {
         self.sequence += 1;
         let line = format!(
             "{}\n",
-            json!({"sequence":self.sequence,"time":now(),"elapsedMs":self.started.elapsed().as_millis(),"source":source,"action":action,"outcome":outcome,"details":details})
+            json!({"sequence":self.sequence,"time":now(),"elapsedMs":self.started.elapsed().as_millis(),"source":redaction::text(source),"action":redaction::text(action),"outcome":redaction::text(outcome),"details":redaction::value(details)})
         );
         // Reserve more than the maximum metadata header, retain complete UTF-8 events.
         if line.len() > 32 * 1024 {
@@ -221,7 +223,7 @@ pub fn flush() {
                     state.dirty = false;
                 }
             }
-            Err(error) => state.storage_error = Some(error.to_string()),
+            Err(error) => state.storage_error = Some(redaction::text(&error.to_string())),
         }
     }
 }
@@ -275,7 +277,7 @@ pub fn read(id: &str) -> Result<Value, String> {
         }
         fs::read_to_string(path).map_err(|e| e.to_string())?
     };
-    Ok(json!({"text":text,"storageError":log.storage_error}))
+    Ok(json!({"text":redaction::document(&text),"storageError":log.storage_error}))
 }
 
 #[cfg(test)]
@@ -335,5 +337,28 @@ mod tests {
         assert!(text.contains("saved"));
         assert!(!valid_id("../other"));
         fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn persisted_events_are_redacted_and_retain_error_codes() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut log = fixture(directory.path().to_path_buf());
+        log.push(
+            "launcher",
+            "import",
+            "failed",
+            json!({
+                "code":"TIMEOUT", "port":7613, "attempt":1,
+                "authorization":"Bearer SENTINEL_AUTH", "prompt":"SENTINEL_CHAT",
+                "nested":[{"message":"EIO at C:\\Users\\SENTINEL_USER\\file"}]
+            }),
+        );
+        log.persist().unwrap();
+        let disk = fs::read_to_string(directory.path().join("0000000001000-1.jsonl")).unwrap();
+        assert!(!disk.contains("SENTINEL"));
+        assert!(disk.contains("redactionPolicy"));
+        let event: Value = serde_json::from_str(disk.lines().nth(1).unwrap()).unwrap();
+        assert_eq!(event["details"]["code"], "TIMEOUT");
+        assert_eq!(event["details"]["port"], 7613);
+        assert_eq!(event["sequence"], 1);
     }
 }

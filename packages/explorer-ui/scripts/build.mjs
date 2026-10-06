@@ -29,6 +29,9 @@ const [legacyPowerPointWorkerBytes, legacyPowerPointWasm, legacyPowerPointStyles
   readFile(resolve(legacyPowerPointAssets, "index.css"), "utf8"),
 ]);
 const pixelSculptDefaultImage = `data:image/png;base64,${(await readFile(resolve(root, "src/pixel-sculpt-default.png"))).toString("base64")}`;
+// The early bundle stays isolated and small. This is the same default flower;
+// normal UI rendering retains the original PNG and saved galleries are unchanged.
+const pixelSculptStartupDefaultImage = `data:image/webp;base64,${(await readFile(resolve(root, "src/pixel-sculpt-startup-default.webp"))).toString("base64")}`;
 const startupTransitionStyles = await readFile(resolve(root, "src/startup-transition.css"), "utf8");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 if (sha256(legacyPowerPointWorkerBytes) !== embeddedWasm.workerSha256 ||
@@ -74,7 +77,17 @@ const options = {
   target: ["chrome120"],
 };
 
-await build({ ...options, entryPoints: ["src/startup-transition-early.ts"], format: "iife", minify: true, outfile: "dist/startup-early.js" });
+await build({
+  ...options,
+  define: { ...options.define, __CODE_CODEX_PIXEL_SCULPT_IMAGE__: JSON.stringify(pixelSculptStartupDefaultImage) },
+  entryPoints: ["src/startup-transition-early.ts"], format: "iife", minify: true,
+  outfile: "dist/startup-early.js",
+});
+const earlyBundleBytes = (await readFile(resolve(root, "dist/startup-early.js"))).byteLength;
+const earlyBundleLimit = 512 * 1024;
+if (earlyBundleBytes >= earlyBundleLimit) {
+  throw new Error(`The isolated startup bundle is ${earlyBundleBytes} bytes; it must stay below ${earlyBundleLimit} bytes. Review startup-only dependencies and embedded assets before packaging.`);
+}
 
 if (watch) {
   const injector = await context({

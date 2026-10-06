@@ -153,11 +153,11 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
     state[CONTROLLER_STATE] = controller;
     await controller.mediaReady;
     if (controller.phase === "complete") {
-      runtimeEvent("startup-animation","video media","failed",{reason:"player ended before reveal; inspect player error or disposal events"});
+      runtimeEvent("startup-animation","source media","failed",{source:settings.source,reason:"player ended before reveal; inspect player error or disposal events"});
       resolveVisualReady?.(false);
       return undefined;
     }
-    runtimeEvent("startup-animation","video media","ready",{phase:controller.phase});
+    runtimeEvent("startup-animation","source media","ready",{source:settings.source,phase:controller.phase});
     if (!await paintedFrame()) {
       runtimeEvent("startup-animation","first painted frame","failed",{reason:"document visibility or painted-frame wait timed out"});
       controller.dispose();

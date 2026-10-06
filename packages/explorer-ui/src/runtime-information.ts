@@ -1,4 +1,5 @@
 import { runtimeEvent, takeRuntimeEvents, restoreRuntimeEvents } from "./runtime-events";
+import { redactRuntimeText, redactRuntimeValue } from "./runtime-redaction";
 import { isHomeWorkspaceView } from "./home-view";
 import { isNativeLoginView } from "./native-login";
 
@@ -30,7 +31,7 @@ export async function flushRuntimeEvents(): Promise<void> {
         if (result.accepted !== events.length) throw new Error("Runtime events were not acknowledged.");
         syncError = "";
       }
-      catch(error) { syncError = error instanceof Error ? error.message : "Renderer log synchronization failed"; restoreRuntimeEvents(events); break; }
+      catch(error) { syncError = error instanceof Error ? redactRuntimeText(error.message) : "Renderer log synchronization failed"; restoreRuntimeEvents(events); break; }
     }
   })();
   try { await sending; } finally { sending = undefined; }
@@ -141,10 +142,10 @@ export async function openRuntimeInformation(): Promise<void> {
       await flushRuntimeEvents();
       const data = await request<{text:string;storageError?:string}>("explorer.runtime.read",{id:select.value});
       if (token !== generation || !host.isConnected) return;
-      text=data.text; const lines=text.trim().split("\n").map(line=>JSON.parse(line)); const metadata=lines.shift(); events=lines;
+      const lines=data.text.trim().split("\n").map(line=>redactRuntimeValue(JSON.parse(line)) as Record<string, unknown>); text=lines.map(line=>JSON.stringify(line)).join("\n")+"\n"; const metadata=lines.shift()!; events=lines as typeof events;
       summary.textContent=`Version ${metadata.version} · ${events.length} retained events · ${metadata.droppedEvents} older events removed · ${(new TextEncoder().encode(text).length/1024/1024).toFixed(2)} MB${data.storageError ? ` · Storage error: ${data.storageError}` : ""}${syncError ? ` · Renderer sync error: ${syncError}` : ""}`;
       render();
-    } catch(error) { summary.textContent=error instanceof Error ? error.message : "Could not load runtime information."; }
+    } catch(error) { summary.textContent=error instanceof Error ? redactRuntimeText(error.message) : "Could not load runtime information."; }
   };
   const refresh = async () => {
     try {
@@ -154,7 +155,7 @@ export async function openRuntimeInformation(): Promise<void> {
       select.replaceChildren(...listing.runs.map(run=>{const option=document.createElement("option"); option.value=run.id; const date=new Date(Number(run.id.split("-")[0])); option.textContent=`${date.toLocaleString()}${run.current ? " · Current run" : ""}`; return option;}));
       select.value=listing.runs.some(run=>run.id===selected) ? selected : listing.currentRun;
       await load();
-    } catch(error) { summary.textContent=error instanceof Error ? error.message : "Could not list runtime logs."; }
+    } catch(error) { summary.textContent=error instanceof Error ? redactRuntimeText(error.message) : "Could not list runtime logs."; }
   };
   shadow.querySelector(".close")!.addEventListener("click",()=>host.close());
   host.addEventListener("close",()=>{host.remove();dialog=undefined;clearInterval(refreshTimer);});

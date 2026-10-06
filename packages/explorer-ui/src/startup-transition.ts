@@ -71,7 +71,7 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
   let readyTimer: number | undefined;
   let exitTimer: number | undefined;
   let video: HTMLVideoElement | undefined;
-  let background: {dispose():void} | undefined;
+  let background: ReturnType<typeof mountStartupBackground> | undefined;
   let frame: number | undefined;
   let exitArmed = false;
   let exitStartedAt: number | undefined;
@@ -79,16 +79,30 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
   const clipStart = Math.max(0, options.clipStart ?? 0);
   const clipEnd = Math.max(clipStart + 0.1, options.clipEnd ?? Number.POSITIVE_INFINITY);
 
+  let settleMediaReady = () => {};
   const mediaReady = new Promise<void>((resolve) => {
+    settleMediaReady = resolve;
     if (options.backgroundId && !reducedMotion) {
       try {
         background = mountStartupBackground(overlay.querySelector<HTMLElement>('.codex-startup__video')!, options.backgroundId, message => {
           if(message) {runtimeEvent('startup-animation','background renderer','failed',{id:options.backgroundId,reason:message});finish('disposed');}
         });
         if(phase === 'complete') { background.dispose(); resolve();return; }
-        overlay.classList.add('codex-startup--has-video');
-        runtimeEvent('startup-animation','background renderer','started',{id:options.backgroundId});
-        resolve();return;
+        runtimeEvent('startup-animation','background renderer','preparing',{id:options.backgroundId});
+        void Promise.resolve(background.ready).then(() => {
+          if (phase !== 'complete') {
+            overlay.classList.add('codex-startup--has-video');
+            runtimeEvent('startup-animation','background renderer','started',{id:options.backgroundId});
+          }
+          resolve();
+        }, error => {
+          if (phase !== 'complete') {
+            runtimeEvent('startup-animation','background renderer','failed',{id:options.backgroundId,reason:String(error)});
+            finish('disposed');
+          }
+          resolve();
+        });
+        return;
       } catch(error) {runtimeEvent('startup-animation','background renderer','failed',{id:options.backgroundId,reason:String(error)});finish('disposed');resolve();return;}
     }
     if (!options.videoSrc || reducedMotion) { resolve(); return; }
@@ -148,6 +162,7 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     if (phase === "complete") return;
     runtimeEvent("startup-animation", "player", "finished", {reason,preview:!options.fullScreen});
     phase = "complete";
+    settleMediaReady();
     clearTimers();
     if (frame !== undefined) cancelAnimationFrame(frame);
     video?.pause();

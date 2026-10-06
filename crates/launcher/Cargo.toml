@@ -42,6 +42,7 @@ dunce.workspace = true
 futures-util.workspace = true
 process-wrap.workspace = true
 reqwest.workspace = true
+regex-automata = "0.4"
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true

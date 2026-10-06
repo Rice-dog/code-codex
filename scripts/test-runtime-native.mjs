@@ -1,6 +1,7 @@
 // Check only Code-Codex's own menu/dialog in an already running authorized local session.
 import assert from 'node:assert/strict';
-import {writeFileSync} from 'node:fs';
+import {readFileSync,writeFileSync} from 'node:fs';
+const version=JSON.parse(readFileSync('packages/explorer-ui/package.json','utf8')).version;
 const port=Number(process.argv[2]);assert.ok(port>0&&port<65536);
 const targets=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();
 const target=targets.find(t=>t.type==='page'&&t.url==='app://-/index.html');assert.ok(target);
@@ -11,8 +12,10 @@ try {
  await evaluate(`document.querySelector('[data-code-codex-runtime-information]')?.firstElementChild.shadowRoot.querySelector('.close').click();document.querySelector('#code-codex-application-menu-trigger').click();[...document.querySelectorAll('[data-code-codex-application-menu-popup] [role=menuitem]')].find(x=>x.textContent==='Runtime Information').click()`);
  await new Promise(r=>setTimeout(r,500));
  const result=await evaluate(`(()=>{const d=document.querySelector('[data-code-codex-runtime-information]'),s=d?.firstElementChild.shadowRoot;return {open:d?.open,title:s?.querySelector('h2').textContent,summary:s?.querySelector('.summary').textContent,runs:s?.querySelector('select').options.length,events:s?.querySelectorAll('.event').length};})()`);
- assert.equal(result.open,true);assert.equal(result.title,'Runtime Information');assert.ok(result.summary.includes('Version 0.3.86'));assert.ok(result.runs>=2);assert.ok(result.events>0);console.log(result);writeFileSync('artifacts/runtime-086-native-check.json',JSON.stringify(result,null,2));
+ assert.equal(result.open,true);assert.equal(result.title,'Runtime Information');assert.ok(result.summary.includes(`Version ${version}`));assert.ok(result.runs>=2);assert.ok(result.events>0);console.log(result);writeFileSync(`artifacts/runtime-${version}-native-check.json`,JSON.stringify(result,null,2));
+ const tree=await evaluate(`(()=>{const nodes=[...document.querySelectorAll('*')].filter(e=>/^code-codex-v/.test(e.localName));return {count:nodes.length,state:nodes[0]?.dataset.state};})()`);
+ assert.equal(tree.count,1);assert.ok(['ready','empty'].includes(tree.state));writeFileSync(`artifacts/runtime-${version}-native-tree.json`,JSON.stringify(tree,null,2));
  const rect=await evaluate(`(()=>{const r=document.querySelector('[data-code-codex-runtime-information]').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,scale:1};})()`);
- const shot=await cmd('Page.captureScreenshot',{format:'png',clip:rect});writeFileSync('artifacts/runtime-086-native.png',Buffer.from(shot.data,'base64'));
+ const shot=await cmd('Page.captureScreenshot',{format:'png',clip:rect});writeFileSync(`artifacts/runtime-${version}-native.png`,Buffer.from(shot.data,'base64'));
  await evaluate(`document.querySelector('[data-code-codex-runtime-information]').firstElementChild.shadowRoot.querySelector('.close').click()`);
 } finally {await evaluate(`document.querySelector('[data-code-codex-runtime-information]')?.firstElementChild.shadowRoot.querySelector('.close').click()`).catch(()=>{});ws.close();}

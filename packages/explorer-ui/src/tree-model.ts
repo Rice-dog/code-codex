@@ -90,6 +90,10 @@ export class TreeModel {
     return this.#children.has(path);
   }
 
+  getLoadError(path: string): string | undefined {
+    return this.#errors.get(path);
+  }
+
   isExpanded(path: string): boolean {
     return this.#expanded.has(path);
   }

@@ -1,3 +1,4 @@
+import { redactRuntimeText, redactRuntimeValue } from "./runtime-redaction";
 export interface RuntimeEvent { source: string; action: string; outcome: string; details: Record<string, unknown>; }
 interface EventState { events: RuntimeEvent[]; dropped: number; }
 const key = Symbol.for("code-codex:runtime-events:v1");
@@ -6,7 +7,7 @@ const state = store[key] ??= { events: [], dropped: 0 };
 
 /** Early loading-page events survive until the authenticated native bridge is available. */
 export function runtimeEvent(source: string, action: string, outcome: string, details: Record<string, unknown> = {}): void {
-  const event: RuntimeEvent = { source, action, outcome, details: { ...details, observedAt: Date.now(), documentElapsedMs: Math.round(performance.now()) } };
+  const event: RuntimeEvent = { source: redactRuntimeText(source).slice(0,160), action: redactRuntimeText(action).slice(0,160), outcome: redactRuntimeText(outcome).slice(0,160), details: { ...(redactRuntimeValue(details) as Record<string, unknown>), observedAt: Date.now(), documentElapsedMs: Math.round(performance.now()) } };
   const bytes = new TextEncoder().encode(JSON.stringify(event)).length;
   if (bytes > 7000) event.details = {truncated:true,originalBytes:bytes,observedAt:Date.now(),documentElapsedMs:Math.round(performance.now())};
   state.events.push(event);
@@ -21,7 +22,10 @@ export function takeRuntimeEvents(): RuntimeEvent[] {
     if (bytes + size > 64 * 1024) break;
     bytes += size; count++;
   }
-  return state.events.splice(0, count);
+  return state.events.splice(0, count).map(event => ({
+    source: redactRuntimeText(event.source).slice(0,160), action: redactRuntimeText(event.action).slice(0,160), outcome: redactRuntimeText(event.outcome).slice(0,160),
+    details: redactRuntimeValue(event.details) as Record<string, unknown>,
+  }));
 }
 export function restoreRuntimeEvents(events: RuntimeEvent[]): void {
   state.events.unshift(...events);

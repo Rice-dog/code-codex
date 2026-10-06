@@ -2,6 +2,42 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.89 — 补齐启动动画的图像背景来源
+
+### 简体中文
+
+- 启动动画新增 Particle Image Background 与 Pixel Sculpt Background，可选择全部十种动态背景；使用各背景已有参数和本地图片库。
+- 独立启动/预览实例等待图像准备和真实首帧，避免空白播放；切换或关闭时释放资源，失败提供运行记录。启动副本不覆盖正常背景参数或启用选择。
+- 保留背景至少展示四秒及用户设置的淡出时间。图像背景参与主背景等待/恢复，预览适配自身窗口大小。
+- 本地版本；尚未发布到 GitHub。验证范围以实际浏览器回归和安装核对为准，不代表所有官方客户端或 GPU 均已实测。
+
+### English
+
+- Add Particle Image Background and Pixel Sculpt Background as startup sources, covering all ten dynamic backgrounds with their existing settings and local image libraries.
+- Wait for image preparation and an actual first frame. Dispose independent startup/preview resources on cancellation and record failures without overwriting normal background settings or selection.
+- Preserve the four-second background minimum and configured fade duration. Image backgrounds participate in main-background hold/resume; inline previews use their own bounds.
+- Local version; not published to GitHub. Validation covers the recorded browser regressions and installation checks, not every official client or GPU.
+
+## v0.3.88 — 修复启动动画来源切换后的参数面板位置
+
+### 简体中文
+
+- 从背景插件切换到视频时，按更新后的面板高度立即重新定位，避免下方参数超出窗口、滑块无法操作；无需关闭再打开面板。
+- 保留已有视频、裁剪范围、参数值及插件预览的清理逻辑。补充持续打开面板、短/窄窗口、真实鼠标拖动和重载保存的浏览器回归检查。
+- 本地版本；尚未发布到 GitHub。浏览器检查使用隔离的生产包界面，不能替代所有官方客户端版本的实测。
+
+### English
+
+- Reposition the open startup settings panel using its updated height when switching from a background plugin to video. Lower controls remain within the viewport and can be adjusted without closing and reopening the panel.
+- Preserve the selected video, clip range, parameter values and preview cleanup. Add browser regression checks for an open panel, short/narrow windows, real mouse dragging and persisted values after reload.
+- Local version; not published to GitHub. Browser checks use an isolated production-bundle UI and do not establish compatibility with every official client version.
+
+## v0.3.87 — Recover uncertain imports and sanitize runtime logs
+
+- Re-read the original destination after a failed commit response without replaying the import. Guard reconciliation across workspace changes and distinguish failed refreshes from successful reads.
+- Sanitize runtime events before renderer synchronization and native storage. Apply the same policy when reading, copying or exporting older logs; retain diagnostic codes, counts and timing.
+- Add fault-injection regression tests covering lost commit responses, refresh failures, workspace changes, rejected commits, pre-commit failures, nested secrets, queue restoration and historical exports.
+
 ## v0.3.86 — Preserve background openings beneath startup animation
 
 - Main backgrounds prepare an initial frame while covered, then hold playback until the startup animation fully finishes. Opening clocks restart before playback resumes.
