@@ -2,6 +2,22 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.90 — 粒子图像背景开场动画
+
+### 简体中文
+
+- Particle Image Background 新增粒子汇聚开场：散开的粒子云逐渐聚合成选中的图片，完成后回到原有粒子效果。
+- 使用统一中英设置面板，可开启或关闭开场、调整时长与汇聚范围，并单独重播。调节常规参数和后续图片切换不会反复重播开场。
+- 开场独立于粒子运动速度，支持暂停和减少动态效果；启动遮罩退场后，主页背景重新开始自己的开场。作为启动来源时仍遵循四秒最短展示和配置的淡出时间。
+- 本地版本；验证范围为隔离浏览器交互、渲染回归、Rust 测试及本机安装文件核对。
+
+### English
+
+- Add a gathering opening to Particle Image Background: a scattered particle cloud assembles into the selected image, then returns to the existing particle effect.
+- Use the shared bilingual settings panel to enable the opening, adjust duration and spread, and replay it independently. Ordinary parameter edits and subsequent image changes do not restart the opening.
+- Keep the opening independent of particle motion speed, with pause and reduced-motion support. The normal background restarts its opening after the startup overlay exits. Startup sources retain their four-second minimum and configured fade duration.
+- Local version, verified with isolated browser interactions, rendering regressions, Rust tests, and installed-file checks.
+
 ## v0.3.89 — 补齐启动动画的图像背景来源
 
 ### 简体中文

@@ -152,8 +152,12 @@ try {
   report.videoRestored = restored;
   check('saved video reloading preserves values adjusted without media', restored, restored.videoPresent && restored.source === 'video' && restored.controls.every(control => Number(control.value) === emptyValues[control.key]));
   const persisted = await evaluate(`JSON.parse(localStorage.getItem('code-codex:startup-transition:v1'))`);
+  // Observe a new document before checking ready; the previous document can
+  // still report ready immediately after Page.reload acknowledges the request.
+  const previousDocument = await evaluate('performance.timeOrigin');
   await command('Page.reload');
-  for (let i = 0; i < 120 && !(await evaluate(`document.querySelector('${tag}')?.dataset.state==='ready'`)); i++) await delay(50);
+  for (let i = 0; i < 200 && !(await evaluate(`performance.timeOrigin!==${previousDocument}&&document.querySelector('${tag}')?.dataset.state==='ready'`)); i++) await delay(50);
+  assert.equal(await evaluate(`performance.timeOrigin!==${previousDocument}&&document.querySelector('${tag}')?.dataset.state==='ready'`), true, 'reloaded fixture host ready');
   await open();
   const reloaded = await snapshot();
   report.reloaded = reloaded;

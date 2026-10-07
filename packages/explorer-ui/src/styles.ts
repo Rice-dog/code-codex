@@ -1900,8 +1900,8 @@ export const styles = String.raw`
   .particle-settings-panel :is(.particle-toggle-row, .particle-color-row) .cle-bilingual-label {
     justify-self: stretch;
   }
-  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset) .cle-bilingual-label,
-  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset).cle-bilingual-label,
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-opening-replay, .particle-morph-curve-reset) .cle-bilingual-label,
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-opening-replay, .particle-morph-curve-reset).cle-bilingual-label,
   .black-hole-preset-toolbar button .cle-bilingual-label,
   .black-hole-preset-toolbar button.cle-bilingual-label {
     display: grid;
@@ -1909,13 +1909,13 @@ export const styles = String.raw`
     justify-items: center;
     text-align: center;
   }
-  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset) .cle-bilingual-label-en,
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-opening-replay, .particle-morph-curve-reset) .cle-bilingual-label-en,
   .black-hole-preset-toolbar button .cle-bilingual-label-en {
     font-size: .72em;
     line-height: 10px;
   }
-  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset):has(.cle-bilingual-label),
-  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-morph-curve-reset).cle-bilingual-label,
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-opening-replay, .particle-morph-curve-reset):has(.cle-bilingual-label),
+  .particle-settings-panel :is(.particle-library-add, .particle-library-clear, .particle-image-transform-reset, .particle-opening-replay, .particle-morph-curve-reset).cle-bilingual-label,
   .black-hole-preset-toolbar button:has(.cle-bilingual-label),
   .black-hole-preset-toolbar button.cle-bilingual-label {
     min-height: 32px;
@@ -2528,6 +2528,7 @@ export const styles = String.raw`
   .particle-image-transform-editor[data-empty="true"] .particle-image-transform-identity {
     grid-template-columns: minmax(0, 1fr);
   }
+  .particle-opening-replay,
   .particle-image-transform-reset {
     flex: 0 0 auto;
     min-height: 22px;
@@ -2539,10 +2540,12 @@ export const styles = String.raw`
     cursor: pointer;
     font-size: 9px;
   }
+  .particle-opening-replay:hover:not(:disabled),
   .particle-image-transform-reset:hover:not(:disabled) {
     color: var(--cle-ink);
     background: var(--cle-hover);
   }
+  .particle-opening-replay:disabled,
   .particle-image-transform-reset:disabled {
     cursor: default;
     opacity: .45;

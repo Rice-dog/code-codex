@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.89-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.90-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,15 +38,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.3.89-x64-setup.exe`
-- Alternative: `CodeCodex-0.3.89-x64.msi`
-- Portable package: `CodeCodex-0.3.89-x64.zip`
+- Recommended: `CodeCodex-0.3.90-x64-setup.exe`
+- Alternative: `CodeCodex-0.3.90-x64.msi`
+- Portable package: `CodeCodex-0.3.90-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.3.89-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.3.90-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -89,7 +89,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.3.89
+./scripts/package.ps1 -Version 0.3.90
 ```
 
 The generated packages are written to `releases/`.
@@ -161,7 +161,9 @@ images into an animated grayscale particle field across Codex. Its image
 library supports ordered auto-switching, smooth morphing, per-photo position
 and zoom, direct numeric values, and adjustable flow, pointer, source, and
 render settings. Transparent Background is available separately. Particle
-images and settings remain local to the user's Codex profile.
+images and settings remain local to the user's Codex profile. The gathering
+opening has enable, duration, spread, and replay controls; the normal background
+replays its opening after the startup overlay exits.
 
 ![Code-Codex Black Hole Background appearance plugin](docs/screenshots/black-hole-background.png)
 

@@ -19,6 +19,7 @@ import {
   normalizeParticleMorphCurve,
   normalizeParticleSettings,
   openParticleImageDatabase,
+  particleOpeningImageOpacity,
   readParticleBackgroundSettings,
   readParticleImageRecords,
   smootherParticleTransition,
@@ -803,9 +804,11 @@ type ParticleNumericSettingKey =
   | "morphIntervalSeconds"
   | "imageOpacity"
   | "cursorStrength"
-  | "dprCap";
+  | "dprCap"
+  | "introDuration"
+  | "introSpread";
 
-type ParticleControlGroup = "particles" | "flow" | "source" | "pointer" | "render";
+type ParticleControlGroup = "particles" | "flow" | "source" | "pointer" | "render" | "opening";
 
 interface ParticleValueControlDefinition {
   readonly id: string;
@@ -867,6 +870,8 @@ const PARTICLE_MORPH_CURVE_EDITOR_BOUNDS = Object.freeze({
 });
 
 const PARTICLE_NUMERIC_CONTROL_DEFINITIONS = Object.freeze([
+  { key: "introDuration", group: "opening", id: "cle-particle-intro-duration", label: "Opening duration", labelZh: "开场时长", minimum: 0.5, maximum: 12, step: 0.1, live: true, format: (value: number) => `${value.toFixed(1)}s` },
+  { key: "introSpread", group: "opening", id: "cle-particle-intro-spread", label: "Gathering spread", labelZh: "汇聚范围", minimum: 0.2, maximum: 2, step: 0.05, live: true, format: (value: number) => `${value.toFixed(2)}×` },
   { key: "particleCount", group: "particles", id: "cle-particle-count", label: "Particle count", labelZh: "粒子数量", minimum: 10_000, maximum: 2_000_000, step: 10_000, live: false, format: (value: number) => Math.round(value).toLocaleString() },
   { key: "particleSize", group: "particles", id: "cle-particle-size", label: "Particle size", labelZh: "粒子大小", minimum: 0.5, maximum: 4, step: 0.1, live: true, format: (value: number) => value.toFixed(1) },
   { key: "particleOpacity", group: "particles", id: "cle-particle-opacity", label: "Particle opacity", labelZh: "粒子不透明度", minimum: 0.1, maximum: 1, step: 0.01, live: true, format: (value: number) => value.toFixed(2) },
@@ -1513,6 +1518,8 @@ class ParticleBackgroundController {
           this.#notify();
         }, this.#settings, (progress, complete) => {
           this.#updateSourceTransition(progress, complete);
+        }, () => {
+          this.#updateSourceTransition(this.#sourceTransitionProgress, false);
         });
         registerBackgroundOpening(layer, this.#renderer);
       } catch (error) {
@@ -1582,6 +1589,15 @@ class ParticleBackgroundController {
       }
     }
     this.#notify();
+  }
+
+  replayOpening(): void {
+    if (!this.#enabled || this.#pending || !this.#renderer?.count || !this.#settings.introEnabled) return;
+    this.#renderer.replayOpening();
+    this.#scheduleRotation();
+    runtimeEvent("particle-image", "opening replay", "started", {
+      durationSeconds: this.#settings.introDuration, spread: this.#settings.introSpread,
+    });
   }
 
   async addImages(files: FileList | readonly File[]): Promise<void> {
@@ -1939,7 +1955,8 @@ class ParticleBackgroundController {
     const previousImage = this.#previousImage;
     if (!image || !previousImage) return;
     this.#sourceTransitionProgress = Math.min(1, Math.max(0, progress));
-    const opacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+    const opacity = this.#settings.showSourceImage
+      ? this.#settings.imageOpacity * particleOpeningImageOpacity(this.#renderer?.openingProgress ?? 1) : 0;
     if (!this.#sourceTransitioning) {
       image.style.opacity = String(opacity);
       previousImage.style.opacity = "0";
@@ -1971,7 +1988,8 @@ class ParticleBackgroundController {
     previousImage?.removeAttribute("src");
     if (previousImage) previousImage.style.opacity = "0";
     if (image) {
-      const opacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+      const opacity = this.#settings.showSourceImage
+        ? this.#settings.imageOpacity * particleOpeningImageOpacity(this.#renderer?.openingProgress ?? 1) : 0;
       image.style.opacity = String(opacity);
     }
     this.#sourceTransitioning = false;
@@ -1991,7 +2009,8 @@ class ParticleBackgroundController {
       this.#updateSourceTransition(this.#sourceTransitionProgress, false);
       return;
     }
-    const opacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+    const opacity = this.#settings.showSourceImage
+      ? this.#settings.imageOpacity * particleOpeningImageOpacity(this.#renderer?.openingProgress ?? 1) : 0;
     image.style.opacity = String(opacity);
     previousImage.style.opacity = "0";
   }
@@ -2007,6 +2026,8 @@ class ParticleBackgroundController {
           this.#notify();
         }, this.#settings, (progress, complete) => {
           this.#updateSourceTransition(progress, complete);
+        }, () => {
+          this.#updateSourceTransition(this.#sourceTransitionProgress, false);
         });
         registerBackgroundOpening(this.#canvas, this.#renderer);
       } catch {
@@ -2059,7 +2080,7 @@ class ParticleBackgroundController {
     ) return;
     const nextId = this.#nextSelectedImageId();
     if (!nextId || nextId === this.#settings.activeImageId) return;
-    const delay = this.#settings.imageDurationSeconds * 1_000;
+    const delay = (this.#settings.imageDurationSeconds + (this.#renderer?.openingRemainingSeconds ?? 0)) * 1_000;
     this.#rotationTimer = window.setTimeout(() => {
       this.#rotationTimer = 0;
       if (document.hidden || this.#reducedMotion.matches) return;
@@ -2069,6 +2090,10 @@ class ParticleBackgroundController {
       this.#rotationFrame = requestBackgroundFrame(layer, () => {
         this.#rotationFrame = 0;
         if (!this.#enabled || document.hidden || this.#reducedMotion.matches) return;
+        if ((this.#renderer?.openingRemainingSeconds ?? 0) > 0) {
+          this.#scheduleRotation();
+          return;
+        }
         void this.#activateImage(nextId);
       });
     }, delay);
@@ -4681,6 +4706,12 @@ function particleSettingsPanelMarkup(): string {
       </header>
       <div class="particle-settings-scroll">
         <fieldset class="particle-settings-group">
+          <legend>${bilingualLabelMarkup("开场动画", "Opening animation")}</legend>
+          <label class="particle-toggle-row" for="cle-particle-intro-enabled">${bilingualLabelMarkup("粒子汇聚", "Particle gathering")}<input id="cle-particle-intro-enabled" type="checkbox" checked></label>
+          ${particleNumericControlsMarkup("opening")}
+          <button class="particle-opening-replay" type="button" disabled>${bilingualLabelMarkup("重播开场", "Replay opening")}</button>
+        </fieldset>
+        <fieldset class="particle-settings-group">
           <legend>${bilingualLabelMarkup("粒子", "Particles")}</legend>
           ${particleNumericControlsMarkup("particles")}
         </fieldset>
@@ -5521,6 +5552,8 @@ export class CodeCodexElement extends HTMLElement {
   readonly #particleSettingsPanel: HTMLElement;
   readonly #particleSettingsTrigger: HTMLButtonElement;
   readonly #particleSettingsCloseButton: HTMLButtonElement;
+  readonly #particleIntroEnabledInput: HTMLInputElement;
+  readonly #particleOpeningReplayButton: HTMLButtonElement;
   readonly #particleNumericControls = new Map<ParticleNumericSettingKey, Readonly<{
     definition: ParticleNumericControlDefinition;
     input: HTMLInputElement;
@@ -5818,6 +5851,8 @@ export class CodeCodexElement extends HTMLElement {
     this.#particleSettingsPanel = this.#required<HTMLElement>(".particle-settings-panel");
     this.#particleSettingsTrigger = this.#required<HTMLButtonElement>(`[data-appearance-plugin="${PARTICLE_BACKGROUND_PLUGIN_ID}"] .particle-settings-trigger`);
     this.#particleSettingsCloseButton = this.#required<HTMLButtonElement>(".particle-settings-close");
+    this.#particleIntroEnabledInput = this.#required<HTMLInputElement>("#cle-particle-intro-enabled");
+    this.#particleOpeningReplayButton = this.#required<HTMLButtonElement>(".particle-opening-replay");
     for (const definition of PARTICLE_NUMERIC_CONTROL_DEFINITIONS) {
       const input = this.#required<HTMLInputElement>(`#${definition.id}`);
       const output = this.#required<HTMLOutputElement>(`output[for="${definition.id}"]`);
@@ -6882,6 +6917,8 @@ export class CodeCodexElement extends HTMLElement {
         }
       }
       this.#bindParticleMorphCurveEditor();
+      this.#particleIntroEnabledInput.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
+      this.#particleOpeningReplayButton.addEventListener("click", () => this.#particleBackgroundController.replayOpening());
       this.#particleAutoSwitchInput.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
       this.#particleShowSourceInput.addEventListener("change", () => void this.#applyParticleSettingsFromControls());
       this.#particleBackgroundColorInput.addEventListener("input", () => void this.#applyParticleSettingsFromControls());
@@ -12730,6 +12767,7 @@ export class CodeCodexElement extends HTMLElement {
     const values: Record<string, unknown> = { ...current };
     for (const [key, { input }] of this.#particleNumericControls) values[key] = input.value;
     values.morphCurve = this.#particleMorphCurveDraft;
+    values.introEnabled = this.#particleIntroEnabledInput.checked;
     values.autoSwitch = this.#particleAutoSwitchInput.checked;
     values.showSourceImage = this.#particleShowSourceInput.checked;
     values.backgroundColor = this.#particleBackgroundColorInput.value;
@@ -12822,6 +12860,9 @@ export class CodeCodexElement extends HTMLElement {
       || this.#appearanceTransitionPending;
 
     const settings = controller.settings;
+    this.#particleIntroEnabledInput.checked = settings.introEnabled;
+    this.#particleIntroEnabledInput.disabled = controller.pending;
+    this.#particleOpeningReplayButton.disabled = !active || controller.pending || !settings.introEnabled || !controller.settings.activeImageId;
     for (const [key, control] of this.#particleNumericControls) {
       const { input, editor } = control;
       const value = settings[key];

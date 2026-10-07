@@ -2,6 +2,7 @@
 // background and independent startup/preview instances. No theme ownership here.
 import { clampParticleNumber } from './startup-background-renderers';
 import { cancelBackgroundFrame, requestBackgroundFrame } from './background-startup-hold';
+import { runtimeEvent } from './runtime-events';
 
 export const PARTICLE_BACKGROUND_SETTINGS_KEY = "code-codex:particle-image-background:v1";
 
@@ -91,6 +92,9 @@ export interface ParticleBackgroundSettings {
   readonly cursorStrength: number;
   readonly cursorInteraction: boolean;
   readonly dprCap: number;
+  readonly introEnabled: boolean;
+  readonly introDuration: number;
+  readonly introSpread: number;
 }
 
 export interface ParticleCursorStrengthValues {
@@ -182,6 +186,9 @@ export const DEFAULT_PARTICLE_BACKGROUND_SETTINGS: ParticleBackgroundSettings = 
   cursorStrength: PARTICLE_BACKGROUND_CURSOR_REFERENCE_STRENGTH,
   cursorInteraction: true,
   dprCap: 1.5,
+  introEnabled: true,
+  introDuration: 4,
+  introSpread: 1,
 });
 
 export const DEFAULT_PARTICLE_IMAGE_TRANSFORM: ParticleImageTransform = Object.freeze({
@@ -568,6 +575,9 @@ export function normalizeParticleSettings(value: unknown): ParticleBackgroundSet
       ? record.cursorInteraction
       : DEFAULT_PARTICLE_BACKGROUND_SETTINGS.cursorInteraction,
     dprCap: normalizeSteppedParticleNumber(record.dprCap, 1, 2, 0.25, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.dprCap, 2),
+    introEnabled: typeof record.introEnabled === "boolean" ? record.introEnabled : DEFAULT_PARTICLE_BACKGROUND_SETTINGS.introEnabled,
+    introDuration: normalizeSteppedParticleNumber(record.introDuration, 0.5, 12, 0.1, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.introDuration, 1),
+    introSpread: normalizeSteppedParticleNumber(record.introSpread, 0.2, 2, 0.05, DEFAULT_PARTICLE_BACKGROUND_SETTINGS.introSpread, 2),
   };
 }
 
@@ -1096,6 +1106,8 @@ export const PARTICLE_BACKGROUND_VERTEX_SHADER = `
   uniform vec4 u_pointerMotion[${PARTICLE_BACKGROUND_POINTER_SEGMENTS}];
   uniform float u_pointerCount;
   uniform float u_time;
+  uniform float u_introProgress;
+  uniform float u_introSpread;
   uniform float u_transitionElapsed;
   uniform float u_transitionNearResponse;
   uniform float u_transitionFarResponse;
@@ -1466,10 +1478,26 @@ export const PARTICLE_BACKGROUND_VERTEX_SHADER = `
     vec2 restingPosition = home + ambientNow;
     float disturbed = smoothstep(0.75, 3.0, length(position - restingPosition));
     float lifecycleAlpha = mix(1.0, lifeAlpha, disturbed);
+    // A dispersed image-coloured cloud contracts into the photograph. At one,
+    // bypass every opening term to preserve the original steady-state rendering.
+    float openingAlpha = 1.0;
+    if (u_introProgress < 1.0) {
+      float delay = hash(a_seed * 71.3 + 4.7) * 0.22;
+      float localProgress = smoother01((u_introProgress - delay) / (1.0 - delay));
+      float remaining = 1.0 - localProgress;
+      float angle = hash(a_seed * 39.7 + 8.1) * 6.2831853;
+      float radius = (0.18 + 0.72 * sqrt(hash(a_seed * 23.9 + 1.3)))
+        * min(u_resolution.x, u_resolution.y) * u_introSpread;
+      vec2 cloud = u_resolution * 0.5 + vec2(cos(angle), sin(angle)) * radius;
+      vec2 tangent = vec2(-sin(angle), cos(angle));
+      position = mix(position, cloud, remaining)
+        + tangent * radius * sin(localProgress * 3.14159265) * remaining * 0.24;
+      openingAlpha = mix(0.35, 1.0, smoother01(u_introProgress / 0.65));
+    }
     vec2 clip = vec2(position.x / u_resolution.x * 2.0 - 1.0, 1.0 - position.y / u_resolution.y * 2.0);
     gl_Position = vec4(clip, 0.0, 1.0);
     gl_PointSize = max(1.0, u_particleSize * u_dpr);
-    v_color = vec4(imageColor.rgb, imageColor.a * u_particleOpacity * lifecycleAlpha);
+    v_color = vec4(imageColor.rgb, imageColor.a * u_particleOpacity * lifecycleAlpha * openingAlpha);
   }
 `;
 
@@ -1537,6 +1565,11 @@ export interface ParticleTransitionClock {
   readonly elapsed: number;
 }
 
+/** Keep the photo underlay out of the way until the particles have assembled. */
+export function particleOpeningImageOpacity(progress: number): number {
+  return smootherParticleTransition((progress - 0.6) / 0.4);
+}
+
 export class ParticleImageRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #gl: WebGLRenderingContext;
@@ -1546,7 +1579,7 @@ export class ParticleImageRenderer {
   readonly #attributes: Readonly<Record<"previousHome" | "home" | "previousVelocity" | "previousColor" | "color" | "seed", number>>;
   readonly #uniforms: Readonly<Record<
     "resolution" | "layout" | "pointerSegments" | "pointerMotion"
-    | "pointerCount" | "time" | "transitionElapsed" | "transitionNearResponse" | "transitionFarResponse"
+    | "pointerCount" | "time" | "introProgress" | "introSpread" | "transitionElapsed" | "transitionNearResponse" | "transitionFarResponse"
     | "transitionStagger" | "transitionActive" | "dpr"
     | "particleSize" | "particleOpacity" | "speed" | "noiseScale" | "noiseStrength" | "dampingRate"
     | "ambientCycle" | "cursorStrength" | "cursorStrengthScales" | "cursorStrengthDerived",
@@ -1559,6 +1592,9 @@ export class ParticleImageRenderer {
   readonly #reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   readonly #onError: (message: string) => void;
   readonly #onTransitionFrame: (progress: number, complete: boolean) => void;
+  readonly #onOpeningFrame: (progress: number) => void;
+  #openingElapsed = 0;
+  #openingProgress = 1;
   #previousHomes: Float32Array<ArrayBuffer> = new Float32Array(0);
   #homes: Float32Array<ArrayBuffer> = new Float32Array(0);
   #previousVelocities: Float32Array<ArrayBuffer> = new Float32Array(0);
@@ -1609,12 +1645,14 @@ export class ParticleImageRenderer {
     onError: (message: string) => void,
     settings: ParticleBackgroundSettings,
     onTransitionFrame: (progress: number, complete: boolean) => void,
+    onOpeningFrame: (progress: number) => void = () => undefined,
   ) {
     this.#canvas = canvas;
     this.#onError = onError;
     this.#settings = settings;
     this.#cursorStrengthValues = calculateParticleCursorStrengthValues(settings.cursorStrength);
     this.#onTransitionFrame = onTransitionFrame;
+    this.#onOpeningFrame = onOpeningFrame;
     const gl = canvas.getContext("webgl", {
       alpha: true,
       antialias: false,
@@ -1644,6 +1682,8 @@ export class ParticleImageRenderer {
       pointerMotion: this.#requiredUniform("u_pointerMotion[0]"),
       pointerCount: this.#requiredUniform("u_pointerCount"),
       time: this.#requiredUniform("u_time"),
+      introProgress: this.#requiredUniform("u_introProgress"),
+      introSpread: this.#requiredUniform("u_introSpread"),
       transitionElapsed: this.#requiredUniform("u_transitionElapsed"),
       transitionNearResponse: this.#requiredUniform("u_transitionNearResponse"),
       transitionFarResponse: this.#requiredUniform("u_transitionFarResponse"),
@@ -1696,6 +1736,22 @@ export class ParticleImageRenderer {
     return this.#count;
   }
 
+  get openingProgress(): number { return this.#openingProgress; }
+  get openingRemainingSeconds(): number {
+    return this.#openingProgress < 1 ? Math.max(0, this.#settings.introDuration - this.#openingElapsed) : 0;
+  }
+
+  replayOpening(): void {
+    if (this.#disposed || !this.#count) return;
+    this.#openingElapsed = 0;
+    this.#openingProgress = this.#settings.introEnabled && !this.#reducedMotion.matches ? 0 : 1;
+    this.#logOpening("replayed");
+    this.#lastFrame = performance.now();
+    this.#resetPointer();
+    this.#draw(this.#lastFrame, false);
+    this.#scheduleFrame();
+  }
+
   setRenderSettings(settings: ParticleBackgroundSettings): void {
     if (this.#disposed) return;
     const previousSettings = this.#settings;
@@ -1719,6 +1775,15 @@ export class ParticleImageRenderer {
       this.#cursorStrengthUniformsDirty = true;
     }
     this.#settings = settings;
+    if (!settings.introEnabled) {
+      this.#openingProgress = 1;
+      this.#onOpeningFrame(1);
+    } else if (!previousSettings.introEnabled) {
+      this.replayOpening();
+    } else if (this.#openingProgress < 1 && settings.introDuration !== previousSettings.introDuration) {
+      // Editing duration changes the remaining pace without jumping backwards.
+      this.#openingElapsed = this.#openingProgress * settings.introDuration;
+    }
     if (!this.#transitionActive) {
       this.#transitionDuration = settings.morphIntervalSeconds;
       if (transitionDurationChanged) this.#transitionConstantsUniformsDirty = true;
@@ -1735,6 +1800,7 @@ export class ParticleImageRenderer {
   setPreparedImage(image: PreparedParticleImage, transform: ParticleImageTransform): Promise<boolean> {
     if (this.#disposed) return Promise.resolve(false);
     const now = performance.now();
+    const firstImage = this.#count === 0;
     if (!this.#paused) this.#simulationTime = this.#clockSeconds(now);
     this.#lastFrame = now;
     const revision = ++this.#imageRevision;
@@ -1750,6 +1816,11 @@ export class ParticleImageRenderer {
     this.#imageHeight = image.height;
     this.#imageTransform = normalizeParticleImageTransform(transform);
     this.#count = image.targetCount;
+    if (firstImage) {
+      this.#openingElapsed = 0;
+      this.#openingProgress = this.#settings.introEnabled && !this.#reducedMotion.matches ? 0 : 1;
+      this.#logOpening("started");
+    }
     this.#transitionDuration = this.#settings.morphIntervalSeconds;
     this.#layoutUniformDirty = true;
     if (!canMorph) {
@@ -1788,8 +1859,16 @@ export class ParticleImageRenderer {
   /** Time covered by the startup splash must not advance the normal background. */
   resumeOpening(): void {
     if (this.#disposed) return;
-    this.#lastFrame = performance.now();
-    this.#resetPointer();
+    this.replayOpening();
+  }
+
+  #logOpening(outcome: string): void {
+    runtimeEvent("particle-image", "particle gathering", outcome, {
+      normalBackground: Boolean(this.#canvas.closest("[data-code-codex-particle-layer]")),
+      durationSeconds: this.#settings.introDuration, spread: this.#settings.introSpread,
+      enabled: this.#settings.introEnabled, reducedMotion: this.#reducedMotion.matches,
+      progress: this.#openingProgress,
+    });
   }
 
   setImageTransform(transform: ParticleImageTransform): void {
@@ -2245,6 +2324,10 @@ export class ParticleImageRenderer {
   };
 
   #onReducedMotionChange = (): void => {
+    if (this.#reducedMotion.matches) {
+      this.#openingProgress = 1;
+      this.#onOpeningFrame(1);
+    }
     this.setPaused(this.#reducedMotion.matches);
   };
 
@@ -2265,6 +2348,11 @@ export class ParticleImageRenderer {
 
   #draw(timestamp: number, scheduleNext: boolean): void {
     if (this.#disposed) return;
+    const wasOpening = this.#openingProgress < 1;
+    if (this.#count && !this.#paused && !document.hidden && this.#openingProgress < 1) {
+      this.#openingElapsed += Math.min(0.1, Math.max(0, (timestamp - this.#lastFrame) / 1000));
+      this.#openingProgress = Math.min(1, this.#openingElapsed / this.#settings.introDuration);
+    }
     if (!this.#paused) {
       this.#simulationTime = this.#clockSeconds(timestamp);
     }
@@ -2328,6 +2416,8 @@ export class ParticleImageRenderer {
         gl.uniform4fv(this.#uniforms.pointerMotion, this.#pointerMotionValues);
       }
       gl.uniform1f(this.#uniforms.time, time);
+      gl.uniform1f(this.#uniforms.introProgress, this.#openingProgress);
+      gl.uniform1f(this.#uniforms.introSpread, this.#settings.introSpread);
       if (this.#transitionActive || this.#transitionElapsedUniformDirty) {
         gl.uniform1f(this.#uniforms.transitionElapsed, this.#transitionClock().elapsed);
         this.#transitionElapsedUniformDirty = false;
@@ -2378,6 +2468,8 @@ export class ParticleImageRenderer {
     // spring state. Completing earlier skips that presentation frame and makes
     // the renderer jump straight from the penultimate pose to the static grid.
     if (completeTransitionAfterDraw) this.#completeTransition();
+    if (this.#count) this.#onOpeningFrame(this.#openingProgress);
+    if (wasOpening && this.#openingProgress === 1) this.#logOpening("completed");
     if (scheduleNext) this.#scheduleFrame();
   }
 }
@@ -2501,6 +2593,7 @@ export function mountParticleImageStartupBackground(
   let previousUrl: string | undefined;
   let currentTransform = { ...DEFAULT_PARTICLE_IMAGE_TRANSFORM };
   let transitioning = false;
+  let sourceTransitionProgress = 1;
   let disposed = false;
   let settled = false;
   let activating = false;
@@ -2563,7 +2656,9 @@ export function mountParticleImageStartupBackground(
   }
   function finishTransition(progress: number, complete: boolean): void {
     if (disposed) return;
-    const opacity = settings.showSourceImage ? settings.imageOpacity : 0;
+    sourceTransitionProgress = progress;
+    const opacity = settings.showSourceImage
+      ? settings.imageOpacity * particleOpeningImageOpacity(renderer?.openingProgress ?? 1) : 0;
     if (!transitioning) {
       image.style.opacity = String(opacity);
       previousImage.style.opacity = "0";
@@ -2578,6 +2673,7 @@ export function mountParticleImageStartupBackground(
     image.style.opacity = String(incoming);
     if (complete) {
       transitioning = false;
+      sourceTransitionProgress = 1;
       revoke(previousUrl);
       previousUrl = undefined;
       previousImage.removeAttribute("src");
@@ -2599,8 +2695,9 @@ export function mountParticleImageStartupBackground(
     rotationTimer = window.setTimeout(() => {
       rotationTimer = 0;
       if (disposed || document.hidden || reducedMotion.matches) return;
+      if ((renderer?.openingRemainingSeconds ?? 0) > 0) { scheduleRotation(); return; }
       void activate(next).catch(fail);
-    }, settings.imageDurationSeconds * 1_000);
+    }, (settings.imageDurationSeconds + (renderer?.openingRemainingSeconds ?? 0)) * 1_000);
   }
   function onVisibilityChange(): void {
     if (document.hidden || reducedMotion.matches) stopRotation();
@@ -2712,7 +2809,7 @@ export function mountParticleImageStartupBackground(
       : selectedIds[0];
     const initial = records.find((record) => record.id === id);
     if (!initial) throw new Error("Add/select an image in Particle Image Background before using it as the startup source.");
-    renderer = new ParticleImageRenderer(canvas, fail, settings, finishTransition);
+    renderer = new ParticleImageRenderer(canvas, fail, settings, finishTransition, () => finishTransition(sourceTransitionProgress, false));
     window.clearTimeout(preparationTimer);
     await activate(initial);
   })().catch(fail);

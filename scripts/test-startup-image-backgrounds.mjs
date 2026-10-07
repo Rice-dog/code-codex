@@ -241,10 +241,12 @@ try{
   if(socket?.readyState===WebSocket.OPEN)await Promise.race([command('Browser.close').catch(()=>{}),delay(1500)]);
   socket?.close();for(const p of pending.values())p.reject(Error('fixture closed'));pending.clear();
   if(browser.exitCode===null)await Promise.race([new Promise(r=>browser.once('exit',r)),delay(1000)]);
-  if(browser.exitCode===null)browser.kill();report.cleanup.browserStopped=true;
+  if(browser.exitCode===null)browser.kill();
+  if(browser.exitCode===null)await Promise.race([new Promise(r=>browser.once('exit',r)),delay(3000)]);
+  report.cleanup.browserStopped=browser.exitCode!==null||browser.signalCode!==null;
   await new Promise(r=>server.close(r));report.cleanup.serverClosed=true;
   const checkedProfile=resolve(profile);assert.ok(checkedProfile.startsWith(resolve(tmpdir())+sep+'code-codex-startup-image-test-'));
-  try{rmSync(checkedProfile,{recursive:true,force:true,maxRetries:10,retryDelay:100});report.cleanup.profileRemoved=true}catch(error){report.cleanup.profileRemoved=false;report.cleanup.error=String(error);report.failures.push('temporary profile cleanup')}
+  try{rmSync(checkedProfile,{recursive:true,force:true,maxRetries:20,retryDelay:300});report.cleanup.profileRemoved=true}catch(error){report.cleanup.profileRemoved=false;report.cleanup.error=String(error);report.failures.push('temporary profile cleanup')}
   report.passed=report.failures.length===0;
   writeFileSync(join(directory,'results.json'),JSON.stringify(report,null,2));
 }
