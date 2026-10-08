@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.3.90",
+    [string]$Version = "0.3.96",
     [string]$WixPath
 )
 
@@ -80,10 +80,7 @@ Copy-Item -LiteralPath (Join-Path $RepoRoot "README.en.md") -Destination $StageF
 Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination $StageFullPath
 Copy-Item -LiteralPath $visualEffectNoticesEn -Destination $StageFullPath
 Copy-Item -LiteralPath $visualEffectNoticesZh -Destination $StageFullPath
-$docsPath = Join-Path $RepoRoot "docs"
-if (Test-Path -LiteralPath $docsPath -PathType Container) {
-    Copy-Item -LiteralPath $docsPath -Destination $StageFullPath -Recurse
-}
+# Documentation screenshots remain in GitHub; do not include them in installers.
 Copy-Item -LiteralPath $thirdPartyLicenses -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $Artifacts "sbom.spdx.json") -Destination $StageFullPath
 Copy-Item -LiteralPath (Join-Path $RepoRoot "installer\Install-CodeCodex.ps1") -Destination $StageFullPath
@@ -135,27 +132,42 @@ $msi = Join-Path $Artifacts "CodeCodex-$Version-x64.msi"
 $downloadUninstaller = Join-Path $Artifacts "Uninstall-CodeCodex.exe"
 Copy-Item -LiteralPath $uninstallProgram -Destination $downloadUninstaller -Force
 
-$hashLines = @(
-    $zip,
-    $setup,
-    $msi,
-    $downloadUninstaller
-) | ForEach-Object {
-    $hash = Get-FileHash -LiteralPath $_ -Algorithm SHA256
-    "{0}  {1}" -f $hash.Hash.ToLowerInvariant(), (Split-Path -Leaf $_)
-}
-$hashLines | Set-Content -LiteralPath (Join-Path $Artifacts "SHA256SUMS.txt") -Encoding ascii
+# Plugins are organized by ID; this directory never enters the core installer.
+$pluginStage = Join-Path $Artifacts "plugin-release-$Version"
+$pluginStageFull = [IO.Path]::GetFullPath($pluginStage)
+if (-not $pluginStageFull.StartsWith($ExpectedStageRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Unsafe plugin staging path" }
+if (Test-Path -LiteralPath $pluginStageFull) { Remove-Item -LiteralPath $pluginStageFull -Recurse -Force }
+& node (Join-Path $PSScriptRoot "stage-plugin-release.mjs") $pluginStageFull
+if ($LASTEXITCODE -ne 0) { throw "Plugin release staging failed" }
+$pluginInventory = @(Get-Content (Join-Path $Artifacts 'plugin-release-inventory.json') -Raw -Encoding UTF8 | ConvertFrom-Json)
 
 New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
-foreach ($releaseFile in @(
-    $setup,
-    $msi,
-    $zip,
-    $downloadUninstaller,
-    (Join-Path $Artifacts "SHA256SUMS.txt")
-)) {
-    Copy-Item -LiteralPath $releaseFile -Destination $ReleaseRoot -Force
+$history = Join-Path $Artifacts ("plugin-release-history/" + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+New-Item -ItemType Directory -Path $history -Force | Out-Null
+$releaseFull = [IO.Path]::GetFullPath($ReleaseRoot) + [IO.Path]::DirectorySeparatorChar
+$historyFull = [IO.Path]::GetFullPath($history)
+if (-not $historyFull.StartsWith($ExpectedStageRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe history path' }
+$previousPlugins = Join-Path $ReleaseRoot 'plugins'
+if (Test-Path -LiteralPath $previousPlugins) {
+    $previousFull = [IO.Path]::GetFullPath($previousPlugins)
+    if (-not $previousFull.StartsWith($releaseFull, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe previous plugin path' }
+    Move-Item -LiteralPath $previousFull -Destination (Join-Path $history 'plugins')
 }
+foreach ($legacy in @(Get-ChildItem -LiteralPath $ReleaseRoot -File | Where-Object { $_.Name -match '^CodeCodex-background-.*\.(js|json)$' })) {
+    if (-not $legacy.FullName.StartsWith($releaseFull, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe legacy asset path' }
+    Move-Item -LiteralPath $legacy.FullName -Destination (Join-Path $history $legacy.Name)
+}
+Copy-Item -LiteralPath $pluginStageFull -Destination (Join-Path $ReleaseRoot 'plugins') -Recurse
+foreach ($releaseFile in @($setup,$msi,$zip,$downloadUninstaller)) { Copy-Item -LiteralPath $releaseFile -Destination $ReleaseRoot -Force }
+$assetInventory = @($setup,$msi,$zip,$downloadUninstaller) | ForEach-Object {
+    $asset = Get-Item -LiteralPath $_
+    [pscustomobject]@{ assetName=$asset.Name; path=$asset.Name; size=$asset.Length; sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() }
+}
+$assetInventory = @($assetInventory) + $pluginInventory
+$assetInventory | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'release-assets.json') -Encoding UTF8
+$hashLines = $assetInventory | ForEach-Object { "{0}  {1}" -f $_.sha256,$_.path }
+$hashLines | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'SHA256SUMS.txt') -Encoding ascii
+Copy-Item -LiteralPath (Join-Path $ReleaseRoot 'SHA256SUMS.txt') -Destination (Join-Path $Artifacts 'SHA256SUMS.txt') -Force
 
 $currentPackageNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($currentPackage in @($setup, $msi, $zip)) {

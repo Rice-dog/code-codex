@@ -193,30 +193,100 @@ async fn session(
     event("candidate session", "connected", json!({"page":page}));
     let mut id = 0u64;
     command(&mut socket, &mut id, "Page.enable", json!({})).await?;
-    // Keep this session alive so the new-document registration survives navigation.
-    match command(
-        &mut socket,
-        &mut id,
-        "Page.addScriptToEvaluateOnNewDocument",
-        json!({"source":SOURCE}),
-    )
-    .await
-    {
-        Ok(_) => event("navigation hook", "installed", json!({"page":page})),
-        Err(error) => event(
-            "navigation hook",
-            "failed",
-            json!({"page":page,"reason":error,"fallback":"evaluate current document; reconnect after navigation"}),
-        ),
+    // The core carries only the entry hook. Both video and background playback
+    // require the independently downloaded, hash-verified startup package.
+    // Never download or wait for a network request while Codex is launching.
+    let selected = command(&mut socket, &mut id, "Runtime.evaluate", json!({
+        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:''}}catch{return {enabled:false,backgroundId:''}}})()",
+        "returnByValue":true
+    })).await.ok().and_then(|value|value.pointer("/result/value").cloned()).unwrap_or(Value::Null);
+    let enabled = selected
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let background_id = selected
+        .get("backgroundId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let mut sources = Vec::new();
+    if enabled {
+        match crate::plugin_store::sources("codex-startup-transition") {
+            Ok(startup) => {
+                let background = if background_id.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    crate::plugin_store::sources(background_id)
+                };
+                match background {
+                    Ok(mut background) => {
+                        event(
+                            "cached startup package",
+                            "verified",
+                            json!({"id":"codex-startup-transition","scriptCount":startup.len(),"verifiedScriptBytes":startup.iter().map(String::len).sum::<usize>(),"networkRequested":false,"stage":"before full UI"}),
+                        );
+                        if !background_id.is_empty() {
+                            event(
+                                "cached background",
+                                "verified",
+                                json!({"id":background_id,"scriptCount":background.len(),"verifiedScriptBytes":background.iter().map(String::len).sum::<usize>(),"networkRequested":false,"stage":"before full UI"}),
+                            );
+                        }
+                        // Register background factories before the player, then run
+                        // the tiny hook only after every required script is ready.
+                        background.extend(startup);
+                        sources = background;
+                    }
+                    Err(error) => event(
+                        "cached background",
+                        "unavailable",
+                        json!({"id":background_id,"code":error.code,"reason":error.message,"startupSkipped":true,"networkRequested":false,"normalStartupUnaffected":true}),
+                    ),
+                }
+            }
+            Err(error) => event(
+                "cached startup package",
+                "unavailable",
+                json!({"id":"codex-startup-transition","code":error.code,"reason":error.message,"startupSkipped":true,"networkRequested":false,"normalStartupUnaffected":true}),
+            ),
+        }
+    } else {
+        event(
+            "cached startup package",
+            "not requested",
+            json!({"reason":"plugin disabled","networkRequested":false}),
+        );
     }
-    command(
-        &mut socket,
-        &mut id,
-        "Runtime.evaluate",
-        json!({"expression":SOURCE,"returnByValue":true}),
-    )
-    .await?;
-    event("loading source", "evaluated", json!({"page":page}));
+    sources.push(SOURCE.to_owned());
+    for (index, source) in sources.into_iter().enumerate() {
+        // Keep this session alive so the new-document registration survives navigation.
+        match command(
+            &mut socket,
+            &mut id,
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({"source":source}),
+        )
+        .await
+        {
+            Ok(_) => event("navigation hook", "installed", json!({"page":page})),
+            Err(error) => event(
+                "navigation hook",
+                "failed",
+                json!({"page":page,"reason":error,"fallback":"evaluate current document; reconnect after navigation"}),
+            ),
+        }
+        command(
+            &mut socket,
+            &mut id,
+            "Runtime.evaluate",
+            json!({"expression":source,"returnByValue":true}),
+        )
+        .await?;
+        event(
+            "loading source",
+            "evaluated",
+            json!({"page":page,"sourceIndex":index,"sourceBytes":source.len(),"stage":"before full UI"}),
+        );
+    }
     let mut previous = String::new();
     loop {
         let value = command(

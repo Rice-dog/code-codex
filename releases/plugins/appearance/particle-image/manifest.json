@@ -1,0 +1,185 @@
+{
+  "id": "particle-image",
+  "name": "Particle Image Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.2",
+  "releaseTag": "v0.3.96",
+  "size": 82516,
+  "sha256": "bc2cb48278012a1973e35513d799bd0477e8f9a0661e41375c683445875eb568",
+  "asset": "CodeCodex-background-particle-image-1.0.2.js",
+  "relativePath": "CodeCodex-background-particle-image-1.0.2.js",
+  "resources": [
+    {
+      "asset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
+      "relativePath": "media/CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
+      "kind": "thumbnail",
+      "size": 13626,
+      "sha256": "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70"
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-image-39894de0da1fa952.png",
+      "relativePath": "media/CodeCodex-background-particle-image-image-39894de0da1fa952.png",
+      "kind": "image",
+      "size": 1286914,
+      "sha256": "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2",
+      "image": {
+        "id": "1087c54f-4f4a-4648-9a4b-29878a1c6c0b",
+        "name": "ChatGPT Image 2026年8月19日 23_06_53.png",
+        "type": "image/png",
+        "size": 1286914,
+        "sha256": "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2",
+        "order": 1,
+        "positionX": 3,
+        "positionY": 0,
+        "zoom": 1.45,
+        "createdAt": 1787152068482,
+        "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png"
+      }
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
+      "relativePath": "media/CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
+      "kind": "thumbnail",
+      "size": 18485,
+      "sha256": "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3"
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
+      "relativePath": "media/CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
+      "kind": "image",
+      "size": 2111416,
+      "sha256": "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898",
+      "image": {
+        "id": "5c47dd02-a969-4c11-a712-231754d3f8d7",
+        "name": "ChatGPT Image 2026年8月16日 08_43_58.png",
+        "type": "image/png",
+        "size": 2111416,
+        "sha256": "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898",
+        "order": 2,
+        "positionX": 36,
+        "positionY": 63,
+        "zoom": 1.35,
+        "createdAt": 1786900081772,
+        "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png"
+      }
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
+      "relativePath": "media/CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
+      "kind": "thumbnail",
+      "size": 12669,
+      "sha256": "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182"
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-image-89d064cef83721eb.png",
+      "relativePath": "media/CodeCodex-background-particle-image-image-89d064cef83721eb.png",
+      "kind": "image",
+      "size": 1230838,
+      "sha256": "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b",
+      "image": {
+        "id": "6a58c7a3-64ea-40c1-a64b-b301f7ded1dd",
+        "name": "ChatGPT Image 2026年8月22日 13_15_56.png",
+        "type": "image/png",
+        "size": 1230838,
+        "sha256": "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b",
+        "order": 3,
+        "positionX": 50,
+        "positionY": 0,
+        "zoom": 1.35,
+        "createdAt": 1787375782731,
+        "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png"
+      }
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
+      "relativePath": "media/CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
+      "kind": "thumbnail",
+      "size": 12801,
+      "sha256": "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda"
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
+      "relativePath": "media/CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
+      "kind": "image",
+      "size": 1266233,
+      "sha256": "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3",
+      "image": {
+        "id": "77960232-16c3-4f65-bbf2-6e4ba26f1480",
+        "name": "ChatGPT Image 2026年8月22日 16_54_33.png",
+        "type": "image/png",
+        "size": 1266233,
+        "sha256": "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3",
+        "order": 4,
+        "positionX": 7,
+        "positionY": 32,
+        "zoom": 1.25,
+        "createdAt": 1787388899281,
+        "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png"
+      }
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
+      "relativePath": "media/CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
+      "kind": "thumbnail",
+      "size": 17458,
+      "sha256": "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f"
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
+      "relativePath": "media/CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
+      "kind": "image",
+      "size": 1783281,
+      "sha256": "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767",
+      "image": {
+        "id": "99bae359-57fe-4a52-91f5-946e64d2da9c",
+        "name": "ChatGPT Image 2026年8月16日 08_49_42.png",
+        "type": "image/png",
+        "size": 1783281,
+        "sha256": "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767",
+        "order": 5,
+        "positionX": 51,
+        "positionY": 50,
+        "zoom": 1.35,
+        "createdAt": 1786964882337,
+        "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png"
+      }
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
+      "relativePath": "media/CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
+      "kind": "thumbnail",
+      "size": 15641,
+      "sha256": "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845"
+    },
+    {
+      "asset": "CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
+      "relativePath": "media/CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
+      "kind": "image",
+      "size": 1549320,
+      "sha256": "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b",
+      "image": {
+        "id": "d79a7089-eb70-4e64-b34a-f910d0cb6ee7",
+        "name": "ChatGPT Image 2026年8月22日 16_10_47.png",
+        "type": "image/png",
+        "size": 1549320,
+        "sha256": "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b",
+        "order": 6,
+        "positionX": 12,
+        "positionY": 0,
+        "zoom": 1.25,
+        "createdAt": 1787386269570,
+        "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png"
+      }
+    }
+  ],
+  "galleryVersion": 1,
+  "defaultImageCount": 6,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

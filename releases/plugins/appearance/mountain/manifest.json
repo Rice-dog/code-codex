@@ -1,0 +1,22 @@
+{
+  "id": "mountain",
+  "name": "Layered Mountain Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 32545,
+  "sha256": "bb2cfcf36979f27f6ae9cea2aff93eeb905a5b1227869dd582dea5a4e83f861e",
+  "asset": "CodeCodex-background-mountain-1.0.0.js",
+  "relativePath": "CodeCodex-background-mountain-1.0.0.js",
+  "resources": [],
+  "galleryVersion": 1,
+  "defaultImageCount": 0,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

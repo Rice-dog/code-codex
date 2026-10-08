@@ -2,6 +2,96 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.96 — 全部插件按需下载与分类目录
+
+### 简体中文
+
+- Preview Market 的 24 个插件全部改为独立下载：Appearance 13 个、File Preview 10 个、Tools 1 个。下载校验后点击 Enable，可在当前 Codex 窗口立即使用，无需重启；下载不会自动启用。
+- 插件统一按 `plugins/<类别>/<插件ID>/` 保存代码与资源。十种预览按格式拆分依赖，Office 的本地 Worker/WASM 随对应插件提供；核心只保留文件树、市场/设置外壳及安全、日志和加载接口。
+- 启动动画播放器也独立下载；核心保留很小的早期缓存加载入口，在官方等待界面读取已校验包，不联网。保持四秒背景最短展示、配置淡出及主页背景开场衔接；缺包时正常启动并记录原因。
+- 说明截图留在 GitHub，从核心 EXE/MSI/ZIP 移除。Particle Image 的六张与 Pixel Sculpt 的三张默认原图保持，继续随对应背景包下载。
+- 更新和普通卸载保留插件缓存、参数、启用偏好、个人图库与视频；有效旧缓存先校验再迁移到分类目录。此前内置功能首次使用独立包时需要下载，未变背景可复用缓存。
+- 本地构建版本，未发布 GitHub；其他用户使用 Download 前，需要先发布与此版本匹配的全部插件资产。
+
+### English
+
+- Make all 24 Preview Market plugins independent downloads: 13 Appearance, 10 File Preview and one Tools plugin. After verification, Enable works immediately in the existing Codex window without restarting. Downloading does not activate a plugin automatically.
+- Organize code and resources under `plugins/<category>/<plugin ID>/`. Split the ten format viewers and their dependencies; Office's local Worker/WASM ship with its own package. The core retains the file tree, market/settings shell, security, logs and loading contracts.
+- Download the startup player too. A tiny core loader reads verified cached packages during the official loading screen without network requests. Preserve the four-second background minimum, configured fade and main-background opening handoff; missing packages skip animation safely and record the reason.
+- Keep documentation screenshots on GitHub and remove them from core EXE/MSI/ZIP installers. Preserve Particle Image's six and Pixel Sculpt's three original default images in their background downloads.
+- Upgrades and ordinary uninstall retain caches, parameters, enable preferences, personal images and videos. Verify and migrate valid old caches into category directories. Previously built-in features require their standalone packages on first use; unchanged backgrounds reuse existing cache.
+- Local build, not published on GitHub. Publish every matching plugin asset before other users can use Download for this version.
+
+## v0.3.95 — 启动动画参数默认值
+
+### 简体中文
+
+- 将本机当前启动动画参数设为默认：视频片段 29–60.093016 秒、最短展示 45%、淡出 3%、速度 1×、亮度 140%、画面铺满；背景来源默认为 Particle Image，背景淡出 3 秒。
+- 新用户缺省参数、损坏/缺失参数的回退以及“恢复默认”使用同一份定义。已有保存参数与启用状态保留，启用开关继续由用户控制。
+- 选择新视频与恢复默认使用新裁剪范围；短于默认起点的视频从 0 开始，结尾不超过实际时长，避免空片段。保留现有媒体和启动时机。
+- 本地构建版本，未发布 GitHub。
+
+### English
+
+- Promote the current startup settings to defaults: video trim 29–60.093016 seconds, minimum display 45%, fade 3%, playback 1×, brightness 140% and cover fit. Default background selection is Particle Image with a 3-second background fade.
+- Use one definition for fresh settings, invalid or missing parameter fallbacks and Reset. Retain existing saved settings and enable state; users continue to control activation.
+- Apply the new trim when selecting a video or resetting. Videos shorter than the default start begin at zero, and the end never exceeds their duration, preventing empty clips. Preserve local media and startup timing.
+- Local build; not yet published on GitHub.
+
+## v0.3.94 — 插件目录与原始素材整理
+
+### 简体中文
+
+- 统一使用 `plugins/<插件ID>/`：主 JS、manifest、说明和署名按插件归档，默认原图及缩略图独立放在 `media/`，不再混放素材注册 JS。
+- 下载、校验、离线导入、缓存及打包清单同步适配。缓存按插件 ID/版本隔离；旧的有效脚本先验 hash 再迁移，八种未变背景无需重新下载。
+- 保持九张默认原图的字节、图库去重和个人设置。PNG 通过大小、SHA-256 及格式签名核验后，转换为分批、有界的素材注册，不将图片当代码执行。
+- 启动动画的早期入口仍内置核心，在官方加载阶段使用选中的已校验缓存，不联网、不等文件树加载；增加入口顺序及载入大小日志。
+- `release-assets.json` 映射 GitHub 的唯一资产名与本地目录；核心安装包继续排除独立插件素材。本地版本，尚未发布 GitHub。
+
+### English
+
+- Organize main JS, manifests, documentation and notices under `plugins/<plugin ID>/`, with original images and thumbnails under `media/`, replacing mixed media-registration JS assets.
+- Update download verification, offline import, per-ID/version cache paths and release inventories together. Verify and migrate legacy scripts; the eight unchanged backgrounds remain reusable without downloading again.
+- Preserve all nine original images, gallery deduplication and personal settings. Verify PNG sizes, SHA-256 and signatures before producing bounded media-registration scripts; image bytes are never treated as executable code.
+- Keep the early startup entry embedded in the core, using the selected verified cache during the native loading stage without network requests or waiting for the file tree. Add script-order and size diagnostics.
+- Map unique GitHub asset names to local paths in `release-assets.json`. Separate plugin media remains outside the core installer. Local version; not yet published on GitHub.
+
+## v0.3.93 — 默认图库素材随插件下载
+
+### 简体中文
+
+- Particle Image 默认提供本机选定的 6 张原图，Pixel Sculpt 默认提供 3 张原图；保留原始 PNG 字节与逐图设置，随对应插件按需下载，不增大核心安装包的素材体积。
+- 首次使用导入默认图库；旧图库相同图片去重，保留用户图片、选择和播放顺序，删除后不在每次打开时重新添加。
+- 主模块及全部默认素材均通过大小与 SHA-256 校验才显示为已安装；可取消、可续用已经校验的缓存。离线导入需要完整的主模块和素材文件。
+- 原生载入分批发送素材，保留单脚本 4 MiB 与原 Binding/CDP 接收限制；启动来源同样使用已缓存素材。
+- 另外八种背景包字节不变，可以复用旧缓存。新增默认图库日志及维护说明。本地构建，尚未发布 GitHub。
+
+### English
+
+- Ship the six selected original images for Particle Image and three for Pixel Sculpt with their on-demand packages. Preserve original PNG bytes and per-image settings; these media assets stay outside the core installer.
+- Import defaults on first use, deduplicate existing images and retain personal images, selections and playback orders. Deleted defaults are not re-added on every reopen.
+- Require size and SHA-256 verification of the main module and every companion asset before marking a package installed. Downloads can be cancelled and reuse previously verified cache files. Offline import requires all companion assets.
+- Load media through separate native evaluations, retaining the 4 MiB per-script and existing Binding/CDP receive limits. Startup sources also use cached media.
+- Keep the other eight background packages byte-identical for cache reuse. Add default-gallery events and maintenance documentation. Local build; not yet published on GitHub.
+
+## v0.3.92 — 背景插件按需下载与即时启用
+
+### 简体中文
+
+- 十种动态背景独立打包，核心安装包不再内嵌背景实现及默认图片；文件树、预览和设置框架保留。
+- Preview Market 先 Download，再 Enable；下载进度可查看、可取消，在当前 Codex 中即时启用，无需重启。
+- 原生缓存按固定目录核对大小和 SHA-256；已下载背景可离线使用，升级保留缓存、原设置和个人媒体。
+- 启动动画使用已缓存的同一背景包；保持原有最短展示、淡出及主页背景开场衔接。
+- 本地构建版本。公网下载需先发布匹配的独立插件资产；验证结果与本机安装状态以本轮交付为准。
+
+### English
+
+- Package ten dynamic backgrounds separately, removing their renderers and default images from the core installer while retaining the file tree, previews and settings framework.
+- Download, then Enable in Preview Market. View progress, cancel downloads and enable backgrounds in the current Codex window without restarting.
+- Verify size and SHA-256 against a pinned catalog in the native cache. Installed backgrounds work offline; upgrades retain cached packages, settings and personal media.
+- Use the same cached packages for startup animations, retaining minimum display, fade and normal-background opening handoff.
+- Local build. Public downloads require the matching independent assets to be published; validation and installed state are reported with this delivery.
+
 ## v0.3.90 — 粒子图像背景开场动画
 
 ### 简体中文

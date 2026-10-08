@@ -1,0 +1,20 @@
+{
+  "id": "csv-preview",
+  "name": "CSV Preview",
+  "hostId": "code-codex.csv-preview",
+  "category": "file-preview",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 21478,
+  "sha256": "f3169b098a3b3296bae081404f12bff123b14621a4bb70f29b87d9290aa67513",
+  "asset": "CodeCodex-plugin-csv-preview-1.0.0.js",
+  "relativePath": "CodeCodex-plugin-csv-preview-1.0.0.js",
+  "resources": [],
+  "defaultImageCount": 0,
+  "capabilities": [
+    "file-preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

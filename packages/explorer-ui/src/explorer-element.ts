@@ -1,3 +1,10 @@
+import {pluginExport} from './plugin-runtime';
+import type {HistoryHost} from './git-history-runtime';
+import {normalizeGitHistory,normalizeGitCommit,normalizeGitDiff,gitHistoryError} from './git-history-facade';
+import {transparentPresentation,applyTransparentPresentation,clearTransparentPresentation} from './utility-plugin-facade';
+import { ParticleImageRenderer, GlowHorizonRenderer, HeavenlyCloudRenderer, AuroraIonosphereRenderer, MilkyWayRenderer, MountainRenderer, BlinkingSquaresRenderer, CloudTrainRenderer, PixelSculptRenderer, BlackHoleRenderer, populateGlowHorizonLayer } from './background-plugin-facade';
+import { ensureBackgroundPackage, connectBackgroundPackages } from './background-plugin-runtime';
+import { BackgroundPackageMarket } from './background-package-market';
 import {
   DEFAULT_PARTICLE_BACKGROUND_SETTINGS,
   DEFAULT_PARTICLE_IMAGE_TRANSFORM,
@@ -8,7 +15,6 @@ import {
   type ParticleBackgroundSettings,
   ParticleImagePreparationCache,
   type ParticleImageRecord,
-  ParticleImageRenderer,
   type ParticleImageTransform,
   type ParticleMorphCurve,
   applyParticleImageTransform,
@@ -27,7 +33,6 @@ import {
 } from './particle-image-startup';
 import { cancelBackgroundFrame, registerBackgroundOpening, requestBackgroundFrame } from './background-startup-hold';
 import {
-  populateGlowHorizonLayer,
   BLACK_HOLE_BACKGROUND_SETTINGS_KEY,
   GLOW_HORIZON_BACKGROUND_SETTINGS_KEY,
   HEAVENLY_CLOUD_BACKGROUND_SETTINGS_KEY,
@@ -72,12 +77,10 @@ import {
   glowHorizonInsideControls,
   glowHorizonElementVisible,
   startGlowHorizonRenderer,
-  GlowHorizonRenderer,
   HEAVENLY_CLOUD_VERTEX_SHADER,
   createHeavenlyCloudFragmentShader,
   HeavenlyCloudRendererRuntime,
   startHeavenlyCloudRenderer,
-  HeavenlyCloudRenderer,
   AURORA_IONOSPHERE_VERTEX_SHADER,
   AURORA_IONOSPHERE_NOISE_SHADER,
   createAuroraIonosphereFieldShader,
@@ -86,7 +89,6 @@ import {
   auroraIonosphereSmoothstep,
   auroraIonosphereWritePacked16,
   calculateAuroraIonosphereNoiseDomain,
-  AuroraIonosphereRenderer,
   MilkyWayQuality,
   MilkyWayBackgroundSettings,
   MilkyWayNumericSettingKey,
@@ -96,13 +98,11 @@ import {
   normalizeMilkyWaySettings,
   readMilkyWayBackgroundSettings,
   MILKY_WAY_FRAGMENT_SHADER,
-  MilkyWayRenderer,
   MOUNTAIN_DEFAULTS,
   MountainSettings,
   MOUNTAIN_CONTROLS,
   normalizeMountainSettings,
   readMountainBackgroundSettings,
-  MountainRenderer,
   BLINKING_SQUARES_CONTROLS,
   normalizeBlinkingSquaresSettings,
   readBlinkingSquaresBackgroundSettings,
@@ -115,7 +115,6 @@ import {
   cloudTrainColorizeSource,
   cloudTrainOpeningSource,
   cloudTrainTintRgb,
-  CloudTrainRenderer,
   BLACK_HOLE_VERTEX_SHADER,
   BLACK_HOLE_SCENE_FRAGMENT_SHADER,
   blackHoleSceneFragmentSource,
@@ -132,18 +131,17 @@ import {
   blackHoleSceneSignature,
   blackHoleSizeSignature,
   startBlackHoleRenderer,
-  BlackHoleRenderer,
 } from './startup-background-renderers';
-import { PixelSculptRenderer, PIXEL_SCULPT_DEFAULTS, normalizePixelSculptSettings, readPixelSculptBackgroundSettings, writePixelSculptBackgroundSettings, type PixelSculptSettings } from "./pixel-sculpt-renderer";
+import { PIXEL_SCULPT_DEFAULTS, normalizePixelSculptSettings, readPixelSculptBackgroundSettings, writePixelSculptBackgroundSettings, type PixelSculptSettings } from "./pixel-sculpt-settings";
 import { ActiveThreadTracker } from "./active-thread";
 import { SurfaceOpacityPlugin, surfaceOpacityCardMarkup, surfaceOpacityPanelMarkup, SURFACE_OPACITY_TREE_CSS } from "./surface-opacity";
-import { BLINKING_SQUARES_DEFAULTS, BlinkingSquaresRenderer, type BlinkingSquaresSettings } from "./blinking-squares-host";
-import { DEFAULT_STARTUP_TRANSITION_SETTINGS, readStartupTransitionSettings, writeStartupTransitionSettings, type StartupTransitionSettings } from "./startup-transition-plugin";
+import { BLINKING_SQUARES_DEFAULTS, type BlinkingSquaresSettings } from "./blinking-squares-settings";
+import { DEFAULT_STARTUP_TRANSITION_SETTINGS, startupTransitionModule, readStartupTransitionSettings, writeStartupTransitionSettings, startupDefaultClip, type StartupTransitionSettings } from "./startup-transition-plugin";
 import { STARTUP_BACKGROUNDS, mountStartupBackground } from './startup-background';
-import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVideo } from "./startup-transition-media";
+import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVideo } from "./startup-transition-facade";
 import { observePluginControls } from "./runtime-information";
 import { runtimeEvent, runtimeTaskLabel } from "./runtime-events";
-import { clipFadeOpacity, formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-timeline";
+import { clipFadeOpacity, formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-facade";
 import { activePageElements, MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { assessBootstrapCompatibility, BridgeUnavailableError, ExplorerBridge, ExplorerBridgeError, getBootstrapConfig } from "./bridge";
@@ -1466,9 +1464,21 @@ class ParticleBackgroundController {
     return this.#initialization;
   }
 
+  async refreshLibrary(): Promise<void> {
+    this.#settings = readParticleBackgroundSettings();
+    await this.initialize();
+    if (this.#database) this.#records = (await readParticleImageRecords(this.#database)).sort((a,b)=>a.createdAt-b.createdAt).slice(0,PARTICLE_BACKGROUND_MAX_IMAGES);
+    this.#notify();
+  }
+
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('particle-image');
+    if (generation !== this.#generation) return;
+    this.#settings = readParticleBackgroundSettings();
     await this.initialize();
+    this.#settings = readParticleBackgroundSettings();
+    if (this.#database) this.#records = (await readParticleImageRecords(this.#database)).sort((a,b)=>a.createdAt-b.createdAt).slice(0,PARTICLE_BACKGROUND_MAX_IMAGES);
     if (
       this.#disposed
       || this.#enabled
@@ -2323,6 +2333,8 @@ class GlowHorizonBackgroundController {
 
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('glow-horizon');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
     const operation = this.#performEnable(generation);
@@ -2555,6 +2567,8 @@ class HeavenlyCloudBackgroundController {
 
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('heavenly-cloud');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
     const operation = this.#performEnable(generation);
@@ -2804,6 +2818,8 @@ class AuroraIonosphereBackgroundController {
   }
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('aurora-ionosphere');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
     const operation = this.#performEnable(generation);
@@ -3038,6 +3054,8 @@ class MilkyWayBackgroundController {
   }
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('milky-way');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
     const operation = this.#performEnable(generation);
@@ -3270,6 +3288,8 @@ class MountainBackgroundController {
   }
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('mountain');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
     const operation = this.#performEnable(generation);
@@ -3504,6 +3524,8 @@ class BlinkingSquaresBackgroundController {
   }
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('blinking-squares');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
     const operation = this.#performEnable(generation);
@@ -3731,6 +3753,8 @@ class CloudTrainBackgroundController {
   }
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('cloud-train');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
     const operation = this.#performEnable(generation);
@@ -4013,6 +4037,8 @@ class PixelSculptBackgroundController {
   }
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('pixel-sculpt');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
     const operation = this.#performEnable(generation);
@@ -4253,6 +4279,8 @@ class BlackHoleBackgroundController {
 
   async enable(): Promise<void> {
     const generation = this.#generation;
+    await ensureBackgroundPackage('black-hole');
+    if (generation !== this.#generation) return;
     await this.initialize();
     if (
       this.#disposed
@@ -6287,6 +6315,9 @@ export class CodeCodexElement extends HTMLElement {
       this.#setState("error", "NO_BRIDGE");
       return;
     }
+    connectBackgroundPackages((method, params, timeout) => this.#bridge!.request(method, params, timeout));
+    this.#backgroundPackageMarket?.dispose();
+    this.#backgroundPackageMarket = new BackgroundPackageMarket(this.#shadow, this.#bridge, message => this.#showActionNotice(message, 'error'), (id,intent)=>this.#prepareDownloadedPluginAction(id,intent));
     this.#startupTransitionNativeSync = this.#syncStartupTransitionNativePreference(this.#bridge);
     void this.#start(this.#bridge, this.#generation, bootstrap.manualWorkspace === true);
   }
@@ -6602,6 +6633,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#cancelUpdateCheck();
     this.#cancelAppearanceHealthCheck();
     this.#clearTransparentBackgroundPresentation();
+    this.#backgroundPackageMarket?.dispose();
+    this.#backgroundPackageMarket = undefined;
+    connectBackgroundPackages(undefined);
     this.#bridge?.dispose();
     this.#bridge = undefined;
     this.#renderAppearancePlugin();
@@ -10834,6 +10868,7 @@ export class CodeCodexElement extends HTMLElement {
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
     try {
+      if (!this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('particle-image');
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       await this.#deactivateAuroraIonosphereForBackgroundSwitch();
         await this.#deactivateMilkyWayForBackgroundSwitch();
@@ -11279,6 +11314,7 @@ export class CodeCodexElement extends HTMLElement {
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
     try {
+      if (!this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('black-hole');
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       await this.#deactivateAuroraIonosphereForBackgroundSwitch();
         await this.#deactivateMilkyWayForBackgroundSwitch();
@@ -11500,6 +11536,7 @@ export class CodeCodexElement extends HTMLElement {
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
     try {
+      if (!this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('glow-horizon');
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       await this.#deactivateAuroraIonosphereForBackgroundSwitch();
         await this.#deactivateMilkyWayForBackgroundSwitch();
@@ -11675,6 +11712,7 @@ export class CodeCodexElement extends HTMLElement {
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
     try {
+      if (!this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('heavenly-cloud');
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       await this.#deactivateAuroraIonosphereForBackgroundSwitch();
         await this.#deactivateMilkyWayForBackgroundSwitch();
@@ -11856,6 +11894,7 @@ export class CodeCodexElement extends HTMLElement {
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
     try {
+      if (!this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('aurora-ionosphere');
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -12056,6 +12095,7 @@ export class CodeCodexElement extends HTMLElement {
     let previousTransparentBackground: string | undefined;
     let bridge: ExplorerBridge | undefined;
     try {
+      if (!this.#enabledAppearancePlugins.has(MILKY_WAY_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('milky-way');
       if (!await this.#awaitBackgroundInitializations(operation)) return;
       bridge = this.#bridge;
       transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
@@ -12830,6 +12870,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderParticleBackgroundPlugin(): void {
+    this.#backgroundPackageMarket?.queueRender();
     const controller = this.#particleBackgroundController;
     const enabled = this.#enabledAppearancePlugins.has(PARTICLE_BACKGROUND_PLUGIN_ID);
     const active = enabled && controller.enabled;
@@ -13038,6 +13079,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderBlackHoleBackgroundPlugin(): void {
+    this.#backgroundPackageMarket?.queueRender();
     const controller = this.#blackHoleBackgroundController;
     const enabled = this.#enabledAppearancePlugins.has(BLACK_HOLE_BACKGROUND_PLUGIN_ID);
     const active = enabled && controller.enabled;
@@ -13103,6 +13145,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderGlowHorizonBackgroundPlugin(): void {
+    this.#backgroundPackageMarket?.queueRender();
     const controller = this.#glowHorizonBackgroundController;
     const enabled = this.#enabledAppearancePlugins.has(GLOW_HORIZON_BACKGROUND_PLUGIN_ID);
     const active = enabled && controller.enabled;
@@ -13167,6 +13210,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderHeavenlyCloudBackgroundPlugin(): void {
+    this.#backgroundPackageMarket?.queueRender();
     const controller = this.#heavenlyCloudBackgroundController;
     const enabled = this.#enabledAppearancePlugins.has(HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID);
     const active = enabled && controller.enabled;
@@ -13225,6 +13269,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderAuroraIonosphereBackgroundPlugin(): void {
+    this.#backgroundPackageMarket?.queueRender();
     const controller = this.#auroraIonosphereBackgroundController;
     const enabled = this.#enabledAppearancePlugins.has(AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID);
     const active = enabled && controller.enabled;
@@ -13282,6 +13327,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderMilkyWayBackgroundPlugin(): void {
+    this.#backgroundPackageMarket?.queueRender();
     const controller = this.#milkyWayBackgroundController;
     const enabled = this.#enabledAppearancePlugins.has(MILKY_WAY_BACKGROUND_PLUGIN_ID);
     const active = enabled && controller.enabled;
@@ -13397,6 +13443,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#required<HTMLButtonElement>(".mountain-replay").disabled=busy||!c.enabled;
     for(const button of this.#shadow.querySelectorAll<HTMLButtonElement>("[data-mountain-steps]")){button.setAttribute("aria-pressed",String(Number(button.dataset.mountainSteps)===s.steps));button.disabled=busy;}
     const error=this.#required<HTMLElement>(".mountain-error");error.textContent=c.error??"";error.hidden=!c.error;
+    this.#backgroundPackageMarket?.queueRender();
   }
   async #toggleMountain(): Promise<void> {
     if(this.#appearanceTransitionPending||this.#appearancePluginPending||this.#mountainController.pending)return;
@@ -13405,6 +13452,7 @@ export class CodeCodexElement extends HTMLElement {
     const ids=[PARTICLE_BACKGROUND_PLUGIN_ID,BLACK_HOLE_BACKGROUND_PLUGIN_ID,GLOW_HORIZON_BACKGROUND_PLUGIN_ID,HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,MILKY_WAY_BACKGROUND_PLUGIN_ID];
     let previous=-1;
     try {
+      if (!this.#enabledAppearancePlugins.has(MOUNTAIN_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('mountain');
       if(!await this.#awaitBackgroundInitializations(operation,true))return;
       if(this.#mountainController.enabled){await this.#mountainController.disable();this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);}
       else {
@@ -13487,6 +13535,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#required<HTMLButtonElement>(".cloudTrain-reset").disabled=busy;
     this.#required<HTMLButtonElement>(".cloudTrain-replay").disabled=busy||!c.enabled;
     const error=this.#required<HTMLElement>(".cloudTrain-error");error.textContent=c.error??"";error.hidden=!c.error;
+    this.#backgroundPackageMarket?.queueRender();
   }
   async #toggleCloudTrain(): Promise<void> {
     if(this.#appearanceTransitionPending||this.#appearancePluginPending||this.#cloudTrainController.pending)return;
@@ -13495,6 +13544,7 @@ export class CodeCodexElement extends HTMLElement {
     const ids=[PARTICLE_BACKGROUND_PLUGIN_ID,BLACK_HOLE_BACKGROUND_PLUGIN_ID,GLOW_HORIZON_BACKGROUND_PLUGIN_ID,HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,MILKY_WAY_BACKGROUND_PLUGIN_ID,MOUNTAIN_BACKGROUND_PLUGIN_ID];
     let previous=-1;
     try {
+      if (!this.#enabledAppearancePlugins.has(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('cloud-train');
       if(!await this.#awaitBackgroundInitializations(operation,true,true))return;
       if(this.#cloudTrainController.enabled){await this.#cloudTrainController.disable();this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);}
       else {
@@ -13560,6 +13610,11 @@ export class CodeCodexElement extends HTMLElement {
       }
       this.#showStartupTransitionError(error);
     };
+    preview = { dispose: () => { active = false; renderer?.dispose(); layer.remove(); } };
+    this.#startupBackgroundPreview = preview;
+    this.#startupBackgroundPreviewId = backgroundId;
+    void ensureBackgroundPackage(backgroundId).then(() => {
+    if (!active) return;
     try {
       renderer = mountStartupBackground(layer, backgroundId, message => { if (message) fail(new Error(message)); });
       if (!active) { renderer.dispose(); return; }
@@ -13572,6 +13627,7 @@ export class CodeCodexElement extends HTMLElement {
         if (active && this.#startupBackgroundPreview === preview) runtimeEvent('startup-animation', 'background preview', 'started', { backgroundId });
       }, fail);
     } catch (error) { fail(error); }
+    }, fail);
   }
 
   #renderStartupTransition(): void {
@@ -13614,6 +13670,8 @@ export class CodeCodexElement extends HTMLElement {
         : `${settings[key]}%`;
     }
     this.#required<HTMLSelectElement>("#cle-startupTransition-fit").value = settings.videoFit;
+    this.#backgroundPackageMarket?.queueRender();
+    if(!startupTransitionModule())return;
     const english = panel.dataset.language === "en";
     const timeline = this.#required<HTMLElement>(".startupTransition-timeline");
     const geometry = startupTimelineGeometry(
@@ -13899,10 +13957,10 @@ export class CodeCodexElement extends HTMLElement {
     });
     this.#required<HTMLButtonElement>(".startupTransition-enable").addEventListener("click", async () => {
       if (this.#startupTransitionPending) return;
+      const enabled = this.#required<HTMLButtonElement>(".startupTransition-enable").getAttribute("aria-pressed") !== "true";
       this.#startupTransitionPending = true;
       this.#renderStartupTransition();
       const settings = readStartupTransitionSettings();
-      const enabled = !settings.enabled;
       try {
         await this.#startupTransitionNativeSync;
         if (this.#bridge?.available) {
@@ -14022,7 +14080,7 @@ export class CodeCodexElement extends HTMLElement {
         const video = await saveStartupVideo(file);
         if (!this.#connected || generation !== this.#startupVideoGeneration) return;
         const settings = readStartupTransitionSettings();
-        if (!writeStartupTransitionSettings({ ...settings, clipStart: 0, clipEnd: Math.min(5, video.duration) })) {
+        if (!writeStartupTransitionSettings({ ...settings, ...startupDefaultClip(video.duration) })) {
           throw new Error("Video trim settings could not be saved");
         }
         this.#setStartupVideo(video);
@@ -14050,7 +14108,7 @@ export class CodeCodexElement extends HTMLElement {
     });
     this.#required<HTMLButtonElement>(".startupTransition-reset").addEventListener("click", () => {
       const settings = readStartupTransitionSettings();
-      if (!writeStartupTransitionSettings({ ...DEFAULT_STARTUP_TRANSITION_SETTINGS, enabled: settings.enabled, clipEnd: Math.min(5, this.#startupVideo?.duration ?? 5) })) {
+      if (!writeStartupTransitionSettings({ ...DEFAULT_STARTUP_TRANSITION_SETTINGS, enabled: settings.enabled, ...startupDefaultClip(this.#startupVideo?.duration) })) {
         this.#showActionNotice("Startup transition setting could not be saved", "error");
       }
       this.#renderStartupTransition();
@@ -14164,6 +14222,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#required<HTMLButtonElement>(".blinkingSquares-replay").disabled = busy || !controller.enabled;
     const error = this.#required<HTMLElement>(".blinkingSquares-error");
     error.textContent = controller.error ?? ""; error.hidden = !controller.error;
+    this.#backgroundPackageMarket?.queueRender();
   }
   async #toggleBlinkingSquares(): Promise<void> {
     if (this.#appearanceTransitionPending || this.#appearancePluginPending || this.#blinkingSquaresController.pending) return;
@@ -14173,6 +14232,7 @@ export class CodeCodexElement extends HTMLElement {
     const ids = [PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID, HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, MILKY_WAY_BACKGROUND_PLUGIN_ID, MOUNTAIN_BACKGROUND_PLUGIN_ID, CLOUD_TRAIN_BACKGROUND_PLUGIN_ID, PIXEL_SCULPT_BACKGROUND_PLUGIN_ID];
     let previous = -1;
     try {
+      if (!this.#enabledAppearancePlugins.has(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('blinking-squares');
       if (!await this.#awaitBackgroundInitializations(operation, true, true, true, true)) return;
       if (this.#blinkingSquaresController.enabled) {
         await this.#blinkingSquaresController.disable();
@@ -14265,6 +14325,7 @@ export class CodeCodexElement extends HTMLElement {
     controlsHost.hidden=!c.editorReady;
     if(c.editorReady)c.mountControls(controlsHost,this.#backgroundSettingsLanguage);
     const error=this.#required<HTMLElement>(".pixelSculpt-error");error.textContent=c.error??"";error.hidden=!c.error;
+    this.#backgroundPackageMarket?.queueRender();
   }
   async #togglePixelSculpt(): Promise<void> {
     if(this.#appearanceTransitionPending||this.#appearancePluginPending||this.#pixelSculptController.pending)return;
@@ -14273,6 +14334,7 @@ export class CodeCodexElement extends HTMLElement {
     const ids=[PARTICLE_BACKGROUND_PLUGIN_ID,BLACK_HOLE_BACKGROUND_PLUGIN_ID,GLOW_HORIZON_BACKGROUND_PLUGIN_ID,HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,MILKY_WAY_BACKGROUND_PLUGIN_ID,MOUNTAIN_BACKGROUND_PLUGIN_ID,CLOUD_TRAIN_BACKGROUND_PLUGIN_ID];
     let previous=-1;
     try {
+      if (!this.#enabledAppearancePlugins.has(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID)) await ensureBackgroundPackage('pixel-sculpt');
       if(!await this.#awaitBackgroundInitializations(operation,true,true,true))return;
       if(this.#pixelSculptController.enabled){await this.#pixelSculptController.disable();this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);}
       else {
@@ -14320,27 +14382,9 @@ export class CodeCodexElement extends HTMLElement {
     return this.#forcedColorsQuery?.matches === true || this.#reducedTransparencyQuery?.matches === true;
   }
 
-  #transparentBackgroundPresentation(): string | undefined {
-    const root = document.documentElement;
-    if (!root.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE)) return undefined;
-    const background = root.style.getPropertyValue(TRANSPARENT_BACKGROUND_COLOR_PROPERTY).trim();
-    return background === "transparent" ? background : undefined;
-  }
-
-  #applyTransparentBackgroundPresentation(background: string): void {
-    const root = document.documentElement;
-    if (root.style.getPropertyValue(TRANSPARENT_BACKGROUND_COLOR_PROPERTY).trim() !== background) {
-      root.style.setProperty(TRANSPARENT_BACKGROUND_COLOR_PROPERTY, background);
-    }
-    if (!root.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE)) {
-      root.toggleAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE, true);
-    }
-  }
-
-  #clearTransparentBackgroundPresentation(): void {
-    document.documentElement.toggleAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE, false);
-    document.documentElement.style.removeProperty(TRANSPARENT_BACKGROUND_COLOR_PROPERTY);
-  }
+  #transparentBackgroundPresentation():string|undefined{return transparentPresentation();}
+  #applyTransparentBackgroundPresentation(background:string):void{applyTransparentPresentation(background);}
+  #clearTransparentBackgroundPresentation():void{clearTransparentPresentation();}
 
   #cancelAppearanceHealthCheck(): void {
     if (this.#appearanceHealthTimer !== undefined) clearTimeout(this.#appearanceHealthTimer);
@@ -14716,6 +14760,10 @@ export class CodeCodexElement extends HTMLElement {
     this.#closeHeavenlyCloudSettings(false);
     this.#closeAuroraIonosphereSettings(false);
     this.#particleSettingsOpen = true;
+    void ensureBackgroundPackage('particle-image').then(async()=>{
+      await this.#particleBackgroundController.refreshLibrary();
+      if(this.#particleSettingsOpen) this.#renderParticleBackgroundPlugin();
+    }).catch(error=>this.#showActionNotice(error instanceof Error ? error.message : String(error),'error'));
     this.#particleSettingsTrigger.setAttribute("aria-expanded", "true");
     this.#renderParticleBackgroundPlugin();
     if (!this.#particleSettingsPanel.matches(":popover-open")) this.#particleSettingsPanel.showPopover();
@@ -15295,38 +15343,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderGitHistoryList(): void {
-    this.#gitHistoryList.replaceChildren();
-    for (const commit of this.#gitHistoryCommits) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "git-history-commit";
-      button.dataset.gitHash = commit.hash;
-      button.setAttribute("role", "listitem");
-
-      const rail = document.createElement("span");
-      rail.className = "git-history-rail";
-      rail.setAttribute("aria-hidden", "true");
-      const copy = document.createElement("span");
-      copy.className = "git-history-commit-copy";
-      const subject = document.createElement("strong");
-      subject.textContent = commit.subject || "Untitled commit";
-      const meta = document.createElement("span");
-      meta.className = "git-history-commit-meta";
-      const hash = document.createElement("code");
-      hash.textContent = commit.shortHash;
-      const author = document.createElement("span");
-      author.textContent = commit.author;
-      const time = document.createElement("time");
-      time.dateTime = commit.authoredAt;
-      time.textContent = formatGitDate(commit.authoredAt);
-      meta.append(hash, author, time);
-      copy.append(subject, meta);
-      button.append(rail, copy);
-      this.#gitHistoryList.append(button);
-    }
-    this.#gitHistoryState.hidden = this.#gitHistoryCommits.length > 0;
-    if (!this.#gitHistoryCommits.length) this.#gitHistoryState.textContent = "No commits found in this repository.";
-    this.#gitHistoryLoadMoreButton.hidden = !this.#gitHistoryHasMore;
+    pluginExport<(host:HistoryHost)=>void>('git-history','renderGitHistoryList')({list:this.#gitHistoryList,commits:this.#gitHistoryCommits,state:this.#gitHistoryState,loadMore:this.#gitHistoryLoadMoreButton,hasMore:this.#gitHistoryHasMore});
   }
 
   #showGitHistoryError(message: string): void {
@@ -15360,47 +15377,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #renderGitCommit(commit: GitCommitResult): void {
-    this.#gitHistoryDetail.replaceChildren();
-    const heading = document.createElement("h4");
-    heading.textContent = commit.message.split(/\r?\n/, 1)[0] || "Untitled commit";
-    const metadata = document.createElement("div");
-    metadata.className = "git-history-detail-meta";
-    const hash = document.createElement("code");
-    hash.textContent = commit.shortHash;
-    const author = document.createElement("span");
-    author.textContent = `${commit.author} · ${formatGitDate(commit.authoredAt)}`;
-    metadata.append(hash, author);
-    const fileHeading = document.createElement("h5");
-    fileHeading.textContent = `${commit.files.length} changed ${commit.files.length === 1 ? "file" : "files"}`;
-    this.#gitHistoryDetail.append(heading, metadata, fileHeading);
-    for (const file of commit.files) {
-      const row = document.createElement("div");
-      row.className = "git-history-file";
-      const actions = document.createElement("div");
-      actions.className = "git-history-file-actions";
-      const openButton = document.createElement("button");
-      openButton.type = "button";
-      openButton.className = "git-history-file-open";
-      openButton.dataset.gitOpenFile = file.path;
-      openButton.dataset.gitHash = commit.hash;
-      openButton.setAttribute("aria-label", `Open changes for ${file.path} in the main view`);
-      const status = document.createElement("span");
-      status.className = `git-history-file-status status-${file.status[0]?.toLowerCase() || "m"}`;
-      status.textContent = file.status[0] || "M";
-      const path = document.createElement("span");
-      path.className = "git-history-file-path";
-      path.textContent = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
-      openButton.append(status, path);
-      actions.append(openButton);
-      row.append(actions);
-      this.#gitHistoryDetail.append(row);
-    }
-    if (commit.filesTruncated) {
-      const note = document.createElement("p");
-      note.className = "git-history-note";
-      note.textContent = "Only the first 500 changed files are shown.";
-      this.#gitHistoryDetail.append(note);
-    }
+    pluginExport<(host:{detail:HTMLElement},commit:GitCommitResult)=>void>('git-history','renderGitCommit')({detail:this.#gitHistoryDetail},commit);
   }
 
   async #openGitHistoryFile(hash: string, path: string): Promise<void> {
@@ -15498,6 +15475,16 @@ export class CodeCodexElement extends HTMLElement {
     this.#announce(`${previewer.title} ${wasEnabled ? "disabled" : "enabled"}`);
   }
 
+  #prepareDownloadedPluginAction(id:string,intent:'enable'|'settings'):void {
+    if(intent!=='enable')return;
+    if(id.endsWith('-preview'))this.#enabledPreviewers.delete(`code-codex.${id}`);
+    else if(id!=='surface-opacity'&&id!=='codex-startup-transition'&&id!=='git-history') {
+      this.#enabledAppearancePlugins.delete(id==='transparent-background'?'code-codex.transparent-background':`code-codex.${id==='mountain'?'layered-mountain':id}-background`);
+    }
+  }
+
+  #backgroundPackageMarket: BackgroundPackageMarket | undefined;
+
   #renderPreviewMarket(): void {
     this.#surfaceOpacity.render();
     this.#renderStartupTransition();
@@ -15521,11 +15508,14 @@ export class CodeCodexElement extends HTMLElement {
       status.dataset.enabled = String(enabled);
       button.textContent = enabled ? "Disable" : "Enable";
       button.dataset.enabled = String(enabled);
+      button.setAttribute("aria-pressed", String(enabled));
       button.setAttribute("aria-label", `${enabled ? "Disable" : "Enable"} ${previewer.title}`);
     }
+    this.#backgroundPackageMarket?.render();
   }
 
   #renderAppearancePlugin(): void {
+    this.#backgroundPackageMarket?.queueRender();
     const enabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID);
     const bridgeAvailable = this.#bridge?.available === true;
     const preferenceBlocked = this.#transparencyPreferenceBlocked();
@@ -16224,109 +16214,6 @@ function externalImportError(error: unknown, committedCount: number): string {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function normalizeGitCommitSummary(raw: unknown): GitCommitSummary {
-  const object = asRecord(raw);
-  if (
-    !object
-    || typeof object.hash !== "string"
-    || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(object.hash)
-    || typeof object.shortHash !== "string"
-    || typeof object.author !== "string"
-    || typeof object.authoredAt !== "string"
-    || typeof object.subject !== "string"
-  ) throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git history response was not valid." });
-  return {
-    hash: object.hash,
-    shortHash: object.shortHash,
-    author: object.author,
-    authoredAt: object.authoredAt,
-    subject: object.subject,
-  };
-}
-
-function normalizeGitHistory(raw: unknown): GitHistoryResult {
-  const object = asRecord(raw);
-  if (
-    !object
-    || typeof object.branch !== "string"
-    || typeof object.detached !== "boolean"
-    || !Array.isArray(object.commits)
-    || typeof object.hasMore !== "boolean"
-  ) throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git history response was not valid." });
-  return {
-    branch: object.branch,
-    detached: object.detached,
-    commits: object.commits.map(normalizeGitCommitSummary),
-    hasMore: object.hasMore,
-  };
-}
-
-function normalizeGitCommit(raw: unknown): GitCommitResult {
-  const object = asRecord(raw);
-  if (
-    !object
-    || typeof object.hash !== "string"
-    || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(object.hash)
-    || typeof object.shortHash !== "string"
-    || typeof object.author !== "string"
-    || typeof object.authorEmail !== "string"
-    || typeof object.authoredAt !== "string"
-    || typeof object.message !== "string"
-    || !Array.isArray(object.files)
-    || typeof object.filesTruncated !== "boolean"
-  ) throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git commit response was not valid." });
-  const files = object.files.map((rawFile): GitChangedFile => {
-    const file = asRecord(rawFile);
-    if (
-      !file
-      || typeof file.status !== "string"
-      || typeof file.path !== "string"
-      || (file.oldPath !== undefined && typeof file.oldPath !== "string")
-    ) throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git commit response was not valid." });
-    return {
-      status: file.status,
-      path: file.path,
-      ...(typeof file.oldPath === "string" ? { oldPath: file.oldPath } : {}),
-    };
-  });
-  return {
-    hash: object.hash,
-    shortHash: object.shortHash,
-    author: object.author,
-    authorEmail: object.authorEmail,
-    authoredAt: object.authoredAt,
-    message: object.message,
-    files,
-    filesTruncated: object.filesTruncated,
-  };
-}
-
-function normalizeGitDiff(raw: unknown): GitDiffResult {
-  const object = asRecord(raw);
-  if (!object || typeof object.path !== "string" || typeof object.content !== "string" || typeof object.truncated !== "boolean") {
-    throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The Git diff response was not valid." });
-  }
-  return { path: object.path, content: object.content, truncated: object.truncated };
-}
-
-function formatGitDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
-}
-
-function gitHistoryError(error: unknown): string {
-  switch (errorCode(error)) {
-    case "NO_CONTEXT": return "Choose a local project to view its Git history.";
-    case "NOT_GIT_REPOSITORY": return "The selected project is not a Git repository.";
-    case "GIT_UNAVAILABLE": return "Git is not installed or is unavailable to Code-Codex.";
-    case "GIT_TIMEOUT": return "Git history took too long to load.";
-    case "GIT_OUTPUT_TOO_LARGE": return "This Git result is too large to display safely.";
-    case "CANCELLED": return "The active project changed. Reopen Git History to continue.";
-    default: return "Git history could not be loaded.";
-  }
 }
 
 function normalizeUpdateCheckResult(raw: unknown): UpdateCheckResult {

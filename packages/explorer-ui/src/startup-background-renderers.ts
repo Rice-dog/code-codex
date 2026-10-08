@@ -1,5 +1,5 @@
 import { requestBackgroundFrame, cancelBackgroundFrame } from './background-startup-hold';
-import { BLINKING_SQUARES_DEFAULTS, type BlinkingSquaresSettings } from "./blinking-squares-host";
+import { BLINKING_SQUARES_DEFAULTS, type BlinkingSquaresSettings } from "./blinking-squares-settings";
 
 export const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1";
 

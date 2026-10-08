@@ -1,0 +1,22 @@
+{
+  "id": "glow-horizon",
+  "name": "Glow Horizon Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 31192,
+  "sha256": "650f79fe0aee14c6c290d12140b03f18938f284677fc5ea7df743699b7a6d60b",
+  "asset": "CodeCodex-background-glow-horizon-1.0.0.js",
+  "relativePath": "CodeCodex-background-glow-horizon-1.0.0.js",
+  "resources": [],
+  "galleryVersion": 1,
+  "defaultImageCount": 0,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

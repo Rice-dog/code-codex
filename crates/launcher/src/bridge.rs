@@ -3466,6 +3466,20 @@ impl BridgeHandler for NativeBridge {
             "explorer.watch.stop" => self.watch_stop(request.params, epoch),
             "explorer.settings.get" => self.settings_get(request.params).await,
             "explorer.settings.set" => self.settings_set(request.params, epoch).await,
+            "explorer.plugins.status" => crate::plugin_store::status(),
+            "explorer.plugins.install" | "explorer.plugins.cancel" | "explorer.plugins.load" => {
+                let id = request
+                    .params
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| BridgeError::new("PLUGIN_ID", "A plugin ID is required."))?;
+                match method.as_str() {
+                    "explorer.plugins.install" => crate::plugin_store::install(id).await,
+                    "explorer.plugins.cancel" => crate::plugin_store::cancel(id),
+                    _ => crate::plugin_store::sources(id)
+                        .map(|source| json!({"id":id,"verifiedSource":source})),
+                }
+            }
             "explorer.update.check" => self.update_check(request.params, epoch).await,
             "explorer.update.install" => self.update_install(request.params, epoch).await,
             "explorer.window.transparency.set" => {
@@ -4136,8 +4150,11 @@ mod tests {
     #[cfg(windows)]
     use windows_sys::Win32::Foundation::POINT;
     #[cfg(windows)]
+    use windows_sys::Win32::Graphics::Dwm::DwmFlush;
+    #[cfg(windows)]
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_POPUP,
+        CreateWindowExW, DestroyWindow, DispatchMessageW, GWL_STYLE, MSG, PM_REMOVE, PeekMessageW,
+        TranslateMessage, WS_DISABLED, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_POPUP,
         WindowFromPoint,
     };
 
@@ -4542,6 +4559,113 @@ mod tests {
         fn handle(&self) -> HWND {
             self.0
         }
+
+        fn assert_presented_client_input_owner(&self, stage: &str) {
+            assert_ne!(
+                unsafe {
+                    SetWindowPos(
+                        self.0,
+                        HWND_TOPMOST,
+                        48,
+                        48,
+                        32,
+                        32,
+                        SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    )
+                },
+                0,
+                "show disposable input fixture"
+            );
+            let started = Instant::now();
+            let (rect, point, hit, inner_point, inner_hit, visible, enabled, style, hit_pid) = loop {
+                let mut message: MSG = unsafe { std::mem::zeroed() };
+                unsafe {
+                    while PeekMessageW(&mut message, self.0, 0, 0, PM_REMOVE) != 0 {
+                        let _ = TranslateMessage(&message);
+                        let _ = DispatchMessageW(&message);
+                    }
+                    let _ = DwmFlush();
+                }
+                let mut rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                assert_ne!(
+                    unsafe { GetWindowRect(self.0, &mut rect) },
+                    0,
+                    "fixture rectangle"
+                );
+                // This fixture is a borderless popup. Derive a client point from
+                // its actual screen rectangle instead of assuming desktop scale.
+                let point = POINT {
+                    x: (rect.left + rect.right) / 2,
+                    y: (rect.top + rect.bottom) / 2,
+                };
+                let hit = unsafe { WindowFromPoint(point) };
+                // Retain the old (56,56) interior check at this 32px geometry,
+                // as well as the center, while deriving both from the real rect.
+                let inner_point = POINT {
+                    x: rect.left + (rect.right - rect.left) / 4,
+                    y: rect.top + (rect.bottom - rect.top) / 4,
+                };
+                let inner_hit = unsafe { WindowFromPoint(inner_point) };
+                let visible = unsafe { IsWindowVisible(self.0) } != 0;
+                let enabled =
+                    unsafe { GetWindowLongPtrW(self.0, GWL_STYLE) } as u32 & WS_DISABLED == 0;
+                let style = read_extended_style(self.0).expect("presented fixture style");
+                let mut hit_pid = 0;
+                unsafe { GetWindowThreadProcessId(hit, &mut hit_pid) };
+                if (hit == self.0 && inner_hit == self.0)
+                    || started.elapsed() >= Duration::from_secs(1)
+                {
+                    break (
+                        rect,
+                        point,
+                        hit,
+                        inner_point,
+                        inner_hit,
+                        visible,
+                        enabled,
+                        style,
+                        hit_pid,
+                    );
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            eprintln!(
+                "{stage}: fixture={:?}; rect=({},{},{},{}); point=({},{}); visible={visible}; enabled={enabled}; exstyle={style:#x}; hit={hit:?}; inner=({},{}); inner_hit={inner_hit:?}; hit_pid={hit_pid}; settled_ms={}",
+                self.0,
+                rect.left,
+                rect.top,
+                rect.right,
+                rect.bottom,
+                point.x,
+                point.y,
+                inner_point.x,
+                inner_point.y,
+                started.elapsed().as_millis()
+            );
+            assert!(
+                visible && enabled,
+                "{stage}: input fixture must be visible and enabled"
+            );
+            assert!(
+                has_extended_style(style, WS_EX_TOPMOST),
+                "{stage}: input fixture must remain topmost"
+            );
+            assert_eq!(
+                hit, self.0,
+                "{stage}: transparent client pixels must remain owned by the Codex HWND; point=({},{}); hit_pid={hit_pid}; fixture_exstyle={style:#x}",
+                point.x, point.y
+            );
+            assert_eq!(
+                inner_hit, self.0,
+                "{stage}: original interior pixels must remain owned by the Codex HWND; point=({},{})",
+                inner_point.x, inner_point.y
+            );
+        }
     }
 
     #[cfg(windows)]
@@ -4581,7 +4705,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn transparency_compositor_policy_preserves_style_and_input_ownership() {
-        let window = TransparencyTestWindow::new(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+        // Background test processes may not receive foreground permission to
+        // promote an existing window. Create this disposable fixture topmost
+        // from the outset, without activating it or altering any other window.
+        let window =
+            TransparencyTestWindow::new(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST);
+        window.assert_presented_client_input_owner("before transparency");
         let original_style =
             read_extended_style(window.handle()).expect("initial non-layered ex-style");
         let original_backdrop =
@@ -4639,25 +4768,7 @@ mod tests {
             );
         }
 
-        assert_ne!(
-            unsafe {
-                SetWindowPos(
-                    window.handle(),
-                    HWND_TOPMOST,
-                    48,
-                    48,
-                    32,
-                    32,
-                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                )
-            },
-            0
-        );
-        assert_eq!(
-            unsafe { WindowFromPoint(POINT { x: 56, y: 56 }) },
-            window.handle(),
-            "transparent client pixels must remain owned by the Codex HWND"
-        );
+        window.assert_presented_client_input_owner("after transparency");
 
         restore_window_accent_policy(window.handle(), original_accent, || true)
             .expect("restore original accent");

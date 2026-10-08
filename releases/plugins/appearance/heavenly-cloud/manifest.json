@@ -1,0 +1,22 @@
+{
+  "id": "heavenly-cloud",
+  "name": "Heavenly Cloud Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 31974,
+  "sha256": "06ca562e6976516ec43134146b65e3588e5b779a9e777268ba83c4f05c64263c",
+  "asset": "CodeCodex-background-heavenly-cloud-1.0.0.js",
+  "relativePath": "CodeCodex-background-heavenly-cloud-1.0.0.js",
+  "resources": [],
+  "galleryVersion": 1,
+  "defaultImageCount": 0,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

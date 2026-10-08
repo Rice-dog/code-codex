@@ -1,3 +1,4 @@
+import { installedBackgroundFixture } from './background-package-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -13,7 +14,7 @@ const label = process.argv[2] ?? 'current';
 assert.match(label, /^[a-zA-Z0-9_-]+$/);
 const directory = join(root, 'artifacts', `startup-source-settings-${label}`);
 mkdirSync(directory, { recursive: true });
-const bundle = readFileSync(join(root, 'packages/explorer-ui/dist/explorer.js'));
+const bundle = installedBackgroundFixture(root) + readFileSync(join(root, 'packages/explorer-ui/dist/explorer.js'),'utf8');
 const sourceVersion = JSON.parse(readFileSync(join(root, 'packages/explorer-ui/package.json'), 'utf8')).version;
 const version = bundle.toString('utf8').match(/current version v(\d+\.\d+\.\d+)/)?.[1];
 assert.ok(version, 'production bundle version found');
@@ -24,7 +25,7 @@ const html = `<!doctype html><html data-theme="dark"><head><meta charset="utf-8"
 </style></head><body><div id="native-root">${home}</div><script>
 window.fixtureErrors=[];addEventListener('error',e=>fixtureErrors.push(e.message));addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
 window.__CODE_CODEX_BOOTSTRAP__={token:'fixture',codexVersion:'26.928.2636.0',supported:true};
-window.__codeCodex={request:async({method,params})=>{if(method==='explorer.settings.get'||method==='explorer.settings.set')return {collapsed:false,panelWidth:260};if(method==='explorer.context')return {threadId:params.threadId,projectName:'Fixture',rootName:'Fixture',compatible:true};if(method==='explorer.list')return {entries:[{name:'README.md',relativePath:'README.md',kind:'file'}]};if(method==='explorer.watch.start')return {watching:true};return {};}};
+window.__codeCodex={request:async({method,params})=>{if(method==='explorer.settings.get'||method==='explorer.settings.set')return {collapsed:false,panelWidth:260};if(method==='explorer.window.transparency.set')return {enabled:params.enabled,background:'transparent'};if(method==='explorer.context')return {threadId:params.threadId,projectName:'Fixture',rootName:'Fixture',compatible:true};if(method==='explorer.list')return {entries:[{name:'README.md',relativePath:'README.md',kind:'file'}]};if(method==='explorer.watch.start')return {watching:true};return {};}};
 if(!localStorage.getItem('code-codex:startup-transition:v1'))localStorage.setItem('code-codex:startup-transition:v1',JSON.stringify({source:'background',backgroundId:'glow-horizon',backgroundFadeSeconds:1,clipStart:0,clipEnd:1,playbackRate:1,videoBrightness:.8,minimumVisiblePercent:25,fadePercent:15}));
 </script><script src="/explorer.js"></script></body></html>`;
 writeFileSync(join(directory, 'fixture.html'), html);
@@ -163,6 +164,14 @@ try {
   report.reloaded = reloaded;
   check('reload retains Video source and changed slider values', { persisted, controls: reloaded.controls }, reloaded.source === 'video' && reloaded.controls.every(control => Number(control.value) === persisted[control.key]));
   check('reload retains saved video', reloaded.videoPresent, reloaded.videoPresent);
+  await evaluate(`${shadow}.querySelector('.startupTransition-reset').click()`);
+  const reset = await snapshot();
+  check('Reset applies promoted timing and appearance defaults', reset.saved,
+    reset.saved.minimumVisiblePercent === 45 && reset.saved.fadePercent === 3 && reset.saved.videoBrightness === 1.4 && reset.saved.backgroundFadeSeconds === 3);
+  check('Reset clamps the promoted trim to a short saved video', reset.saved,
+    reset.saved.clipStart === 0 && Math.abs(reset.saved.clipEnd - 1.2) < .01);
+  check('Reset preserves enable state and restores default source selection', reset.saved,
+    reset.saved.enabled === persisted.enabled && reset.saved.source === 'video' && reset.saved.backgroundId === 'particle-image');
   report.browserErrors = await evaluate('window.fixtureErrors');
   check('no uncaught browser errors', report.browserErrors, report.browserErrors.length === 0);
 } catch (error) {

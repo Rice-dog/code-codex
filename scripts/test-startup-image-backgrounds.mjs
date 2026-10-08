@@ -1,3 +1,5 @@
+import {pluginAssetPath} from './plugin-package-files.mjs';
+import { installedBackgroundFixture } from './background-package-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -16,8 +18,8 @@ assert.match(label, /^[a-zA-Z0-9_-]+$/);
 const directory = join(root, 'artifacts', `startup-image-backgrounds-${label}`);
 assert.ok(!existsSync(join(directory, 'results.json')), 'use a new evidence label; historical reports are immutable');
 mkdirSync(directory, { recursive: true });
-const bundle = readFileSync(join(root, 'packages/explorer-ui/dist/explorer.js'));
-const earlyBundle = readFileSync(join(root, 'packages/explorer-ui/dist/startup-early.js'));
+const bundle = installedBackgroundFixture(root) + readFileSync(join(root, 'packages/explorer-ui/dist/explorer.js'),'utf8');
+const earlyBundle = readFileSync(join(root, 'packages/explorer-ui/dist/startup-early.js'),'utf8');
 const originalPixelImage = readFileSync(join(root, 'packages/explorer-ui/src/pixel-sculpt-default.png'));
 const startupPixelImage = readFileSync(join(root, 'packages/explorer-ui/src/pixel-sculpt-startup-default.webp'));
 const startupPixelURL = `data:image/webp;base64,${startupPixelImage.toString('base64')}`;
@@ -26,7 +28,7 @@ const earlyGate = 'window===window.top&&location.protocol==="app:"&&location.hos
 assert.equal(earlyBundle.toString('utf8').split(earlyGate).length, 2, 'actual early bundle has the one expected app-origin qualification gate');
 // The only adaptation to this ACTUAL production early bundle is its app:// gate,
 // required by the separate loopback test browser. No player/renderer code changes.
-const earlyFixture = earlyBundle.toString('utf8').replace(earlyGate, 'window===window.top');
+const earlyFixture = installedBackgroundFixture(root) + earlyBundle.toString('utf8').replace(earlyGate, 'window===window.top');
 const version = bundle.toString('utf8').match(/current version v(\d+\.\d+\.\d+)/)?.[1];
 assert.ok(version, 'production bundle version found');
 const tag = `code-codex-v${version.replaceAll('.', '-')}`;
@@ -82,7 +84,7 @@ writeFileSync(join(directory, 'fixture-bare.html'), page(false));
 writeFileSync(join(directory, 'fixture-ui.html'), page(true));
 const server = createServer((request, response) => {
   if(request.url==='/explorer.js'){response.setHeader('Content-Type','text/javascript');response.end(bundle)}
-  else if(request.url==='/seams.js'){response.setHeader('Content-Type','text/javascript');response.end(seam)}
+  else if(request.url==='/seams.js'){response.setHeader('Content-Type','text/javascript');response.end(installedBackgroundFixture(root)+seam)}
   else if(request.url==='/default-source.png'){response.setHeader('Content-Type','image/png');response.end(originalPixelImage)}
   else if(request.url==='/default-startup.webp'){response.setHeader('Content-Type','image/webp');response.end(startupPixelImage)}
   else if(request.url==='/app-initial-image-backgrounds.js'){response.setHeader('Content-Type','text/javascript');response.end(`export const adapter={appActions:{runInPrimaryWindow:async({action})=>({mode:action.mode??'dark'})},clientCoordination:{invalidateQueryCache:async()=>({})}};`)}
@@ -92,7 +94,7 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin = `http://127.0.0.1:${server.address().port}`;
 const profile = mkdtempSync(join(tmpdir(),'code-codex-startup-image-test-'));
 const browser = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--no-sandbox','--disable-gpu','--enable-unsafe-swiftshader','--autoplay-policy=no-user-gesture-required','--window-size=1500,1000','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe'],windowsHide:true});
-const report={version,mode:'isolated production UI bundle and production source graph with the production early WebP define',date:new Date().toISOString(),bundleSha256:sha(bundle),earlyBundleSha256:sha(earlyBundle),earlyBundleBytes:earlyBundle.length,earlyOriginAdapter:{original:earlyGate,replacement:'window===window.top',replacements:1,adaptedSha256:sha(earlyFixture)},startupAsset:{path:'packages/explorer-ui/src/pixel-sculpt-startup-default.webp',bytes:startupPixelImage.length,sha256:sha(startupPixelImage),originalPath:'packages/explorer-ui/src/pixel-sculpt-default.png',originalBytes:originalPixelImage.length,originalSha256:sha(originalPixelImage)},seamSha256:sha(seam),sourceFiles:{},checks:[],sources:[],browserErrors:[],failures:[],cleanup:{},limitations:['Synthetic native shell and generated PNG media; no official Codex cold launch or user media','Only the actual early bundle app-origin gate is adapted for its loopback fallback test','Software WebGL fixture; no long-running physical GPU/performance certification','Saved-library snapshots prove records/settings preservation; empty Pixel library schema creation is permitted']};
+const report={version,mode:'isolated production UI bundle and production source graph and verified independent cached packages',date:new Date().toISOString(),bundleSha256:sha(bundle),earlyBundleSha256:sha(earlyBundle),earlyBundleBytes:earlyBundle.length,earlyOriginAdapter:{original:earlyGate,replacement:'window===window.top',replacements:1,adaptedSha256:sha(earlyFixture)},startupAsset:{path:'packages/explorer-ui/src/pixel-sculpt-startup-default.webp',bytes:startupPixelImage.length,sha256:sha(startupPixelImage),originalPath:'packages/explorer-ui/src/pixel-sculpt-default.png',originalBytes:originalPixelImage.length,originalSha256:sha(originalPixelImage)},seamSha256:sha(seam),sourceFiles:{},checks:[],sources:[],browserErrors:[],failures:[],cleanup:{},limitations:['Synthetic native shell and generated PNG media; no official Codex cold launch or user media','Only the actual early bundle app-origin gate is adapted for its loopback fallback test','Software WebGL fixture; no long-running physical GPU/performance certification','Saved-library snapshots prove records/settings preservation; empty Pixel library schema creation is permitted']};
 for(const file of ['startup-background.ts','startup-transition.ts','startup-transition-plugin.ts','particle-image-startup.ts','pixel-sculpt-renderer.ts','pixel-sculpt-runtime.ts'])report.sourceFiles[file]=sha(readFileSync(join(root,'packages/explorer-ui/src',file)));
 let socket,session,sequence=0;
 const pending=new Map();
@@ -109,7 +111,10 @@ try{
   const {targetInfos}=await command('Target.getTargets');({sessionId:session}=await command('Target.attachToTarget',{targetId:targetInfos.find(t=>t.type==='page').targetId,flatten:true}));await command('Page.enable');await command('Runtime.enable');await command('Emulation.setDeviceMetricsOverride',{width:1500,height:1000,deviceScaleFactor:1,mobile:false});
   await navigate('/bare');await evaluate('fixtureSeed()');
   check('actual production early bundle stays below the launcher 512 KiB limit',earlyBundle.length,earlyBundle.length<512*1024);
-  check('production early embeds only the optimized default; main keeps original default',{earlyWebP:earlyBundle.includes(startupPixelURL),earlyPNG:earlyBundle.includes(originalPixelURL),mainPNG:bundle.includes(originalPixelURL),mainWebP:bundle.includes(startupPixelURL)},earlyBundle.includes(startupPixelURL)&&!earlyBundle.includes(originalPixelURL)&&bundle.includes(originalPixelURL)&&!bundle.includes(startupPixelURL));
+  const coreOnly=readFileSync(join(root,'packages/explorer-ui/dist/explorer.js'),'utf8');
+  const packageCatalog=JSON.parse(readFileSync(join(root,'packages/explorer-ui/dist/plugins/catalog.json'),'utf8'));
+  const pixelPackage=readFileSync(pluginAssetPath(join(root,'packages/explorer-ui/dist/plugins'),packageCatalog.find(p=>p.id==='pixel-sculpt')),'utf8');
+  check('core and early contain no default image; downloaded Pixel package retains original default',{earlyWebP:earlyBundle.includes(startupPixelURL),earlyPNG:earlyBundle.includes(originalPixelURL),corePNG:coreOnly.includes(originalPixelURL),packagePNG:pixelPackage.includes(originalPixelURL)},!earlyBundle.includes(startupPixelURL)&&!earlyBundle.includes(originalPixelURL)&&!coreOnly.includes(originalPixelURL)&&pixelPackage.includes(originalPixelURL));
   const provenance=await evaluate(`(async()=>{const source=await createImageBitmap(await(await fetch('/default-source.png')).blob()),startup=await createImageBitmap(await(await fetch('/default-startup.webp')).blob());const sample=bitmap=>{const c=document.createElement('canvas');c.width=64;c.height=64;const context=c.getContext('2d');context.drawImage(bitmap,0,0,64,64);return context.getImageData(0,0,64,64).data};const a=sample(source),b=sample(startup);let error=0;for(let i=0;i<a.length;i++)if(i%4!==3)error+=Math.abs(a[i]-b[i]);const result={source:{width:source.width,height:source.height},startup:{width:startup.width,height:startup.height},meanRGBError:error/(64*64*3)};source.close();startup.close();return result})()`);
   report.startupAsset.visualProvenance=provenance;
   check('optimized default preserves the original flower image composition',provenance,provenance.startup.width===512&&provenance.startup.height===512&&provenance.meanRGBError<15);

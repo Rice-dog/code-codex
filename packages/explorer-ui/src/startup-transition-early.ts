@@ -1,4 +1,4 @@
-import { startEarlyStartupTransition, readStartupTransitionSettings, startupDocumentReady } from "./startup-transition-plugin";
+import { startEarlyStartupTransition, readStartupTransitionSettings, startupDocumentReady, startupTransitionModule } from "./startup-transition-plugin";
 import { runtimeEvent } from "./runtime-events";
 
 const valid = window === window.top && location.protocol === "app:" && location.host === "-"
@@ -10,6 +10,16 @@ if (valid && !shared[entered]) {
   shared[entered] = true;
   state.__CODE_CODEX_EARLY_STARTUP_STATUS__ = {stage:"awaiting-body",readyState:document.readyState,bodyPresent:!!document.body};
   const start = () => {
+    if (!readStartupTransitionSettings().enabled) {
+      state.__CODE_CODEX_EARLY_STARTUP_STATUS__ = { stage: "skipped", reason: "plugin disabled", networkRequested: false };
+      runtimeEvent("startup-animation", "early entry", "skipped", { reason: "plugin disabled", networkRequested: false });
+      return;
+    }
+    if (!startupTransitionModule()) {
+      state.__CODE_CODEX_EARLY_STARTUP_STATUS__ = { stage: "skipped", reason: "startup package is not downloaded or verified", networkRequested: false };
+      runtimeEvent("startup-animation", "early entry", "skipped", { reason: "startup package is not downloaded or verified", networkRequested: false });
+      return;
+    }
     const status = { stage: "preparing", enabled: readStartupTransitionSettings().enabled, readyAtEntry: startupDocumentReady(), controller: false, phase: "none", reason:"", enteredAt:Date.now() };
     state.__CODE_CODEX_EARLY_STARTUP_STATUS__ = status;
     runtimeEvent("startup-animation", "early entry", "observed", {enabled:status.enabled,readyAtEntry:status.readyAtEntry});

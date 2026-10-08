@@ -408,8 +408,75 @@ pub struct BridgeNotification {
 }
 
 struct OutboundMessage {
+    trusted_script: Option<Vec<String>>,
     payload: Value,
     document_epoch: u64,
+}
+
+// Only the native first-party package loader can provide executable source.
+// Never return those bytes through the renderer's ordinary response channel.
+fn take_verified_plugin_source(method: &str, response: &mut Value) -> Option<Vec<String>> {
+    if method != "explorer.plugins.load" || response["ok"] != true {
+        return None;
+    }
+    let value = response
+        .get_mut("result")?
+        .as_object_mut()?
+        .remove("verifiedSource")?;
+    if let Some(source) = value.as_str() {
+        return Some(vec![source.to_owned()]);
+    }
+    value
+        .as_array()?
+        .iter()
+        .map(|source| source.as_str().map(str::to_owned))
+        .collect()
+}
+
+fn outbound_expressions(
+    outbound: &OutboundMessage,
+    receiver_name: &str,
+) -> Result<Vec<String>, CdpError> {
+    let Some(sources) = &outbound.trusted_script else {
+        return Ok(vec![outbound_expression(outbound, receiver_name)?]);
+    };
+    if sources.is_empty()
+        || sources.len() > 33
+        || sources.iter().any(|s| s.len() > 4 * 1024 * 1024)
+        || sources.iter().map(String::len).sum::<usize>() > 32 * 1024 * 1024
+    {
+        return Err(CdpError::Protocol);
+    }
+    let mut expressions = Vec::new();
+    for (index, source) in sources.iter().take(sources.len() - 1).enumerate() {
+        let reset = if index == 0 {
+            "delete window[key];"
+        } else {
+            ""
+        };
+        expressions.push(format!("(()=>{{const key=Symbol.for('code-codex:plugin-load-error:v1');{reset}try{{\n{source}\n}}catch(error){{window[key]=String(error).slice(0,500);}}}})()"));
+    }
+    expressions.push(outbound_expression(outbound, receiver_name)?);
+    Ok(expressions)
+}
+
+fn outbound_expression(
+    outbound: &OutboundMessage,
+    receiver_name: &str,
+) -> Result<String, CdpError> {
+    let success = delivery_expression(&outbound.payload, receiver_name)?;
+    let Some(sources) = &outbound.trusted_script else {
+        return Ok(success);
+    };
+    let source = sources.last().ok_or(CdpError::Protocol)?;
+    if source.len() > 4 * 1024 * 1024 {
+        return Err(CdpError::Protocol);
+    }
+    let id = serde_json::to_string(&outbound.payload["id"]).map_err(|_| CdpError::Protocol)?;
+    let receiver = serde_json::to_string(receiver_name).map_err(|_| CdpError::Protocol)?;
+    Ok(format!(
+        "(()=>{{const key=Symbol.for('code-codex:plugin-load-error:v1');try{{if(window[key])throw new Error(window[key]);\n{source}\n{success}}}catch(error){{const receive=window[{receiver}];if(typeof receive==='function')receive({{id:{id},ok:false,error:{{code:'PLUGIN_EXECUTION',message:String(error)}}}});}}finally{{delete window[key];}}}})()"
+    ))
 }
 
 #[derive(Debug)]
@@ -1585,14 +1652,15 @@ where
                 {
                     continue;
                 }
-                let expression = delivery_expression(&outbound.payload, &injection.receiver_name)?;
+                for expression in outbound_expressions(&outbound, &injection.receiver_name)? {
                 send_command(
                     &mut writer,
                     next_id,
                     "Runtime.evaluate",
-                    json!({ "expression": expression, "awaitPromise": false }),
+                    json!({ "expression": expression, "awaitPromise": false, "contextId":trusted_execution_context }),
                 ).await?;
                 next_id += 1;
+                }
             }
             notification = notifications.recv() => match notification {
                 Ok(notification) => {
@@ -1954,12 +2022,15 @@ where
             handler_tasks.spawn(async move {
                 let _permit = permit;
                 let id = request.id.clone();
-                let response = match handler.handle(request).await {
+                let method = request.method.clone();
+                let mut response = match handler.handle(request).await {
                     Ok(result) => json!({ "id": id, "ok": true, "result": result }),
                     Err(error) => json!({ "id": id, "ok": false, "error": error }),
                 };
+                let trusted_script = take_verified_plugin_source(&method, &mut response);
                 let _ = outbound_sender
                     .send(OutboundMessage {
+                        trusted_script,
                         payload: response,
                         document_epoch,
                     })
@@ -1974,6 +2045,7 @@ where
             });
             outbound_sender
                 .try_send(OutboundMessage {
+                    trusted_script: None,
                     payload: response,
                     document_epoch,
                 })
@@ -2309,6 +2381,68 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
+
+    #[test]
+    fn native_plugin_source_is_separate_from_response_and_method_scoped() {
+        let original = json!({"id":"load", "ok":true, "result":{"id":"glow-horizon", "verifiedSource":"window.verifiedPackage = true;"}});
+        let mut ordinary = original.clone();
+        assert!(take_verified_plugin_source("explorer.read", &mut ordinary).is_none());
+        assert_eq!(ordinary, original);
+        let mut failed = json!({"ok":false,"result":{"verifiedSource":"never execute"}});
+        assert!(take_verified_plugin_source("explorer.plugins.load", &mut failed).is_none());
+        let mut response = original;
+        let source = take_verified_plugin_source("explorer.plugins.load", &mut response).unwrap();
+        assert!(response["result"].get("verifiedSource").is_none());
+        let outbound = OutboundMessage {
+            trusted_script: Some(source),
+            payload: response,
+            document_epoch: 7,
+        };
+        let expression = outbound_expression(&outbound, PRIMARY_RECEIVER_NAME).unwrap();
+        assert!(expression.contains("window.verifiedPackage = true;"));
+        assert!(expression.contains("PLUGIN_EXECUTION"));
+        assert!(!expression.contains("verifiedSource"));
+        assert_eq!(outbound.document_epoch, 7);
+    }
+
+    #[test]
+    fn native_plugin_source_is_bounded_without_raising_binding_or_cdp_limits() {
+        let outbound = OutboundMessage {
+            trusted_script: Some(vec!["x".repeat(4 * 1024 * 1024 + 1)]),
+            payload: json!({"id":"load","ok":true}),
+            document_epoch: 0,
+        };
+        assert!(outbound_expression(&outbound, PRIMARY_RECEIVER_NAME).is_err());
+        assert_eq!(MAX_BINDING_PAYLOAD_BYTES, 96 * 1024);
+        assert_eq!(MAX_CDP_MESSAGE_BYTES, 12 * 1024 * 1024);
+    }
+
+    #[test]
+    fn default_media_sources_are_separate_bounded_evaluations_with_one_final_reply() {
+        let mut response = json!({"id":"media-load","ok":true,"result":{"verifiedSource":["window.defaultOne=true;","window.defaultTwo=true;","window.moduleReady=true;"]}});
+        let scripts = take_verified_plugin_source("explorer.plugins.load", &mut response).unwrap();
+        let outbound = OutboundMessage {
+            trusted_script: Some(scripts),
+            payload: response,
+            document_epoch: 4,
+        };
+        let expressions = outbound_expressions(&outbound, PRIMARY_RECEIVER_NAME).unwrap();
+        assert_eq!(expressions.len(), 3);
+        assert!(expressions[0].contains("defaultOne"));
+        assert!(!expressions[0].contains(PRIMARY_RECEIVER_NAME));
+        assert!(expressions[1].contains("defaultTwo"));
+        assert!(expressions[2].contains("moduleReady"));
+        assert!(expressions[2].contains("if(window[key])throw"));
+        assert!(expressions[2].contains("PLUGIN_EXECUTION"));
+        assert!(expressions[2].contains(PRIMARY_RECEIVER_NAME));
+        assert!(outbound.payload["result"].get("verifiedSource").is_none());
+        let excessive = OutboundMessage {
+            trusted_script: Some(vec![String::new(); 34]),
+            payload: json!({}),
+            document_epoch: 4,
+        };
+        assert!(outbound_expressions(&excessive, PRIMARY_RECEIVER_NAME).is_err());
+    }
 
     #[test]
     fn supervisor_timeline_keeps_recent_bounded_events_without_target_ids() {

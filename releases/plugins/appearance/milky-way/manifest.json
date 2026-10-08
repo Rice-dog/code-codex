@@ -1,0 +1,22 @@
+{
+  "id": "milky-way",
+  "name": "Milky Way Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 32289,
+  "sha256": "2fa663d312f082b191e45890e8bf8fc1c3f18eb1b5c5300aa8037704a117c853",
+  "asset": "CodeCodex-background-milky-way-1.0.0.js",
+  "relativePath": "CodeCodex-background-milky-way-1.0.0.js",
+  "resources": [],
+  "galleryVersion": 1,
+  "defaultImageCount": 0,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

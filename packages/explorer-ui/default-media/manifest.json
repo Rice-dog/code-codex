@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "plugins": {
+    "particle-image": [
+      {
+        "id": "1087c54f-4f4a-4648-9a4b-29878a1c6c0b",
+        "name": "ChatGPT Image 2026年8月19日 23_06_53.png",
+        "type": "image/png",
+        "size": 1286914,
+        "sha256": "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2",
+        "file": "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2.png",
+        "order": 1,
+        "positionX": 3,
+        "positionY": 0,
+        "zoom": 1.45,
+        "thumbnailFile": "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2-thumbnail.png",
+        "thumbnailSha256": "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70",
+        "createdAt": 1787152068482
+      },
+      {
+        "id": "5c47dd02-a969-4c11-a712-231754d3f8d7",
+        "name": "ChatGPT Image 2026年8月16日 08_43_58.png",
+        "type": "image/png",
+        "size": 2111416,
+        "sha256": "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898",
+        "file": "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898.png",
+        "order": 2,
+        "positionX": 36,
+        "positionY": 63,
+        "zoom": 1.35,
+        "thumbnailFile": "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898-thumbnail.png",
+        "thumbnailSha256": "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3",
+        "createdAt": 1786900081772
+      },
+      {
+        "id": "6a58c7a3-64ea-40c1-a64b-b301f7ded1dd",
+        "name": "ChatGPT Image 2026年8月22日 13_15_56.png",
+        "type": "image/png",
+        "size": 1230838,
+        "sha256": "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b",
+        "file": "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b.png",
+        "order": 3,
+        "positionX": 50,
+        "positionY": 0,
+        "zoom": 1.35,
+        "thumbnailFile": "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b-thumbnail.png",
+        "thumbnailSha256": "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182",
+        "createdAt": 1787375782731
+      },
+      {
+        "id": "77960232-16c3-4f65-bbf2-6e4ba26f1480",
+        "name": "ChatGPT Image 2026年8月22日 16_54_33.png",
+        "type": "image/png",
+        "size": 1266233,
+        "sha256": "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3",
+        "file": "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3.png",
+        "order": 4,
+        "positionX": 7,
+        "positionY": 32,
+        "zoom": 1.25,
+        "thumbnailFile": "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3-thumbnail.png",
+        "thumbnailSha256": "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda",
+        "createdAt": 1787388899281
+      },
+      {
+        "id": "99bae359-57fe-4a52-91f5-946e64d2da9c",
+        "name": "ChatGPT Image 2026年8月16日 08_49_42.png",
+        "type": "image/png",
+        "size": 1783281,
+        "sha256": "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767",
+        "file": "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767.png",
+        "order": 5,
+        "positionX": 51,
+        "positionY": 50,
+        "zoom": 1.35,
+        "thumbnailFile": "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767-thumbnail.png",
+        "thumbnailSha256": "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f",
+        "createdAt": 1786964882337
+      },
+      {
+        "id": "d79a7089-eb70-4e64-b34a-f910d0cb6ee7",
+        "name": "ChatGPT Image 2026年8月22日 16_10_47.png",
+        "type": "image/png",
+        "size": 1549320,
+        "sha256": "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b",
+        "file": "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b.png",
+        "order": 6,
+        "positionX": 12,
+        "positionY": 0,
+        "zoom": 1.25,
+        "thumbnailFile": "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b-thumbnail.png",
+        "thumbnailSha256": "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845",
+        "createdAt": 1787386269570
+      }
+    ],
+    "pixel-sculpt": [
+      {
+        "id": "default:0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b",
+        "name": "ChatGPT Image 2026年9月8日 01_21_02.png",
+        "type": "image/png",
+        "size": 1633897,
+        "sha256": "0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b",
+        "file": "0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b.png",
+        "order": 0,
+        "positionX": 50,
+        "positionY": 50,
+        "zoom": 1
+      },
+      {
+        "id": "default:3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33",
+        "name": "ChatGPT Image 2026年9月15日 19_04_59.png",
+        "type": "image/png",
+        "size": 1748802,
+        "sha256": "3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33",
+        "file": "3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33.png",
+        "order": 0,
+        "positionX": 50,
+        "positionY": 50,
+        "zoom": 1
+      },
+      {
+        "id": "default:079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79",
+        "name": "ChatGPT Image 2026年9月15日 19_05_01.png",
+        "type": "image/png",
+        "size": 1753647,
+        "sha256": "079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79",
+        "file": "079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79.png",
+        "order": 1,
+        "positionX": 50,
+        "positionY": 50,
+        "zoom": 1
+      }
+    ]
+  }
+}

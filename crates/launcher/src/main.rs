@@ -5,6 +5,7 @@ mod early_startup;
 mod exit_codes;
 #[allow(dead_code)]
 mod gui_support;
+mod plugin_store;
 mod process_guard;
 mod runtime_log;
 mod startup_diagnostics;
@@ -283,6 +284,11 @@ enum Commands {
     Activate(ActivateArgs),
     /// Report package, bundle, App Server, and optional CDP diagnostics.
     Diagnose(DiagnoseArgs),
+    /// Inspect cached first-party backgrounds, or import verified offline release assets.
+    Plugins {
+        #[arg(long)]
+        import_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -360,6 +366,8 @@ struct DiagnoseArgs {
 
 #[derive(Debug, Error)]
 enum AppError {
+    #[error("background package operation failed: {0}")]
+    Plugin(String),
     #[error(transparent)]
     Discovery(#[from] DiscoveryError),
     #[error(transparent)]
@@ -429,7 +437,8 @@ impl AppError {
             | Self::Workspace(_)
             | Self::Resolver(_)
             | Self::Launch(_) => exit_codes::STARTUP_FAILURE,
-            Self::Cdp(_)
+            Self::Plugin(_)
+            | Self::Cdp(_)
             | Self::CdpStartup(_)
             | Self::CdpTarget(_)
             | Self::ProcessGuard(_)
@@ -448,6 +457,13 @@ impl AppError {
 
         let reason = self.to_string();
         match self {
+            Self::Plugin(_) => StartupDiagnostic::new(
+                "CC-PLUGIN-CACHE-001",
+                "Preparing background packages",
+                "A background package could not be prepared",
+                reason,
+                "Check the verified release package and per-user cache permissions. Send the full report if it repeats.",
+            ),
             Self::Discovery(DiscoveryError::PackageQueryFailed { .. }) => StartupDiagnostic::new(
                 "CC-START-DISCOVERY-003",
                 "Querying Codex Desktop registration",
@@ -972,6 +988,7 @@ async fn main() -> ExitCode {
         Commands::Attach(_) => "attach",
         Commands::Activate(_) => "activate",
         Commands::Diagnose(_) => "diagnose",
+        Commands::Plugins { .. } => "plugins",
     };
     if mode != "diagnose" {
         runtime_log::begin(mode);
@@ -982,6 +999,16 @@ async fn main() -> ExitCode {
         Commands::Attach(args) => attach(args).await,
         Commands::Activate(args) => activate(args).await,
         Commands::Diagnose(args) => diagnose(args).await,
+        Commands::Plugins { import_dir } => {
+            let result = if let Some(directory) = import_dir {
+                plugin_store::import_directory(&directory)
+            } else {
+                plugin_store::status()
+            };
+            result
+                .map(|value| println!("{value}"))
+                .map_err(|error| AppError::Plugin(error.message))
+        }
     };
     match result {
         Ok(()) => {
@@ -2539,8 +2566,10 @@ mod tests {
         assert!(!super::early_startup::SOURCE.contains("explorer.context"));
         assert!(super::early_startup::SOURCE.contains("app:"));
         assert!(super::early_startup::SOURCE.contains("/index.html"));
-        assert!(super::early_startup::SOURCE.contains("data-app-shell-main-surface"));
-        assert!(super::early_startup::SOURCE.contains("early-promise:v1"));
+        assert!(super::early_startup::SOURCE.contains("plugin-modules:v1"));
+        assert!(super::early_startup::SOURCE.contains("codex-startup-transition"));
+        assert!(!super::early_startup::SOURCE.contains("data-app-shell-main-surface"));
+        assert!(super::early_startup::SOURCE.contains("early-startup-entry:v2"));
     }
 
     use super::*;

@@ -1,10 +1,8 @@
 import { PIXEL_SCULPT_CONTROLS_HTML, startPixelSculptRuntime } from "./pixel-sculpt-runtime";
 
-export type PixelSculptSettings = { paused: boolean };
-export const PIXEL_SCULPT_DEFAULTS: PixelSculptSettings = { paused: false };
-export function normalizePixelSculptSettings(value: unknown): PixelSculptSettings {return {paused:Boolean((value as PixelSculptSettings)?.paused)};}
-export function readPixelSculptBackgroundSettings(): PixelSculptSettings {return {...PIXEL_SCULPT_DEFAULTS};}
-export function writePixelSculptBackgroundSettings(_settings: PixelSculptSettings): void {}
+import { PIXEL_SCULPT_DEFAULTS, type PixelSculptSettings } from './pixel-sculpt-settings';
+export { PIXEL_SCULPT_DEFAULTS, normalizePixelSculptSettings, readPixelSculptBackgroundSettings, writePixelSculptBackgroundSettings } from './pixel-sculpt-settings';
+export type { PixelSculptSettings } from './pixel-sculpt-settings';
 export class PixelSculptRenderer {
  readonly ready: Promise<void>;
  readonly firstFrame: Promise<void>;

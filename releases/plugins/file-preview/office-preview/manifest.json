@@ -1,0 +1,37 @@
+{
+  "id": "office-preview",
+  "name": "Office Preview",
+  "hostId": "code-codex.office-preview",
+  "category": "file-preview",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 3626557,
+  "sha256": "b836d12f23f7805e6faea5c2d1f8fe7d066f7a8c82571d2603f3bf786a09c37a",
+  "asset": "CodeCodex-plugin-office-preview-1.0.0.js",
+  "relativePath": "CodeCodex-plugin-office-preview-1.0.0.js",
+  "resources": [
+    {
+      "asset": "CodeCodex-plugin-office-preview-1.0.0-parser.worker.js",
+      "relativePath": "resources/CodeCodex-plugin-office-preview-1.0.0-parser.worker.js",
+      "kind": "worker",
+      "mimeType": "text/javascript",
+      "size": 10039,
+      "sha256": "70e6cf8b2937a8df90800f17e5e2df6315a8a61a79af1f932ea85d4381dc540d"
+    },
+    {
+      "asset": "CodeCodex-plugin-office-preview-1.0.0-parser.wasm",
+      "relativePath": "resources/CodeCodex-plugin-office-preview-1.0.0-parser.wasm",
+      "kind": "wasm",
+      "mimeType": "application/wasm",
+      "size": 573411,
+      "sha256": "6cd3fb9f1082477f155009bd583a1d18deb8b46bde829d25cf9ab00b120b4c90"
+    }
+  ],
+  "defaultImageCount": 0,
+  "capabilities": [
+    "file-preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

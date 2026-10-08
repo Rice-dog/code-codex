@@ -1,0 +1,20 @@
+{
+  "id": "model-preview",
+  "name": "3D Model Preview",
+  "hostId": "code-codex.model-preview",
+  "category": "file-preview",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 677208,
+  "sha256": "c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2",
+  "asset": "CodeCodex-plugin-model-preview-1.0.0.js",
+  "relativePath": "CodeCodex-plugin-model-preview-1.0.0.js",
+  "resources": [],
+  "defaultImageCount": 0,
+  "capabilities": [
+    "file-preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

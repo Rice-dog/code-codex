@@ -1,3 +1,4 @@
+import { optionalPluginExport } from './utility-plugin-facade';
 import { monitorStartupReadiness } from './startup-readiness';
 import { getBootstrapConfig } from "./bridge";
 import { prepareStartupTransitionHandoff, getEarlyStartupTransition } from "./startup-transition-plugin";
@@ -114,43 +115,7 @@ ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:m
   }
 }
 `;
-const TRANSPARENT_BACKGROUND_CSS = `
-html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] {
-  background-color: var(${TRANSPARENT_BACKGROUND_COLOR_PROPERTY}) !important;
-}
 
-html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body,
-html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body :where(
-  div,
-  main,
-  aside,
-  section,
-  article,
-  header,
-  footer,
-  nav,
-  form,
-  dialog,
-  ul,
-  ol,
-  li,
-  button,
-  input,
-  textarea,
-  select
-):not([role="img"]):not([data-icon]):not([class*="icon" i]) {
-  background-color: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
-
-html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body :is(
-  [class*="bg-gradient-to-t"],
-  [class*="MainContentTopFade"]
-) {
-  background-image: none !important;
-}
-`;
 const PARTICLE_BACKGROUND_CSS = `
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] {
   background-color: var(${PARTICLE_BACKGROUND_COLOR_PROPERTY}, #000) !important;
@@ -551,13 +516,7 @@ function reconcileCurrentLayoutHeader(explorer: CodeCodexElement | null, strateg
 }
 
 function installTransparentBackgroundStyle(): void {
-  let style = document.querySelector<HTMLStyleElement>(TRANSPARENT_BACKGROUND_STYLE_SELECTOR);
-  if (!style) {
-    style = document.createElement("style");
-    style.dataset.codeCodexTransparentBackground = "v1";
-    (document.head ?? document.documentElement).append(style);
-  }
-  if (style.textContent !== TRANSPARENT_BACKGROUND_CSS) style.textContent = TRANSPARENT_BACKGROUND_CSS;
+  optionalPluginExport<() => void>('transparent-background','installTransparentBackgroundStyle')?.();
 }
 
 function installParticleBackgroundStyle(): void {

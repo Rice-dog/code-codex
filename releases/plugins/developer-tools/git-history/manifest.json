@@ -1,0 +1,17 @@
+{
+  "id": "git-history",
+  "name": "Git History",
+  "category": "developer-tools",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "asset": "CodeCodex-plugin-git-history-1.0.0.js",
+  "relativePath": "CodeCodex-plugin-git-history-1.0.0.js",
+  "size": 5646,
+  "sha256": "1fcdf42d099e7159e1cf07517882c6b21ba7e99aa23be9c3c9e0a8fed6ffe77e",
+  "resources": [],
+  "capabilities": [
+    "developer-tools"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex"
+}

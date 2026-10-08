@@ -1,10 +1,11 @@
+import { installedBackgroundFixture } from './background-package-fixture.mjs';
 import {buildSync} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:http';
 import assert from 'node:assert/strict';
 // Isolated real-renderer fixture; never launches or restarts official Codex.
-const source=buildSync({stdin:{contents:"import { mountStartupBackground } from './startup-background';\nimport { registerBackgroundOpening, setStartupBackgroundHold, requestBackgroundFrame, cancelBackgroundFrame } from './background-startup-hold';\nwindow.holdFixture = { mountStartupBackground, registerBackgroundOpening, setStartupBackgroundHold, requestBackgroundFrame, cancelBackgroundFrame };\n",resolveDir:'packages/explorer-ui/src',loader:'ts'},bundle:true,write:false,format:'iife'}).outputFiles[0].text;
+const source=installedBackgroundFixture(process.cwd())+buildSync({stdin:{contents:"import { mountStartupBackground } from './startup-background';\nimport { registerBackgroundOpening, setStartupBackgroundHold, requestBackgroundFrame, cancelBackgroundFrame } from './background-startup-hold';\nwindow.holdFixture = { mountStartupBackground, registerBackgroundOpening, setStartupBackgroundHold, requestBackgroundFrame, cancelBackgroundFrame };\n",resolveDir:'packages/explorer-ui/src',loader:'ts'},bundle:true,write:false,format:'iife'}).outputFiles[0].text;
 const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><head><meta charset="utf-8"></head><body><main class="main-surface"></main><div id="loading">Loading</div></body></html>');});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const url=`http://127.0.0.1:${server.address().port}/index.html`;
 const child=spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--window-size=640,480','--no-sandbox','--disable-gpu','--enable-unsafe-swiftshader','--autoplay-policy=no-user-gesture-required','--remote-debugging-port=0','--user-data-dir='+process.cwd()+'/artifacts/early-navigation-'+Date.now(),'about:blank'],{stdio:['ignore','ignore','pipe'],windowsHide:true});

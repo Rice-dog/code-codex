@@ -276,5 +276,17 @@ const document = {
   comment: `Generated for ${rustTarget} from Cargo.lock, ${basename(resolve(uiRoot, "package-lock.json"))}, and the SHA-256-pinned embedded PowerPoint WASM inventory.`,
 };
 
+// Separate release assets are inventoried without claiming they are bundled
+// into the core. Existing dependency and visual provenance notices still apply.
+const backgrounds = JSON.parse(await readFile(resolve(uiRoot, "dist/plugins/catalog.json"), "utf8"));
+document.annotations = backgrounds.map((background) => ({
+  annotator: "Tool: scripts/generate-sbom.mjs",
+  annotationDate: document.creationInfo.created,
+  annotationType: "OTHER",
+  comment: JSON.stringify({ type:"separate-plugin-asset", ...background }),
+}));
+const earlyBytes=await readFile(resolve(uiRoot,'dist/startup-early.js'));
+document.annotations.push({annotator:'Tool: scripts/generate-sbom.mjs',annotationDate:document.creationInfo.created,annotationType:'OTHER',comment:JSON.stringify({type:'builtin-early-cache-dispatcher',size:earlyBytes.length,sha256:createHash('sha256').update(earlyBytes).digest('hex')})});
+
 await writeFile(outputPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
 console.log(`Wrote SPDX SBOM with ${dependencyPackages.length} dependencies to ${outputPath}`);

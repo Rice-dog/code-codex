@@ -1,0 +1,22 @@
+{
+  "id": "cloud-train",
+  "name": "Cloud Train Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 43216,
+  "sha256": "93198c2a9d8f2a19b811150890cf4cee6b8aaf0f99524f7a6c975d800da583c4",
+  "asset": "CodeCodex-background-cloud-train-1.0.0.js",
+  "relativePath": "CodeCodex-background-cloud-train-1.0.0.js",
+  "resources": [],
+  "galleryVersion": 1,
+  "defaultImageCount": 0,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "transparent-background",
+  "name": "Transparent Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "asset": "CodeCodex-plugin-transparent-background-1.0.0.js",
+  "relativePath": "CodeCodex-plugin-transparent-background-1.0.0.js",
+  "size": 1736,
+  "sha256": "862678f97edda3bb575b20e1c1a66e1dd6e12dabf9eaee30b1ebe8a35758119b",
+  "resources": [],
+  "capabilities": [
+    "appearance"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex"
+}

@@ -1,3 +1,4 @@
+import { installedBackgroundFixture } from './background-package-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -12,7 +13,7 @@ assert.match(label,/^[a-zA-Z0-9_-]+$/);
 const directory=join(root,'artifacts',`particle-opening-${label}`);
 assert.ok(!existsSync(join(directory,'results.json')),'use a new evidence label');
 mkdirSync(directory,{recursive:true});
-const bundle=readFileSync(join(root,'packages/explorer-ui/dist/explorer.js'));
+const bundle = installedBackgroundFixture(root) + readFileSync(join(root, 'packages/explorer-ui/dist/explorer.js'),'utf8');
 const version=JSON.parse(readFileSync(join(root,'packages/explorer-ui/package.json'),'utf8')).version;
 const tag=`code-codex-v${version.replaceAll('.','-')}`;
 const seam=buildSync({stdin:{contents:`import * as particle from './particle-image-startup'; import * as hold from './background-startup-hold'; window.fixture={...particle,...hold};`,resolveDir:join(root,'packages/explorer-ui/src'),loader:'ts'},bundle:true,write:false,format:'iife',target:'chrome120'}).outputFiles[0].text;

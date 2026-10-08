@@ -1,0 +1,22 @@
+{
+  "id": "blinking-squares",
+  "name": "Blinking Squares Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 236708,
+  "sha256": "f07c95845db5884dfbbc4943f694d131cf64825b9f81686c8ee2de743dea53a3",
+  "asset": "CodeCodex-background-blinking-squares-1.0.0.js",
+  "relativePath": "CodeCodex-background-blinking-squares-1.0.0.js",
+  "resources": [],
+  "galleryVersion": 1,
+  "defaultImageCount": 0,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

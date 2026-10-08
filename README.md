@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.3.90-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.3.96-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -35,15 +35,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.3.90-x64-setup.exe`
-- 备选：`CodeCodex-0.3.90-x64.msi`
-- 便携包：`CodeCodex-0.3.90-x64.zip`
+- 推荐：`CodeCodex-0.3.96-x64-setup.exe`
+- 备选：`CodeCodex-0.3.96-x64.msi`
+- 便携包：`CodeCodex-0.3.96-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.3.90-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.3.96-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -84,10 +84,40 @@ Get-FileHash .\CodeCodex-0.3.90-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.3.90
+./scripts/package.ps1 -Version 0.3.96
 ```
 
 生成结果会写入 `releases/`。
+
+## 所有插件按需下载
+
+从 **0.3.96** 开始，Preview Market 中的 **24 个插件全部独立下载**：Appearance 13 个、File Preview 10 个、Tools 1 个。核心安装包保留文件树、基础文本预览与编辑、市场和设置框架、权限检查与运行日志；插件的实际渲染、预览、启动播放器和工具实现不再内置。
+
+打开 Preview Market，先点击 **Download**；下载和校验完成后点击 **Enable**，即可在当前 Codex 窗口使用，无需重启。下载不会自动启用插件或打开设置。参数按钮在完整插件包可用后使用；UI Surface Opacity 仍要求先实际启用一个背景插件。
+
+插件代码与必需资源来自本项目 GitHub Release。下载、缓存和每次载入都根据核心内置目录核对文件大小与 SHA-256；不能通过市场安装任意第三方脚本。插件目录按三类归档：
+
+```text
+releases/plugins/
+├── appearance/
+│   └── particle-image/       # 插件主 JS、manifest、说明及默认图片
+├── file-preview/
+│   └── office-preview/       # 预览代码及本地 Worker/WASM 等资源
+└── developer-tools/
+    └── git-history/          # 只读 Git 工具实现
+```
+
+每个插件的文件夹名称使用稳定英文 ID，代码、样式和必需资源留在该插件目录内。GitHub Release 资产仍使用唯一文件名；`releases/release-assets.json` 映射文件名、本地分类路径和 SHA-256。
+
+缓存位于 `%LOCALAPPDATA%\CodeCodex\plugin-cache\plugins\<类别>\<插件ID>\<插件版本>`。正常升级和普通卸载保留缓存，未变插件可离线复用；旧的有效分类前目录或平铺缓存先校验再迁移。原有参数、启用偏好、个人图库和用户视频保留。Installed 仅表示缓存完整；当前窗口尚未校验载入时，按钮显示 Enable，保存偏好不会因此被清空。此前内置的预览、工具及三种外观功能首次使用新独立包时需要下载；已有背景只在所需包或素材变化、缺失或损坏时重新下载。
+
+Particle Image 默认提供 **6 张原图**，Pixel Sculpt 默认提供 **3 张原图**，随对应背景插件下载。首次使用自动导入，已有相同图片不重复添加，个人图片和播放选择保留；用户删除默认图片后，重新打开不会自动恢复。这些图片没有加入核心安装包。
+
+Codex Startup Transition 的播放器也需下载。核心只保留很小的早期加载入口，在官方等待画面读取已校验的启动插件和所选背景缓存，不联网、不等待文件树挂载。缺包或损坏时跳过动画并记录原因，Codex 正常继续启动。视频仍来自用户本地 IndexedDB，安装包和插件包不自带官方宣传视频。
+
+离线安装保留上述目录及插件的全部资源，再运行该版本 `code-codex.exe plugins --import-dir "releases目录"`；也可指定 `plugins`、分类目录或单个插件目录。命令仅导入内置目录信任的完整资产，不自动启用插件。当前没有独立插件更新或卸载管理页。
+
+README 的 `docs/screenshots/` 功能说明截图继续保留在 GitHub，不再随 EXE、MSI 或 ZIP 分发；它们与插件默认图库素材不同。查看完整截图可访问仓库 README。安装器不会自动预下载所有插件，本地生成的包须发布匹配的 GitHub 资产后，其他用户的 Download 才可用。
 
 ## 卸载
 
@@ -113,15 +143,15 @@ Code-Codex 文件。如果安装时没有可接管的快捷方式而创建了独
 - 右键菜单支持新建、重命名、删除、复制路径、在资源管理器中显示和刷新。
 - 支持在文件树中拖拽移动文件和文件夹。
 - 位于对话旁边的主窗口文件标签页。
-- 文本预览与编辑，包括多语言 Markdown 内容。
+- 基础文本预览、语法高亮与受限编辑；Markdown 渲染由独立预览插件提供。
 - 本地 bridge 仅执行受限的工作区操作。
 
 ### 插件
 
 - Preview Market 分为 Appearance、File Preview 和 Tools 三类，打开时默认显示 Appearance。
-- File Preview 可独立启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 和 3D 模型预览；所有处理都在本地完成。
-- Appearance 包含透明背景、粒子图像、黑洞、发光地平线、天境云隧道、极光电离层、银河光场、层叠山峦、云海列车和立体像素浮雕等背景插件。
-- Tools 中的 Git History 以只读方式显示当前分支、提交记录、变更文件和带颜色的逐文件 diff，不执行仓库写入操作。
+- File Preview 可独立下载并启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 和 3D 模型预览；所有处理都在本地完成。
+- Appearance 包含十种动态背景、Transparent Background、UI Surface Opacity 和 Codex Startup Transition，均先下载再启用。
+- Tools 中的 Git History 下载启用后，以只读方式显示当前分支、提交记录、变更文件和带颜色的逐文件 diff，不执行仓库写入操作。
 
 ### 更新与兼容
 
@@ -139,7 +169,7 @@ Code-Codex 文件。如果安装时没有可接管的快捷方式而创建了独
 
 ![Code-Codex 交互式 glTF 和 GLB 3D 模型预览](docs/screenshots/gltf-preview.png)
 
-File Preview 分类可按需独立启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter
+File Preview 分类可按需独立下载并启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter
 Notebook、Office 文档和 glTF 3D 模型预览，所有预览处理都在用户电脑本地完成。
 
 3D 模型预览插件为 `.gltf` 和 `.glb` 文件提供交互式视图，支持旋转、平移、缩放、

@@ -13,7 +13,28 @@ const fail = (message) => { throw new Error(`Invalid SPDX SBOM: ${message}`); };
 
 if (document.spdxVersion !== "SPDX-2.3") fail("unexpected SPDX version");
 if (document.SPDXID !== "SPDXRef-DOCUMENT") fail("missing document identifier");
+const backgroundCatalog = JSON.parse(await readFile(resolve(uiRoot, "dist/plugins/catalog.json"), "utf8"));
+const assetAnnotations = (document.annotations ?? []).map(a => {
+  try { return JSON.parse(a.comment); } catch { return null; }
+}).filter(a => a?.type === "separate-plugin-asset");
+if (assetAnnotations.length !== backgroundCatalog.length) fail("separate background inventory is incomplete");
+for (const background of backgroundCatalog) {
+  const annotation = assetAnnotations.find(a => a.id === background.id);
+  const bytes = await readFile(resolve(uiRoot, "dist/plugins", background.category,background.id,background.relativePath||background.asset));
+  if (annotation?.sha256 !== background.sha256 || annotation?.version !== background.version ||
+      bytes.length !== background.size || createHash("sha256").update(bytes).digest("hex") !== background.sha256) {
+    fail(`separate background asset mismatch: ${background.id}`);
+  }
+  if (JSON.stringify(annotation.resources) !== JSON.stringify(background.resources)) fail(`Default media inventory mismatch: ${background.id}`);
+  for (const resource of background.resources ?? []) {
+    const bytes = await readFile(resolve(uiRoot,'dist/plugins',background.category,background.id,resource.relativePath||resource.asset));
+    if (bytes.length !== resource.size || createHash('sha256').update(bytes).digest('hex') !== resource.sha256) fail(`Default media resource mismatch: ${resource.asset}`);
+  }
+}
 if (!Array.isArray(document.packages) || document.packages.length < 2) fail("dependency inventory is empty");
+const startupBytes = await readFile(resolve(uiRoot,'dist/startup-early.js'));
+const startupAnnotation = (document.annotations ?? []).map(a=>{try{return JSON.parse(a.comment)}catch{return null}}).find(a=>a?.type==='builtin-early-cache-dispatcher');
+if(startupAnnotation?.size!==startupBytes.length || createHash('sha256').update(startupBytes).digest('hex')!==startupAnnotation?.sha256)fail('builtin early cache dispatcher mismatch');
 
 const ids = new Set();
 for (const pkg of document.packages) {
