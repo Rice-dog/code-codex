@@ -10,7 +10,7 @@ This folder contains ready-made downloadable packages.
 - 完整插件名称、按钮上方独立下载状态、等距排版及下载/校验进度；下载完成后状态行消失，Download 变为 Enable。
 - 浅蓝 Enable 与浅紫 Download，保留单项下载、取消、失败重试及重连后的控件恢复；不提供 Download All。
 - 24 个插件代码和资源未变化，继续使用 v0.3.96 附件。本次 Release 只提供核心安装资产，升级保留插件缓存、设置和个人素材。
-- 发布准备中；最终公开状态以对应 GitHub Release 为准。
+- 2026-10-09 已通过 PR #45 合并，并从 main 提交 `46ce3e0` 发布为 [GitHub Latest v0.4.0](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.0)。五个附件公开下载字节、大小和 API SHA-256 digest 已核对；本机已升级。
 
 ### English
 
@@ -18,7 +18,7 @@ This folder contains ready-made downloadable packages.
 - Complete plugin names, a separate download-status row above actions, equal spacing and transfer/verification progress. After verification, the status row disappears and Download becomes Enable.
 - Pale blue Enable and pale lavender Download, with individual downloads, cancellation, failure retry and control recovery after reconnect. Download All is not included.
 - All 24 plugin packages and resources are unchanged and retain v0.3.96 assets. This release includes core installation assets only; upgrades retain plugin caches, settings and personal media.
-- Prepared for release; the corresponding GitHub Release is the authority for publication status.
+- Published on 2026-10-09 as [GitHub Latest v0.4.0](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.0) from main commit `46ce3e0`, merged through PR #45. Publicly downloaded bytes, sizes and API SHA-256 digests of all five attachments are verified; this machine is upgraded.
 
 ## v0.3.105 — 当前按钮色再混入三分之一白色
 
