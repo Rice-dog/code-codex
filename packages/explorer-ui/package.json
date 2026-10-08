@@ -1,9 +1,10 @@
 {
   "name": "@code-codex/explorer-ui",
-  "version": "0.3.96",
+  "version": "0.3.105",
   "private": true,
   "description": "Dependency-light renderer UI injected into Codex Desktop.",
   "codeCodex": {
+    "pluginReleaseVersion": "0.3.96",
     "embeddedWasm": {
       "file": "node_modules/@extend-ai/react-pptx/dist/pptx_wasm_bg.wasm",
       "sha256": "6cd3fb9f1082477f155009bd583a1d18deb8b46bde829d25cf9ab00b120b4c90",

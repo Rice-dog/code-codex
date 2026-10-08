@@ -55,14 +55,22 @@ export class BackgroundPackageMarket {
     if (this.#busy.has(info.id)) {
       void this.bridge.request('explorer.plugins.cancel',{id:info.id}).catch(e=>this.notice(String(e)));return;
     }
-    this.#busy.add(info.id);this.render();
-    runtimeEvent('plugin-package','download','requested',{id:info.id,version:info.version});
-    void this.bridge.request('explorer.plugins.install',{id:info.id},130_000).then(()=>{
-      runtimeEvent('plugin-package','download','installed',{id:info.id,version:info.version});
-    },error=>{ if(!this.#disposed) this.notice(error instanceof Error?error.message:String(error)); }).finally(()=>{
-      this.#busy.delete(info.id);if(!this.#disposed)void this.#refresh();
-    });
+    void this.#install(info.id);
   };
+  async #install(id:string):Promise<void> {
+    const info=PLUGIN_PACKAGES.find(p=>p.id===id)!;
+    if(this.#disposed||this.#busy.has(id))return;
+    this.#busy.add(id);this.render();
+    // Start the fast progress poll immediately, even if the idle timer has
+    // several seconds left. An install still has its own completion request.
+    void this.#refresh();
+    runtimeEvent('plugin-package','download','requested',{id:info.id,version:info.version});
+    try{
+      await this.bridge.request('explorer.plugins.install',{id},130_000);
+      runtimeEvent('plugin-package','download','installed',{id:info.id,version:info.version});
+    }catch(error){if(!this.#disposed)this.notice(error instanceof Error?error.message:String(error));}
+    finally{this.#busy.delete(id);if(!this.#disposed)await this.#refresh();}
+  }
   async #refresh():Promise<void> {
     if(this.#disposed)return;
     clearTimeout(this.#timer);
@@ -85,6 +93,41 @@ export class BackgroundPackageMarket {
       const state=this.#states.get(info.id),busy=this.#busy.has(info.id);
       const installed=!!state?.installed;
       card.dataset.packageInstalled=String(installed);
+      card.dataset.packagePending=String(!installed||busy);
+      button.dataset.packageAction=!installed||busy?'download':'enable';
+      const status=card.querySelector<HTMLElement>('.preview-extension-status');
+      if(status)status.hidden=!installed||busy;
+      let download=card.querySelector<HTMLElement>('.preview-extension-download');
+      const copy=card.querySelector<HTMLElement>('.preview-extension-copy')!;
+      const actions=button.closest<HTMLElement>('.preview-extension-actions')??button;
+      if(installed&&!busy){
+        download?.remove();
+        if(actions.parentElement===copy)card.append(actions);
+      }
+      else {
+        if(!download){
+          download=document.createElement('div');download.className='preview-extension-download';
+          const label=document.createElement('span');label.className='preview-extension-download-label';
+          const progress=document.createElement('progress');progress.max=100;
+          download.append(label,progress);
+          copy.append(download);
+        }
+        // Keep all three rows in the text column, independent of icon height.
+        if(download.parentElement!==copy)copy.append(download);
+        if(actions.parentElement!==copy)copy.append(actions);
+        const label=download.querySelector<HTMLElement>('span')!;
+        const progress=download.querySelector('progress')!;
+        progress.hidden=!busy;
+        progress.setAttribute('aria-label',`Download ${info.name}`);
+        const packageBytes=info.size+(info.resources??[]).reduce((sum,asset)=>sum+asset.size,0);
+        const percent=state?.total?Math.min(100,Math.max(0,Math.floor((state.downloaded??0)/state.total*100))):null;
+        if(busy){
+          if(percent===null)progress.removeAttribute('value');else progress.value=percent;
+          const phase=state?.phase==='verifying'?'Verifying':'Downloading';
+          label.textContent=`${phase}${percent===null?'…':` · ${percent}%`}`;
+        } else label.textContent=`${(packageBytes/1024).toFixed(0)} KB · ${state?.error?'Download failed':state?'Not installed':'Checking…'}`;
+        download.title=state?.error??'';
+      }
       const active=button.getAttribute('aria-pressed')==='true'||button.dataset.enabled==='true';
       if(this.#loading.has(info.id)){button.textContent='Loading…';button.disabled=true;continue;}
       if(!installed||busy) {
@@ -95,13 +138,6 @@ export class BackgroundPackageMarket {
         if(state)button.disabled=false;
         button.dataset.enabled='false';button.setAttribute('aria-pressed','false');
         button.setAttribute('aria-label',`${busy?'Cancel download of':'Download'} ${info.name}`);
-        const status=card.querySelector<HTMLElement>('.preview-extension-status');
-        if(status){
-          const percent=state?.total?Math.floor((state.downloaded??0)/state.total*100):0;
-          const packageBytes=info.size+(info.resources??[]).reduce((sum,asset)=>sum+asset.size,0);
-          status.textContent=busy?`${state?.phase??'Downloading'} ${percent}%`:state?.error?'Download failed':`${(packageBytes/1024).toFixed(0)} KB · Not installed`;
-          status.dataset.enabled='false';status.title=state?.error??'';
-        }
       } else if(!isPluginPackageLoaded(info.id)) {
         // A saved enabled preference is not proof of a loaded package. Keep
         // this card actionable while preserving the user's preference bytes.
