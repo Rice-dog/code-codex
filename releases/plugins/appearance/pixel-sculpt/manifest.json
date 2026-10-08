@@ -1,0 +1,77 @@
+{
+  "id": "pixel-sculpt",
+  "name": "Pixel Sculpt Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.2",
+  "releaseTag": "v0.3.96",
+  "size": 2412208,
+  "sha256": "61db19e65bc178b93a8eaae274f423d81d9ee36cb6ea0874344d276360f42543",
+  "asset": "CodeCodex-background-pixel-sculpt-1.0.2.js",
+  "relativePath": "CodeCodex-background-pixel-sculpt-1.0.2.js",
+  "resources": [
+    {
+      "asset": "CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
+      "relativePath": "media/CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
+      "kind": "image",
+      "size": 1633897,
+      "sha256": "0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b",
+      "image": {
+        "id": "default:0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b",
+        "name": "ChatGPT Image 2026年9月8日 01_21_02.png",
+        "type": "image/png",
+        "size": 1633897,
+        "sha256": "0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b",
+        "order": 0,
+        "positionX": 50,
+        "positionY": 50,
+        "zoom": 1
+      }
+    },
+    {
+      "asset": "CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
+      "relativePath": "media/CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
+      "kind": "image",
+      "size": 1748802,
+      "sha256": "3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33",
+      "image": {
+        "id": "default:3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33",
+        "name": "ChatGPT Image 2026年9月15日 19_04_59.png",
+        "type": "image/png",
+        "size": 1748802,
+        "sha256": "3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33",
+        "order": 0,
+        "positionX": 50,
+        "positionY": 50,
+        "zoom": 1
+      }
+    },
+    {
+      "asset": "CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
+      "relativePath": "media/CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
+      "kind": "image",
+      "size": 1753647,
+      "sha256": "079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79",
+      "image": {
+        "id": "default:079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79",
+        "name": "ChatGPT Image 2026年9月15日 19_05_01.png",
+        "type": "image/png",
+        "size": 1753647,
+        "sha256": "079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79",
+        "order": 1,
+        "positionX": 50,
+        "positionY": 50,
+        "zoom": 1
+      }
+    }
+  ],
+  "galleryVersion": 1,
+  "defaultImageCount": 3,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

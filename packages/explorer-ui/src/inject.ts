@@ -1,6 +1,10 @@
+import { optionalPluginExport } from './utility-plugin-facade';
+import { monitorStartupReadiness } from './startup-readiness';
 import { getBootstrapConfig } from "./bridge";
-import { prepareStartupTransitionHandoff, startStartupTransitionOnLaunch } from "./startup-transition-plugin";
+import { prepareStartupTransitionHandoff, getEarlyStartupTransition } from "./startup-transition-plugin";
 import { reconcileApplicationMenu } from "./application-menu";
+import { openRuntimeInformation, observeCodexRuntime } from "./runtime-information";
+import { runtimeEvent } from "./runtime-events";
 import {
   CodeCodexElement,
   GLOW_HORIZON_BACKGROUND_ATTRIBUTE,
@@ -111,43 +115,7 @@ ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:m
   }
 }
 `;
-const TRANSPARENT_BACKGROUND_CSS = `
-html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] {
-  background-color: var(${TRANSPARENT_BACKGROUND_COLOR_PROPERTY}) !important;
-}
 
-html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body,
-html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body :where(
-  div,
-  main,
-  aside,
-  section,
-  article,
-  header,
-  footer,
-  nav,
-  form,
-  dialog,
-  ul,
-  ol,
-  li,
-  button,
-  input,
-  textarea,
-  select
-):not([role="img"]):not([data-icon]):not([class*="icon" i]) {
-  background-color: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
-
-html[${TRANSPARENT_BACKGROUND_ATTRIBUTE}] body :is(
-  [class*="bg-gradient-to-t"],
-  [class*="MainContentTopFade"]
-) {
-  background-image: none !important;
-}
-`;
 const PARTICLE_BACKGROUND_CSS = `
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] {
   background-color: var(${PARTICLE_BACKGROUND_COLOR_PROPERTY}, #000) !important;
@@ -548,13 +516,7 @@ function reconcileCurrentLayoutHeader(explorer: CodeCodexElement | null, strateg
 }
 
 function installTransparentBackgroundStyle(): void {
-  let style = document.querySelector<HTMLStyleElement>(TRANSPARENT_BACKGROUND_STYLE_SELECTOR);
-  if (!style) {
-    style = document.createElement("style");
-    style.dataset.codeCodexTransparentBackground = "v1";
-    (document.head ?? document.documentElement).append(style);
-  }
-  if (style.textContent !== TRANSPARENT_BACKGROUND_CSS) style.textContent = TRANSPARENT_BACKGROUND_CSS;
+  optionalPluginExport<() => void>('transparent-background','installTransparentBackgroundStyle')?.();
 }
 
 function installParticleBackgroundStyle(): void {
@@ -589,11 +551,13 @@ function revealExplorer(): CodeCodexElement | null {
 }
 
 const applicationMenuActions = {
+  openRuntimeInformation: () => { void openRuntimeInformation(); },
   isExplorerVisible: () => {
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     return !sessionDismissed() && Boolean(explorer?.isConnected && !explorer.hasAttribute("data-home-view-hidden") && explorer.dataset.collapsed !== "true");
   },
   toggleExplorer: () => {
+    runtimeEvent("renderer", "file tree", "toggle requested");
     if (!isHomeWorkspaceView()) return;
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     if (sessionDismissed() || !explorer?.isConnected) {
@@ -621,6 +585,7 @@ const applicationMenuActions = {
 };
 
 export function injectExplorer(): CodeCodexElement | null {
+  if (document.body) observeCodexRuntime();
   reconcileLoginBackground();
   reconcileApplicationMenu(applicationMenuActions);
   installTransparentBackgroundStyle();
@@ -781,7 +746,7 @@ export function installInjector(): void {
   installGlowHorizonBackgroundStyle();
   installReselectionListener();
   const start = () => {
-    const startupTransitionPromise = startStartupTransitionOnLaunch(startupSplashActive);
+    const startupTransitionPromise = getEarlyStartupTransition();
     removeSupersededExplorers();
     const existing = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     const explorer = injectExplorer();
@@ -791,20 +756,7 @@ export function installInjector(): void {
     installRemountObserver();
     void startupTransitionPromise.then((startupTransition) => {
       if (!startupTransition) return;
-      const revealWhenReady = () => {
-        if (document.querySelector(MAIN_SURFACE_SELECTOR)) {
-          requestAnimationFrame(() => requestAnimationFrame(() => startupTransition.signalReady()));
-        } else {
-          const observer = new MutationObserver(() => {
-            if (!document.querySelector(MAIN_SURFACE_SELECTOR)) return;
-            observer.disconnect();
-            requestAnimationFrame(() => requestAnimationFrame(() => startupTransition.signalReady()));
-          });
-          observer.observe(document.body, { childList: true, subtree: true });
-          window.setTimeout(() => observer.disconnect(), 15_000);
-        }
-      };
-      revealWhenReady();
+      monitorStartupReadiness(startupTransition);
     });
   };
   if (document.body) start();

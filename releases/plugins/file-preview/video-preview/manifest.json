@@ -1,0 +1,20 @@
+{
+  "id": "video-preview",
+  "name": "Video Preview",
+  "hostId": "code-codex.video-preview",
+  "category": "file-preview",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 19679,
+  "sha256": "e499f389722694bf88f9a8128fe62eb5c7c7c0b45e638649b454f8d2aacde228",
+  "asset": "CodeCodex-plugin-video-preview-1.0.0.js",
+  "relativePath": "CodeCodex-plugin-video-preview-1.0.0.js",
+  "resources": [],
+  "defaultImageCount": 0,
+  "capabilities": [
+    "file-preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

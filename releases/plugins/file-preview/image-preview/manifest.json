@@ -1,0 +1,20 @@
+{
+  "id": "image-preview",
+  "name": "Image Preview",
+  "hostId": "code-codex.image-preview",
+  "category": "file-preview",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 19679,
+  "sha256": "5dbed7beb1c7665a83c4fce192193359bc543c694ff56d5589ff4efe0ccceb2c",
+  "asset": "CodeCodex-plugin-image-preview-1.0.0.js",
+  "relativePath": "CodeCodex-plugin-image-preview-1.0.0.js",
+  "resources": [],
+  "defaultImageCount": 0,
+  "capabilities": [
+    "file-preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

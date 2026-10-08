@@ -1959,18 +1959,6 @@ fn select_codex_window(pid: u32) -> Result<WindowCandidate, WindowTransparencyEr
 }
 
 #[cfg(windows)]
-pub(crate) fn startup_splash_window(pid: u32) -> Option<isize> {
-    select_codex_window(pid)
-        .ok()
-        .map(|candidate| candidate.window)
-}
-
-#[cfg(not(windows))]
-pub(crate) fn startup_splash_window(_pid: u32) -> Option<isize> {
-    None
-}
-
-#[cfg(windows)]
 unsafe extern "system" fn collect_codex_window_candidate(window: HWND, parameter: LPARAM) -> BOOL {
     let context = unsafe { &mut *(parameter as *mut WindowEnumerationContext) };
     if let Some(candidate) = inspect_window_candidate(window, context.virtual_screen) {
@@ -3389,7 +3377,58 @@ impl BridgeHandler for NativeBridge {
     async fn handle(&self, request: BindingRequest) -> Result<Value, BridgeError> {
         let epoch = request.lifecycle_epoch;
         self.ensure_epoch(epoch)?;
-        match request.method.as_str() {
+        let method = request.method.clone();
+        let started = std::time::Instant::now();
+        let log_operation = !method.starts_with("explorer.runtime.")
+            && !method.ends_with(".chunk")
+            && !method.ends_with(".resource.chunk");
+        if log_operation {
+            crate::runtime_log::record("native-bridge", &method, "started", json!({}));
+        }
+        let result = match request.method.as_str() {
+            "explorer.runtime.list" => {
+                crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))
+            }
+            "explorer.runtime.read" => {
+                let id = request
+                    .params
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(BridgeError::invalid_request)?;
+                crate::runtime_log::read(id).map_err(|e| BridgeError::new("RUNTIME_LOG", e))
+            }
+            "explorer.runtime.append" => {
+                let events = request
+                    .params
+                    .get("events")
+                    .and_then(Value::as_array)
+                    .filter(|e| e.len() <= 128)
+                    .ok_or_else(BridgeError::invalid_request)?;
+                // Validate the whole batch before appending any event.
+                for event in events {
+                    for key in ["source", "action", "outcome"] {
+                        if !event.get(key).and_then(Value::as_str).is_some_and(|s| {
+                            !s.is_empty() && s.len() <= 160 && !s.chars().any(char::is_control)
+                        }) {
+                            return Err(BridgeError::invalid_request());
+                        }
+                    }
+                    if !event.get("details").is_some_and(Value::is_object)
+                        || event.to_string().len() > 8192
+                    {
+                        return Err(BridgeError::invalid_request());
+                    }
+                }
+                for event in events {
+                    crate::runtime_log::record(
+                        event["source"].as_str().unwrap(),
+                        event["action"].as_str().unwrap(),
+                        event["outcome"].as_str().unwrap(),
+                        event["details"].clone(),
+                    );
+                }
+                Ok(json!({"accepted":events.len()}))
+            }
             "explorer.context" => self.context(request.params, epoch).await,
             "explorer.context.clear" => self.context_clear(request.params, epoch),
             "explorer.list" => self.list(request.params, epoch).await,
@@ -3427,6 +3466,20 @@ impl BridgeHandler for NativeBridge {
             "explorer.watch.stop" => self.watch_stop(request.params, epoch),
             "explorer.settings.get" => self.settings_get(request.params).await,
             "explorer.settings.set" => self.settings_set(request.params, epoch).await,
+            "explorer.plugins.status" => crate::plugin_store::status(),
+            "explorer.plugins.install" | "explorer.plugins.cancel" | "explorer.plugins.load" => {
+                let id = request
+                    .params
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| BridgeError::new("PLUGIN_ID", "A plugin ID is required."))?;
+                match method.as_str() {
+                    "explorer.plugins.install" => crate::plugin_store::install(id).await,
+                    "explorer.plugins.cancel" => crate::plugin_store::cancel(id),
+                    _ => crate::plugin_store::sources(id)
+                        .map(|source| json!({"id":id,"verifiedSource":source})),
+                }
+            }
             "explorer.update.check" => self.update_check(request.params, epoch).await,
             "explorer.update.install" => self.update_install(request.params, epoch).await,
             "explorer.window.transparency.set" => {
@@ -3436,7 +3489,29 @@ impl BridgeHandler for NativeBridge {
                 "INVALID_REQUEST",
                 "The native method is not allowed.",
             )),
+        };
+        if log_operation {
+            let mut details = json!({"durationMs":started.elapsed().as_millis()});
+            if let Err(error) = &result {
+                details["errorCode"] = json!(error.code);
+                details["message"] = json!(error.message.chars().take(1500).collect::<String>());
+            }
+            if let Ok(value) = &result {
+                if let Some(entries) = value.get("entries").and_then(Value::as_array) {
+                    details["entryCount"] = json!(entries.len());
+                }
+                if method == "explorer.context" {
+                    details["workspaceAvailable"] = json!(value.get("rootName").is_some());
+                }
+            }
+            crate::runtime_log::record(
+                "native-bridge",
+                &method,
+                if result.is_ok() { "passed" } else { "failed" },
+                details,
+            );
         }
+        result
     }
 
     fn lifecycle_epoch(&self) -> u64 {
@@ -4075,8 +4150,11 @@ mod tests {
     #[cfg(windows)]
     use windows_sys::Win32::Foundation::POINT;
     #[cfg(windows)]
+    use windows_sys::Win32::Graphics::Dwm::DwmFlush;
+    #[cfg(windows)]
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_POPUP,
+        CreateWindowExW, DestroyWindow, DispatchMessageW, GWL_STYLE, MSG, PM_REMOVE, PeekMessageW,
+        TranslateMessage, WS_DISABLED, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_POPUP,
         WindowFromPoint,
     };
 
@@ -4481,6 +4559,113 @@ mod tests {
         fn handle(&self) -> HWND {
             self.0
         }
+
+        fn assert_presented_client_input_owner(&self, stage: &str) {
+            assert_ne!(
+                unsafe {
+                    SetWindowPos(
+                        self.0,
+                        HWND_TOPMOST,
+                        48,
+                        48,
+                        32,
+                        32,
+                        SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    )
+                },
+                0,
+                "show disposable input fixture"
+            );
+            let started = Instant::now();
+            let (rect, point, hit, inner_point, inner_hit, visible, enabled, style, hit_pid) = loop {
+                let mut message: MSG = unsafe { std::mem::zeroed() };
+                unsafe {
+                    while PeekMessageW(&mut message, self.0, 0, 0, PM_REMOVE) != 0 {
+                        let _ = TranslateMessage(&message);
+                        let _ = DispatchMessageW(&message);
+                    }
+                    let _ = DwmFlush();
+                }
+                let mut rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                assert_ne!(
+                    unsafe { GetWindowRect(self.0, &mut rect) },
+                    0,
+                    "fixture rectangle"
+                );
+                // This fixture is a borderless popup. Derive a client point from
+                // its actual screen rectangle instead of assuming desktop scale.
+                let point = POINT {
+                    x: (rect.left + rect.right) / 2,
+                    y: (rect.top + rect.bottom) / 2,
+                };
+                let hit = unsafe { WindowFromPoint(point) };
+                // Retain the old (56,56) interior check at this 32px geometry,
+                // as well as the center, while deriving both from the real rect.
+                let inner_point = POINT {
+                    x: rect.left + (rect.right - rect.left) / 4,
+                    y: rect.top + (rect.bottom - rect.top) / 4,
+                };
+                let inner_hit = unsafe { WindowFromPoint(inner_point) };
+                let visible = unsafe { IsWindowVisible(self.0) } != 0;
+                let enabled =
+                    unsafe { GetWindowLongPtrW(self.0, GWL_STYLE) } as u32 & WS_DISABLED == 0;
+                let style = read_extended_style(self.0).expect("presented fixture style");
+                let mut hit_pid = 0;
+                unsafe { GetWindowThreadProcessId(hit, &mut hit_pid) };
+                if (hit == self.0 && inner_hit == self.0)
+                    || started.elapsed() >= Duration::from_secs(1)
+                {
+                    break (
+                        rect,
+                        point,
+                        hit,
+                        inner_point,
+                        inner_hit,
+                        visible,
+                        enabled,
+                        style,
+                        hit_pid,
+                    );
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            eprintln!(
+                "{stage}: fixture={:?}; rect=({},{},{},{}); point=({},{}); visible={visible}; enabled={enabled}; exstyle={style:#x}; hit={hit:?}; inner=({},{}); inner_hit={inner_hit:?}; hit_pid={hit_pid}; settled_ms={}",
+                self.0,
+                rect.left,
+                rect.top,
+                rect.right,
+                rect.bottom,
+                point.x,
+                point.y,
+                inner_point.x,
+                inner_point.y,
+                started.elapsed().as_millis()
+            );
+            assert!(
+                visible && enabled,
+                "{stage}: input fixture must be visible and enabled"
+            );
+            assert!(
+                has_extended_style(style, WS_EX_TOPMOST),
+                "{stage}: input fixture must remain topmost"
+            );
+            assert_eq!(
+                hit, self.0,
+                "{stage}: transparent client pixels must remain owned by the Codex HWND; point=({},{}); hit_pid={hit_pid}; fixture_exstyle={style:#x}",
+                point.x, point.y
+            );
+            assert_eq!(
+                inner_hit, self.0,
+                "{stage}: original interior pixels must remain owned by the Codex HWND; point=({},{})",
+                inner_point.x, inner_point.y
+            );
+        }
     }
 
     #[cfg(windows)]
@@ -4520,7 +4705,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn transparency_compositor_policy_preserves_style_and_input_ownership() {
-        let window = TransparencyTestWindow::new(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+        // Background test processes may not receive foreground permission to
+        // promote an existing window. Create this disposable fixture topmost
+        // from the outset, without activating it or altering any other window.
+        let window =
+            TransparencyTestWindow::new(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST);
+        window.assert_presented_client_input_owner("before transparency");
         let original_style =
             read_extended_style(window.handle()).expect("initial non-layered ex-style");
         let original_backdrop =
@@ -4578,25 +4768,7 @@ mod tests {
             );
         }
 
-        assert_ne!(
-            unsafe {
-                SetWindowPos(
-                    window.handle(),
-                    HWND_TOPMOST,
-                    48,
-                    48,
-                    32,
-                    32,
-                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                )
-            },
-            0
-        );
-        assert_eq!(
-            unsafe { WindowFromPoint(POINT { x: 56, y: 56 }) },
-            window.handle(),
-            "transparent client pixels must remain owned by the Codex HWND"
-        );
+        window.assert_presented_client_input_owner("after transparency");
 
         restore_window_accent_policy(window.handle(), original_accent, || true)
             .expect("restore original accent");

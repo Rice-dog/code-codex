@@ -3,6 +3,7 @@ interface ApplicationMenuActions {
   toggleExplorer(): void;
   openPreviewMarket(): void;
   checkForUpdates(): void;
+  openRuntimeInformation(): void;
 }
 
 interface MenuMount {
@@ -149,6 +150,11 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   marketItem.setAttribute("role", "menuitem");
   marketItem.tabIndex = -1;
   marketItem.textContent = "Preview Market";
+  const runtimeItem = document.createElement("button");
+  runtimeItem.type = "button";
+  runtimeItem.setAttribute("role", "menuitem");
+  runtimeItem.tabIndex = -1;
+  runtimeItem.textContent = "Runtime Information";
   const updateItem = document.createElement("button");
   updateItem.type = "button";
   updateItem.setAttribute("role", "menuitem");
@@ -163,14 +169,14 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   repositoryItem.textContent = "Open GitHub Repository";
   const separator = document.createElement("div");
   separator.setAttribute("role", "separator");
-  popup.append(treeItem, marketItem, separator, updateItem, repositoryItem);
+  popup.append(treeItem, marketItem, runtimeItem, separator, updateItem, repositoryItem);
 
   // Keep this sibling separate from Codex's React-owned Radix menubar. It
   // shares the visual row without joining Radix's private keyboard collection.
   mount.topBar.insertBefore(host, mount.menubar.nextSibling);
   document.body.append(popup);
 
-  const items: HTMLElement[] = [treeItem, marketItem, updateItem, repositoryItem];
+  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, updateItem, repositoryItem];
   const position = () => {
     if (popup.hidden) return;
     const rect = trigger.getBoundingClientRect();
@@ -218,6 +224,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   }, { signal });
   treeItem.addEventListener("click", () => { close(); actions.toggleExplorer(); }, { signal });
   marketItem.addEventListener("click", () => { close(); actions.openPreviewMarket(); }, { signal });
+  runtimeItem.addEventListener("click", () => { close(); actions.openRuntimeInformation(); }, { signal });
   updateItem.addEventListener("click", () => { close(); actions.checkForUpdates(); }, { signal });
   repositoryItem.addEventListener("click", () => close(), { signal });
   document.addEventListener("pointerdown", (event) => {

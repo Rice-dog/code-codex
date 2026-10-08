@@ -1,0 +1,20 @@
+{
+  "id": "notebook-preview",
+  "name": "Jupyter Notebook Preview",
+  "hostId": "code-codex.notebook-preview",
+  "category": "file-preview",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 210257,
+  "sha256": "58c58eaf1247437677da66a399588b9ed3362ec7af6ff1190051a5bfe77fb179",
+  "asset": "CodeCodex-plugin-notebook-preview-1.0.0.js",
+  "relativePath": "CodeCodex-plugin-notebook-preview-1.0.0.js",
+  "resources": [],
+  "defaultImageCount": 0,
+  "capabilities": [
+    "file-preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

@@ -2,6 +2,271 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.3.96 — 全部插件按需下载与分类目录
+
+### 简体中文
+
+- Preview Market 的 24 个插件全部改为独立下载：Appearance 13 个、File Preview 10 个、Tools 1 个。下载校验后点击 Enable，可在当前 Codex 窗口立即使用，无需重启；下载不会自动启用。
+- 插件统一按 `plugins/<类别>/<插件ID>/` 保存代码与资源。十种预览按格式拆分依赖，Office 的本地 Worker/WASM 随对应插件提供；核心只保留文件树、市场/设置外壳及安全、日志和加载接口。
+- 启动动画播放器也独立下载；核心保留很小的早期缓存加载入口，在官方等待界面读取已校验包，不联网。保持四秒背景最短展示、配置淡出及主页背景开场衔接；缺包时正常启动并记录原因。
+- 说明截图留在 GitHub，从核心 EXE/MSI/ZIP 移除。Particle Image 的六张与 Pixel Sculpt 的三张默认原图保持，继续随对应背景包下载。
+- 更新和普通卸载保留插件缓存、参数、启用偏好、个人图库与视频；有效旧缓存先校验再迁移到分类目录。此前内置功能首次使用独立包时需要下载，未变背景可复用缓存。
+- 本地构建版本，未发布 GitHub；其他用户使用 Download 前，需要先发布与此版本匹配的全部插件资产。
+
+### English
+
+- Make all 24 Preview Market plugins independent downloads: 13 Appearance, 10 File Preview and one Tools plugin. After verification, Enable works immediately in the existing Codex window without restarting. Downloading does not activate a plugin automatically.
+- Organize code and resources under `plugins/<category>/<plugin ID>/`. Split the ten format viewers and their dependencies; Office's local Worker/WASM ship with its own package. The core retains the file tree, market/settings shell, security, logs and loading contracts.
+- Download the startup player too. A tiny core loader reads verified cached packages during the official loading screen without network requests. Preserve the four-second background minimum, configured fade and main-background opening handoff; missing packages skip animation safely and record the reason.
+- Keep documentation screenshots on GitHub and remove them from core EXE/MSI/ZIP installers. Preserve Particle Image's six and Pixel Sculpt's three original default images in their background downloads.
+- Upgrades and ordinary uninstall retain caches, parameters, enable preferences, personal images and videos. Verify and migrate valid old caches into category directories. Previously built-in features require their standalone packages on first use; unchanged backgrounds reuse existing cache.
+- Local build, not published on GitHub. Publish every matching plugin asset before other users can use Download for this version.
+
+## v0.3.95 — 启动动画参数默认值
+
+### 简体中文
+
+- 将本机当前启动动画参数设为默认：视频片段 29–60.093016 秒、最短展示 45%、淡出 3%、速度 1×、亮度 140%、画面铺满；背景来源默认为 Particle Image，背景淡出 3 秒。
+- 新用户缺省参数、损坏/缺失参数的回退以及“恢复默认”使用同一份定义。已有保存参数与启用状态保留，启用开关继续由用户控制。
+- 选择新视频与恢复默认使用新裁剪范围；短于默认起点的视频从 0 开始，结尾不超过实际时长，避免空片段。保留现有媒体和启动时机。
+- 本地构建版本，未发布 GitHub。
+
+### English
+
+- Promote the current startup settings to defaults: video trim 29–60.093016 seconds, minimum display 45%, fade 3%, playback 1×, brightness 140% and cover fit. Default background selection is Particle Image with a 3-second background fade.
+- Use one definition for fresh settings, invalid or missing parameter fallbacks and Reset. Retain existing saved settings and enable state; users continue to control activation.
+- Apply the new trim when selecting a video or resetting. Videos shorter than the default start begin at zero, and the end never exceeds their duration, preventing empty clips. Preserve local media and startup timing.
+- Local build; not yet published on GitHub.
+
+## v0.3.94 — 插件目录与原始素材整理
+
+### 简体中文
+
+- 统一使用 `plugins/<插件ID>/`：主 JS、manifest、说明和署名按插件归档，默认原图及缩略图独立放在 `media/`，不再混放素材注册 JS。
+- 下载、校验、离线导入、缓存及打包清单同步适配。缓存按插件 ID/版本隔离；旧的有效脚本先验 hash 再迁移，八种未变背景无需重新下载。
+- 保持九张默认原图的字节、图库去重和个人设置。PNG 通过大小、SHA-256 及格式签名核验后，转换为分批、有界的素材注册，不将图片当代码执行。
+- 启动动画的早期入口仍内置核心，在官方加载阶段使用选中的已校验缓存，不联网、不等文件树加载；增加入口顺序及载入大小日志。
+- `release-assets.json` 映射 GitHub 的唯一资产名与本地目录；核心安装包继续排除独立插件素材。本地版本，尚未发布 GitHub。
+
+### English
+
+- Organize main JS, manifests, documentation and notices under `plugins/<plugin ID>/`, with original images and thumbnails under `media/`, replacing mixed media-registration JS assets.
+- Update download verification, offline import, per-ID/version cache paths and release inventories together. Verify and migrate legacy scripts; the eight unchanged backgrounds remain reusable without downloading again.
+- Preserve all nine original images, gallery deduplication and personal settings. Verify PNG sizes, SHA-256 and signatures before producing bounded media-registration scripts; image bytes are never treated as executable code.
+- Keep the early startup entry embedded in the core, using the selected verified cache during the native loading stage without network requests or waiting for the file tree. Add script-order and size diagnostics.
+- Map unique GitHub asset names to local paths in `release-assets.json`. Separate plugin media remains outside the core installer. Local version; not yet published on GitHub.
+
+## v0.3.93 — 默认图库素材随插件下载
+
+### 简体中文
+
+- Particle Image 默认提供本机选定的 6 张原图，Pixel Sculpt 默认提供 3 张原图；保留原始 PNG 字节与逐图设置，随对应插件按需下载，不增大核心安装包的素材体积。
+- 首次使用导入默认图库；旧图库相同图片去重，保留用户图片、选择和播放顺序，删除后不在每次打开时重新添加。
+- 主模块及全部默认素材均通过大小与 SHA-256 校验才显示为已安装；可取消、可续用已经校验的缓存。离线导入需要完整的主模块和素材文件。
+- 原生载入分批发送素材，保留单脚本 4 MiB 与原 Binding/CDP 接收限制；启动来源同样使用已缓存素材。
+- 另外八种背景包字节不变，可以复用旧缓存。新增默认图库日志及维护说明。本地构建，尚未发布 GitHub。
+
+### English
+
+- Ship the six selected original images for Particle Image and three for Pixel Sculpt with their on-demand packages. Preserve original PNG bytes and per-image settings; these media assets stay outside the core installer.
+- Import defaults on first use, deduplicate existing images and retain personal images, selections and playback orders. Deleted defaults are not re-added on every reopen.
+- Require size and SHA-256 verification of the main module and every companion asset before marking a package installed. Downloads can be cancelled and reuse previously verified cache files. Offline import requires all companion assets.
+- Load media through separate native evaluations, retaining the 4 MiB per-script and existing Binding/CDP receive limits. Startup sources also use cached media.
+- Keep the other eight background packages byte-identical for cache reuse. Add default-gallery events and maintenance documentation. Local build; not yet published on GitHub.
+
+## v0.3.92 — 背景插件按需下载与即时启用
+
+### 简体中文
+
+- 十种动态背景独立打包，核心安装包不再内嵌背景实现及默认图片；文件树、预览和设置框架保留。
+- Preview Market 先 Download，再 Enable；下载进度可查看、可取消，在当前 Codex 中即时启用，无需重启。
+- 原生缓存按固定目录核对大小和 SHA-256；已下载背景可离线使用，升级保留缓存、原设置和个人媒体。
+- 启动动画使用已缓存的同一背景包；保持原有最短展示、淡出及主页背景开场衔接。
+- 本地构建版本。公网下载需先发布匹配的独立插件资产；验证结果与本机安装状态以本轮交付为准。
+
+### English
+
+- Package ten dynamic backgrounds separately, removing their renderers and default images from the core installer while retaining the file tree, previews and settings framework.
+- Download, then Enable in Preview Market. View progress, cancel downloads and enable backgrounds in the current Codex window without restarting.
+- Verify size and SHA-256 against a pinned catalog in the native cache. Installed backgrounds work offline; upgrades retain cached packages, settings and personal media.
+- Use the same cached packages for startup animations, retaining minimum display, fade and normal-background opening handoff.
+- Local build. Public downloads require the matching independent assets to be published; validation and installed state are reported with this delivery.
+
+## v0.3.90 — 粒子图像背景开场动画
+
+### 简体中文
+
+- Particle Image Background 新增粒子汇聚开场：散开的粒子云逐渐聚合成选中的图片，完成后回到原有粒子效果。
+- 使用统一中英设置面板，可开启或关闭开场、调整时长与汇聚范围，并单独重播。调节常规参数和后续图片切换不会反复重播开场。
+- 开场独立于粒子运动速度，支持暂停和减少动态效果；启动遮罩退场后，主页背景重新开始自己的开场。作为启动来源时仍遵循四秒最短展示和配置的淡出时间。
+- 本地版本；验证范围为隔离浏览器交互、渲染回归、Rust 测试及本机安装文件核对。
+
+### English
+
+- Add a gathering opening to Particle Image Background: a scattered particle cloud assembles into the selected image, then returns to the existing particle effect.
+- Use the shared bilingual settings panel to enable the opening, adjust duration and spread, and replay it independently. Ordinary parameter edits and subsequent image changes do not restart the opening.
+- Keep the opening independent of particle motion speed, with pause and reduced-motion support. The normal background restarts its opening after the startup overlay exits. Startup sources retain their four-second minimum and configured fade duration.
+- Local version, verified with isolated browser interactions, rendering regressions, Rust tests, and installed-file checks.
+
+## v0.3.89 — 补齐启动动画的图像背景来源
+
+### 简体中文
+
+- 启动动画新增 Particle Image Background 与 Pixel Sculpt Background，可选择全部十种动态背景；使用各背景已有参数和本地图片库。
+- 独立启动/预览实例等待图像准备和真实首帧，避免空白播放；切换或关闭时释放资源，失败提供运行记录。启动副本不覆盖正常背景参数或启用选择。
+- 保留背景至少展示四秒及用户设置的淡出时间。图像背景参与主背景等待/恢复，预览适配自身窗口大小。
+- 本地版本；尚未发布到 GitHub。验证范围以实际浏览器回归和安装核对为准，不代表所有官方客户端或 GPU 均已实测。
+
+### English
+
+- Add Particle Image Background and Pixel Sculpt Background as startup sources, covering all ten dynamic backgrounds with their existing settings and local image libraries.
+- Wait for image preparation and an actual first frame. Dispose independent startup/preview resources on cancellation and record failures without overwriting normal background settings or selection.
+- Preserve the four-second background minimum and configured fade duration. Image backgrounds participate in main-background hold/resume; inline previews use their own bounds.
+- Local version; not published to GitHub. Validation covers the recorded browser regressions and installation checks, not every official client or GPU.
+
+## v0.3.88 — 修复启动动画来源切换后的参数面板位置
+
+### 简体中文
+
+- 从背景插件切换到视频时，按更新后的面板高度立即重新定位，避免下方参数超出窗口、滑块无法操作；无需关闭再打开面板。
+- 保留已有视频、裁剪范围、参数值及插件预览的清理逻辑。补充持续打开面板、短/窄窗口、真实鼠标拖动和重载保存的浏览器回归检查。
+- 本地版本；尚未发布到 GitHub。浏览器检查使用隔离的生产包界面，不能替代所有官方客户端版本的实测。
+
+### English
+
+- Reposition the open startup settings panel using its updated height when switching from a background plugin to video. Lower controls remain within the viewport and can be adjusted without closing and reopening the panel.
+- Preserve the selected video, clip range, parameter values and preview cleanup. Add browser regression checks for an open panel, short/narrow windows, real mouse dragging and persisted values after reload.
+- Local version; not published to GitHub. Browser checks use an isolated production-bundle UI and do not establish compatibility with every official client version.
+
+## v0.3.87 — Recover uncertain imports and sanitize runtime logs
+
+- Re-read the original destination after a failed commit response without replaying the import. Guard reconciliation across workspace changes and distinguish failed refreshes from successful reads.
+- Sanitize runtime events before renderer synchronization and native storage. Apply the same policy when reading, copying or exporting older logs; retain diagnostic codes, counts and timing.
+- Add fault-injection regression tests covering lost commit responses, refresh failures, workspace changes, rejected commits, pre-commit failures, nested secrets, queue restoration and historical exports.
+
+## v0.3.86 — Preserve background openings beneath startup animation
+
+- Main backgrounds prepare an initial frame while covered, then hold playback until the startup animation fully finishes. Opening clocks restart before playback resumes.
+- Startup backgrounds and settings previews continue independently. Hold, preparation, release and reset errors are included in runtime information.
+
+## v0.3.85 — Native Codex readiness without plugin handoff
+
+- Startup fade depends on visible native Codex content and one second of stable frames. It no longer waits for Code-Codex UI mounting.
+- Minimum display and fade settings remain unchanged; readiness evidence, stalls and explicit compatibility fallbacks are recorded.
+
+## v0.3.84 — Content and frame stability readiness
+
+- Startup fade now waits for visible native content, full UI mounting handoff, and one second of stable frames, rather than the presence of shell elements alone.
+- Long tasks and frame stalls restart the stability check. Background minimum display and configured fade, and video timing, remain unchanged.
+- Runtime information records readiness evidence, long tasks, resets, success and bounded compatibility fallbacks. Current official internal phase state is not directly exposed, so the visible-content fallback is explicitly identified.
+
+## v0.3.83 — Background startup fade and centered transport
+
+- Background startup retains its four-second minimum and readiness gate, then fades into Codex over a separately configurable duration (default one second).
+- Video transport controls stay centered within the timeline header; the clip duration stays at the right.
+
+## v0.3.82 — Simplified startup animation controls
+
+- Background startup mode only requires selecting a plugin; its preview starts automatically and keeps running while the panel is open.
+- Background startup displays for at least four seconds, waits for Codex readiness, then exits immediately; video timing parameters do not affect background mode.
+- Localized source choices and one source label. Video timeline label, time and borderless transport controls now share one compact row.
+
+## v0.3.81 — Background plugins as startup animations
+
+- Choose Video or Background plugin in Codex Startup Transition; keep the selected video when switching sources.
+- Reuse eight existing independent renderers and their saved settings without changing the normal background's enabled state.
+- Preview background startup, keep minimum-display and readiness-driven fade, and log the chosen source and renderer lifecycle.
+- A background timing reference defines the percentages while the effect continues until Codex is ready.
+
+## v0.3.80 — Remove startup video opacity control
+
+- Remove Video opacity from startup transition settings and fix video opacity at 100%.
+- Ignore legacy saved opacity values in both playback and preview; preserve the readiness-driven fade.
+
+## v0.3.79 — Fade from the current frame when ready
+
+- Once native readiness and minimum visibility are satisfied, fade immediately from the current playback position.
+- Measure fade duration from the selected clip percentage; continue video playback across clip boundaries until fade completes.
+- Log readiness timing, remaining minimum visibility and fade trigger position/duration.
+
+## v0.3.78 — Loading-screen animation supervision
+
+- Supervise the optional startup player concurrently from activation through page discovery and navigation.
+- Keep the new-document hook connected; show only the selected video during loading and fade after native readiness.
+- Record candidate selection, ownership checks, CDP command failures, player state, video lookup and renderer lifecycle in Runtime Information.
+- Preserve normal startup and the existing 10-run, 5 MiB per-run log limits.
+
+## v0.3.77 — Runtime Information
+
+- Add the English Runtime Information item to the Code-Codex menu, with run selection, event filtering, Copy Details and JSONL export.
+- Reuse startup traces and collect renderer supervision, file-tree/project/preview activity, plugin state/settings, startup video lifecycle and observable native Codex page changes.
+- Automatically retain the latest 10 runs. Each JSONL file is capped at 5 MiB; oldest complete events are removed in batches and the removed count remains visible.
+- Write asynchronously with atomic file replacement, bounded renderer batches and retry after temporary connection loss. Logs stay local under `%LOCALAPPDATA%\CodeCodex\runtime-logs`.
+- Validated with Rust storage/retention tests, a native failed-launch persistence check, browser interaction/export/retry checks and existing UI regression checks.
+- Local build, not published to GitHub.
+
+## v0.3.76 — Earlier loading-screen animation
+
+- Start the lightweight animation immediately after official package activation, before the slower CIM check and App Server preparation.
+- Use a native TCP-owner and process-creation-time check for this capability-free early phase; full identity checks and privileged UI qualification remain in place.
+- A main container alone no longer means ready: the native navigation/sidebar or actual sign-in controls must be present.
+- Show the first decoded frame immediately: the tail-fade percentage no longer creates a long entrance fade.
+- Detect readiness within the early player, preserve video/trim/percentage settings, and suppress late replay.
+- Local build, not published to GitHub.
+
+## v0.3.75 — Animation during the loading screen
+
+- A separate 8.5 KB, bridge-free startup bundle runs on the verified official main loading document before App Server preparation and shell qualification.
+- The full UI adopts the same player and readiness promise; it does not replay an opening animation after the main interface appears.
+- Late loading skips animation. Existing video selection, trim, percentage timing and preview controls are preserved.
+- Added loading-page to ready-page handoff and late-replay regression checks.
+- Local version, not published to GitHub.
+
+## v0.3.74 — Percentage timing and readiness-based playback
+
+- Removed the maximum-wait control and startup timeout; the selected clip loops until Codex is ready.
+- Minimum display and tail fade now use 0–100% of the selected clip. Changing trim or playback speed preserves these proportions.
+- Preview, timing markers and actual startup share the same clip proportions; legacy saved milliseconds migrate automatically.
+- Readiness detection continues through slow startup; video decoding or playback errors dismiss the animation instead of blocking the app.
+- Validated and installed locally; not published to GitHub.
+
+## v0.3.73 — 裁剪片段尾部淡出 / Fade within the trimmed clip
+
+- 预览及实际启动的淡出作用于所选片段的尾部，视频在淡出期间继续播放，在片段终点结束，不再追加静止末帧淡出。
+- 参数范围细线以裁剪起点为零点、裁剪片段长度为尺度；超过片段长度的标记收束在片段边界。
+- 范围条减为 3px 细线，移除固定标题和颜色标签；各颜色提供悬停及键盘焦点可访问的效果与时间说明。
+- 保留播放、暂停、跳转、拖动与空格控制；最短显示超出片段播放时长时，在开头等待后再完整播放及尾部淡出。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.72 — 剪辑式播放控制 / Timeline transport controls
+
+- 时间轴区域使用深黑灰背景；其上方加入片段开头、播放/暂停及片段末尾按钮，移除重播选项。
+- 播放从当前指针继续，空格切换播放与暂停；拖动定位或跳转重置模拟计时，关闭面板停止播放。
+- 预览模拟启动：片段结束视为就绪，满足最短显示时长后淡出；达到最长等待时间则停止播放并淡出。暂停同时冻结视频、等待和淡出，参数实时生效。
+- 增大参数两列之间的空隙，缩短参数说明与滑条距离，保留统一字体、控件和窄屏单列布局。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.71 — 启动视频时间轴播放 / Startup video timeline playback
+
+- 按住时间轴拖动即可连续定位视频画面；拖出时间轴仍可定位两端，播放指针同步更新。
+- 重播从选中片段起点播放到终点并停留在末帧，不受启动等待和淡出参数截断；拖动暂停定位，再次重播返回片段起点。
+- 打开设置只显示视频首帧，关闭面板停止播放；移除启动器和播放器内置默认动画，没有自选视频时不播放动画。
+- 保留统一设置样式、宽屏预览、双列参数和窄屏排列。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.70 — 加宽启动动画设置 / Wider startup transition settings
+
+- 启动动画设置面板加宽至 800px，上方视频预览和时间轴使用整行宽度。
+- 视频外观及播放时长使用双列参数排列；窄窗口下自动恢复单列，保留统一字体、颜色、控件和中英切换。
+- 保留动画插件的市场入口、已有设置及预览行为。
+- 本地版本，尚未发布至 GitHub。
+
+## v0.3.69 — 恢复启动动画市场入口 / Restore startup transition entry
+
+- 在 Preview Market 的 Appearance 中重新显示 Codex Startup Transition，保留其已有启用状态与动画设置。
+- 保留 v0.3.68 的蒙版调节、双语面板、消息提示及登录页背景行为。
+- 本地版本，尚未发布至 GitHub。
+
 ## v0.3.68 — 蒙版面板样式和提示层级 / Consistent opacity controls and visible notices
 
 - 市场名称固定为英文 UI Surface Opacity；设置面板复用其他外观插件的中英语言开关、标题、参数行、字体和按钮样式。

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.68-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.96-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -38,15 +38,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.3.68-x64-setup.exe`
-- Alternative: `CodeCodex-0.3.68-x64.msi`
-- Portable package: `CodeCodex-0.3.68-x64.zip`
+- Recommended: `CodeCodex-0.3.96-x64-setup.exe`
+- Alternative: `CodeCodex-0.3.96-x64.msi`
+- Portable package: `CodeCodex-0.3.96-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.3.68-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.3.96-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -89,10 +89,40 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.3.68
+./scripts/package.ps1 -Version 0.3.96
 ```
 
 The generated packages are written to `releases/`.
+
+## Download all plugins on demand
+
+Starting with **0.3.96**, **all 24 Preview Market plugins are separate downloads**: 13 Appearance plugins, 10 File Preview plugins and one Tools plugin. The core retains the file tree, basic text preview and editing, market and settings framework, permission checks and runtime logs. Actual plugin rendering, format viewers, the startup player and tool implementations are no longer embedded.
+
+In Preview Market, click **Download**, then **Enable** after download and verification complete. The current Codex window can use the plugin immediately, without restarting. Downloading does not automatically enable it or open settings. Configuration is available after the complete package is installed; UI Surface Opacity still requires an actually enabled background.
+
+Plugin code and required resources come from this project's GitHub Release. The native loader verifies file size and SHA-256 against the core's embedded catalog before caching and on every load. The market does not accept arbitrary third-party scripts. Packages use three category directories:
+
+```text
+releases/plugins/
+├── appearance/
+│   └── particle-image/       # Main JS, manifest, notices and default images
+├── file-preview/
+│   └── office-preview/       # Viewer code and local Worker/WASM resources
+└── developer-tools/
+    └── git-history/          # Read-only Git tool implementation
+```
+
+Each folder uses the stable English plugin ID and contains its code, styles and required resources. GitHub Release assets still use unique flat filenames; `releases/release-assets.json` maps them to categorized local paths and SHA-256 values.
+
+Caches are stored at `%LOCALAPPDATA%\CodeCodex\plugin-cache\plugins\<category>\<plugin ID>\<package version>`. Normal upgrades and ordinary uninstall retain them. Unchanged packages remain available offline; valid old category-free directories or flat caches are verified before migration. Existing parameters, enable preferences, personal images and user videos remain. Installed confirms complete cached files; a package not yet verified and loaded in the current window shows Enable without clearing saved preferences. Previously built-in viewers, tools and the three additional appearance features require their new standalone packages on first use. Existing backgrounds need downloading again only if required package bytes or resources change, are missing or fail verification.
+
+Particle Image includes **six original default images** and Pixel Sculpt includes **three**, downloaded with their background packages. First use imports them without duplicating existing images or replacing personal media and playback choices. Deleted default images stay deleted on reopen. These assets remain outside the core installer.
+
+Codex Startup Transition also requires a downloaded player. The core embeds only a tiny early loader that reads verified startup and selected-background caches during the official loading screen, without network requests or waiting for file-tree mounting. Missing or invalid packages skip the animation, record the reason and let Codex start normally. Videos remain in the user's local IndexedDB; neither the installer nor plugin package includes a default official promotional video.
+
+For offline installation, retain the category structure and every required resource, then run that version's `code-codex.exe plugins --import-dir "releases directory"`. A `plugins` directory, category directory or individual plugin directory is also accepted. Only complete assets trusted by the embedded catalog are imported, without automatic activation. There is currently no separate plugin update or uninstall management page.
+
+README screenshots under `docs/screenshots/` remain on GitHub and are excluded from EXE, MSI and ZIP installers. They are documentation images, separate from plugin default libraries; view the repository README for complete screenshots. Setup does not download all plugins automatically. Locally built packages need matching GitHub assets published before Download works for other users.
 
 ## Uninstall
 
@@ -118,19 +148,20 @@ MSI installs can also be removed from Windows **Installed apps**.
 - Context menu actions for create, rename, delete, copy path, reveal, and refresh.
 - Drag-and-drop movement for workspace files and folders.
 - Main-window file tabs beside the conversation.
-- Text preview and editing, including multilingual Markdown content.
+- Basic text preview, syntax highlighting and bounded editing; Markdown rendering is provided by its standalone viewer plugin.
 - A local bridge restricted to bounded workspace operations.
 
 ### Plugins
 
 - Preview Market groups plugins into Appearance, File Preview, and Tools, and opens on Appearance by default.
-- File Preview independently enables Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews, with all processing performed locally.
-- Appearance includes Transparent, Particle Image, Black Hole, Glow Horizon, Heavenly Cloud, Aurora Ionosphere, Milky Way, Layered Mountain, Cloud Train, and Pixel Sculpt backgrounds.
-- Git History under Tools shows the current branch, commits, changed files, and colored per-file diffs in read-only mode without repository write operations.
+- File Preview independently downloads and enables Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews, with all processing performed locally.
+- Appearance includes ten dynamic backgrounds, Transparent Background, UI Surface Opacity and Codex Startup Transition, each downloaded before activation.
+- Once downloaded and enabled, Git History under Tools shows the current branch, commits, changed files, and colored per-file diffs in read-only mode without repository write operations.
 
 ### Updates and Compatibility
 
 - Click the version number at the bottom of the file tree or choose **Check for Updates…** from the Code-Codex menu to check GitHub for the latest published stable release.
+- Codex Startup Transition supports video or any of the ten dynamic backgrounds, including Particle Image and Pixel Sculpt with their local image libraries. Backgrounds display for at least four seconds, then fade after Codex is ready.
 - Startup failures show the exact failing stage, a stable support code, a suggested action, and buttons to copy or open a redacted local diagnostic report.
 - Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
 
@@ -144,7 +175,7 @@ Appearance by default.
 
 ![Code-Codex interactive glTF and GLB 3D model preview](docs/screenshots/gltf-preview.png)
 
-File Preview can independently enable Markdown, CSV, diagram, image, video, PDF, audio,
+File Preview can independently download and enable Markdown, CSV, diagram, image, video, PDF, audio,
 Jupyter Notebook, Office document, and glTF 3D model previews. All preview processing runs
 locally on the user's computer.
 
@@ -160,7 +191,9 @@ images into an animated grayscale particle field across Codex. Its image
 library supports ordered auto-switching, smooth morphing, per-photo position
 and zoom, direct numeric values, and adjustable flow, pointer, source, and
 render settings. Transparent Background is available separately. Particle
-images and settings remain local to the user's Codex profile.
+images and settings remain local to the user's Codex profile. The gathering
+opening has enable, duration, spread, and replay controls; the normal background
+replays its opening after the startup overlay exits.
 
 ![Code-Codex Black Hole Background appearance plugin](docs/screenshots/black-hole-background.png)
 

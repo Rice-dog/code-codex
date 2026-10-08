@@ -1,0 +1,22 @@
+{
+  "id": "aurora-ionosphere",
+  "name": "Aurora Ionosphere Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 43264,
+  "sha256": "db5ca913b587b4665d9a99b0652a436d5fccbd5cedb460dbe9cb15fb12a03fb8",
+  "asset": "CodeCodex-background-aurora-ionosphere-1.0.0.js",
+  "relativePath": "CodeCodex-background-aurora-ionosphere-1.0.0.js",
+  "resources": [],
+  "galleryVersion": 1,
+  "defaultImageCount": 0,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}

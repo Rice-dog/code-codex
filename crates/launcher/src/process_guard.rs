@@ -2166,3 +2166,117 @@ mod tests {
             .is_ok_and(|status| status.success())
     }
 }
+
+/// Fast, fail-closed ownership check for the capability-free loading animation.
+/// Full CIM executable verification and renderer qualification still follow.
+pub fn verify_listener_owner_fast(
+    port: u16,
+    pid: u32,
+    launched_after: SystemTime,
+) -> Result<(), ProcessGuardError> {
+    #[cfg(not(windows))]
+    {
+        let _ = (port, pid, launched_after);
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+        use windows_sys::Win32::NetworkManagement::IpHelper::{
+            GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
+        };
+        use windows_sys::Win32::System::Threading::{
+            GetProcessTimes, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        let mut bytes = 0u32;
+        unsafe {
+            GetExtendedTcpTable(
+                std::ptr::null_mut(),
+                &mut bytes,
+                0,
+                2,
+                TCP_TABLE_OWNER_PID_LISTENER,
+                0,
+            );
+        }
+        if bytes < 4 || bytes > 4 * 1024 * 1024 {
+            return Err(ProcessGuardError::OwnershipUnknown);
+        }
+        let mut table = vec![0u32; (bytes as usize).div_ceil(4)];
+        if unsafe {
+            GetExtendedTcpTable(
+                table.as_mut_ptr().cast(),
+                &mut bytes,
+                0,
+                2,
+                TCP_TABLE_OWNER_PID_LISTENER,
+                0,
+            )
+        } != 0
+        {
+            return Err(ProcessGuardError::OwnershipUnknown);
+        }
+        let count = table[0] as usize;
+        if 4 + count * std::mem::size_of::<MIB_TCPROW_OWNER_PID>() > bytes as usize {
+            return Err(ProcessGuardError::OwnershipUnknown);
+        }
+        let rows = unsafe {
+            std::slice::from_raw_parts(table.as_ptr().add(1).cast::<MIB_TCPROW_OWNER_PID>(), count)
+        };
+        let matches = rows.iter().any(|r| {
+            u16::from_be(r.dwLocalPort as u16) == port
+                && r.dwOwningPid == pid
+                && r.dwLocalAddr == u32::from_ne_bytes([127, 0, 0, 1])
+        });
+        if !matches {
+            return Err(ProcessGuardError::OwnershipMismatch);
+        }
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if handle.is_null() {
+            return Err(ProcessGuardError::OwnershipUnknown);
+        }
+        let mut times = [FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        }; 4];
+        let ok = unsafe {
+            GetProcessTimes(
+                handle,
+                &mut times[0],
+                &mut times[1],
+                &mut times[2],
+                &mut times[3],
+            )
+        };
+        unsafe {
+            CloseHandle(handle);
+        }
+        if ok == 0 {
+            return Err(ProcessGuardError::OwnershipUnknown);
+        }
+        let ticks = ((times[0].dwHighDateTime as u64) << 32) | times[0].dwLowDateTime as u64;
+        let created = ticks.saturating_sub(116444736000000000) / 10000;
+        let expected = launched_after
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| ProcessGuardError::OwnershipUnknown)?
+            .as_millis();
+        if (created as u128) < expected {
+            return Err(ProcessGuardError::OwnershipMismatch);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod early_owner_tests {
+    use super::*;
+    #[test]
+    fn fast_owner_checks_a_real_listener_and_rejects_pid_and_age_mismatches() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("listener");
+        let port = listener.local_addr().expect("address").port();
+        verify_listener_owner_fast(port, std::process::id(), UNIX_EPOCH)
+            .expect("native owner check");
+        assert!(verify_listener_owner_fast(port, 0, UNIX_EPOCH).is_err());
+        assert!(verify_listener_owner_fast(port, std::process::id(), SystemTime::now()).is_err());
+    }
+}

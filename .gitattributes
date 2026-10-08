@@ -1,2 +1,6 @@
 # Preserve upstream legal texts byte-for-byte, including original spacing.
 THIRD_PARTY_LICENSES.txt -text -whitespace
+
+# Downloadable plugin assets are verified by their exact SHA-256 bytes.
+# Preserve generated bundles, shader text and upstream notices on all platforms.
+releases/plugins/** -text -whitespace

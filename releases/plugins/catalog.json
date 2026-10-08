@@ -1,0 +1,729 @@
+[
+  {
+    "id": "glow-horizon",
+    "name": "Glow Horizon Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 31192,
+    "sha256": "650f79fe0aee14c6c290d12140b03f18938f284677fc5ea7df743699b7a6d60b",
+    "asset": "CodeCodex-background-glow-horizon-1.0.0.js",
+    "relativePath": "CodeCodex-background-glow-horizon-1.0.0.js",
+    "resources": [],
+    "galleryVersion": 1,
+    "defaultImageCount": 0,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "black-hole",
+    "name": "Black Hole Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 49441,
+    "sha256": "723193dbb9ca89b09dc63978b6b2acdc32e85b5d722b69cf913125622daddf56",
+    "asset": "CodeCodex-background-black-hole-1.0.0.js",
+    "relativePath": "CodeCodex-background-black-hole-1.0.0.js",
+    "resources": [],
+    "galleryVersion": 1,
+    "defaultImageCount": 0,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "heavenly-cloud",
+    "name": "Heavenly Cloud Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 31974,
+    "sha256": "06ca562e6976516ec43134146b65e3588e5b779a9e777268ba83c4f05c64263c",
+    "asset": "CodeCodex-background-heavenly-cloud-1.0.0.js",
+    "relativePath": "CodeCodex-background-heavenly-cloud-1.0.0.js",
+    "resources": [],
+    "galleryVersion": 1,
+    "defaultImageCount": 0,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "aurora-ionosphere",
+    "name": "Aurora Ionosphere Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 43264,
+    "sha256": "db5ca913b587b4665d9a99b0652a436d5fccbd5cedb460dbe9cb15fb12a03fb8",
+    "asset": "CodeCodex-background-aurora-ionosphere-1.0.0.js",
+    "relativePath": "CodeCodex-background-aurora-ionosphere-1.0.0.js",
+    "resources": [],
+    "galleryVersion": 1,
+    "defaultImageCount": 0,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "milky-way",
+    "name": "Milky Way Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 32289,
+    "sha256": "2fa663d312f082b191e45890e8bf8fc1c3f18eb1b5c5300aa8037704a117c853",
+    "asset": "CodeCodex-background-milky-way-1.0.0.js",
+    "relativePath": "CodeCodex-background-milky-way-1.0.0.js",
+    "resources": [],
+    "galleryVersion": 1,
+    "defaultImageCount": 0,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "mountain",
+    "name": "Layered Mountain Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 32545,
+    "sha256": "bb2cfcf36979f27f6ae9cea2aff93eeb905a5b1227869dd582dea5a4e83f861e",
+    "asset": "CodeCodex-background-mountain-1.0.0.js",
+    "relativePath": "CodeCodex-background-mountain-1.0.0.js",
+    "resources": [],
+    "galleryVersion": 1,
+    "defaultImageCount": 0,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "cloud-train",
+    "name": "Cloud Train Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 43216,
+    "sha256": "93198c2a9d8f2a19b811150890cf4cee6b8aaf0f99524f7a6c975d800da583c4",
+    "asset": "CodeCodex-background-cloud-train-1.0.0.js",
+    "relativePath": "CodeCodex-background-cloud-train-1.0.0.js",
+    "resources": [],
+    "galleryVersion": 1,
+    "defaultImageCount": 0,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "blinking-squares",
+    "name": "Blinking Squares Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 236708,
+    "sha256": "f07c95845db5884dfbbc4943f694d131cf64825b9f81686c8ee2de743dea53a3",
+    "asset": "CodeCodex-background-blinking-squares-1.0.0.js",
+    "relativePath": "CodeCodex-background-blinking-squares-1.0.0.js",
+    "resources": [],
+    "galleryVersion": 1,
+    "defaultImageCount": 0,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "particle-image",
+    "name": "Particle Image Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.2",
+    "releaseTag": "v0.3.96",
+    "size": 82516,
+    "sha256": "bc2cb48278012a1973e35513d799bd0477e8f9a0661e41375c683445875eb568",
+    "asset": "CodeCodex-background-particle-image-1.0.2.js",
+    "relativePath": "CodeCodex-background-particle-image-1.0.2.js",
+    "resources": [
+      {
+        "asset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
+        "relativePath": "media/CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
+        "kind": "thumbnail",
+        "size": 13626,
+        "sha256": "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70"
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-image-39894de0da1fa952.png",
+        "relativePath": "media/CodeCodex-background-particle-image-image-39894de0da1fa952.png",
+        "kind": "image",
+        "size": 1286914,
+        "sha256": "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2",
+        "image": {
+          "id": "1087c54f-4f4a-4648-9a4b-29878a1c6c0b",
+          "name": "ChatGPT Image 2026年8月19日 23_06_53.png",
+          "type": "image/png",
+          "size": 1286914,
+          "sha256": "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2",
+          "order": 1,
+          "positionX": 3,
+          "positionY": 0,
+          "zoom": 1.45,
+          "createdAt": 1787152068482,
+          "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png"
+        }
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
+        "relativePath": "media/CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
+        "kind": "thumbnail",
+        "size": 18485,
+        "sha256": "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3"
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
+        "relativePath": "media/CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
+        "kind": "image",
+        "size": 2111416,
+        "sha256": "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898",
+        "image": {
+          "id": "5c47dd02-a969-4c11-a712-231754d3f8d7",
+          "name": "ChatGPT Image 2026年8月16日 08_43_58.png",
+          "type": "image/png",
+          "size": 2111416,
+          "sha256": "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898",
+          "order": 2,
+          "positionX": 36,
+          "positionY": 63,
+          "zoom": 1.35,
+          "createdAt": 1786900081772,
+          "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png"
+        }
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
+        "relativePath": "media/CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
+        "kind": "thumbnail",
+        "size": 12669,
+        "sha256": "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182"
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-image-89d064cef83721eb.png",
+        "relativePath": "media/CodeCodex-background-particle-image-image-89d064cef83721eb.png",
+        "kind": "image",
+        "size": 1230838,
+        "sha256": "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b",
+        "image": {
+          "id": "6a58c7a3-64ea-40c1-a64b-b301f7ded1dd",
+          "name": "ChatGPT Image 2026年8月22日 13_15_56.png",
+          "type": "image/png",
+          "size": 1230838,
+          "sha256": "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b",
+          "order": 3,
+          "positionX": 50,
+          "positionY": 0,
+          "zoom": 1.35,
+          "createdAt": 1787375782731,
+          "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png"
+        }
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
+        "relativePath": "media/CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
+        "kind": "thumbnail",
+        "size": 12801,
+        "sha256": "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda"
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
+        "relativePath": "media/CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
+        "kind": "image",
+        "size": 1266233,
+        "sha256": "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3",
+        "image": {
+          "id": "77960232-16c3-4f65-bbf2-6e4ba26f1480",
+          "name": "ChatGPT Image 2026年8月22日 16_54_33.png",
+          "type": "image/png",
+          "size": 1266233,
+          "sha256": "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3",
+          "order": 4,
+          "positionX": 7,
+          "positionY": 32,
+          "zoom": 1.25,
+          "createdAt": 1787388899281,
+          "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png"
+        }
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
+        "relativePath": "media/CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
+        "kind": "thumbnail",
+        "size": 17458,
+        "sha256": "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f"
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
+        "relativePath": "media/CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
+        "kind": "image",
+        "size": 1783281,
+        "sha256": "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767",
+        "image": {
+          "id": "99bae359-57fe-4a52-91f5-946e64d2da9c",
+          "name": "ChatGPT Image 2026年8月16日 08_49_42.png",
+          "type": "image/png",
+          "size": 1783281,
+          "sha256": "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767",
+          "order": 5,
+          "positionX": 51,
+          "positionY": 50,
+          "zoom": 1.35,
+          "createdAt": 1786964882337,
+          "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png"
+        }
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
+        "relativePath": "media/CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
+        "kind": "thumbnail",
+        "size": 15641,
+        "sha256": "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845"
+      },
+      {
+        "asset": "CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
+        "relativePath": "media/CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
+        "kind": "image",
+        "size": 1549320,
+        "sha256": "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b",
+        "image": {
+          "id": "d79a7089-eb70-4e64-b34a-f910d0cb6ee7",
+          "name": "ChatGPT Image 2026年8月22日 16_10_47.png",
+          "type": "image/png",
+          "size": 1549320,
+          "sha256": "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b",
+          "order": 6,
+          "positionX": 12,
+          "positionY": 0,
+          "zoom": 1.25,
+          "createdAt": 1787386269570,
+          "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png"
+        }
+      }
+    ],
+    "galleryVersion": 1,
+    "defaultImageCount": 6,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "pixel-sculpt",
+    "name": "Pixel Sculpt Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.2",
+    "releaseTag": "v0.3.96",
+    "size": 2412208,
+    "sha256": "61db19e65bc178b93a8eaae274f423d81d9ee36cb6ea0874344d276360f42543",
+    "asset": "CodeCodex-background-pixel-sculpt-1.0.2.js",
+    "relativePath": "CodeCodex-background-pixel-sculpt-1.0.2.js",
+    "resources": [
+      {
+        "asset": "CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
+        "relativePath": "media/CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
+        "kind": "image",
+        "size": 1633897,
+        "sha256": "0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b",
+        "image": {
+          "id": "default:0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b",
+          "name": "ChatGPT Image 2026年9月8日 01_21_02.png",
+          "type": "image/png",
+          "size": 1633897,
+          "sha256": "0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b",
+          "order": 0,
+          "positionX": 50,
+          "positionY": 50,
+          "zoom": 1
+        }
+      },
+      {
+        "asset": "CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
+        "relativePath": "media/CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
+        "kind": "image",
+        "size": 1748802,
+        "sha256": "3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33",
+        "image": {
+          "id": "default:3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33",
+          "name": "ChatGPT Image 2026年9月15日 19_04_59.png",
+          "type": "image/png",
+          "size": 1748802,
+          "sha256": "3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33",
+          "order": 0,
+          "positionX": 50,
+          "positionY": 50,
+          "zoom": 1
+        }
+      },
+      {
+        "asset": "CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
+        "relativePath": "media/CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
+        "kind": "image",
+        "size": 1753647,
+        "sha256": "079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79",
+        "image": {
+          "id": "default:079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79",
+          "name": "ChatGPT Image 2026年9月15日 19_05_01.png",
+          "type": "image/png",
+          "size": 1753647,
+          "sha256": "079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79",
+          "order": 1,
+          "positionX": 50,
+          "positionY": 50,
+          "zoom": 1
+        }
+      }
+    ],
+    "galleryVersion": 1,
+    "defaultImageCount": 3,
+    "capabilities": [
+      "background",
+      "startup",
+      "preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "surface-opacity",
+    "name": "UI Surface Opacity",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "asset": "CodeCodex-plugin-surface-opacity-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-surface-opacity-1.0.0.js",
+    "size": 11478,
+    "sha256": "cc75dfa941b72fd0bca2f927eb681b263b446e41f880e83c19977b1abf5dd8d2",
+    "resources": [],
+    "capabilities": [
+      "appearance"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex"
+  },
+  {
+    "id": "transparent-background",
+    "name": "Transparent Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "asset": "CodeCodex-plugin-transparent-background-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-transparent-background-1.0.0.js",
+    "size": 1736,
+    "sha256": "862678f97edda3bb575b20e1c1a66e1dd6e12dabf9eaee30b1ebe8a35758119b",
+    "resources": [],
+    "capabilities": [
+      "appearance"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex"
+  },
+  {
+    "id": "git-history",
+    "name": "Git History",
+    "category": "developer-tools",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "asset": "CodeCodex-plugin-git-history-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-git-history-1.0.0.js",
+    "size": 5646,
+    "sha256": "1fcdf42d099e7159e1cf07517882c6b21ba7e99aa23be9c3c9e0a8fed6ffe77e",
+    "resources": [],
+    "capabilities": [
+      "developer-tools"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex"
+  },
+  {
+    "id": "codex-startup-transition",
+    "name": "Codex Startup Transition",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "asset": "CodeCodex-plugin-codex-startup-transition-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.0.0.js",
+    "size": 24145,
+    "sha256": "bfe5c31a1cdd99094d7d2139da8339fc5f51ac92903d67fb710ef3c074b21434",
+    "resources": [],
+    "capabilities": [
+      "startup",
+      "preview",
+      "video-storage"
+    ],
+    "networkDuringStartup": false,
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "markdown-preview",
+    "name": "Markdown Preview",
+    "hostId": "code-codex.markdown-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 207915,
+    "sha256": "69e849e596dd0295f8dcc1b4d4a1298e7d9f7c48dc8b476df07903d307c2ac0d",
+    "asset": "CodeCodex-plugin-markdown-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-markdown-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "csv-preview",
+    "name": "CSV Preview",
+    "hostId": "code-codex.csv-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 21478,
+    "sha256": "f3169b098a3b3296bae081404f12bff123b14621a4bb70f29b87d9290aa67513",
+    "asset": "CodeCodex-plugin-csv-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-csv-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "diagram-preview",
+    "name": "Diagram Preview",
+    "hostId": "code-codex.diagram-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 47101,
+    "sha256": "00f5c4b5445d0b6d12404b1f34dbb55b00332a1998e2a5d978951b24266a6443",
+    "asset": "CodeCodex-plugin-diagram-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-diagram-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "image-preview",
+    "name": "Image Preview",
+    "hostId": "code-codex.image-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 19679,
+    "sha256": "5dbed7beb1c7665a83c4fce192193359bc543c694ff56d5589ff4efe0ccceb2c",
+    "asset": "CodeCodex-plugin-image-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-image-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "video-preview",
+    "name": "Video Preview",
+    "hostId": "code-codex.video-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 19679,
+    "sha256": "e499f389722694bf88f9a8128fe62eb5c7c7c0b45e638649b454f8d2aacde228",
+    "asset": "CodeCodex-plugin-video-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-video-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "pdf-preview",
+    "name": "PDF Preview",
+    "hostId": "code-codex.pdf-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 1445453,
+    "sha256": "1552de879e28c47492843d9bf37f1ab2216c7cc3d428bc588b27e40668745b84",
+    "asset": "CodeCodex-plugin-pdf-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-pdf-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "audio-preview",
+    "name": "Audio Preview",
+    "hostId": "code-codex.audio-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 19679,
+    "sha256": "7cf9bae954295a88964e0d77ad8949e2862e480155d517f489928910de64a88b",
+    "asset": "CodeCodex-plugin-audio-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-audio-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "office-preview",
+    "name": "Office Preview",
+    "hostId": "code-codex.office-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 3626557,
+    "sha256": "b836d12f23f7805e6faea5c2d1f8fe7d066f7a8c82571d2603f3bf786a09c37a",
+    "asset": "CodeCodex-plugin-office-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-office-preview-1.0.0.js",
+    "resources": [
+      {
+        "asset": "CodeCodex-plugin-office-preview-1.0.0-parser.worker.js",
+        "relativePath": "resources/CodeCodex-plugin-office-preview-1.0.0-parser.worker.js",
+        "kind": "worker",
+        "mimeType": "text/javascript",
+        "size": 10039,
+        "sha256": "70e6cf8b2937a8df90800f17e5e2df6315a8a61a79af1f932ea85d4381dc540d"
+      },
+      {
+        "asset": "CodeCodex-plugin-office-preview-1.0.0-parser.wasm",
+        "relativePath": "resources/CodeCodex-plugin-office-preview-1.0.0-parser.wasm",
+        "kind": "wasm",
+        "mimeType": "application/wasm",
+        "size": 573411,
+        "sha256": "6cd3fb9f1082477f155009bd583a1d18deb8b46bde829d25cf9ab00b120b4c90"
+      }
+    ],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "notebook-preview",
+    "name": "Jupyter Notebook Preview",
+    "hostId": "code-codex.notebook-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 210257,
+    "sha256": "58c58eaf1247437677da66a399588b9ed3362ec7af6ff1190051a5bfe77fb179",
+    "asset": "CodeCodex-plugin-notebook-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-notebook-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "model-preview",
+    "name": "3D Model Preview",
+    "hostId": "code-codex.model-preview",
+    "category": "file-preview",
+    "api": 1,
+    "version": "1.0.0",
+    "releaseTag": "v0.3.96",
+    "size": 677208,
+    "sha256": "c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2",
+    "asset": "CodeCodex-plugin-model-preview-1.0.0.js",
+    "relativePath": "CodeCodex-plugin-model-preview-1.0.0.js",
+    "resources": [],
+    "defaultImageCount": 0,
+    "capabilities": [
+      "file-preview"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex",
+    "notices": "THIRD_PARTY_NOTICES_EN.md"
+  }
+]

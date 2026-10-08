@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {buildSync} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
+const code=buildSync({stdin:{contents:"export * from './runtime-events';export * from './runtime-redaction';",resolveDir:'packages/explorer-ui/src',loader:'ts'},bundle:true,write:false,format:'iife',globalName:'Fixture'}).outputFiles[0].text;
+const context=vm.createContext({window:{},performance,Date,TextEncoder,URL});vm.runInContext(code,context);
+const sample={code:'CC-START-CDP-014',port:7613,elapsedMs:134185,nested:[{api_token:'SENTINEL_TOKEN',content:'SENTINEL_CHAT',workspacePath:'C:\\Users\\SENTINEL_USER\\private'}],message:'EIO at C:\\Users\\SENTINEL_PATH\\file.txt',other:'app://-/index.html?token=SENTINEL_QUERY',auth:'Bearer SENTINEL_AUTH'};
+context.Fixture.runtimeEvent('https://user:pass@example.test/SENTINEL', 'C:\\Users\\SENTINEL_ACTION\\file', 'token=SENTINEL_OUTCOME', sample);
+let events=context.Fixture.takeRuntimeEvents();assert.equal(events.length,1);assert.ok(!JSON.stringify(events).includes('SENTINEL'));assert.equal(events[0].details.code,sample.code);assert.equal(events[0].details.port,7613);assert.equal(events[0].details.elapsedMs,134185);
+for(const raw of ['\\\\server\\SENTINEL_SHARE\\file','/home/SENTINEL_UNIX/file','sk-SENTINEL_123456','SENTINEL@example.test','access_token=SENTINEL_AUTH']) assert.ok(!context.Fixture.redactRuntimeText(raw).includes('SENTINEL'));
+assert.equal(context.Fixture.redactRuntimeText('http://127.0.0.1:7613/json/list?token=hidden#secret'),'http://127.0.0.1:7613/json/list');
+context.Fixture.restoreRuntimeEvents([{source:'test',action:'restored',outcome:'passed',details:sample}]);assert.ok(!JSON.stringify(context.Fixture.takeRuntimeEvents()).includes('SENTINEL'));
+const cycle={};cycle.self=cycle;context.Fixture.runtimeEvent('test','cycle','passed',cycle);assert.ok(JSON.stringify(context.Fixture.takeRuntimeEvents()).includes('circular'));
+context.Fixture.runtimeEvent('test','bigint','passed',{bad:3n});assert.doesNotThrow(()=>JSON.stringify(context.Fixture.takeRuntimeEvents()));
+const getter={get fail(){throw Error('SENTINEL')}};assert.doesNotThrow(()=>context.Fixture.runtimeEvent('test','getter','passed',getter));assert.ok(JSON.stringify(context.Fixture.takeRuntimeEvents()).includes('redactionFailed'));
+console.log('Runtime redaction: nested secrets/content, URLs, paths, credentials, queue restore, circular/getter/BigInt inputs and retained diagnostic codes/times passed.');

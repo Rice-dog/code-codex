@@ -1,6 +1,10 @@
+import {buildStartupPackage} from './build-startup-package.mjs';
+import {buildUtilityPackages} from './utility-packages.mjs';
+import {buildFilePreviewPackages} from './file-preview-packages.mjs';
+import { buildBackgroundPackages } from './background-packages.mjs';
 import { build, context } from "esbuild";
 import { createHash } from "node:crypto";
-import { mkdir, copyFile, readFile } from "node:fs/promises";
+import { mkdir, copyFile, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +33,9 @@ const [legacyPowerPointWorkerBytes, legacyPowerPointWasm, legacyPowerPointStyles
   readFile(resolve(legacyPowerPointAssets, "index.css"), "utf8"),
 ]);
 const pixelSculptDefaultImage = `data:image/png;base64,${(await readFile(resolve(root, "src/pixel-sculpt-default.png"))).toString("base64")}`;
+// The early bundle stays isolated and small. This is the same default flower;
+// normal UI rendering retains the original PNG and saved galleries are unchanged.
+const pixelSculptStartupDefaultImage = `data:image/webp;base64,${(await readFile(resolve(root, "src/pixel-sculpt-startup-default.webp"))).toString("base64")}`;
 const startupTransitionStyles = await readFile(resolve(root, "src/startup-transition.css"), "utf8");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 if (sha256(legacyPowerPointWorkerBytes) !== embeddedWasm.workerSha256 ||
@@ -71,8 +78,30 @@ const options = {
     __CODE_CODEX_STARTUP_TRANSITION_CSS__: JSON.stringify(startupTransitionStyles),
   },
   sourcemap: true,
+  metafile:true,
   target: ["chrome120"],
 };
+
+const pluginCatalog = await buildBackgroundPackages(root, options, uiManifest.version);
+pluginCatalog.push(...await buildUtilityPackages(root,options,uiManifest.version));
+pluginCatalog.push(await buildStartupPackage(root,options,uiManifest.version));
+pluginCatalog.push(...await buildFilePreviewPackages(root,options,uiManifest.version));
+await writeFile(resolve(root,'dist/plugins/catalog.json'),JSON.stringify(pluginCatalog,null,2)+'\n');
+options.define.__CODE_CODEX_PLUGIN_CATALOG__ = JSON.stringify(pluginCatalog);
+
+await build({
+  ...options,
+  define: { ...options.define, __CODE_CODEX_PIXEL_SCULPT_IMAGE__: JSON.stringify(pixelSculptStartupDefaultImage) },
+  entryPoints: ["src/startup-transition-early.ts"], format: "iife", minify: true,
+  outfile: "dist/startup-early.js",
+});
+const earlyBundleBytes = (await readFile(resolve(root, "dist/startup-early.js"))).byteLength;
+const earlyBundleLimit = 512 * 1024;
+if (earlyBundleBytes >= earlyBundleLimit) {
+  throw new Error(`The isolated startup bundle is ${earlyBundleBytes} bytes; it must stay below ${earlyBundleLimit} bytes. Review startup-only dependencies and embedded assets before packaging.`);
+}
+
+// Only the tiny verified-cache startup dispatcher is embedded in the core.
 
 if (watch) {
   const injector = await context({
@@ -105,6 +134,6 @@ if (watch) {
       format: "esm",
       outfile: "dist/demo/demo.js",
     }),
-  ]);
+  ]).then(async results=>{await writeFile(resolve(root,'dist/core.metafile.json'),JSON.stringify(results[0].metafile));});
   await copyFile(resolve(root, "demo/index.html"), resolve(root, "dist/demo/index.html"));
 }

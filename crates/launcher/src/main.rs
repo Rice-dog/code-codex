@@ -1,16 +1,17 @@
 mod bootstrap;
 mod bridge;
 mod discovery;
+mod early_startup;
 mod exit_codes;
 #[allow(dead_code)]
 mod gui_support;
+mod plugin_store;
 mod process_guard;
+mod runtime_log;
 mod startup_diagnostics;
-mod startup_splash;
 
 use std::path::PathBuf;
 use std::process::{ExitCode, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 use std::time::{Duration, Instant};
@@ -38,7 +39,6 @@ use process_guard::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use startup_diagnostics::StartupDiagnostic;
-use startup_splash::StartupSplash;
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::process::Command;
@@ -79,6 +79,7 @@ fn begin_startup_trace(mode: &'static str) {
 }
 
 fn record_startup_event(stage: &'static str, outcome: &'static str) {
+    runtime_log::record("launcher", stage, outcome, json!({}));
     if let Ok(mut trace) = startup_trace().lock() {
         let elapsed = trace.started.map_or(0, |start| start.elapsed().as_millis());
         if trace.events.len() < 40 {
@@ -90,6 +91,12 @@ fn record_startup_event(stage: &'static str, outcome: &'static str) {
 }
 
 fn record_launch_context(renderer_port: u16, inspector_port: Option<u16>, pid: u32) {
+    runtime_log::record(
+        "launcher",
+        "launch context",
+        "observed",
+        json!({"rendererPort":renderer_port,"inspectorPort":inspector_port,"pid":pid}),
+    );
     if let Ok(mut trace) = startup_trace().lock() {
         trace.renderer_port = Some(renderer_port);
         trace.inspector_port = inspector_port;
@@ -116,6 +123,20 @@ fn record_listener_verified() {
 }
 
 fn record_supervisor_progress(progress: Arc<SupervisorProgress>) {
+    let observed = progress.clone();
+    tokio::spawn(async move {
+        let mut previous = String::new();
+        loop {
+            let state = observed.snapshot();
+            let summary = json!({"phase":state.last_phase,"sessionsStarted":state.sessions_started,"sessionsEnded":state.sessions_ended,"layoutRejections":state.layout_rejections,"layoutMatches":state.layout_probe_matches,"bootstrapAttempts":state.bootstrap_attempts,"bootstrapFailures":state.bootstrap_failures,"targets":state.last_target_count,"matches":state.last_filter_match_count,"documentState":state.last_ready_state,"listError":state.last_list_error,"sessionError":state.last_session_error});
+            let encoded = summary.to_string();
+            if encoded != previous {
+                runtime_log::record("cdp", "renderer supervisor", "observed", summary);
+                previous = encoded;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
     if let Ok(mut trace) = startup_trace().lock() {
         trace.supervisor_progress = Some(progress);
     }
@@ -263,6 +284,11 @@ enum Commands {
     Activate(ActivateArgs),
     /// Report package, bundle, App Server, and optional CDP diagnostics.
     Diagnose(DiagnoseArgs),
+    /// Inspect cached first-party backgrounds, or import verified offline release assets.
+    Plugins {
+        #[arg(long)]
+        import_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -340,6 +366,8 @@ struct DiagnoseArgs {
 
 #[derive(Debug, Error)]
 enum AppError {
+    #[error("background package operation failed: {0}")]
+    Plugin(String),
     #[error(transparent)]
     Discovery(#[from] DiscoveryError),
     #[error(transparent)]
@@ -409,7 +437,8 @@ impl AppError {
             | Self::Workspace(_)
             | Self::Resolver(_)
             | Self::Launch(_) => exit_codes::STARTUP_FAILURE,
-            Self::Cdp(_)
+            Self::Plugin(_)
+            | Self::Cdp(_)
             | Self::CdpStartup(_)
             | Self::CdpTarget(_)
             | Self::ProcessGuard(_)
@@ -428,6 +457,13 @@ impl AppError {
 
         let reason = self.to_string();
         match self {
+            Self::Plugin(_) => StartupDiagnostic::new(
+                "CC-PLUGIN-CACHE-001",
+                "Preparing background packages",
+                "A background package could not be prepared",
+                reason,
+                "Check the verified release package and per-user cache permissions. Send the full report if it repeats.",
+            ),
             Self::Discovery(DiscoveryError::PackageQueryFailed { .. }) => StartupDiagnostic::new(
                 "CC-START-DISCOVERY-003",
                 "Querying Codex Desktop registration",
@@ -947,25 +983,51 @@ async fn main() -> ExitCode {
     let command = cli
         .command
         .unwrap_or_else(|| Commands::Run(default_run_args()));
-    begin_startup_trace(match &command {
+    let mode = match &command {
         Commands::Run(_) => "run",
         Commands::Attach(_) => "attach",
         Commands::Activate(_) => "activate",
         Commands::Diagnose(_) => "diagnose",
-    });
+        Commands::Plugins { .. } => "plugins",
+    };
+    if mode != "diagnose" {
+        runtime_log::begin(mode);
+    }
+    begin_startup_trace(mode);
     let result = match command {
         Commands::Run(args) => run(args).await,
         Commands::Attach(args) => attach(args).await,
         Commands::Activate(args) => activate(args).await,
         Commands::Diagnose(args) => diagnose(args).await,
+        Commands::Plugins { import_dir } => {
+            let result = if let Some(directory) = import_dir {
+                plugin_store::import_directory(&directory)
+            } else {
+                plugin_store::status()
+            };
+            result
+                .map(|value| println!("{value}"))
+                .map_err(|error| AppError::Plugin(error.message))
+        }
     };
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => {
+            runtime_log::record("launcher", "session", "finished", json!({}));
+            runtime_log::flush();
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             tracing::error!(event = "launcher_failed", error = %error);
             record_startup_event("exit", "startup failed");
             complete_startup_failure_probe().await;
             let diagnostic = enrich_startup_diagnostic(&error);
+            runtime_log::record(
+                "launcher",
+                "startup diagnostic",
+                "failed",
+                json!({"supportCode":diagnostic.code,"report":diagnostic.reason}),
+            );
+            runtime_log::flush();
             if let Some(line) = diagnostic.encoded_line() {
                 eprintln!("{line}");
             }
@@ -1020,6 +1082,12 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         args.channel,
     )?;
     record_startup_event("discovery", "official Codex installation found");
+    runtime_log::record(
+        "launcher",
+        "Codex installation",
+        "discovered",
+        json!({"version":installation.version,"channel":installation.channel,"source":installation.source}),
+    );
     let compatible = is_supported_version(&installation.version);
     if !compatible && !args.allow_unsupported_version {
         return Err(AppError::UnsupportedVersion);
@@ -1034,12 +1102,12 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         .ok()
         .and_then(|store| store.load().ok())
         .is_some_and(|settings| settings.startup_transition_enabled);
-    let splash = if startup_enabled {
-        StartupSplash::open()
-    } else {
-        StartupSplash::disabled()
-    };
-
+    runtime_log::record(
+        "launcher",
+        "startup animation preference",
+        "loaded",
+        json!({"enabled":startup_enabled}),
+    );
     record_startup_event("port reservation", "reserving loopback debugging port");
     let reservation = PortReservation::reserve()?;
     let port = reservation.port()?;
@@ -1063,6 +1131,7 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     }
     let launched_after = SystemTime::now();
     record_startup_event("Codex activation", "starting official process");
+    let mut early_player = None;
     let mut child = if installation.source == DiscoverySource::WindowsPackageManager {
         let package_full_name = installation
             .package_full_name
@@ -1084,6 +1153,13 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         })?;
         let launched_pid = child.pid();
         record_launch_context(port, main_inspector_port, launched_pid);
+        if startup_enabled {
+            record_startup_event(
+                "early startup animation",
+                "starting concurrent loading-page supervisor after activation",
+            );
+            early_player = Some(early_startup::start(endpoint, launched_pid, launched_after));
+        }
         record_startup_event("process identity", "checking activated executable");
         let official_executable = installation.executable.clone();
         let identity_result = tokio::task::spawn_blocking(move || {
@@ -1117,23 +1193,13 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             kind: error.kind(),
         })?
     };
+    if startup_enabled && early_player.is_none() {
+        early_player = Some(early_startup::start(endpoint, child.pid(), launched_after));
+    }
     let launched_pid = child.pid();
     record_launch_context(port, main_inspector_port, launched_pid);
     record_startup_event("Codex activation", "process handle acquired");
     tracing::info!(event = "codex_launched", channel = %installation.channel);
-
-    let splash_available = splash.is_open();
-    let splash_visible = Arc::new(AtomicBool::new(false));
-    let startup_handoff = Arc::new(AtomicBool::new(false));
-    let splash_stop = Arc::new(AtomicBool::new(false));
-    let splash_task = {
-        let visible = splash_visible.clone();
-        let handoff = startup_handoff.clone();
-        let stop = splash_stop.clone();
-        tokio::task::spawn_blocking(move || {
-            splash.wait_for_handoff(launched_pid, &visible, &handoff, &stop)
-        })
-    };
 
     let result = async {
         if let Some(main_inspector_endpoint) = main_inspector_endpoint {
@@ -1146,19 +1212,10 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         record_startup_event("CDP version", "waiting for renderer debugging endpoint");
         wait_for_launched_endpoint(endpoint, launched_pid, Duration::from_secs(30)).await?;
         record_startup_event("CDP version", "supported endpoint responded");
-        tracing::info!(event = "codex_renderer_ready", resolver_start = "deferred");
-        let splash_active = if splash_available {
-            let deadline = Instant::now() + Duration::from_millis(800);
-            while Instant::now() < deadline && !splash_visible.load(Ordering::Acquire) {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            splash_visible.load(Ordering::Acquire)
-        } else {
-            false
-        };
-        if splash_available && !splash_active {
-            splash_stop.store(true, Ordering::Release);
+        if startup_enabled {
+            record_startup_event("early startup animation", "concurrent supervisor continues through App Server preparation and renderer discovery");
         }
+        tracing::info!(event = "codex_renderer_ready", resolver_start = "deferred");
         // Start the resolver only after the official desktop has opened its
         // renderer/CDP endpoint.  The packaged resolver is a second Codex App
         // Server process and uses the same CODEX_HOME SQLite database as the
@@ -1169,7 +1226,7 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             "runtime preparation",
             "preparing UI bundle and App Server bridge",
         );
-        let (bridge, mut injection) = prepare_runtime(
+        let (bridge, injection) = prepare_runtime(
             &args.common,
             Some(&installation),
             &installation.version,
@@ -1177,16 +1234,13 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             compatible,
             PRIMARY_BINDING_NAME,
             PRIMARY_RECEIVER_NAME,
-            splash_active,
+            startup_enabled,
         )
         .await?;
         record_startup_event(
             "runtime preparation",
             "UI bundle, bridge and settings prepared",
         );
-        if splash_active {
-            injection.startup_handoff = Some(startup_handoff.clone());
-        }
         record_startup_event("listener ownership", "verifying renderer port owner");
         tokio::task::spawn_blocking(move || {
             verify_listener_owner(port, launched_pid, launched_after)
@@ -1229,8 +1283,6 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         }
     }
     .await;
-    splash_stop.store(true, Ordering::Release);
-    let _ = splash_task.await;
     record_startup_event(
         "renderer supervisor",
         if result.is_err() { "failed" } else { "ended" },
@@ -1248,6 +1300,7 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     };
     record_startup_event("cleanup", "terminating launched Codex process");
     child.terminate().await;
+    drop(early_player);
     result
 }
 
@@ -2506,6 +2559,19 @@ async fn diagnose_cdp(endpoint: CdpEndpoint) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn early_animation_bundle_is_isolated_and_rejects_late_replay() {
+        assert!(super::early_startup::SOURCE.len() < 512 * 1024);
+        assert!(!super::early_startup::SOURCE.contains("__CODE_CODEX_BOOTSTRAP__"));
+        assert!(!super::early_startup::SOURCE.contains("explorer.context"));
+        assert!(super::early_startup::SOURCE.contains("app:"));
+        assert!(super::early_startup::SOURCE.contains("/index.html"));
+        assert!(super::early_startup::SOURCE.contains("plugin-modules:v1"));
+        assert!(super::early_startup::SOURCE.contains("codex-startup-transition"));
+        assert!(!super::early_startup::SOURCE.contains("data-app-shell-main-surface"));
+        assert!(super::early_startup::SOURCE.contains("early-startup-entry:v2"));
+    }
+
     use super::*;
 
     #[tokio::test]

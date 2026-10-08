@@ -1,0 +1,12 @@
+import { requireStartupTransitionModule, startupTransitionModule } from './startup-transition-plugin';
+export type { StartupVideo } from './startup-transition-media';
+export type { StartupTransitionController, StartupTransitionOptions } from './startup-transition';
+export const loadStartupVideo: typeof import('./startup-transition-media').loadStartupVideo = async (...args) => startupTransitionModule()?.loadStartupVideo(...args) ?? null;
+export const saveStartupVideo: typeof import('./startup-transition-media').saveStartupVideo = async (...args) => requireStartupTransitionModule().saveStartupVideo(...args);
+export const removeStartupVideo: typeof import('./startup-transition-media').removeStartupVideo = async (...args) => requireStartupTransitionModule().removeStartupVideo(...args);
+export const mountStartupTransition: typeof import('./startup-transition').mountStartupTransition = (...args) => requireStartupTransitionModule().mountStartupTransition(...args);
+export const formatTimelineTime: typeof import('./startup-transition-timeline').formatTimelineTime = (...args) => requireStartupTransitionModule().formatTimelineTime(...args);
+export const startupTimelineGeometry: typeof import('./startup-transition-timeline').startupTimelineGeometry = (...args) => requireStartupTransitionModule().startupTimelineGeometry(...args);
+export const moveTimelineBoundary: typeof import('./startup-transition-timeline').moveTimelineBoundary = (...args) => requireStartupTransitionModule().moveTimelineBoundary(...args);
+export const sampleStartupVideoFrames: typeof import('./startup-transition-timeline').sampleStartupVideoFrames = (...args) => requireStartupTransitionModule().sampleStartupVideoFrames(...args);
+export const clipFadeOpacity: typeof import('./startup-transition-timeline').clipFadeOpacity = (...args) => requireStartupTransitionModule().clipFadeOpacity(...args);

@@ -1,0 +1,22 @@
+{
+  "id": "black-hole",
+  "name": "Black Hole Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.0",
+  "releaseTag": "v0.3.96",
+  "size": 49441,
+  "sha256": "723193dbb9ca89b09dc63978b6b2acdc32e85b5d722b69cf913125622daddf56",
+  "asset": "CodeCodex-background-black-hole-1.0.0.js",
+  "relativePath": "CodeCodex-background-black-hole-1.0.0.js",
+  "resources": [],
+  "galleryVersion": 1,
+  "defaultImageCount": 0,
+  "capabilities": [
+    "background",
+    "startup",
+    "preview"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex",
+  "notices": "THIRD_PARTY_NOTICES_EN.md"
+}
