@@ -11,7 +11,7 @@ This folder contains ready-made downloadable packages.
 - 启动动画播放器也独立下载；核心保留很小的早期缓存加载入口，在官方等待界面读取已校验包，不联网。保持四秒背景最短展示、配置淡出及主页背景开场衔接；缺包时正常启动并记录原因。
 - 说明截图留在 GitHub，从核心 EXE/MSI/ZIP 移除。Particle Image 的六张与 Pixel Sculpt 的三张默认原图保持，继续随对应背景包下载。
 - 更新和普通卸载保留插件缓存、参数、启用偏好、个人图库与视频；有效旧缓存先校验再迁移到分类目录。此前内置功能首次使用独立包时需要下载，未变背景可复用缓存。
-- 本地构建版本，未发布 GitHub；其他用户使用 Download 前，需要先发布与此版本匹配的全部插件资产。
+- 已于 2026-10-08 发布 [v0.3.96](https://github.com/Rice-dog/code-codex/releases/tag/v0.3.96)，包含全部匹配插件资产、安装包和校验清单。插件市场可以直接从该 Release 下载。
 
 ### English
 
@@ -20,7 +20,7 @@ This folder contains ready-made downloadable packages.
 - Download the startup player too. A tiny core loader reads verified cached packages during the official loading screen without network requests. Preserve the four-second background minimum, configured fade and main-background opening handoff; missing packages skip animation safely and record the reason.
 - Keep documentation screenshots on GitHub and remove them from core EXE/MSI/ZIP installers. Preserve Particle Image's six and Pixel Sculpt's three original default images in their background downloads.
 - Upgrades and ordinary uninstall retain caches, parameters, enable preferences, personal images and videos. Verify and migrate valid old caches into category directories. Previously built-in features require their standalone packages on first use; unchanged backgrounds reuse existing cache.
-- Local build, not published on GitHub. Publish every matching plugin asset before other users can use Download for this version.
+- Published [v0.3.96](https://github.com/Rice-dog/code-codex/releases/tag/v0.3.96) on 2026-10-08 with every matching plugin asset, installer and checksum file. The market downloads directly from this release.
 
 ## v0.3.95 — 启动动画参数默认值
 
