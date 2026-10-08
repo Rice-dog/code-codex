@@ -1,27 +1,27 @@
 [
   {
-    "assetName": "CodeCodex-0.3.105-x64-setup.exe",
-    "path": "CodeCodex-0.3.105-x64-setup.exe",
-    "size": 7574856,
-    "sha256": "c71e525b434a72c76370af0642b69792dc2d81661d649fdef6f920ca447f4386"
+    "assetName": "CodeCodex-0.4.0-x64-setup.exe",
+    "path": "CodeCodex-0.4.0-x64-setup.exe",
+    "size": 7575595,
+    "sha256": "e78205938e4bd40a3cea87473e9b973e4ba2091840f59204293e828c3d6a0573"
   },
   {
-    "assetName": "CodeCodex-0.3.105-x64.msi",
-    "path": "CodeCodex-0.3.105-x64.msi",
-    "size": 5832704,
-    "sha256": "6ab595eb887a53f7dec1c617d9692af148438847d42b894c2ecc79fd217642a7"
+    "assetName": "CodeCodex-0.4.0-x64.msi",
+    "path": "CodeCodex-0.4.0-x64.msi",
+    "size": 5836800,
+    "sha256": "817f648e80d7a5972ea33339f6507fffb23d058db94e95d09531404a79e159dc"
   },
   {
-    "assetName": "CodeCodex-0.3.105-x64.zip",
-    "path": "CodeCodex-0.3.105-x64.zip",
-    "size": 6901040,
-    "sha256": "3650b84e01e2ad3b804e508f5a51cc10ef1b4f60979ab5ca26f42e2c09d84094"
+    "assetName": "CodeCodex-0.4.0-x64.zip",
+    "path": "CodeCodex-0.4.0-x64.zip",
+    "size": 6901779,
+    "sha256": "c007e135b47cfec004464d976ace7ed6dcd3af819f6dee8c80525ab3a5a2e041"
   },
   {
     "assetName": "Uninstall-CodeCodex.exe",
     "path": "Uninstall-CodeCodex.exe",
     "size": 562176,
-    "sha256": "25e0f3896513a3a818a90c536b202a515cfe537294dc60c2d39dcc98c94cbeb5"
+    "sha256": "d02a6b3997ab536ca2b617fad5df88c0be6ccd0a8ab992cedb3cf5001a6f83f3"
   },
   {
     "assetName": "CodeCodex-background-glow-horizon-1.0.0.js",
@@ -270,7 +270,7 @@
     "sha256": "c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2"
   },
   {
-    "assetName": "CodeCodex-plugin-catalog-0.3.105.json",
+    "assetName": "CodeCodex-plugin-catalog-0.4.0.json",
     "path": "plugins/catalog.json",
     "size": 25262,
     "sha256": "5f4c38d3a3d8f881409d8fc866c9c7b3de73d578380d21abecd6eb19d3da3688"

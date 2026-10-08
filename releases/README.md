@@ -2,6 +2,24 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.4.0 — 插件市场下载体验与浅色按钮
+
+### 简体中文
+
+- 将已保存的 v0.3.105 维护版本统一为 v0.4.0，包含自公开 v0.3.96 以来的市场修正。
+- 完整插件名称、按钮上方独立下载状态、等距排版及下载/校验进度；下载完成后状态行消失，Download 变为 Enable。
+- 浅蓝 Enable 与浅紫 Download，保留单项下载、取消、失败重试及重连后的控件恢复；不提供 Download All。
+- 24 个插件代码和资源未变化，继续使用 v0.3.96 附件。本次 Release 只提供核心安装资产，升级保留插件缓存、设置和个人素材。
+- 发布准备中；最终公开状态以对应 GitHub Release 为准。
+
+### English
+
+- Consolidates the saved v0.3.105 maintenance build as v0.4.0, including market fixes since the public v0.3.96 release.
+- Complete plugin names, a separate download-status row above actions, equal spacing and transfer/verification progress. After verification, the status row disappears and Download becomes Enable.
+- Pale blue Enable and pale lavender Download, with individual downloads, cancellation, failure retry and control recovery after reconnect. Download All is not included.
+- All 24 plugin packages and resources are unchanged and retain v0.3.96 assets. This release includes core installation assets only; upgrades retain plugin caches, settings and personal media.
+- Prepared for release; the corresponding GitHub Release is the authority for publication status.
+
 ## v0.3.105 — 当前按钮色再混入三分之一白色
 
 ### 中文
