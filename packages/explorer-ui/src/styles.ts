@@ -1122,11 +1122,12 @@ export const styles = String.raw`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 8px;
     padding: 8px 10px 8px 14px;
     border-bottom: 1px solid var(--cle-rule);
   }
   .preview-market-header h3 {
+    flex: 1;
     margin: 0;
     color: var(--cle-ink);
     font-size: 13px;
@@ -1227,6 +1228,8 @@ export const styles = String.raw`
     gap: 8px;
   }
   .preview-extension {
+    --cle-market-enable: #e5f0fe;
+    --cle-download: #f1eef8;
     display: grid;
     grid-template-columns: 38px minmax(0, 1fr);
     column-gap: 10px;
@@ -1237,6 +1240,14 @@ export const styles = String.raw`
     border-radius: 8px;
   }
   .preview-extension[hidden] { display: none !important; }
+  .preview-extension[data-package-pending="true"] .preview-extension-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+  }
+  .preview-extension[data-package-pending="true"] .preview-extension-title-row { width: 100%; }
+  .preview-extension-icon { align-self: start; }
   .preview-extension-icon {
     display: grid;
     place-items: center;
@@ -1259,11 +1270,6 @@ export const styles = String.raw`
   .preview-extension-copy { min-width: 0; }
   .preview-extension-title-row {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-  }
-  .appearance-extension .preview-extension-title-row {
     align-items: flex-start;
     flex-direction: column;
     gap: 3px;
@@ -1271,13 +1277,12 @@ export const styles = String.raw`
   .preview-extension h4 {
     min-width: 0;
     margin: 0;
-    overflow: hidden;
     color: var(--cle-ink);
     font-size: 12px;
     font-weight: 650;
     line-height: 17px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
   .preview-extension-status {
     flex: 0 0 auto;
@@ -1292,6 +1297,30 @@ export const styles = String.raw`
     color: var(--cle-added);
     background: color-mix(in srgb, var(--cle-added) 11%, var(--cle-paper));
   }
+  .preview-extension-status[hidden],
+  .preview-extension-download progress[hidden] { display: none; }
+  .preview-extension-download {
+    align-self: stretch;
+    grid-column: 2;
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    color: var(--cle-muted);
+    font-size: 9.5px;
+    line-height: 15px;
+  }
+  .preview-extension-download progress {
+    display: block;
+    width: 100%;
+    height: 4px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 2px;
+    background: var(--cle-subtle);
+    accent-color: var(--cle-signal);
+  }
+  .preview-extension-download progress::-webkit-progress-bar { background: var(--cle-subtle); }
+  .preview-extension-download progress::-webkit-progress-value { background: var(--cle-signal); }
   .preview-extension-meta { display: flex; flex-wrap: wrap; gap: 4px; }
   .preview-extension-meta span {
     padding: 1px 5px;
@@ -1307,15 +1336,20 @@ export const styles = String.raw`
     min-width: 58px;
     min-height: 25px;
     padding: 3px 10px;
-    color: #ffffff;
-    background: var(--cle-signal);
-    border: 1px solid color-mix(in srgb, var(--cle-signal) 80%, #000000);
+    color: #173b66;
+    background: var(--cle-market-enable);
+    border: 1px solid color-mix(in srgb, var(--cle-market-enable) 80%, #69aaf5);
     border-radius: 5px;
     cursor: pointer;
     font-size: 10.5px;
     font-weight: 600;
   }
   .preview-extension-action:hover { filter: brightness(1.06); }
+  .preview-extension-action[data-package-action="download"] {
+    color: #34204f;
+    background: var(--cle-download);
+    border: 1px solid color-mix(in srgb, var(--cle-download) 80%, #7854b8);
+  }
   .preview-extension-action:disabled {
     cursor: default;
     filter: none;

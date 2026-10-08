@@ -82,10 +82,24 @@ const options = {
   target: ["chrome120"],
 };
 
-const pluginCatalog = await buildBackgroundPackages(root, options, uiManifest.version);
-pluginCatalog.push(...await buildUtilityPackages(root,options,uiManifest.version));
-pluginCatalog.push(await buildStartupPackage(root,options,uiManifest.version));
-pluginCatalog.push(...await buildFilePreviewPackages(root,options,uiManifest.version));
+// Core-only maintenance can keep unchanged plugin bytes on their published
+// release. Fail closed if a pinned release no longer describes those bytes.
+const pluginReleaseVersion = uiManifest.codeCodex?.pluginReleaseVersion ?? uiManifest.version;
+if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(pluginReleaseVersion)) throw new Error('Invalid plugin release version');
+const pluginCatalog = await buildBackgroundPackages(root, options, pluginReleaseVersion);
+pluginCatalog.push(...await buildUtilityPackages(root,options,pluginReleaseVersion));
+pluginCatalog.push(await buildStartupPackage(root,options,pluginReleaseVersion));
+pluginCatalog.push(...await buildFilePreviewPackages(root,options,pluginReleaseVersion));
+if (pluginReleaseVersion !== uiManifest.version) {
+  const published = JSON.parse(await readFile(resolve(root, '../../releases/plugins/catalog.json'), 'utf8'));
+  for (const plugin of pluginCatalog) {
+    const previous = published.find(p => p.id === plugin.id);
+    if (!previous || JSON.stringify(previous) !== JSON.stringify(plugin)) {
+      throw new Error(`Plugin ${plugin.id} changed: publish a new matching plugin release instead of retaining v${pluginReleaseVersion}`);
+    }
+  }
+  if (published.length !== pluginCatalog.length) throw new Error('Pinned plugin catalog count changed');
+}
 await writeFile(resolve(root,'dist/plugins/catalog.json'),JSON.stringify(pluginCatalog,null,2)+'\n');
 options.define.__CODE_CODEX_PLUGIN_CATALOG__ = JSON.stringify(pluginCatalog);
 

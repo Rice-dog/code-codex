@@ -6315,9 +6315,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#setState("error", "NO_BRIDGE");
       return;
     }
-    connectBackgroundPackages((method, params, timeout) => this.#bridge!.request(method, params, timeout));
-    this.#backgroundPackageMarket?.dispose();
-    this.#backgroundPackageMarket = new BackgroundPackageMarket(this.#shadow, this.#bridge, message => this.#showActionNotice(message, 'error'), (id,intent)=>this.#prepareDownloadedPluginAction(id,intent));
+    this.#connectPackageMarket(this.#bridge);
     this.#startupTransitionNativeSync = this.#syncStartupTransitionNativePreference(this.#bridge);
     void this.#start(this.#bridge, this.#generation, bootstrap.manualWorkspace === true);
   }
@@ -6652,6 +6650,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#setState("error", "NO_BRIDGE");
       return;
     }
+    this.#connectPackageMarket(bridge);
     this.#setState("loading");
     void this.#start(bridge, this.#generation, bootstrap.manualWorkspace === true);
   }
@@ -15484,6 +15483,14 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #backgroundPackageMarket: BackgroundPackageMarket | undefined;
+
+  #connectPackageMarket(bridge: ExplorerBridge): void {
+    connectBackgroundPackages((method, params, timeout) => bridge.request(method, params, timeout));
+    this.#backgroundPackageMarket?.dispose();
+    this.#backgroundPackageMarket = new BackgroundPackageMarket(this.#shadow, bridge,
+      message => this.#showActionNotice(message, 'error'),
+      (id, intent) => this.#prepareDownloadedPluginAction(id, intent));
+  }
 
   #renderPreviewMarket(): void {
     this.#surfaceOpacity.render();

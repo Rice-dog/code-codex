@@ -2,6 +2,138 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.4.0 — 插件市场下载体验与浅色按钮
+
+### 简体中文
+
+- 将已保存的 v0.3.105 维护版本统一为 v0.4.0，包含自公开 v0.3.96 以来的市场修正。
+- 完整插件名称、按钮上方独立下载状态、等距排版及下载/校验进度；下载完成后状态行消失，Download 变为 Enable。
+- 浅蓝 Enable 与浅紫 Download，保留单项下载、取消、失败重试及重连后的控件恢复；不提供 Download All。
+- 24 个插件代码和资源未变化，继续使用 v0.3.96 附件。本次 Release 只提供核心安装资产，升级保留插件缓存、设置和个人素材。
+- 发布准备中；最终公开状态以对应 GitHub Release 为准。
+
+### English
+
+- Consolidates the saved v0.3.105 maintenance build as v0.4.0, including market fixes since the public v0.3.96 release.
+- Complete plugin names, a separate download-status row above actions, equal spacing and transfer/verification progress. After verification, the status row disappears and Download becomes Enable.
+- Pale blue Enable and pale lavender Download, with individual downloads, cancellation, failure retry and control recovery after reconnect. Download All is not included.
+- All 24 plugin packages and resources are unchanged and retain v0.3.96 assets. This release includes core installation assets only; upgrades retain plugin caches, settings and personal media.
+- Prepared for release; the corresponding GitHub Release is the authority for publication status.
+
+## v0.3.105 — 当前按钮色再混入三分之一白色
+
+### 中文
+
+- 按用户追加要求，在.104浅蓝/浅紫按钮上再混入三分之一白色，Enable为#e5f0fe，Download为#f1eef8。
+- 保留对应深色文字、边框公式、5px间距和所有功能。24插件仍使用公开v0.3.96资源，本版未发布GitHub。
+
+### English
+
+- Apply the user's follow-up adjustment by mixing .104 button colors with one third white: Enable #e5f0fe and Download #f1eef8.
+- Matching dark text, border formulas, 5px spacing and all behavior remain unchanged. All 24 plugins still use published v0.3.96 assets; this build is not published to GitHub yet.
+
+## v0.3.104 — 当前按钮色再混入50%白色
+
+### 中文
+
+- 在上一版蓝紫按钮色上再混入50%白色，Enable变为#d8e9fd，Download变为#eae5f4，继续变浅、变亮并保留色调。
+- 仅调整两个局部填充色；文字、边框公式、间距及所有功能不变。24插件仍使用公开v0.3.96资产，本版未发布GitHub。
+
+### English
+
+- Mix the previous blue and purple button colors with 50% white: Enable becomes #d8e9fd and Download #eae5f4, retaining pale hues.
+- Only two local fill tokens change. Text, border formulas, spacing and behavior remain unchanged. All 24 plugins still use published v0.3.96 assets; this build is not published to GitHub yet.
+
+## v0.3.103 — 按当前混白比例再提高50%
+
+### 中文
+
+- Enable蓝色混白由32%增至48%，Download紫色由46%增至69%，继续提亮并保留原色调。
+- 仅调整两个局部填充色；文字、边框公式、间距和功能不变。24插件继续使用已公开v0.3.96资源，本版未发布GitHub。
+
+### English
+
+- Increase current white-mixing ratios by 50%: Enable blue from 32% to 48%, Download purple from 46% to 69%, retaining their hues.
+- Only two local fill tokens change. Text, border formulas, spacing and behavior remain unchanged. All 24 plugins still use published v0.3.96 assets; this build is not published to GitHub yet.
+
+## v0.3.102 — 更浅、更亮的市场按钮
+
+### 中文
+
+- 在现有蓝紫色调中增加白色：Enable 混白由16%提高至32%，Download由28%提高至46%，填充更浅、更亮。
+- 文字、边框、间距和所有市场功能保持原样。24插件资源未变，仍使用已发布的v0.3.96资产。本版尚未发布GitHub。
+
+### English
+
+- Lighten the existing blue and purple hues further: increase white mixing from 16% to 32% for Enable and from 28% to 46% for Download.
+- Text, borders, spacing and all market behavior remain unchanged. All 24 plugin packages still use published v0.3.96 assets. This build is not published to GitHub yet.
+
+## v0.3.101 — 浅蓝与浅紫操作按钮
+
+### 中文
+
+- 恢复原蓝紫色调，通过混入白色变浅，取代上一版偏暗的灰蓝/灰紫。Enable 混白 16%，Download 混白 28%，下载按钮更柔和。
+- 使用对应深蓝/深紫文字保持可读性；保留等距排版、单项下载、取消与重试，未增加功能。
+- 24 个插件及资源未变，继续校验和下载公开 v0.3.96 资产。本版尚未发布 GitHub。
+
+### English
+
+- Restore the original blue and purple hues and lighten them with white instead of darkening them toward gray. Enable uses 16% white and Download 28% white.
+- Matching dark blue/purple text maintains readability. Equal spacing, individual downloads, cancellation and retry are unchanged.
+- All 24 plugin packages and resources remain unchanged and use verified published v0.3.96 assets. This build is not published to GitHub yet.
+
+## v0.3.100 — 市场等距排版与柔和按钮
+
+### 中文
+
+- 名称、下载信息和按钮放入同一右侧纵向列，下载信息上下均为5px，左侧图标不再撑大上方留白。已安装卡原排版保持。
+- 删除 Download All 按钮及批量下载逻辑，保留单项下载、进度、取消和重试。
+- 降低 Enable 蓝色和 Download 紫色的饱和度，Download 降幅更大；字体、图标和设置面板风格保持。
+- 24插件代码/资源未变，仍从已公开 v0.3.96 下载并完整校验。此核心为本地维护版，尚未发布 GitHub。
+
+### English
+
+- Names, download information and actions now share one vertical text column with equal 5px spacing. Icon height no longer creates extra space above the download information. Installed cards retain their layout.
+- Removed the Download All button and batch download logic. Individual downloads, progress, cancellation and retry remain available.
+- Reduced saturation of blue Enable and purple Download, more strongly for Download, while retaining typography, icons and settings-panel style.
+- All 24 plugin packages remain unchanged and use verified published v0.3.96 assets. This core is a local maintenance build, not published to GitHub yet.
+
+## v0.3.99 — 紧凑下载状态与 Download All
+
+### 中文
+
+- 未安装插件的下载信息上下间距由 9px 缩为 5px，完整标题和下载进度继续保留。
+- Download 和 Download All 使用紫色，Enable 保留蓝色，便于区分下载与启用。
+- 市场顶部新增 Download All：顺序下载所有分类的缺少插件，跳过已有缓存和已下载依赖；支持 Cancel All，个别失败后继续下载其他插件，再次点击可重试缺少项。
+- 下载不会自动启用、修改参数或打开设置。插件资源继续复用已公开的 v0.3.96，完整校验保持。
+- 本地维护版本，尚未提交或发布 GitHub。
+
+### English
+
+- Tightened vertical spacing around download information from 9px to 5px, while retaining full titles and per-card progress.
+- Download and Download All are purple; Enable remains blue.
+- Added Download All at the top of the market. It sequentially downloads missing plugins across every category, skips installed packages and downloaded dependencies, supports Cancel All, continues after individual failures, and retries missing packages on the next run.
+- Downloads do not enable plugins, change preferences, or open settings. Unchanged plugin assets retain the published v0.3.96 URLs and verification.
+- Local maintenance build; not committed or published to GitHub.
+
+## v0.3.98 — 插件市场下载状态与进度布局
+
+### 简体中文
+
+- 三个分类的全部 24 张插件卡片将大小与未安装状态显示在 Download 上方，插件名称完整换行显示。
+- 点击 Download 后立即显示进度条与百分比；校验完成后删除该行并显示 Enable。保留取消、失败重试和同窗口启用。
+- 插件代码与资源未变，继续使用已发布的 v0.3.96 匹配资源与校验值，避免本地新版尚未发布时的 404。
+- 修复原生桥接重连后市场下载处理器未重建的问题，热更新后下载与启用状态保持有效。
+- 本地构建/验证/安装版本；尚未提交、推送或发布 GitHub。
+
+### English
+
+- All 24 cards across the three categories show size and uninstalled status above Download. Long plugin names wrap in full.
+- Download immediately shows a progress bar and percentage. After verification, the row is removed and Enable becomes available. Cancellation, retry and activation without reloading remain supported.
+- Plugin bytes and resources are unchanged and retain the published v0.3.96 URLs and trusted hashes, avoiding unpublished local-version download URLs.
+- Restore package controls and the loading channel when the native bridge reconnects, preserving download and activation behavior after a live update.
+- Local build, validation and installation only; not committed, pushed or published to GitHub.
+
 ## v0.3.96 — 全部插件按需下载与分类目录
 
 ### 简体中文
