@@ -2,7 +2,7 @@
 
 This folder contains ready-made downloadable packages.
 
-## v0.4.4 — 运行过程与错误信息（本地维护版）
+## v0.4.4 — 运行诊断增强与启动版本提示
 
 ### 简体中文
 
@@ -11,7 +11,8 @@ This folder contains ready-made downloadable packages.
 - 补全Bridge/App Server请求、工作区切换、目录监听、预览、Git、更新和全局可观察异常；抑制成功的高频轮询。
 - 修复同版本再次激活时菜单与复用组件的日志连接不一致，共享最新鉴权连接和一个事件发送器。
 - Runtime Information缩进展示详情和失败统计；复制/导出刷新失败会停止，避免误交旧日志。最近10次/单次5MiB限制保持。
-- 沿用v0.4.1启动版本反馈与24个v0.3.96插件资产；本地构建安装，未发布GitHub。
+- 启动后检查一次更新，最新版本号彩虹显示1.5秒后恢复当前版本；已是最新短暂绿色确认，不自动下载安装。24个插件继续复用v0.3.96资产，升级保留缓存和参数。
+- 2026-10-09已通过PR #47从main提交`cc16715`发布为[GitHub Latest v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4)，五项核心附件公开下载字节及API digest已核对，本机已安装。
 
 ### English
 
@@ -20,7 +21,8 @@ This folder contains ready-made downloadable packages.
 - Extends Bridge/App Server requests, workspace switches, directory/watch operations, previews, Git, updates and observable global errors while suppressing successful high-frequency polling.
 - Fixes logging-connection sharing between a reinjected menu and a reused same-version component, with one shared authenticated connection and event pump.
 - Runtime Information displays indented details and failure counts. Copy/export stops if refresh fails, preventing stale reports. Latest 10 runs and 5 MiB per run limits remain.
-- Retains v0.4.1 startup-version feedback and all 24 published v0.3.96 plugin packages. Local build/install only; not published to GitHub.
+- Checks updates once per launch; an available version appears with a rainbow transition for 1.5 seconds before restoring the installed version, while an equal release gets brief green confirmation. No automatic download/install. All 24 plugins retain v0.3.96 assets; upgrades preserve caches/preferences.
+- Published on 2026-10-09 as [GitHub Latest v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4) from main commit `cc16715`, merged through PR #47. Publicly downloaded bytes and API digests of all five core attachments are verified; this machine is installed.
 
 ## v0.4.1 — 启动版本检查（本地维护版）
 
@@ -48,7 +50,7 @@ This folder contains ready-made downloadable packages.
 - 完整插件名称、按钮上方独立下载状态、等距排版及下载/校验进度；下载完成后状态行消失，Download 变为 Enable。
 - 浅蓝 Enable 与浅紫 Download，保留单项下载、取消、失败重试及重连后的控件恢复；不提供 Download All。
 - 24 个插件代码和资源未变化，继续使用 v0.3.96 附件。本次 Release 只提供核心安装资产，升级保留插件缓存、设置和个人素材。
-- 2026-10-09 已通过 PR #45 合并，并从 main 提交 `46ce3e0` 发布为 [GitHub Latest v0.4.0](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.0)。五个附件公开下载字节、大小和 API SHA-256 digest 已核对；本机已升级。
+- 2026-10-09 已通过 PR #45 合并，并从 main 提交 `46ce3e0` 发布为 [GitHub v0.4.0](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.0)。五个附件公开下载字节、大小和 API SHA-256 digest 已核对；本机已升级。
 
 ### English
 
@@ -56,7 +58,7 @@ This folder contains ready-made downloadable packages.
 - Complete plugin names, a separate download-status row above actions, equal spacing and transfer/verification progress. After verification, the status row disappears and Download becomes Enable.
 - Pale blue Enable and pale lavender Download, with individual downloads, cancellation, failure retry and control recovery after reconnect. Download All is not included.
 - All 24 plugin packages and resources are unchanged and retain v0.3.96 assets. This release includes core installation assets only; upgrades retain plugin caches, settings and personal media.
-- Published on 2026-10-09 as [GitHub Latest v0.4.0](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.0) from main commit `46ce3e0`, merged through PR #45. Publicly downloaded bytes, sizes and API SHA-256 digests of all five attachments are verified; this machine is upgraded.
+- Published on 2026-10-09 as [GitHub v0.4.0](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.0) from main commit `46ce3e0`, merged through PR #45. Publicly downloaded bytes, sizes and API SHA-256 digests of all five attachments are verified; this machine is upgraded.
 
 ## v0.3.105 — 当前按钮色再混入三分之一白色
 
