@@ -31,11 +31,11 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Local maintenance version **0.4.4** adds correlated stages, timings and error chains for plugin downloads, Bridge/App Server requests, file-tree and preview operations, module loading and updates. Copy/export stops on refresh failure instead of returning stale logs. The latest 10 runs and 5 MiB per run limits and redaction remain. Local maintenance build — Version **0.4.4** checks GitHub once in the background at startup. An available release briefly appears in the footer with a rainbow fade, a 1.5-second hold and a fade back to the installed version, leaving a clickable update dot. Current releases receive brief green confirmation; failed checks remain neutral and can be retried manually. Upgrades preserve plugin caches and preferences. This build is not published on GitHub.
+Version **0.4.4** adds correlated stages, timings and error chains for plugin downloads, Bridge/App Server requests, file-tree and preview operations, module loading and updates. Copy/export stops on refresh failure instead of returning stale logs. The latest 10 runs and 5 MiB per run limits and redaction remain. Version **0.4.4** checks GitHub once in the background at startup. An available release briefly appears in the footer with a rainbow fade, a 1.5-second hold and a fade back to the installed version, leaving a clickable update dot. Current releases receive brief green confirmation; failed checks remain neutral and can be retried manually. Upgrades preserve plugin caches and preferences. Published as [GitHub v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4).
 
 ## Install Option 1: Download EXE
 
-Download the ready-made installer from [`releases`](releases/):
+Download the installer from [GitHub Release v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4); matching build files are retained in [`releases`](releases/):
 
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.

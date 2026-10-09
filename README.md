@@ -28,11 +28,11 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-本地维护版本 **0.4.4**：增强 Runtime Information 的下载完整过程、耗时、错误原因链及操作关联，同时补全 Bridge、App Server、文件树、预览、插件加载和更新记录；复制/导出失败会停止，防止交付旧日志。保留最近10次运行、每次最多5MiB及脱敏。继续保留启动版本反馈：启动后后台检查一次 GitHub 更新。有更新时，底部短暂显示最新版本号，彩虹淡入、停留 1.5 秒后淡出，恢复当前版本并保留更新圆点；点击可打开更新窗口。已是最新版时短暂显示绿色确认；网络失败只作中性提示，保留手动检查。升级保留已有插件缓存和参数。本版尚未发布到 GitHub。
+当前版本 **0.4.4**：增强 Runtime Information 的下载完整过程、耗时、错误原因链及操作关联，同时补全 Bridge、App Server、文件树、预览、插件加载和更新记录；复制/导出失败会停止，防止交付旧日志。保留最近10次运行、每次最多5MiB及脱敏。继续保留启动版本反馈：启动后后台检查一次 GitHub 更新。有更新时，底部短暂显示最新版本号，彩虹淡入、停留 1.5 秒后淡出，恢复当前版本并保留更新圆点；点击可打开更新窗口。已是最新版时短暂显示绿色确认；网络失败只作中性提示，保留手动检查。升级保留已有插件缓存和参数。已发布 [GitHub v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4)。
 
 ## 安装方式一：直接下载 EXE
 
-可以从 [`releases`](releases/) 下载已经生成好的安装包：
+推荐从 [GitHub Release v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4) 下载安装包；仓库中的 [`releases`](releases/) 保留对应构建文件：
 
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
