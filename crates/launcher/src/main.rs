@@ -5,6 +5,7 @@ mod early_startup;
 mod exit_codes;
 #[allow(dead_code)]
 mod gui_support;
+mod network_diagnostics;
 mod plugin_store;
 mod process_guard;
 mod runtime_log;

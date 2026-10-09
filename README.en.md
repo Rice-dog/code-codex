@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.0-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.4-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -31,7 +31,7 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Version **0.4.0** displays complete plugin names, places download size and status above the action button, and shows progress until verification completes. Enable is pale blue and Download is pale lavender; individual downloads, cancellation and retry remain available. All 24 plugins reuse published v0.3.96 assets, preserving existing caches and preferences during upgrades.
+Local maintenance version **0.4.4** adds correlated stages, timings and error chains for plugin downloads, Bridge/App Server requests, file-tree and preview operations, module loading and updates. Copy/export stops on refresh failure instead of returning stale logs. The latest 10 runs and 5 MiB per run limits and redaction remain. Local maintenance build — Version **0.4.4** checks GitHub once in the background at startup. An available release briefly appears in the footer with a rainbow fade, a 1.5-second hold and a fade back to the installed version, leaving a clickable update dot. Current releases receive brief green confirmation; failed checks remain neutral and can be retried manually. Upgrades preserve plugin caches and preferences. This build is not published on GitHub.
 
 ## Install Option 1: Download EXE
 
@@ -40,15 +40,15 @@ Download the ready-made installer from [`releases`](releases/):
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.4.0-x64-setup.exe`
-- Alternative: `CodeCodex-0.4.0-x64.msi`
-- Portable package: `CodeCodex-0.4.0-x64.zip`
+- Recommended: `CodeCodex-0.4.4-x64-setup.exe`
+- Alternative: `CodeCodex-0.4.4-x64.msi`
+- Portable package: `CodeCodex-0.4.4-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.4.0-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.4.4-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -91,7 +91,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.0
+./scripts/package.ps1 -Version 0.4.4
 ```
 
 The generated packages are written to `releases/`.

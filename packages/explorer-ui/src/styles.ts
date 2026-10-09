@@ -2851,21 +2851,51 @@ export const styles = String.raw`
     border-radius: 50%;
     animation: cle-version-check 650ms linear infinite;
   }
-  .status-code[data-update-state="upToDate"]::after,
-  .status-code[data-update-state="ahead"]::after {
+  .status-code[data-feedback="latest"]::after {
     display: block;
     content: "✓";
     color: var(--cle-added);
   }
   .status-code[data-update-state="updateAvailable"]::after {
     display: block;
-    content: "↑";
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--cle-focus);
     color: var(--cle-focus);
   }
-  .status-code[data-update-state="error"]::after {
+  .status-code[data-feedback="error"]::after {
     display: block;
-    content: "!";
-    color: var(--cle-deleted);
+    content: "·";
+    color: var(--cle-muted);
+  }
+  .status-code[data-feedback="latest"] {
+    animation: cle-version-current 1s ease-in-out both;
+  }
+  .status-code[data-feedback="update"], .status-code[data-feedback="update"]:hover:not(:disabled) {
+    background-image: linear-gradient(100deg, #dc616e, #c89224, #31986d, #3988d4, #a268d4, #dc616e);
+    background-size: 250% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: cle-version-rainbow 2s linear both;
+    transition: opacity 250ms ease;
+  }
+  .status-code[data-feedback="update"][data-feedback-phase="in"] {
+    animation: cle-version-rainbow 2s linear both, cle-version-enter 250ms ease both;
+  }
+  .status-code[data-feedback="update"][data-feedback-phase="out"] { opacity: 0; }
+  @keyframes cle-version-rainbow { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
+  @keyframes cle-version-enter { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes cle-version-current { 0%,100% { color: var(--cle-ink); } 50% { color: #319b87; } }
+  @media (prefers-reduced-motion: reduce) {
+    .status-code[data-feedback] { animation: none !important; transition: none; transform: none; opacity: 1 !important; }
+    .status-code[data-feedback="update"], .status-code[data-feedback="update"]:hover:not(:disabled) { background-image: none; color: var(--cle-focus); }
+  }
+  @media (forced-colors: active) {
+    .status-code[data-feedback="update"], .status-code[data-feedback="update"]:hover:not(:disabled) { background-image: none; color: ButtonText; }
+    .status-code[data-update-state="updateAvailable"]::after { background: Highlight; }
   }
 
   .resize-handle {

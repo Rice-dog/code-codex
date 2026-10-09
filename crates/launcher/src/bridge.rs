@@ -99,6 +99,77 @@ const MAX_GIT_DIFF_BYTES: usize = 1536 * 1024;
 const MAX_GIT_CHANGED_FILES: usize = 500;
 const MAX_GIT_STDERR_BYTES: usize = 64 * 1024;
 
+fn request_summary(params: &Value) -> Value {
+    // Deliberate allowlist: no paths, account/task IDs, tokens, source or saved text.
+    let mut summary = json!({"hasRelativeEntry":params.get("relativePath").is_some(),"hasTaskSelection":params.get("threadId").is_some(),"hasPagination":params.get("cursor").is_some()});
+    for key in [
+        "limit",
+        "skip",
+        "offset",
+        "length",
+        "expectedSizeBytes",
+        "visible",
+        "enabled",
+        "opacity",
+        "force",
+    ] {
+        if let Some(value) = params.get(key).filter(|v| v.is_boolean() || v.is_number()) {
+            summary[key] = value.clone();
+        }
+    }
+    for key in ["paths", "entries"] {
+        if let Some(items) = params.get(key).and_then(Value::as_array) {
+            summary[format!("{key}Count")] = json!(items.len());
+        }
+    }
+    summary
+}
+fn result_summary(result: &Value) -> Value {
+    let mut summary = json!({});
+    for key in ["entries", "commits", "files", "changes"] {
+        if let Some(items) = result.get(key).and_then(Value::as_array) {
+            summary[format!("{key}Count")] = json!(items.len());
+        }
+    }
+    for key in [
+        "sizeBytes",
+        "chunkCount",
+        "chunkSize",
+        "truncated",
+        "editable",
+        "installed",
+        "cached",
+        "launched",
+        "compatible",
+        "watching",
+    ] {
+        if let Some(value) = result.get(key).filter(|v| v.is_boolean() || v.is_number()) {
+            summary[key] = value.clone();
+        }
+    }
+    summary["hasNextPage"] = json!(result.get("nextCursor").is_some_and(|v| !v.is_null()));
+    if let Some(kind) = result.get("kind").and_then(Value::as_str).filter(|kind| {
+        [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf",
+            "office",
+            "notebook",
+            "model",
+            "unsupported",
+            "binary",
+            "directory",
+            "file",
+        ]
+        .contains(kind)
+    }) {
+        summary["kind"] = json!(kind);
+    }
+    summary
+}
+
 #[derive(Clone)]
 pub struct NativeBridge {
     inner: Arc<BridgeInner>,
@@ -122,6 +193,7 @@ struct BridgeInner {
 }
 
 struct UpdateChecker {
+    startup_result: Mutex<Option<Result<UpdateCheckResult, BridgeError>>>,
     client: Option<reqwest::Client>,
     download_client: Option<reqwest::Client>,
     endpoint: String,
@@ -151,7 +223,7 @@ enum UpdateAvailability {
     Ahead,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateCheckResult {
     current_version: String,
@@ -185,24 +257,54 @@ impl UpdateChecker {
             .timeout(UPDATE_REQUEST_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
             .build()
+            .inspect_err(|e| {
+                crate::runtime_log::record(
+                    "update",
+                    "HTTP client",
+                    "failed",
+                    crate::network_diagnostics::error_details(e),
+                )
+            })
             .ok();
         let download_client = reqwest::Client::builder()
             .connect_timeout(UPDATE_CONNECT_TIMEOUT)
             .timeout(UPDATE_DOWNLOAD_TIMEOUT)
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 5 || !trusted_update_download_host(attempt.url()) {
+                let allowed=attempt.previous().len()<5 && trusted_update_download_host(attempt.url());
+                crate::runtime_log::record("update","HTTP redirect",if allowed{"followed"}else{"rejected"},json!({"fromHost":attempt.previous().last().and_then(|u|u.host_str()),"toHost":attempt.url().host_str(),"status":attempt.status().as_u16(),"redirectCount":attempt.previous().len()}));
+                if !allowed {
                     attempt.stop()
                 } else {
                     attempt.follow()
                 }
             }))
             .build()
+            .inspect_err(|e|crate::runtime_log::record("update","download client","failed",crate::network_diagnostics::error_details(e)))
             .ok();
         Self {
+            startup_result: Mutex::new(None),
             client,
             download_client,
             endpoint: endpoint.into(),
         }
+    }
+
+    // Cache both success and failure for this launcher run, across renderers and
+    // bridge reconnects. Explicit checks and installation always fetch afresh.
+    async fn check_startup(&self, current_version: &str) -> Result<UpdateCheckResult, BridgeError> {
+        let mut cached = self.startup_result.lock().await;
+        if let Some(result) = cached.as_ref() {
+            crate::runtime_log::record(
+                "update",
+                "startup check",
+                "cached",
+                json!({"networkRequested":false,"previousCheckSucceeded":result.is_ok()}),
+            );
+            return result.clone();
+        }
+        let result = self.check(current_version).await;
+        *cached = Some(result.clone());
+        result
     }
 
     async fn check(&self, current_version: &str) -> Result<UpdateCheckResult, BridgeError> {
@@ -213,15 +315,36 @@ impl UpdateChecker {
         &self,
         current_version: &str,
     ) -> Result<GithubLatestRelease, BridgeError> {
+        let mut trace = crate::network_diagnostics::HttpTrace::start(
+            "update",
+            &self.endpoint,
+            5_000,
+            10_000,
+            json!({"purpose":"latest release","currentVersion":current_version}),
+        );
+        let result = self.fetch_release_inner(current_version, &mut trace).await;
+        match &result {
+            Ok(release)=>trace.operation.finish("passed",json!({"phase":"release parsed","releaseTag":release.tag_name,"assetCount":release.assets.len()})),
+            Err(e)=>trace.operation.finish("failed",json!({"code":e.code,"reason":e.message})),
+        }
+        result
+    }
+    async fn fetch_release_inner(
+        &self,
+        current_version: &str,
+        trace: &mut crate::network_diagnostics::HttpTrace,
+    ) -> Result<GithubLatestRelease, BridgeError> {
         let client = self.client.as_ref().ok_or_else(update_unavailable_error)?;
-        let mut response = client
-            .get(&self.endpoint)
-            .header(ACCEPT, GITHUB_API_ACCEPT)
-            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-            .header(USER_AGENT, format!("Code-Codex/{current_version}"))
-            .send()
+        let mut response = trace
+            .send(
+                client
+                    .get(&self.endpoint)
+                    .header(ACCEPT, GITHUB_API_ACCEPT)
+                    .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+                    .header(USER_AGENT, format!("Code-Codex/{current_version}")),
+            )
             .await
-            .map_err(|_| update_unavailable_error())?;
+            .map_err(|e| update_transport_error(update_unavailable_error(), &e))?;
 
         let status = response.status();
         if status == reqwest::StatusCode::FORBIDDEN
@@ -247,23 +370,54 @@ impl UpdateChecker {
         }
 
         let mut body = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| update_unavailable_error())?
-        {
+        while let Some(chunk) = response.chunk().await.map_err(|e| {
+            trace.fail("release body", &e, body.len() as u64);
+            update_transport_error(update_unavailable_error(), &e)
+        })? {
             if body.len().saturating_add(chunk.len()) > MAX_UPDATE_RESPONSE_BYTES {
                 return Err(update_invalid_response_error());
             }
             body.extend_from_slice(&chunk);
         }
-        serde_json::from_slice(&body).map_err(|_| update_invalid_response_error())
+        trace.operation.event(
+            "release body",
+            "received",
+            json!({"receivedBytes":body.len()}),
+        );
+        serde_json::from_slice(&body).map_err(|e| {
+            trace.operation.event(
+                "release JSON",
+                "failed",
+                crate::network_diagnostics::error_details(&e),
+            );
+            update_invalid_response_error()
+        })
     }
 
     async fn download_installer(
         &self,
         current_version: &str,
         expected_latest_version: &str,
+    ) -> Result<DownloadedUpdate, BridgeError> {
+        let mut operation = crate::runtime_log::Operation::start(
+            "update",
+            "prepare installer",
+            json!({"currentVersion":current_version,"requestedVersion":expected_latest_version}),
+        );
+        let result = self
+            .download_installer_inner(current_version, expected_latest_version, &operation)
+            .await;
+        match &result {
+            Ok(_) => operation.finish("passed", json!({"integrityVerified":true})),
+            Err(e) => operation.finish("failed", json!({"code":e.code,"reason":e.message})),
+        }
+        result
+    }
+    async fn download_installer_inner(
+        &self,
+        current_version: &str,
+        expected_latest_version: &str,
+        operation: &crate::runtime_log::Operation,
     ) -> Result<DownloadedUpdate, BridgeError> {
         let release = self.fetch_release(current_version).await?;
         let update = classify_update(current_version, release.clone())?;
@@ -275,17 +429,25 @@ impl UpdateChecker {
         let asset = select_update_asset(&release, &update.latest_version)?;
         let expected_digest =
             validate_update_asset(asset, &release.tag_name, &update.latest_version)?;
+        operation.event("installer asset","selected",json!({"releaseTag":release.tag_name,"expectedBytes":asset.size,"expectedSha256":expected_digest}));
         let download_client = self
             .download_client
             .as_ref()
             .ok_or_else(update_download_error)?;
-        let mut response = download_client
+        let mut trace = crate::network_diagnostics::HttpTrace::start(
+            "update",
+            &asset.browser_download_url,
+            5_000,
+            180_000,
+            json!({"purpose":"installer","expectedBytes":asset.size,"parentOperationId":operation.id()}),
+        );
+        let result=async {
+        let mut response = trace.send(download_client
             .get(&asset.browser_download_url)
             .header(ACCEPT, "application/octet-stream")
-            .header(USER_AGENT, format!("Code-Codex/{current_version}"))
-            .send()
+            .header(USER_AGENT, format!("Code-Codex/{current_version}")))
             .await
-            .map_err(|_| update_download_error())?;
+            .map_err(|e|update_transport_error(update_download_error(),&e))?;
         if !response.status().is_success()
             || !trusted_update_download_host(response.url())
             || response
@@ -304,10 +466,11 @@ impl UpdateChecker {
             std::fs::File::create(&installer_path).map_err(|_| update_download_error())?;
         let mut digest = sha2::Sha256::new();
         let mut downloaded = 0_u64;
+        let mut transfer=crate::network_diagnostics::TransferProgress::new();
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|_| update_download_error())?
+            .map_err(|e|{trace.fail("installer body",&e,downloaded);update_transport_error(update_download_error(),&e)})?
         {
             downloaded = downloaded.saturating_add(chunk.len() as u64);
             if downloaded > asset.size || downloaded > MAX_UPDATE_ASSET_BYTES {
@@ -316,11 +479,14 @@ impl UpdateChecker {
             file.write_all(&chunk)
                 .map_err(|_| update_download_error())?;
             sha2::Digest::update(&mut digest, &chunk);
+            transfer.observe(&trace.operation,downloaded,asset.size);
         }
         file.sync_all().map_err(|_| update_download_error())?;
         drop(file);
+        let observed_digest=format!("{:x}",sha2::Digest::finalize(digest));
+        operation.event("installer integrity","checked",json!({"expectedBytes":asset.size,"receivedBytes":downloaded,"expectedSha256":expected_digest,"observedSha256":observed_digest,"matches":downloaded==asset.size && observed_digest==expected_digest}));
         if downloaded != asset.size
-            || format!("{:x}", sha2::Digest::finalize(digest)) != expected_digest
+            || observed_digest != expected_digest
         {
             return Err(update_verification_error());
         }
@@ -330,7 +496,26 @@ impl UpdateChecker {
             directory,
             latest_version: update.latest_version,
         })
+        }.await;
+        match &result {
+            Ok(_) => trace
+                .operation
+                .finish("passed", json!({"integrityVerified":true})),
+            Err(e) => trace
+                .operation
+                .finish("failed", json!({"code":e.code,"reason":e.message})),
+        }
+        result
     }
+}
+
+fn update_transport_error(mut base: BridgeError, error: &reqwest::Error) -> BridgeError {
+    base.message = format!(
+        "{} Network cause: {}",
+        base.message,
+        crate::network_diagnostics::error_message(error)
+    );
+    base
 }
 
 struct DownloadedUpdate {
@@ -3051,6 +3236,19 @@ impl NativeBridge {
             .map_err(|_| internal_error())
     }
 
+    async fn update_startup(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        require_empty_object(&params)?;
+        self.ensure_epoch(epoch)?;
+        let result = self
+            .inner
+            .update_checker
+            .check_startup(env!("CARGO_PKG_VERSION"))
+            .await?;
+        // This launch-wide metadata has no workspace capability. A project switch
+        // while GitHub responds must not turn a valid startup check into CANCELLED.
+        serde_json::to_value(result).map_err(|_| update_internal_error())
+    }
+
     async fn update_check(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         require_empty_object(&params)?;
         self.ensure_epoch(epoch)?;
@@ -3376,140 +3574,165 @@ impl NativeBridge {
 impl BridgeHandler for NativeBridge {
     async fn handle(&self, request: BindingRequest) -> Result<Value, BridgeError> {
         let epoch = request.lifecycle_epoch;
-        self.ensure_epoch(epoch)?;
         let method = request.method.clone();
         let started = std::time::Instant::now();
         let log_operation = !method.starts_with("explorer.runtime.")
+            && method != "explorer.plugins.status"
             && !method.ends_with(".chunk")
             && !method.ends_with(".resource.chunk");
-        if log_operation {
-            crate::runtime_log::record("native-bridge", &method, "started", json!({}));
-        }
-        let result = match request.method.as_str() {
-            "explorer.runtime.list" => {
-                crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))
-            }
-            "explorer.runtime.read" => {
-                let id = request
-                    .params
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(BridgeError::invalid_request)?;
-                crate::runtime_log::read(id).map_err(|e| BridgeError::new("RUNTIME_LOG", e))
-            }
-            "explorer.runtime.append" => {
-                let events = request
-                    .params
-                    .get("events")
-                    .and_then(Value::as_array)
-                    .filter(|e| e.len() <= 128)
-                    .ok_or_else(BridgeError::invalid_request)?;
-                // Validate the whole batch before appending any event.
-                for event in events {
-                    for key in ["source", "action", "outcome"] {
-                        if !event.get(key).and_then(Value::as_str).is_some_and(|s| {
-                            !s.is_empty() && s.len() <= 160 && !s.chars().any(char::is_control)
-                        }) {
+        let request_ref = if request.id.starts_with("cle-")
+            && request.id.len() < 80
+            && request
+                .id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            request.id.clone()
+        } else {
+            "untrusted-request-reference".into()
+        };
+        let mut operation=log_operation.then(||crate::runtime_log::Operation::start("native-bridge",method.clone(),json!({"requestRef":request_ref,"lifecycleEpoch":epoch,"contextRevision":self.inner.context_revision.load(Ordering::Acquire),"requestSummary":request_summary(&request.params)})));
+        // Keep validation and early `?`/returns inside the result boundary so every
+        // method (including rejected requests) reaches its terminal diagnostic.
+        let result = async {
+            self.ensure_epoch(epoch)?;
+            match request.method.as_str() {
+                "explorer.runtime.list" => {
+                    crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))
+                }
+                "explorer.runtime.read" => {
+                    let id = request
+                        .params
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(BridgeError::invalid_request)?;
+                    crate::runtime_log::read(id).map_err(|e| BridgeError::new("RUNTIME_LOG", e))
+                }
+                "explorer.runtime.append" => {
+                    let events = request
+                        .params
+                        .get("events")
+                        .and_then(Value::as_array)
+                        .filter(|e| e.len() <= 128)
+                        .ok_or_else(BridgeError::invalid_request)?;
+                    // Validate the whole batch before appending any event.
+                    for event in events {
+                        for key in ["source", "action", "outcome"] {
+                            if !event.get(key).and_then(Value::as_str).is_some_and(|s| {
+                                !s.is_empty() && s.len() <= 160 && !s.chars().any(char::is_control)
+                            }) {
+                                return Err(BridgeError::invalid_request());
+                            }
+                        }
+                        if !event.get("details").is_some_and(Value::is_object)
+                            || event.to_string().len() > 8192
+                        {
                             return Err(BridgeError::invalid_request());
                         }
                     }
-                    if !event.get("details").is_some_and(Value::is_object)
-                        || event.to_string().len() > 8192
-                    {
-                        return Err(BridgeError::invalid_request());
+                    for event in events {
+                        crate::runtime_log::record(
+                            event["source"].as_str().unwrap(),
+                            event["action"].as_str().unwrap(),
+                            event["outcome"].as_str().unwrap(),
+                            event["details"].clone(),
+                        );
+                    }
+                    Ok(json!({"accepted":events.len()}))
+                }
+                "explorer.context" => self.context(request.params, epoch).await,
+                "explorer.context.clear" => self.context_clear(request.params, epoch),
+                "explorer.list" => self.list(request.params, epoch).await,
+                "explorer.git.history" => self.git_history(request.params, epoch).await,
+                "explorer.git.commit" => self.git_commit(request.params, epoch).await,
+                "explorer.git.diff" => self.git_diff(request.params, epoch).await,
+                "explorer.preview" => self.preview(request.params, epoch).await,
+                "explorer.preview.save" => self.preview_save(request.params, epoch).await,
+                "explorer.media.info" => self.media_info(request.params, epoch).await,
+                "explorer.media.chunk" => self.media_chunk(request.params, epoch).await,
+                "explorer.model.resource.info" => {
+                    self.model_resource_info(request.params, epoch).await
+                }
+                "explorer.model.resource.chunk" => {
+                    self.model_resource_chunk(request.params, epoch).await
+                }
+                "explorer.entry.create" => self.entry_create(request.params, epoch).await,
+                "explorer.entry.rename" => self.entry_rename(request.params, epoch).await,
+                "explorer.entry.move" => self.entry_move_batch(request.params, epoch).await,
+                "explorer.entry.copy" => self.entry_copy(request.params, epoch).await,
+                "explorer.entry.delete" => self.entry_delete(request.params, epoch).await,
+                "explorer.entry.reveal" => self.entry_reveal(request.params, epoch).await,
+                "explorer.entry.import.begin" => {
+                    self.entry_import_begin(request.params, epoch).await
+                }
+                "explorer.entry.import.directory" => {
+                    self.entry_import_directory(request.params, epoch).await
+                }
+                "explorer.entry.import.file.begin" => {
+                    self.entry_import_file_begin(request.params, epoch).await
+                }
+                "explorer.entry.import.chunk" => {
+                    self.entry_import_chunk(request.params, epoch).await
+                }
+                "explorer.entry.import.file.finish" => {
+                    self.entry_import_file_finish(request.params, epoch).await
+                }
+                "explorer.entry.import.commit" => {
+                    self.entry_import_commit(request.params, epoch).await
+                }
+                "explorer.entry.import.abort" => {
+                    self.entry_import_abort(request.params, epoch).await
+                }
+                "explorer.watch.start" => self.watch_start(request.params, epoch).await,
+                "explorer.watch.stop" => self.watch_stop(request.params, epoch),
+                "explorer.settings.get" => self.settings_get(request.params).await,
+                "explorer.settings.set" => self.settings_set(request.params, epoch).await,
+                "explorer.plugins.status" => crate::plugin_store::status(),
+                "explorer.plugins.install"
+                | "explorer.plugins.cancel"
+                | "explorer.plugins.load" => {
+                    let id = request
+                        .params
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| BridgeError::new("PLUGIN_ID", "A plugin ID is required."))?;
+                    match method.as_str() {
+                        "explorer.plugins.install" => crate::plugin_store::install(id).await,
+                        "explorer.plugins.cancel" => crate::plugin_store::cancel(id),
+                        _ => crate::plugin_store::sources(id)
+                            .map(|source| json!({"id":id,"verifiedSource":source})),
                     }
                 }
-                for event in events {
-                    crate::runtime_log::record(
-                        event["source"].as_str().unwrap(),
-                        event["action"].as_str().unwrap(),
-                        event["outcome"].as_str().unwrap(),
-                        event["details"].clone(),
-                    );
+                "explorer.update.startup" => self.update_startup(request.params, epoch).await,
+                "explorer.update.check" => self.update_check(request.params, epoch).await,
+                "explorer.update.install" => self.update_install(request.params, epoch).await,
+                "explorer.window.transparency.set" => {
+                    self.window_transparency_set(request.params, epoch)
                 }
-                Ok(json!({"accepted":events.len()}))
+                _ => Err(BridgeError::new(
+                    "INVALID_REQUEST",
+                    "The native method is not allowed.",
+                )),
             }
-            "explorer.context" => self.context(request.params, epoch).await,
-            "explorer.context.clear" => self.context_clear(request.params, epoch),
-            "explorer.list" => self.list(request.params, epoch).await,
-            "explorer.git.history" => self.git_history(request.params, epoch).await,
-            "explorer.git.commit" => self.git_commit(request.params, epoch).await,
-            "explorer.git.diff" => self.git_diff(request.params, epoch).await,
-            "explorer.preview" => self.preview(request.params, epoch).await,
-            "explorer.preview.save" => self.preview_save(request.params, epoch).await,
-            "explorer.media.info" => self.media_info(request.params, epoch).await,
-            "explorer.media.chunk" => self.media_chunk(request.params, epoch).await,
-            "explorer.model.resource.info" => self.model_resource_info(request.params, epoch).await,
-            "explorer.model.resource.chunk" => {
-                self.model_resource_chunk(request.params, epoch).await
-            }
-            "explorer.entry.create" => self.entry_create(request.params, epoch).await,
-            "explorer.entry.rename" => self.entry_rename(request.params, epoch).await,
-            "explorer.entry.move" => self.entry_move_batch(request.params, epoch).await,
-            "explorer.entry.copy" => self.entry_copy(request.params, epoch).await,
-            "explorer.entry.delete" => self.entry_delete(request.params, epoch).await,
-            "explorer.entry.reveal" => self.entry_reveal(request.params, epoch).await,
-            "explorer.entry.import.begin" => self.entry_import_begin(request.params, epoch).await,
-            "explorer.entry.import.directory" => {
-                self.entry_import_directory(request.params, epoch).await
-            }
-            "explorer.entry.import.file.begin" => {
-                self.entry_import_file_begin(request.params, epoch).await
-            }
-            "explorer.entry.import.chunk" => self.entry_import_chunk(request.params, epoch).await,
-            "explorer.entry.import.file.finish" => {
-                self.entry_import_file_finish(request.params, epoch).await
-            }
-            "explorer.entry.import.commit" => self.entry_import_commit(request.params, epoch).await,
-            "explorer.entry.import.abort" => self.entry_import_abort(request.params, epoch).await,
-            "explorer.watch.start" => self.watch_start(request.params, epoch).await,
-            "explorer.watch.stop" => self.watch_stop(request.params, epoch),
-            "explorer.settings.get" => self.settings_get(request.params).await,
-            "explorer.settings.set" => self.settings_set(request.params, epoch).await,
-            "explorer.plugins.status" => crate::plugin_store::status(),
-            "explorer.plugins.install" | "explorer.plugins.cancel" | "explorer.plugins.load" => {
-                let id = request
-                    .params
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| BridgeError::new("PLUGIN_ID", "A plugin ID is required."))?;
-                match method.as_str() {
-                    "explorer.plugins.install" => crate::plugin_store::install(id).await,
-                    "explorer.plugins.cancel" => crate::plugin_store::cancel(id),
-                    _ => crate::plugin_store::sources(id)
-                        .map(|source| json!({"id":id,"verifiedSource":source})),
-                }
-            }
-            "explorer.update.check" => self.update_check(request.params, epoch).await,
-            "explorer.update.install" => self.update_install(request.params, epoch).await,
-            "explorer.window.transparency.set" => {
-                self.window_transparency_set(request.params, epoch)
-            }
-            _ => Err(BridgeError::new(
-                "INVALID_REQUEST",
-                "The native method is not allowed.",
-            )),
-        };
-        if log_operation {
-            let mut details = json!({"durationMs":started.elapsed().as_millis()});
+        }
+        .await;
+        if log_operation || (result.is_err() && !method.starts_with("explorer.runtime.")) {
+            let mut details = json!({"requestRef":request_ref,"durationMs":started.elapsed().as_millis(),"lifecycleEpoch":epoch,"currentLifecycleEpoch":self.inner.lifecycle_epoch.load(Ordering::Acquire),"contextRevision":self.inner.context_revision.load(Ordering::Acquire)});
             if let Err(error) = &result {
                 details["errorCode"] = json!(error.code);
                 details["message"] = json!(error.message.chars().take(1500).collect::<String>());
             }
             if let Ok(value) = &result {
-                if let Some(entries) = value.get("entries").and_then(Value::as_array) {
-                    details["entryCount"] = json!(entries.len());
-                }
+                details["resultSummary"] = result_summary(value);
                 if method == "explorer.context" {
                     details["workspaceAvailable"] = json!(value.get("rootName").is_some());
                 }
             }
-            crate::runtime_log::record(
-                "native-bridge",
-                &method,
-                if result.is_ok() { "passed" } else { "failed" },
-                details,
-            );
+            if let Some(operation) = operation.as_mut() {
+                operation.finish(if result.is_ok() { "passed" } else { "failed" }, details);
+            } else {
+                crate::runtime_log::record("native-bridge", &method, "failed", details);
+            }
         }
         result
     }
@@ -3745,6 +3968,19 @@ async fn run_git_readonly(
     args: Vec<String>,
     max_stdout_bytes: usize,
 ) -> Result<GitCommandOutput, BridgeError> {
+    let command_kind = args
+        .iter()
+        .find(|arg| {
+            ["rev-parse", "symbolic-ref", "log", "show", "diff", "status"].contains(&arg.as_str())
+        })
+        .cloned()
+        .unwrap_or_else(|| "other-readonly".into());
+    let mut operation = crate::runtime_log::Operation::start(
+        "git",
+        "command",
+        json!({"commandKind":command_kind,"argumentCount":args.len(),"timeoutMs":GIT_COMMAND_TIMEOUT.as_millis(),"maxStdoutBytes":max_stdout_bytes}),
+    );
+    let result=async {
     let mut command = TokioCommand::new("git");
     command
         .arg("--no-pager")
@@ -3759,7 +3995,8 @@ async fn run_git_readonly(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|_| {
+    let mut child = command.spawn().map_err(|e| {
+        operation.event("process spawn","failed",crate::network_diagnostics::error_details(&e));
         BridgeError::new(
             "GIT_UNAVAILABLE",
             "Git is not installed or is unavailable to Code-Codex.",
@@ -3785,9 +4022,10 @@ async fn run_git_readonly(
             ));
         }
     };
-    let status = status.map_err(|_| internal_error())?;
-    let stdout = stdout.map_err(|_| internal_error())?;
-    let stderr = stderr.map_err(|_| internal_error())?;
+    let status = status.map_err(|e|{operation.event("process exit","failed",crate::network_diagnostics::error_details(&e));internal_error()})?;
+    let stdout = stdout.map_err(|e|{operation.event("stdout collection","failed",crate::network_diagnostics::error_details(&e));internal_error()})?;
+    let stderr = stderr.map_err(|e|{operation.event("stderr collection","failed",crate::network_diagnostics::error_details(&e));internal_error()})?;
+    operation.event("process exit","observed",json!({"exitCode":status.code(),"stdoutBytes":stdout.bytes.len(),"stderrBytes":stderr.bytes.len(),"stderrSummary":String::from_utf8_lossy(&stderr.bytes).chars().take(1800).collect::<String>()}));
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr.bytes);
         if stderr.to_ascii_lowercase().contains("not a git repository") {
@@ -3802,6 +4040,12 @@ async fn run_git_readonly(
         ));
     }
     Ok(GitCommandOutput { stdout })
+    }.await;
+    match &result {
+        Ok(_) => operation.finish("passed", json!({})),
+        Err(e) => operation.finish("failed", json!({"errorCode":e.code,"reason":e.message})),
+    }
+    result
 }
 
 fn git_output_too_large_error() -> BridgeError {
@@ -4083,6 +4327,12 @@ fn reveal_in_file_explorer(_target: &Path) -> Result<(), WorkspaceError> {
 }
 
 fn map_resolver_error(error: ResolverError) -> BridgeError {
+    crate::runtime_log::record(
+        "app-server",
+        "workspace resolution",
+        "failed",
+        crate::network_diagnostics::error_details(&error),
+    );
     match error {
         ResolverError::NoWorkspace | ResolverError::InvalidThreadId => no_context_error(),
         _ => internal_error(),
@@ -4090,6 +4340,12 @@ fn map_resolver_error(error: ResolverError) -> BridgeError {
 }
 
 fn map_workspace_error(error: WorkspaceError) -> BridgeError {
+    crate::runtime_log::record(
+        "workspace",
+        "native operation",
+        "failed",
+        crate::network_diagnostics::error_details(&error),
+    );
     let code = match error.code() {
         ErrorCode::InvalidPath => "INVALID_PATH",
         ErrorCode::OutsideWorkspace => "OUTSIDE_WORKSPACE",
@@ -4169,6 +4425,38 @@ mod tests {
         let bridge = NativeBridge::new(None, Some(workspace), settings_store, Settings::default());
         bridge.initialize_manual().await;
         (directory, bridge)
+    }
+
+    #[tokio::test]
+    async fn diagnostics_capture_early_validation_and_stale_epoch_without_private_payloads() {
+        let (_directory, bridge) = manual_bridge().await;
+        crate::runtime_log::capture_test_events();
+        let failure = bridge
+            .handle(request(
+                "explorer.plugins.install",
+                json!({"relativePath":"SENTINEL_PRIVATE","token":"SENTINEL_TOKEN"}),
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(failure.code, "PLUGIN_ID");
+        let events = crate::runtime_log::take_test_events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["outcome"], "started");
+        assert_eq!(events[1]["outcome"], "failed");
+        assert_eq!(
+            events[0]["details"]["operationId"],
+            events[1]["details"]["operationId"]
+        );
+        assert!(!serde_json::to_string(&events).unwrap().contains("SENTINEL"));
+        crate::runtime_log::capture_test_events();
+        let failure = bridge
+            .handle(request_at("explorer.list", json!({}), 999))
+            .await
+            .unwrap_err();
+        assert_eq!(failure.code, "CANCELLED");
+        let events = crate::runtime_log::take_test_events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1]["details"]["errorCode"], "CANCELLED");
     }
 
     fn request(method: &str, params: Value) -> BindingRequest {
@@ -4458,6 +4746,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn startup_update_is_shared_and_manual_check_remains_fresh() {
+        let body = serde_json::to_vec(&json!({
+            "tag_name": "v999.0.0",
+            "html_url": "https://github.com/Rice-dog/code-codex/releases/tag/v999.0.0"
+        }))
+        .unwrap();
+        let (endpoint, request_receiver, server) =
+            mock_update_server(http_response("200 OK", "application/json", &body)).await;
+        let (_directory, mut bridge) = manual_bridge().await;
+        Arc::get_mut(&mut bridge.inner).unwrap().update_checker = UpdateChecker::new(endpoint);
+        let (first, second) = tokio::join!(
+            bridge.handle(request("explorer.update.startup", json!({}))),
+            bridge.handle(request("explorer.update.startup", json!({})))
+        );
+        assert_eq!(first.unwrap(), second.unwrap());
+        request_receiver.await.unwrap();
+        server.await.unwrap();
+        assert_eq!(
+            bridge
+                .handle(request("explorer.update.startup", json!({})))
+                .await
+                .unwrap()["status"],
+            "updateAvailable"
+        );
+        assert!(
+            bridge
+                .handle(request("explorer.update.check", json!({})))
+                .await
+                .is_err(),
+            "manual check must try the now-closed server afresh"
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_update_caches_failure_without_claiming_latest() {
+        let (endpoint, request_receiver, server) = mock_update_server(http_response(
+            "429 Too Many Requests",
+            "application/json",
+            b"{}",
+        ))
+        .await;
+        let checker = UpdateChecker::new(endpoint);
+        let first = checker.check_startup("0.4.1").await.unwrap_err();
+        request_receiver.await.unwrap();
+        server.await.unwrap();
+        let second = checker.check_startup("0.4.1").await.unwrap_err();
+        assert_eq!(first.code, "UPDATE_CHECK_RATE_LIMITED");
+        assert_eq!(second.code, first.code);
+    }
+
+    #[tokio::test]
     async fn update_rpc_rejects_parameters_before_any_network_request() {
         let (_directory, bridge) = manual_bridge().await;
         let error = bridge
@@ -4467,6 +4806,14 @@ mod tests {
             ))
             .await
             .expect_err("update endpoint cannot be supplied by the renderer");
+        assert_eq!(error.code, "INVALID_REQUEST");
+        let error = bridge
+            .handle(request(
+                "explorer.update.startup",
+                json!({"endpoint":"https://example.com"}),
+            ))
+            .await
+            .unwrap_err();
         assert_eq!(error.code, "INVALID_REQUEST");
     }
 

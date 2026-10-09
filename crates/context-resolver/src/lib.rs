@@ -28,6 +28,59 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 const THREAD_LIST_PAGE_SIZE: usize = 100;
 const MAX_THREAD_LIST_PAGES: usize = 10;
+type DiagnosticObserver = fn(&str, &str, &str, Value);
+static DIAGNOSTIC_OBSERVER: std::sync::OnceLock<DiagnosticObserver> = std::sync::OnceLock::new();
+/// Records protocol metadata only; bodies, task IDs and workspace paths are excluded.
+pub fn set_diagnostic_observer(observer: DiagnosticObserver) {
+    let _ = DIAGNOSTIC_OBSERVER.set(observer);
+}
+fn diagnostic(action: &str, outcome: &str, details: Value) {
+    if let Some(observer) = DIAGNOSTIC_OBSERVER.get() {
+        observer("app-server", action, outcome, details);
+    }
+}
+struct RequestTrace {
+    started: std::time::Instant,
+    method: String,
+    number: u64,
+    finished: bool,
+}
+impl RequestTrace {
+    fn new(method: &str, number: u64, timeout: Duration) -> Self {
+        let method = if ["initialize", "thread/read", "thread/list"].contains(&method) {
+            method
+        } else {
+            "other"
+        }
+        .to_owned();
+        diagnostic(
+            "request",
+            "started",
+            json!({"method":method,"requestNumber":number,"timeoutMs":timeout.as_millis()}),
+        );
+        Self {
+            started: std::time::Instant::now(),
+            method,
+            number,
+            finished: false,
+        }
+    }
+    fn finish(&mut self, outcome: &str, error: Option<&ResolverError>) {
+        diagnostic(
+            "request",
+            outcome,
+            json!({"method":self.method,"requestNumber":self.number,"durationMs":self.started.elapsed().as_millis(),"reason":error.map(ToString::to_string)}),
+        );
+        self.finished = true;
+    }
+}
+impl Drop for RequestTrace {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.finish("interrupted", None);
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum ResolverError {
@@ -297,10 +350,12 @@ impl AppServerClient {
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, ResolverError> {
+        let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut trace = RequestTrace::new(method, id, self.inner.timeout);
+        let result=async {
         if method.is_empty() || method.len() > 128 {
             return Err(ResolverError::Protocol);
         }
-        let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let message = json!({ "id": id, "method": method, "params": params });
         let mut encoded = serde_json::to_vec(&message).map_err(|_| ResolverError::Protocol)?;
         if encoded.len() > MAX_MESSAGE_BYTES {
@@ -315,7 +370,8 @@ impl AppServerClient {
             writer.flush().await
         }
         .await;
-        if write_result.is_err() {
+        if let Err(e)=write_result {
+            diagnostic("request write","failed",json!({"requestNumber":id,"ioKind":format!("{:?}",e.kind()),"osErrorCode":e.raw_os_error()}));
             self.inner.pending.lock().await.remove(&id);
             return Err(ResolverError::Io);
         }
@@ -327,6 +383,12 @@ impl AppServerClient {
                 Err(ResolverError::Timeout)
             }
         }
+        }.await;
+        trace.finish(
+            if result.is_ok() { "passed" } else { "failed" },
+            result.as_ref().err(),
+        );
+        result
     }
 
     pub async fn notify(&self, method: &str, params: Value) -> Result<(), ResolverError> {
@@ -368,15 +430,33 @@ async fn read_loop<R>(
         line.clear();
         let read = match reader.read_line(&mut line).await {
             Ok(read) => read,
-            Err(_) => break,
+            Err(error) => {
+                diagnostic(
+                    "transport read",
+                    "failed",
+                    json!({"ioKind":format!("{:?}",error.kind()),"osErrorCode":error.raw_os_error()}),
+                );
+                break;
+            }
         };
         if read == 0 {
+            diagnostic("transport read", "closed", json!({"reason":"EOF"}));
             break;
         }
         if line.len() > MAX_MESSAGE_BYTES {
+            diagnostic(
+                "protocol frame",
+                "failed",
+                json!({"observedBytes":line.len(),"maxBytes":MAX_MESSAGE_BYTES}),
+            );
             break;
         }
         let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            diagnostic(
+                "protocol frame",
+                "rejected",
+                json!({"reason":"Invalid JSON","observedBytes":line.len()}),
+            );
             continue;
         };
         let Some(inner) = inner.upgrade() else {
@@ -412,6 +492,11 @@ async fn read_loop<R>(
 
     if let Some(inner) = inner.upgrade() {
         let mut pending = inner.pending.lock().await;
+        diagnostic(
+            "transport pending requests",
+            "released",
+            json!({"pendingCount":pending.len()}),
+        );
         for (_, sender) in pending.drain() {
             let _ = sender.send(Err(ResolverError::Io));
         }

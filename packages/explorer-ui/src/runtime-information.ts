@@ -1,4 +1,5 @@
 import { runtimeEvent, takeRuntimeEvents, restoreRuntimeEvents } from "./runtime-events";
+import { runtimeErrorDetails } from "./runtime-operations";
 import { redactRuntimeText, redactRuntimeValue } from "./runtime-redaction";
 import { isHomeWorkspaceView } from "./home-view";
 import { isNativeLoginView } from "./native-login";
@@ -6,35 +7,64 @@ import { isNativeLoginView } from "./native-login";
 type Request = <T>(method: string, params?: Record<string, unknown>) => Promise<T>;
 interface Run { id: string; bytes: number; current: boolean; }
 interface Listing { runs: Run[]; currentRun: string; storageError?: string; }
-let request: Request | undefined;
-let sending: Promise<void> | undefined;
-let syncError = "";
-let timer: ReturnType<typeof setInterval> | undefined;
+interface LogConnection { request?: Request; sending?: Promise<void>; syncError: string; timer?: ReturnType<typeof setInterval>; }
+// A same-version reinjection may reuse the registered element class but replace the menu.
+// Both module instances must use the latest authenticated connection and a single pump.
+const connectionKey=Symbol.for("code-codex:runtime-log-connection:v1");
+const connectionHost=window as unknown as Record<symbol,LogConnection|undefined>;
+const connection=connectionHost[connectionKey]??={syncError:""};
+if (!Object.getOwnPropertyDescriptor(connection,"request")?.get) {
+  // Share a logging-only dispatcher, never the general authenticated Bridge capability.
+  let send=connection.request;
+  const loggingRequest:Request=(method,params)=>{
+    if(!["explorer.runtime.list","explorer.runtime.read","explorer.runtime.append"].includes(method))
+      return Promise.reject(new Error("The shared logging connection only supports runtime information."));
+    if(!send)return Promise.reject(new Error("The native logging connection is unavailable."));
+    return send(method,params);
+  };
+  Object.defineProperty(connection,"request",{configurable:false,get:()=>send?loggingRequest:undefined,set:(next:Request|undefined)=>{send=next;}});
+}
 let currentView = "";
 let dialog: HTMLDialogElement | undefined;
 
 export function connectRuntimeInformation(send: Request): void {
-  request = send;
+  connection.request = send;
+  observeRuntimeExceptions();
   runtimeEvent("renderer","native bridge","connected");
-  if (!timer) timer = setInterval(() => { void flushRuntimeEvents(); },1000);
+  if (!connection.timer) connection.timer = setInterval(() => { void flushRuntimeEvents(); },1000);
   void flushRuntimeEvents();
 }
 export async function flushRuntimeEvents(): Promise<void> {
-  if (!request) return;
-  if (sending) return sending;
-  sending = (async () => {
+  if (!connection.request) return;
+  if (connection.sending) return connection.sending;
+  connection.sending = (async () => {
     for (let batch = 0; batch < 128; batch++) {
       const events = takeRuntimeEvents();
-      if (!events.length || !request) break;
+      if (!events.length || !connection.request) break;
       try {
-        const result = await request<{accepted:number}>("explorer.runtime.append",{events});
+        const result = await connection.request<{accepted:number}>("explorer.runtime.append",{events});
         if (result.accepted !== events.length) throw new Error("Runtime events were not acknowledged.");
-        syncError = "";
+        connection.syncError = "";
       }
-      catch(error) { syncError = error instanceof Error ? redactRuntimeText(error.message) : "Renderer log synchronization failed"; restoreRuntimeEvents(events); break; }
+      catch(error) { connection.syncError = error instanceof Error ? redactRuntimeText(error.message) : "Renderer log synchronization failed"; restoreRuntimeEvents(events); break; }
     }
   })();
-  try { await sending; } finally { sending = undefined; }
+  try { await connection.sending; } finally { delete connection.sending; }
+}
+
+function observeRuntimeExceptions():void {
+  const key=Symbol.for("code-codex:runtime-exceptions:v1");
+  const host=window as unknown as Record<symbol,unknown>;
+  if(host[key])return;host[key]=true;
+  // Observe unhandled failures without intercepting or changing native behavior.
+  let exceptionWindow = Date.now(), exceptionCount = 0, suppressed = 0;
+  const exception = (action:string,error:unknown) => {
+    if(Date.now()-exceptionWindow>10_000){if(suppressed)runtimeEvent('codex-observed','exception observation','throttled',{suppressedCount:suppressed});exceptionWindow=Date.now();exceptionCount=0;suppressed=0;}
+    if(++exceptionCount>10){suppressed++;return;}
+    runtimeEvent('codex-observed',action,'failed',{...runtimeErrorDetails(error),observation:'Window-level exception; source ownership and root cause are not inferred.'});
+  };
+  window.addEventListener('error',event=>{if(event instanceof ErrorEvent)exception('window exception',event.error??event.message);});
+  window.addEventListener('unhandledrejection',event=>exception('unhandled rejection',event.reason));
 }
 
 /** Observe structural state, never conversation text, input values, URLs or account identifiers. */
@@ -54,6 +84,7 @@ export function observeCodexRuntime(): void {
   window.addEventListener("code-codex:thread-change",() => runtimeEvent("codex-observed","active task","changed"));
   document.addEventListener("visibilitychange",() => runtimeEvent("codex-observed","document visibility",document.visibilityState));
   window.addEventListener("pagehide",() => { runtimeEvent("renderer","document","leaving"); void flushRuntimeEvents(); });
+
   check();
 }
 
@@ -128,29 +159,32 @@ export async function openRuntimeInformation(): Promise<void> {
       const source = document.createElement("span"); source.className="source"; source.textContent=String(event.source);
       const body = document.createElement("div"); body.className="body";
       const title = document.createElement("strong"); title.textContent=`${event.action} · ${event.outcome}`; if (event.outcome==="failed") title.className="failed";
-      const details = document.createElement("div"); details.className="detail"; details.textContent=JSON.stringify(event.details);
+      const details = document.createElement("div"); details.className="detail"; details.textContent=JSON.stringify(event.details,null,2);
       body.append(title,details); row.append(time,source,body); container.append(row);
     }
     if (!matching.length) container.textContent="No matching events.";
     older.hidden=matching.length<=visibleLimit;
     container.scrollTop=following ? container.scrollHeight : scrollTop;
   };
-  const load = async () => {
+  const load = async ():Promise<boolean> => {
     const token = ++generation;
     try {
-      if (!request) throw new Error("The native logging connection is unavailable.");
+      if (!connection.request) throw new Error("The native logging connection is unavailable.");
       await flushRuntimeEvents();
-      const data = await request<{text:string;storageError?:string}>("explorer.runtime.read",{id:select.value});
-      if (token !== generation || !host.isConnected) return;
+      const data = await connection.request<{text:string;storageError?:string}>("explorer.runtime.read",{id:select.value});
+      if (token !== generation || !host.isConnected) return false;
       const lines=data.text.trim().split("\n").map(line=>redactRuntimeValue(JSON.parse(line)) as Record<string, unknown>); text=lines.map(line=>JSON.stringify(line)).join("\n")+"\n"; const metadata=lines.shift()!; events=lines as typeof events;
-      summary.textContent=`Version ${metadata.version} · ${events.length} retained events · ${metadata.droppedEvents} older events removed · ${(new TextEncoder().encode(text).length/1024/1024).toFixed(2)} MB${data.storageError ? ` · Storage error: ${data.storageError}` : ""}${syncError ? ` · Renderer sync error: ${syncError}` : ""}`;
+      const failures=events.filter(event=>event.outcome==='failed').length;
+      const interruptions=events.filter(event=>event.outcome==='cancelled'||event.outcome==='interrupted'||event.outcome==='discarded').length;
+      summary.textContent=`Version ${metadata.version} · ${events.length} retained events · ${failures} failure events · ${interruptions} interrupted/cancelled/discarded events · ${metadata.droppedEvents} older events removed · ${(new TextEncoder().encode(text).length/1024/1024).toFixed(2)} MB${data.storageError ? ` · Storage error: ${data.storageError}` : ""}${connection.syncError ? ` · Renderer sync error: ${connection.syncError}` : ""}`;
       render();
-    } catch(error) { summary.textContent=error instanceof Error ? redactRuntimeText(error.message) : "Could not load runtime information."; }
+      return true;
+    } catch(error) { if(token===generation){text='';events=[];container.replaceChildren();summary.textContent=error instanceof Error ? redactRuntimeText(error.message) : "Could not load runtime information.";}return false; }
   };
   const refresh = async () => {
     try {
-      if (!request) throw new Error("The native logging connection is unavailable.");
-      const listing = await request<Listing>("explorer.runtime.list");
+      if (!connection.request) throw new Error("The native logging connection is unavailable.");
+      const listing = await connection.request<Listing>("explorer.runtime.list");
       const selected=select.value;
       select.replaceChildren(...listing.runs.map(run=>{const option=document.createElement("option"); option.value=run.id; const date=new Date(Number(run.id.split("-")[0])); option.textContent=`${date.toLocaleString()}${run.current ? " · Current run" : ""}`; return option;}));
       select.value=listing.runs.some(run=>run.id===selected) ? selected : listing.currentRun;
@@ -162,8 +196,8 @@ export async function openRuntimeInformation(): Promise<void> {
   select.addEventListener("change",()=>{visibleLimit=500;void load();}); filter.addEventListener("input",()=>{visibleLimit=500;render();});
   older.addEventListener("click",()=>{const height=container.scrollHeight,top=container.scrollTop;visibleLimit+=500;render();container.scrollTop=top+container.scrollHeight-height;});
   shadow.querySelector(".refresh")!.addEventListener("click",()=>void refresh());
-  shadow.querySelector(".copy")!.addEventListener("click",async()=>{try {await load(); await navigator.clipboard.writeText(`Code-Codex runtime information\n${summary.textContent}\n${text}`);summary.textContent="Complete retained log copied.";} catch {summary.textContent="Clipboard unavailable. Use Export to save the complete log.";}});
-  shadow.querySelector(".export")!.addEventListener("click",()=>{const url=URL.createObjectURL(new Blob([text],{type:"application/x-ndjson;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`CodeCodex-runtime-${select.value}.jsonl`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
+  shadow.querySelector(".copy")!.addEventListener("click",async()=>{try {if(!await load()){summary.textContent+=' · Copy cancelled: the selected log could not be refreshed.';return;} await navigator.clipboard.writeText(`Code-Codex runtime information\n${summary.textContent}\n${text}`);summary.textContent="Complete retained log copied.";} catch {summary.textContent="Clipboard unavailable. Use Export to save the complete log.";}});
+  shadow.querySelector(".export")!.addEventListener("click",async()=>{if(!await load()){summary.textContent+=' · Export cancelled: the selected log could not be refreshed.';return;}const url=URL.createObjectURL(new Blob([text],{type:"application/x-ndjson;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`CodeCodex-runtime-${select.value}.jsonl`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
   const refreshTimer = setInterval(()=>{if (select.selectedOptions[0]?.textContent?.endsWith(" · Current run")) void load();},3000);
   await refresh();
 }

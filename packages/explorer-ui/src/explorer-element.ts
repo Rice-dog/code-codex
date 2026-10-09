@@ -1,9 +1,11 @@
+import { VersionFeedback } from './version-feedback';
 import {pluginExport} from './plugin-runtime';
 import type {HistoryHost} from './git-history-runtime';
 import {normalizeGitHistory,normalizeGitCommit,normalizeGitDiff,gitHistoryError} from './git-history-facade';
 import {transparentPresentation,applyTransparentPresentation,clearTransparentPresentation} from './utility-plugin-facade';
 import { ParticleImageRenderer, GlowHorizonRenderer, HeavenlyCloudRenderer, AuroraIonosphereRenderer, MilkyWayRenderer, MountainRenderer, BlinkingSquaresRenderer, CloudTrainRenderer, PixelSculptRenderer, BlackHoleRenderer, populateGlowHorizonLayer } from './background-plugin-facade';
-import { ensureBackgroundPackage, connectBackgroundPackages } from './background-plugin-runtime';
+import { connectBackgroundPackages } from './background-plugin-runtime';
+import { ensureBackgroundPackage } from './plugin-load-diagnostics';
 import { BackgroundPackageMarket } from './background-package-market';
 import {
   DEFAULT_PARTICLE_BACKGROUND_SETTINGS,
@@ -141,6 +143,7 @@ import { STARTUP_BACKGROUNDS, mountStartupBackground } from './startup-backgroun
 import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVideo } from "./startup-transition-facade";
 import { observePluginControls } from "./runtime-information";
 import { runtimeEvent, runtimeTaskLabel } from "./runtime-events";
+import { beginRuntimeOperation, runtimeErrorDetails } from "./runtime-operations";
 import { clipFadeOpacity, formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-facade";
 import { activePageElements, MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
@@ -5452,6 +5455,8 @@ export class CodeCodexElement extends HTMLElement {
   #contextMenuError: string | undefined;
   #contextActionPending = false;
   #actionNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+  readonly #versionFeedback: VersionFeedback;
+  #startupUpdateStarted = false;
   #updateCheckPending = false;
   #updateCheckOperation = 0;
   #updateCheckPresentation: UpdateCheckPresentation = "idle";
@@ -5833,6 +5838,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#masthead = this.#required<HTMLElement>(".masthead");
     this.#editModeButton = this.#required<HTMLButtonElement>(".edit-mode-toggle");
     this.#statusCode = this.#required<HTMLButtonElement>(".status-code");
+    this.#versionFeedback = new VersionFeedback(this.#statusCode, () => this.#renderStatus());
     this.#updatePopover = this.#required<HTMLElement>(".update-popover");
     this.#updateMessage = this.#required<HTMLElement>(".update-message");
     this.#updateLaterButton = this.#required<HTMLButtonElement>(".update-later");
@@ -6315,6 +6321,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#setState("error", "NO_BRIDGE");
       return;
     }
+    this.#versionFeedback.connect();
+    void this.#checkStartupVersion();
     this.#connectPackageMarket(this.#bridge);
     this.#startupTransitionNativeSync = this.#syncStartupTransitionNativePreference(this.#bridge);
     void this.#start(this.#bridge, this.#generation, bootstrap.manualWorkspace === true);
@@ -6351,6 +6359,7 @@ export class CodeCodexElement extends HTMLElement {
     this.#cancelMarquee();
     this.#preserveDetachedDraft();
     this.#connected = false;
+    this.#versionFeedback.dispose();
     this.#appearanceInitializationGeneration += 1;
     this.#particleBackgroundUnsubscribe?.();
     this.#particleBackgroundUnsubscribe = undefined;
@@ -6548,6 +6557,7 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   reconcileMount(parent: Element, before: ChildNode | null, placement: "inline" | "drawer", strategy: string): void {
+    if(this.dataset.placement!==placement || this.dataset.mountStrategy!==strategy || this.parentElement!==parent)runtimeEvent('file-tree','mount','reconciled',{placement,strategy,homeActive:this.#homeViewActive,parentConnected:parent.isConnected});
     this.dataset.placement = placement;
     this.dataset.mountStrategy = strategy;
     this.#requestedPlacement = placement;
@@ -6650,6 +6660,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#setState("error", "NO_BRIDGE");
       return;
     }
+    this.#versionFeedback.connect();
+    void this.#checkStartupVersion();
     this.#connectPackageMarket(bridge);
     this.#setState("loading");
     void this.#start(bridge, this.#generation, bootstrap.manualWorkspace === true);
@@ -6834,7 +6846,10 @@ export class CodeCodexElement extends HTMLElement {
       this.#collapseButton.addEventListener("click", () => this.collapse(true));
       this.#collapsedTab.addEventListener("click", () => this.collapse(false));
       this.#editModeButton.addEventListener("click", () => this.#toggleEditing());
-      this.#statusCode.addEventListener("click", () => void this.#checkForUpdates());
+      this.#statusCode.addEventListener("click", () => {
+        if (this.#updateCandidate && this.#updateCheckPresentation === "updateAvailable") this.#openUpdateDialog(this.#updateCandidate);
+        else void this.#checkForUpdates();
+      });
       this.#updateLaterButton.addEventListener("click", () => this.#closeUpdateDialog(true));
       this.#updateInstallButton.addEventListener("click", () => void this.#installUpdate());
       this.#previewMarketButton.addEventListener("click", () => this.#togglePreviewMarket());
@@ -7521,19 +7536,25 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   async #switchThread(threadId: string | null, force = false): Promise<void> {
+    const diagnostic=beginRuntimeOperation('file-tree','workspace switch',{from:runtimeTaskLabel(this.#threadId),to:runtimeTaskLabel(threadId),force});
+    let diagnosticGeneration=this.#generation;
+    try {
     runtimeEvent("renderer", "workspace selection", "requested", {from:runtimeTaskLabel(this.#threadId),to:runtimeTaskLabel(threadId),hasTask:!!threadId,force,cached:threadId===this.#threadId && !!this.#context});
     this.#closeContextMenu(false);
     if (!force && threadId === this.#threadId && this.#context) {
       this.#queuedThreadSwitch = undefined;
+      diagnostic.finish('cached',{workspacePreserved:true});
       return;
     }
     if (this.#editSaving) {
       this.#queuedThreadSwitch = { threadId, force };
+      diagnostic.finish('queued',{reason:'File save in progress'});
       this.#announce("Task switch queued until the current save finishes");
       return;
     }
     if (!this.#leaveEditing("Switch tasks and discard your unsaved changes?")) {
       this.#queuedThreadSwitch = { threadId, force };
+      diagnostic.finish('deferred',{reason:'Unsaved edits retained'});
       return;
     }
     this.#purgePreviewTabs(false);
@@ -7545,12 +7566,14 @@ export class CodeCodexElement extends HTMLElement {
     }
     this.#prepareGitHistoryForThreadSwitch();
     const generation = ++this.#generation;
+    diagnosticGeneration=generation;
     this.#clearWorkspaceTimers();
     this.#threadId = threadId;
     this.#context = undefined;
 
     const bridge = this.#bridge;
     if (!bridge) {
+      diagnostic.finish('failed',{errorCode:'NO_BRIDGE'});
       this.#setState("error", "NO_BRIDGE");
       this.#showGitHistoryUnavailable("Code-Codex is not connected.");
       return;
@@ -7586,6 +7609,7 @@ export class CodeCodexElement extends HTMLElement {
       this.#model.reset();
       this.#model.beginLoad("");
       this.#model.commitLoad("", list);
+      diagnostic.event('root listing','applied',{entryCount:list.entries.length,hasNextPage:!!list.nextCursor,generation});
       this.#setState("ready");
       this.#renderTree();
       if (!this.#restoreDetachedDraft(context)) this.#announce(`${context.projectName} loaded`);
@@ -7598,12 +7622,14 @@ export class CodeCodexElement extends HTMLElement {
         await bridge.request("explorer.watch.start", {});
         if (generation !== this.#generation) return;
         this.#watching = true;
-      } catch {
+      } catch (error) {
         if (generation !== this.#generation) return;
         this.#watching = false;
+        diagnostic.event('file watcher','failed',runtimeErrorDetails(error));
       }
       if (this.#watching) await this.#loadDirectory("");
     } catch (error) {
+      diagnostic.event('workspace preparation','failed',runtimeErrorDetails(error));
       if (generation !== this.#generation) return;
       if (error instanceof ExplorerBridgeError && error.code === "NO_CONTEXT") {
         try {
@@ -7626,6 +7652,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#showGitHistoryUnavailable("Git history is unavailable while the project is not loaded.");
       }
     }
+    } finally {diagnostic.finish(diagnosticGeneration!==this.#generation?'discarded':['error','incompatible'].includes(this.#state)?'failed':'completed',{state:this.#state,generation:diagnosticGeneration,currentGeneration:this.#generation,selectionStillCurrent:threadId===this.#threadId,watching:this.#watching,workspaceAvailable:!!this.#context});}
   }
 
   async #requestBootstrap<T>(
@@ -7638,6 +7665,7 @@ export class CodeCodexElement extends HTMLElement {
       return await bridge.request<T>(method, params);
     } catch (error) {
       if (!isTransientBootstrapError(error) || !this.#canRetryBootstrap(bridge, generation)) throw error;
+      runtimeEvent('file-tree','bootstrap retry','scheduled',{method,generation,delayMs:BOOTSTRAP_RETRY_DELAY_MS,...runtimeErrorDetails(error)});
       await new Promise<void>((resolve) => setTimeout(resolve, BOOTSTRAP_RETRY_DELAY_MS));
       if (!this.#canRetryBootstrap(bridge, generation)) throw error;
       return bridge.request<T>(method, params);
@@ -7701,6 +7729,7 @@ export class CodeCodexElement extends HTMLElement {
     if (append && !cursor) return;
     if (!this.#model.beginLoad(path, append)) return;
     const generation = this.#generation;
+    const diagnostic=beginRuntimeOperation('file-tree','directory listing',{directory:runtimeTaskLabel(path || 'workspace-root'),append,generation});
     this.#renderTree();
     try {
       const params: Record<string, unknown> = { relativePath: path, limit: PAGE_SIZE };
@@ -7708,6 +7737,7 @@ export class CodeCodexElement extends HTMLElement {
       const raw = await bridge.request<unknown>("explorer.list", params);
       if (generation !== this.#generation) return;
       this.#model.commitLoad(path, normalizeList(raw), append);
+      diagnostic.finish('applied',{nodeCount:this.#model.nodeCount(),hasNextPage:!!this.#model.getNextCursor(path)});
       for (const [markedPath, kind] of this.#pendingMarks) {
         if (parentPath(markedPath) === path) {
           this.#model.markChange(markedPath, kind);
@@ -7715,10 +7745,12 @@ export class CodeCodexElement extends HTMLElement {
         }
       }
     } catch (error) {
+      diagnostic.finish('failed',runtimeErrorDetails(error));
       if (generation !== this.#generation) return;
       this.#model.failLoad(path, friendlyError(error));
       if (path === "") this.#setState("error", errorCode(error));
     } finally {
+      diagnostic.finish('discarded',{reason:'Workspace generation changed',currentGeneration:this.#generation});
       this.#renderTree();
     }
   }
@@ -7782,6 +7814,7 @@ export class CodeCodexElement extends HTMLElement {
     const rawChanges = Array.isArray(params) ? params : Array.isArray(object?.changes) ? object.changes : [params];
     const changes = rawChanges.map(normalizeChange).filter((change): change is ExplorerChange => Boolean(change));
     if (!changes.length) return;
+    runtimeEvent('file-tree','watched changes','applied',{count:changes.length,kinds:[...new Set(changes.map(change=>change.kind))],loadedDirectoryCount:this.#model.loadedDirectories().length});
 
     for (const change of changes) {
       const removedPath = change.kind === "renamed" ? (change.fromRelativePath ?? change.relativePath) : change.relativePath;
@@ -10214,8 +10247,10 @@ export class CodeCodexElement extends HTMLElement {
   ): Promise<void> {
     if (!this.#canApplyPreview(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, revision)) return;
     runtimeEvent("renderer","file preview","requested",{tab:runtimeTaskLabel(tab.path),extension:tab.path.split(".").pop()?.slice(0,12),openTabCount:this.#previewTabs.length});
+    const diagnostic=beginRuntimeOperation('file-preview','load',{tab:runtimeTaskLabel(tab.path),generation,revision});
     const mediaRoute = mediaPreviewRoute(tab.path);
     if (mediaRoute && !this.#enabledPreviewers.has(mediaRoute.previewerId)) {
+      diagnostic.finish('unavailable',{reason:'Previewer disabled',previewer:mediaRoute.previewerId});
       tab.view = { kind: "unsupported", path: tab.path, name: tab.name, sizeBytes: 0, reason: "previewer-disabled" };
       this.#syncMainPreview();
       this.#announce(`Preview extension disabled for ${tab.name}`);
@@ -10232,7 +10267,9 @@ export class CodeCodexElement extends HTMLElement {
       tab.view = this.#previewView(tab, preview);
       this.#syncMainPreview();
       this.#announce(preview.kind === "unsupported" ? `Preview unavailable for ${tab.name}` : `Preview loaded for ${tab.name}`);
+      diagnostic.finish('applied',{kind:preview.kind});
     } catch (error) {
+      diagnostic.finish('failed',runtimeErrorDetails(error));
       if (!this.#canApplyPreview(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, revision)) return;
       const code = errorCode(error);
       const message = mediaRoute ? mediaPreviewError(error) : undefined;
@@ -10241,7 +10278,7 @@ export class CodeCodexElement extends HTMLElement {
         : { kind: "error", path: tab.path, name: tab.name, code };
       this.#syncMainPreview();
       this.#announce(`Preview could not load for ${tab.name}`);
-    }
+    } finally {diagnostic.finish('discarded',{reason:'Preview result no longer belongs to the active selection'});}
   }
 
   async #requestMediaPreview(
@@ -15642,6 +15679,8 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #cancelUpdateCheck(): void {
+    if (this.#updateCheckPending) this.#startupUpdateStarted = false;
+    this.#versionFeedback.cancel();
     this.#updateCheckOperation += 1;
     this.#updateCheckPending = false;
     this.#updateInstallPending = false;
@@ -15654,9 +15693,15 @@ export class CodeCodexElement extends HTMLElement {
     }
   }
 
-  async #checkForUpdates(): Promise<void> {
+  async #checkStartupVersion(): Promise<void> {
+    if (this.#startupUpdateStarted) return;
+    this.#startupUpdateStarted = true;
+    await this.#checkForUpdates(true);
+  }
+
+  async #checkForUpdates(automatic = false): Promise<void> {
     const versionVisible = this.#state === "ready" || this.#state === "empty" || this.#state === "no-project";
-    if (!versionVisible || this.#updateCheckPending) return;
+    if ((!automatic && !versionVisible) || this.#updateCheckPending) return;
 
     const bridge = this.#bridge;
     if (!bridge?.available) {
@@ -15674,29 +15719,35 @@ export class CodeCodexElement extends HTMLElement {
     this.#updateCheckPresentation = "checking";
     this.#updateCheckSummary = "Checking GitHub for the latest release…";
     this.#renderStatus();
-    this.#showActionProgress(this.#updateCheckSummary);
+    if (!automatic) this.#showActionProgress(this.#updateCheckSummary);
+    runtimeEvent("renderer", "version check", "started", { automatic });
 
     try {
-      const result = normalizeUpdateCheckResult(await bridge.request<unknown>("explorer.update.check", {}));
+      const result = normalizeUpdateCheckResult(await bridge.request<unknown>(automatic ? "explorer.update.startup" : "explorer.update.check", {}));
       if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
 
       this.#updateCheckPresentation = result.status;
+      runtimeEvent("renderer", "version check", result.status, { automatic, currentVersion: result.currentVersion, latestVersion: result.latestVersion });
       if (result.status === "updateAvailable") {
         this.#updateCheckSummary = `Code-Codex v${result.latestVersion} is available. You are using v${result.currentVersion}.`;
-        this.#hideActionNotice();
-        this.#openUpdateDialog(result);
+        this.#updateCandidate = result;
+        if (automatic) this.#versionFeedback.show("update", result.latestVersion);
+        else { this.#hideActionNotice(); this.#openUpdateDialog(result); }
       } else if (result.status === "ahead") {
         this.#updateCheckSummary = `This build (v${result.currentVersion}) is newer than GitHub’s latest published release (v${result.latestVersion}).`;
-        this.#showActionNotice(this.#updateCheckSummary);
+        if (!automatic) this.#showActionNotice(this.#updateCheckSummary);
       } else {
         this.#updateCheckSummary = `Code-Codex v${result.currentVersion} is up to date.`;
-        this.#showActionNotice(this.#updateCheckSummary);
+        if (automatic) this.#versionFeedback.show("latest");
+        else this.#showActionNotice(this.#updateCheckSummary);
       }
     } catch (error) {
       if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
       this.#updateCheckPresentation = "error";
       this.#updateCheckSummary = updateCheckError(error);
-      this.#showActionNotice(this.#updateCheckSummary, "error");
+      runtimeEvent("renderer", "version check", "failed", { automatic, code: errorCode(error), ...runtimeErrorDetails(error) });
+      if (automatic) this.#versionFeedback.show("error");
+      else this.#showActionNotice(this.#updateCheckSummary, "error");
     } finally {
       if (operation === this.#updateCheckOperation) {
         this.#updateCheckPending = false;
@@ -15771,7 +15822,8 @@ export class CodeCodexElement extends HTMLElement {
 
   #renderStatus(): void {
     const versionVisible = this.#state === "ready" || this.#state === "empty" || this.#state === "no-project";
-    this.#statusCode.textContent = versionVisible ? `v${__CODE_CODEX_VERSION__}` : this.#state.toUpperCase().slice(0, 8);
+    this.#statusCode.textContent = versionVisible ? (this.#versionFeedback.text ?? `v${__CODE_CODEX_VERSION__}`) : this.#state.toUpperCase().slice(0, 8);
+    this.#versionFeedback.sync(versionVisible);
     this.#statusCode.disabled = !versionVisible || this.#updateCheckPending || this.#updateInstallPending;
     this.#statusCode.dataset.updateState = versionVisible ? this.#updateCheckPresentation : "idle";
     this.#statusCode.setAttribute("aria-busy", String(versionVisible && (this.#updateCheckPending || this.#updateInstallPending)));

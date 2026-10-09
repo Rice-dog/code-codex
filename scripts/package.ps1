@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.0",
+    [string]$Version = "0.4.4",
     [string]$WixPath
 )
 
@@ -139,7 +139,10 @@ if (-not $pluginStageFull.StartsWith($ExpectedStageRoot, [StringComparison]::Ord
 if (Test-Path -LiteralPath $pluginStageFull) { Remove-Item -LiteralPath $pluginStageFull -Recurse -Force }
 & node (Join-Path $PSScriptRoot "stage-plugin-release.mjs") $pluginStageFull
 if ($LASTEXITCODE -ne 0) { throw "Plugin release staging failed" }
-$pluginInventory = @(Get-Content (Join-Path $Artifacts 'plugin-release-inventory.json') -Raw -Encoding UTF8 | ConvertFrom-Json)
+$pluginInventoryJson = Get-Content (Join-Path $Artifacts 'plugin-release-inventory.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+# Windows PowerShell 5.1 does not enumerate ConvertFrom-Json's root array.
+# Materialize entries explicitly so the inventory/hash list never contains a nested array.
+$pluginInventory = @(foreach ($pluginAsset in $pluginInventoryJson) { $pluginAsset })
 
 New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
 $history = Join-Path $Artifacts ("plugin-release-history/" + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))

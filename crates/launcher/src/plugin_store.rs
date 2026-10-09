@@ -641,6 +641,12 @@ pub(crate) fn cancel(id: &str) -> Result<Value, BridgeError> {
     if let Some(job) = jobs.get(id) {
         job.cancel.cancel();
     }
+    crate::runtime_log::record(
+        "plugin-package",
+        "cancel",
+        "requested",
+        json!({"id":id,"activeJob":jobs.contains_key(id)}),
+    );
     Ok(json!({"cancelRequested":true}))
 }
 struct JobGuard(String);
@@ -678,6 +684,23 @@ fn trusted_url(url: &url::Url) -> bool {
         )
 }
 pub(crate) async fn install(id: &str) -> Result<Value, BridgeError> {
+    let mut operation =
+        crate::runtime_log::Operation::start("plugin-package", "download", json!({"id":id}));
+    let result = install_inner(id, &operation).await;
+    let job = jobs().lock().ok().and_then(|jobs| {
+        jobs.get(id)
+            .map(|j| json!({"phase":j.phase,"receivedBytes":j.bytes}))
+    });
+    match &result {
+        Ok(value)=>operation.finish("passed",json!({"id":id,"cached":value.get("cached").and_then(Value::as_bool).unwrap_or(false),"job":job})),
+        Err(e)=>operation.finish(if e.code=="PLUGIN_CANCELLED" {"cancelled"}else{"failed"},json!({"id":id,"code":e.code,"reason":e.message,"job":job})),
+    }
+    result
+}
+async fn install_inner(
+    id: &str,
+    operation: &crate::runtime_log::Operation,
+) -> Result<Value, BridgeError> {
     let p = package(id)?;
     let packages = catalog()?;
     let closure = dependency_order(&packages, id)?;
@@ -719,15 +742,14 @@ pub(crate) async fn install(id: &str) -> Result<Value, BridgeError> {
         );
     }
     let _guard = JobGuard(id.to_owned());
-    crate::runtime_log::record(
-        "plugin-package",
-        "download",
-        "started",
+    operation.event(
+        "download plan",
+        "prepared",
         json!({"id":id,"category":p.category,"version":p.version,"expectedBytes":closure.iter().map(|p|p.total_size()).sum::<usize>(),"resourceCount":p.resources.len(),"dependencyCount":closure.len()-1}),
     );
     let result = tokio::select! {
         ()=cancel.cancelled()=>Err(error("PLUGIN_CANCELLED","Plugin download was cancelled.")),
-        result=tokio::time::timeout(Duration::from_secs(120),download(&p,&closure))=>result.map_err(|_|error("PLUGIN_NETWORK","Plugin package and resources download exceeded 120 seconds. Retry to reuse already verified files.")).and_then(|result|result),
+        result=tokio::time::timeout(Duration::from_secs(120),download(&p,&closure, operation))=>result.map_err(|_|error("PLUGIN_NETWORK","Plugin package and resources download exceeded 120 seconds. Retry to reuse already verified files.")).and_then(|result|result),
     };
     if let Err(e) = &result {
         if let Ok(mut jobs) = jobs().lock() {
@@ -740,31 +762,36 @@ pub(crate) async fn install(id: &str) -> Result<Value, BridgeError> {
                 j.error = Some(e.message.clone());
             }
         }
-        crate::runtime_log::record(
-            "plugin-package",
-            "download",
-            "failed",
-            json!({"id":id,"version":p.version,"code":e.code,"reason":e.message}),
-        );
     }
     result
 }
-async fn download(p: &Package, closure: &[&Package]) -> Result<Value, BridgeError> {
+async fn download(
+    p: &Package,
+    closure: &[&Package],
+    operation: &crate::runtime_log::Operation,
+) -> Result<Value, BridgeError> {
     let root = cache_root()?;
     let mut completed = 0;
     for dependency in closure {
         for asset in dependency.assets() {
+            operation.event("asset selection", "started", json!({"id":asset.id,"asset":asset.asset,"releaseTag":asset.release_tag,"kind":asset.kind,"expectedBytes":asset.size,"completedBytes":completed}));
             if source_available(&root, &asset) {
                 // Upgrade the categorized location using verified old bytes, without HTTP.
                 read_asset(&root, &asset)?;
+                operation.event(
+                    "asset selection",
+                    "cached",
+                    json!({"id":asset.id,"asset":asset.asset,"expectedBytes":asset.size}),
+                );
             } else {
-                download_asset(&asset, completed, &p.id).await?;
+                download_asset(&asset, completed, &p.id, operation.id()).await?;
             }
             completed += asset.size;
             progress(&p.id, "downloading", completed);
         }
     }
     sources(&p.id)?;
+    operation.event("package availability", "verified", json!({"id":p.id,"verifiedBytes":completed,"dependencyCount":closure.len()-1,"enabledAutomatically":false}));
     progress(&p.id, "installed", completed);
     Ok(json!({"id":p.id,"category":p.category,"installed":true,"version":p.version}))
 }
@@ -772,30 +799,46 @@ async fn download_asset(
     p: &Package,
     completed: usize,
     progress_id: &str,
+    parent_operation: u64,
 ) -> Result<Value, BridgeError> {
+    let endpoint = format!(
+        "https://github.com/Rice-dog/code-codex/releases/download/{}/{}",
+        p.release_tag, p.asset
+    );
+    let mut trace = crate::network_diagnostics::HttpTrace::start(
+        "plugin-package",
+        &endpoint,
+        10_000,
+        120_000,
+        json!({"id":p.id,"asset":p.asset,"releaseTag":p.release_tag,"expectedBytes":p.size,"parentOperationId":parent_operation}),
+    );
+    let request_operation = trace.operation.id();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() > 5 || !trusted_url(attempt.url()) {
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            let allowed = attempt.previous().len() <= 5 && trusted_url(attempt.url());
+            crate::runtime_log::record("plugin-package", "HTTP redirect", if allowed {"followed"}else{"rejected"}, json!({"operationId":request_operation,"status":attempt.status().as_u16(),"fromHost":attempt.previous().last().and_then(|u|u.host_str()),"toHost":attempt.url().host_str(),"redirectCount":attempt.previous().len(),"trusted":trusted_url(attempt.url())}));
+            if !allowed {
                 attempt.stop()
             } else {
                 attempt.follow()
             }
         }))
         .build()
-        .map_err(|e| error("PLUGIN_NETWORK", format!("Plugin HTTP client: {e}")))?;
-    let url = format!(
-        "https://github.com/Rice-dog/code-codex/releases/download/{}/{}",
-        p.release_tag, p.asset
-    );
-    let response = client.get(&url).send().await.map_err(|e| {
+        .map_err(|e| {trace.fail("client build", &e, 0); error("PLUGIN_NETWORK", format!("Plugin HTTP client: {}", crate::network_diagnostics::error_message(&e)))})?;
+    let response = trace.send(client.get(&endpoint)).await.map_err(|e| {
         error(
             "PLUGIN_NETWORK",
-            format!("Plugin {} request failed: {e}", p.id),
+            format!(
+                "Plugin {} request failed: {}",
+                p.id,
+                crate::network_diagnostics::error_message(&e)
+            ),
         )
     })?;
     if !response.status().is_success() || !trusted_url(response.url()) {
+        trace.operation.finish("failed",json!({"phase":"HTTP response validation","code":"PLUGIN_HTTP","status":response.status().as_u16(),"trustedFinalHost":trusted_url(response.url())}));
         return Err(error(
             "PLUGIN_HTTP",
             format!(
@@ -810,13 +853,24 @@ async fn download_asset(
         .content_length()
         .is_some_and(|len| len != p.size as u64)
     {
+        trace.operation.finish("failed",json!({"phase":"length validation","code":"PLUGIN_INTEGRITY","expectedBytes":p.size,"observedLength":response.content_length()}));
         return Err(error(
             "PLUGIN_INTEGRITY",
             "Plugin HTTP Content-Length does not match the trusted catalog.",
         ));
     }
     let root = cache_root()?;
-    receive_asset(p, response, &root, completed, progress_id).await
+    let result = receive_asset(p, response, &root, completed, progress_id, &mut trace).await;
+    match &result {
+        Ok(_) => trace.operation.finish(
+            "passed",
+            json!({"receivedBytes":p.size,"integrityVerified":true,"cacheCommitted":true}),
+        ),
+        Err(e) => trace
+            .operation
+            .finish("failed", json!({"code":e.code,"reason":e.message})),
+    }
+    result
 }
 #[cfg(test)]
 async fn receive(
@@ -824,7 +878,19 @@ async fn receive(
     response: reqwest::Response,
     root: &Path,
 ) -> Result<Value, BridgeError> {
-    receive_asset(p, response, root, 0, &p.id).await
+    let mut trace = crate::network_diagnostics::HttpTrace::start(
+        "plugin-package",
+        "http://localhost",
+        10_000,
+        120_000,
+        json!({"fixture":true}),
+    );
+    let result = receive_asset(p, response, root, 0, &p.id, &mut trace).await;
+    trace.operation.finish(
+        if result.is_ok() { "passed" } else { "failed" },
+        json!({"fixture":true}),
+    );
+    result
 }
 async fn receive_asset(
     p: &Package,
@@ -832,14 +898,26 @@ async fn receive_asset(
     root: &Path,
     completed: usize,
     progress_id: &str,
+    trace: &mut crate::network_diagnostics::HttpTrace,
 ) -> Result<Value, BridgeError> {
+    trace.operation.event(
+        "cache staging",
+        "started",
+        json!({"id":p.id,"asset":p.asset}),
+    );
     let staging = tempfile::NamedTempFile::new_in(&root)
         .map_err(|e| error("PLUGIN_CACHE", format!("Plugin staging: {e}")))?;
     let mut bytes = Vec::with_capacity(p.size);
+    let mut transfer = crate::network_diagnostics::TransferProgress::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| {
+        trace.fail("body stream", &e, bytes.len() as u64);
         error(
             "PLUGIN_NETWORK",
-            format!("Plugin stream failed after {} bytes: {e}", bytes.len()),
+            format!(
+                "Plugin stream failed after {} bytes: {}",
+                bytes.len(),
+                crate::network_diagnostics::error_message(&e)
+            ),
         )
     })? {
         if bytes.len().saturating_add(chunk.len()) > p.size {
@@ -849,23 +927,28 @@ async fn receive_asset(
             ));
         }
         bytes.extend_from_slice(&chunk);
+        transfer.observe(&trace.operation, bytes.len() as u64, p.size as u64);
         progress(progress_id, "downloading", completed + bytes.len());
     }
     progress(progress_id, "verifying", completed + bytes.len());
+    trace.operation.event("integrity", "started",json!({"id":p.id,"asset":p.asset,"expectedBytes":p.size,"receivedBytes":bytes.len(),"expectedSha256":p.sha256,"observedSha256":format!("{:x}",Sha256::digest(&bytes))}));
     verify(p, &bytes)?;
-    crate::runtime_log::record(
-        "plugin-package",
+    trace.operation.event(
         "integrity",
         "passed",
-        json!({"id":p.id,"version":p.version,"bytes":bytes.len()}),
+        json!({"id":p.id,"asset":p.asset,"version":p.version,"bytes":bytes.len()}),
+    );
+    trace.operation.event(
+        "cache commit",
+        "started",
+        json!({"id":p.id,"asset":p.asset}),
     );
     commit(&root, p, &bytes, staging)?;
     progress(progress_id, "downloading", completed + bytes.len());
-    crate::runtime_log::record(
-        "plugin-package",
+    trace.operation.event(
         "install",
         "committed",
-        json!({"id":p.id,"version":p.version,"bytes":bytes.len()}),
+        json!({"id":p.id,"asset":p.asset,"version":p.version,"bytes":bytes.len()}),
     );
     Ok(json!({"id":p.id,"installed":true,"version":p.version}))
 }
