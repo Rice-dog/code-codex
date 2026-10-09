@@ -2,6 +2,44 @@
 
 This folder contains ready-made downloadable packages.
 
+## v0.4.4 — 运行过程与错误信息（本地维护版）
+
+### 简体中文
+
+- 下载记录插件/资源选择、缓存命中、重定向、响应、接收进度、大小与SHA-256校验、缓存提交及模块准备，关联操作编号和耗时。
+- 网络失败保留脱敏原因链、错误分类、已接收字节、代理配置状态与失败后的独立DNS探测；探测不冒充原请求，未修改网络策略。
+- 补全Bridge/App Server请求、工作区切换、目录监听、预览、Git、更新和全局可观察异常；抑制成功的高频轮询。
+- 修复同版本再次激活时菜单与复用组件的日志连接不一致，共享最新鉴权连接和一个事件发送器。
+- Runtime Information缩进展示详情和失败统计；复制/导出刷新失败会停止，避免误交旧日志。最近10次/单次5MiB限制保持。
+- 沿用v0.4.1启动版本反馈与24个v0.3.96插件资产；本地构建安装，未发布GitHub。
+
+### English
+
+- Correlates plugin/asset selection, cache hits, redirects, headers, transfer milestones, size/SHA-256 validation, atomic cache commits and module preparation with operation IDs and timings.
+- Network failures retain redacted cause chains, classifications, received bytes, proxy configuration metadata and a separate post-failure DNS probe. The probe is explicitly independent; network policy is unchanged.
+- Extends Bridge/App Server requests, workspace switches, directory/watch operations, previews, Git, updates and observable global errors while suppressing successful high-frequency polling.
+- Fixes logging-connection sharing between a reinjected menu and a reused same-version component, with one shared authenticated connection and event pump.
+- Runtime Information displays indented details and failure counts. Copy/export stops if refresh fails, preventing stale reports. Latest 10 runs and 5 MiB per run limits remain.
+- Retains v0.4.1 startup-version feedback and all 24 published v0.3.96 plugin packages. Local build/install only; not published to GitHub.
+
+## v0.4.1 — 启动版本检查（本地维护版）
+
+### 简体中文
+
+- 启动后后台检查一次官方项目 GitHub Release；项目切换与连接恢复共享本次启动结果，不自动下载或安装。
+- 有更新：版本号彩虹淡入 250ms、显示 1.5 秒、淡出 250ms，恢复当前版本并保留更新圆点；点击进入已有更新窗口。
+- 已是最新：短暂绿色确认；检查失败：中性提示与明确悬停原因。当前构建领先公开版时单独说明，避免误报。
+- 提示等待文件树底栏可见且启动动画结束，支持减少动态效果；运行信息记录检查结果。24 插件仍复用 v0.3.96 已发布资源。
+- 本地构建，未创建 GitHub Release；公开版本仍以 GitHub 为准。
+
+### English
+
+- Checks this project's GitHub release once in the background per launch, sharing the result across project switches and reconnects. No automatic download or installation.
+- An available version fades in over 250ms, remains for 1.5 seconds, then fades out over 250ms. The installed version returns with a clickable update dot opening the existing update dialog.
+- Brief green confirmation for an equal release; neutral feedback and an explanatory tooltip for failure. Builds ahead of the public release are identified separately.
+- Feedback waits for the footer to be visible and the startup animation to finish; reduced motion is supported and results enter Runtime Information. The 24 plugins retain published v0.3.96 assets.
+- Local build only; no GitHub Release has been created for this version.
+
 ## v0.4.0 — 插件市场下载体验与浅色按钮
 
 ### 简体中文

@@ -1,6 +1,13 @@
 use serde::Serialize;
 use thiserror::Error;
 
+type DiagnosticObserver = fn(&str, &str, &str, serde_json::Value);
+static DIAGNOSTIC_OBSERVER: std::sync::OnceLock<DiagnosticObserver> = std::sync::OnceLock::new();
+/// Optional metadata-only observation; never exposes the accessed path or file contents.
+pub fn set_diagnostic_observer(observer: DiagnosticObserver) {
+    let _ = DIAGNOSTIC_OBSERVER.set(observer);
+}
+
 /// Stable error codes safe to cross the renderer boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -88,6 +95,14 @@ impl WorkspaceError {
 
 pub(crate) fn map_io(error: &std::io::Error) -> WorkspaceError {
     use std::io::ErrorKind;
+    if let Some(observer) = DIAGNOSTIC_OBSERVER.get() {
+        observer(
+            "workspace",
+            "I/O",
+            "failed",
+            serde_json::json!({"ioKind":format!("{:?}",error.kind()),"osErrorCode":error.raw_os_error()}),
+        );
+    }
 
     match error.kind() {
         ErrorKind::NotFound => WorkspaceError::NotFound,

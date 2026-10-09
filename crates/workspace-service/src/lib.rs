@@ -20,6 +20,7 @@ mod preview;
 mod settings;
 mod watcher;
 
+pub use error::set_diagnostic_observer;
 pub use error::{ErrorCode, WorkspaceError};
 pub use listing::{EntryKind, ListOptions, ListPage, TreeEntry, Workspace};
 pub use mutation::{

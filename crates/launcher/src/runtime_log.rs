@@ -1,7 +1,7 @@
 //! Bounded, per-launch diagnostics. Logging failure never fails an application operation.
 use serde_json::{Value, json};
 #[path = "runtime_redaction.rs"]
-mod redaction;
+pub(crate) mod redaction;
 use std::{
     collections::VecDeque,
     fs, io,
@@ -12,8 +12,66 @@ use std::{
 
 const MAX_BYTES: usize = 5 * 1024 * 1024;
 const KEEP_RUNS: usize = 10;
+static OPERATION_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static LOG: OnceLock<Mutex<RunLog>> = OnceLock::new();
 static WRITER: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+thread_local! { static TEST_EVENTS: std::cell::RefCell<Option<Vec<Value>>> = const { std::cell::RefCell::new(None) }; }
+#[cfg(test)]
+pub(crate) fn capture_test_events() {
+    TEST_EVENTS.with(|events| *events.borrow_mut() = Some(Vec::new()));
+}
+#[cfg(test)]
+pub(crate) fn take_test_events() -> Vec<Value> {
+    TEST_EVENTS.with(|events| events.borrow_mut().take().unwrap_or_default())
+}
+
+/// A bounded operation timeline. Dropped async work is visible without pretending it succeeded.
+pub(crate) struct Operation {
+    source: &'static str,
+    action: String,
+    id: u64,
+    started: Instant,
+    finished: bool,
+}
+impl Operation {
+    pub(crate) fn start(source: &'static str, action: impl Into<String>, details: Value) -> Self {
+        let op = Self {
+            source,
+            action: action.into(),
+            id: OPERATION_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            started: Instant::now(),
+            finished: false,
+        };
+        op.event(&op.action, "started", details);
+        op
+    }
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+    pub(crate) fn event(&self, phase: &str, outcome: &str, mut details: Value) {
+        if !details.is_object() {
+            details = json!({});
+        }
+        details["operationId"] = json!(self.id);
+        details["durationMs"] = json!(self.started.elapsed().as_millis());
+        record(self.source, phase, outcome, details);
+    }
+    pub(crate) fn finish(&mut self, outcome: &str, details: Value) {
+        if self.finished {
+            return;
+        }
+        self.event(&self.action, outcome, details);
+        self.finished = true;
+    }
+}
+impl Drop for Operation {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.finish("interrupted", json!({"reason":"Operation ended without a result (future dropped, cancellation or unwind)."}));
+        }
+    }
+}
 
 struct RunLog {
     directory: PathBuf,
@@ -171,6 +229,8 @@ pub fn begin(mode: &str) {
     if LOG.set(Mutex::new(log)).is_err() {
         return;
     }
+    workspace_service::set_diagnostic_observer(record);
+    context_resolver::set_diagnostic_observer(record);
     record("launcher", "session", "started", json!({"mode":mode}));
     flush();
     let _ = std::thread::Builder::new()
@@ -183,6 +243,8 @@ pub fn begin(mode: &str) {
         });
 }
 pub fn record(source: &str, action: &str, outcome: &str, details: Value) {
+    #[cfg(test)]
+    TEST_EVENTS.with(|events| { if let Some(events)=events.borrow_mut().as_mut() {events.push(json!({"source":source,"action":action,"outcome":outcome,"details":redaction::value(details.clone())}));} });
     if let Some(log) = LOG.get()
         && let Ok(mut log) = log.lock()
     {
@@ -283,6 +345,23 @@ pub fn read(id: &str) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn operation_terminal_events_are_correlated_and_dropped_futures_are_visible() {
+        capture_test_events();
+        let mut operation = Operation::start("test", "download", json!({"expectedBytes":10}));
+        let id = operation.id();
+        operation.event("verify", "passed", json!({"receivedBytes":10}));
+        operation.finish("passed", json!({}));
+        operation.finish("failed", json!({}));
+        drop(operation);
+        drop(Operation::start("test", "aborted", json!({})));
+        let events = take_test_events();
+        assert_eq!(events.len(), 5);
+        assert_eq!(events[0]["details"]["operationId"], id);
+        assert_eq!(events[2]["details"]["operationId"], id);
+        assert_eq!(events[2]["outcome"], "passed");
+        assert_eq!(events[4]["outcome"], "interrupted");
+    }
     fn fixture(directory: PathBuf) -> RunLog {
         RunLog {
             directory,

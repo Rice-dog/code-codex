@@ -10,6 +10,7 @@ import type {
 const MESSAGE_EVENT = "code-codex:message";
 import { connectRuntimeInformation } from "./runtime-information";
 import { runtimeEvent } from "./runtime-events";
+import { runtimeErrorDetails } from "./runtime-operations";
 
 function safeRuntimeName(value: string | undefined, fallback: string): string {
   return typeof value === "string" && /^__[A-Za-z][A-Za-z0-9_]{1,94}$/.test(value)
@@ -153,11 +154,16 @@ export class ExplorerBridge extends EventTarget {
   }
 
   request<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = this.#timeoutMs): Promise<T> {
-    if (this.#disposed) return Promise.reject(new BridgeUnavailableError());
+    const requestRef = `cle-${Date.now().toString(36)}-${(++this.#sequence).toString(36)}`;
+    const started = performance.now();
+    const observed=!method.startsWith('explorer.runtime.') && method!=='explorer.plugins.status' && !method.endsWith('.chunk');
+    const complete=(outcome:string,extra:Record<string,unknown>={})=>{if(observed || (outcome!=='passed' && !method.startsWith('explorer.runtime.')))runtimeEvent('renderer-bridge',method,outcome,{requestRef,timeoutMs,durationMs:Math.round(performance.now()-started),...extra});};
+    if(observed)runtimeEvent('renderer-bridge',method,'started',{requestRef,timeoutMs,hasRelativeEntry:'relativePath' in params,hasTaskSelection:'threadId' in params,hasPagination:'cursor' in params});
+    if (this.#disposed) {complete('cancelled',{reason:'Bridge disposed'});return Promise.reject(new BridgeUnavailableError());}
     const binding = this.#binding();
-    if (!binding) return Promise.reject(new BridgeUnavailableError());
+    if (!binding) {complete('failed',{reason:'Native binding unavailable'});return Promise.reject(new BridgeUnavailableError());}
 
-    const id = `cle-${Date.now().toString(36)}-${(++this.#sequence).toString(36)}`;
+    const id = requestRef;
     const request: BridgeRequest = {
       id,
       token: this.#capabilityToken,
@@ -166,11 +172,19 @@ export class ExplorerBridge extends EventTarget {
     };
 
     return new Promise<T>((resolve, reject) => {
+      const rejectLogged=(error:unknown)=>{complete(this.#disposed?'cancelled':'failed',runtimeErrorDetails(error));reject(error);};
+      const resolveLogged=(value:unknown)=>{
+        const object=value && typeof value==='object'?value as Record<string,unknown>:{};
+        const summary:Record<string,unknown>={};
+        for(const key of ['entries','commits','files','changes'])if(Array.isArray(object[key]))summary[`${key}Count`]=(object[key] as unknown[]).length;
+        for(const key of ['sizeBytes','chunkCount','truncated','installed','cached','launched','compatible'])if(typeof object[key]==='number'||typeof object[key]==='boolean')summary[key]=object[key];
+        complete('passed',{resultSummary:summary});resolve(value as T);
+      };
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new ExplorerBridgeError({ code: "TIMEOUT", message: `Timed out while requesting ${method}.` }));
+        rejectLogged(new ExplorerBridgeError({ code: "TIMEOUT", message: `Timed out while requesting ${method}.` }));
       }, timeoutMs);
-      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+      this.#pending.set(id, { resolve: resolveLogged, reject:rejectLogged, timer });
 
       try {
         const output = this.#send(binding, request);

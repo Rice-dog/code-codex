@@ -1,6 +1,8 @@
 import { ExplorerBridge } from './bridge';
-import { PLUGIN_PACKAGES, ensurePluginPackage, isPluginPackageLoaded } from './plugin-runtime';
-import { runtimeEvent } from './runtime-events';
+import { PLUGIN_PACKAGES, isPluginPackageLoaded } from './plugin-runtime';
+import { ensurePluginPackage } from './plugin-load-diagnostics';
+import { runtimeEvent } from "./runtime-events";
+import { beginRuntimeOperation, runtimeErrorDetails } from "./runtime-operations";
 
 interface PackageState { id: string; installed: boolean; phase?: string; downloaded?: number; total?: number; error?: string; }
 const cardIds: Record<string, string> = { mountain:'layered-mountain', 'particle-image':'particle-image' };
@@ -12,6 +14,7 @@ export class BackgroundPackageMarket {
   #loading = new Set<string>();
   #replayed = new WeakSet<Event>();
   #renderQueued = false;
+  #statusFailed = false;
   constructor(private root: ShadowRoot, private bridge: ExplorerBridge, private notice: (message:string)=>void,private prepare?:(id:string,intent:'enable'|'settings')=>void) {
     root.addEventListener('click', this.#click, true);
     void this.#refresh();
@@ -64,11 +67,11 @@ export class BackgroundPackageMarket {
     // Start the fast progress poll immediately, even if the idle timer has
     // several seconds left. An install still has its own completion request.
     void this.#refresh();
-    runtimeEvent('plugin-package','download','requested',{id:info.id,version:info.version});
+    const operation=beginRuntimeOperation('plugin-market','download',{id:info.id,version:info.version,category:info.category});
     try{
       await this.bridge.request('explorer.plugins.install',{id},130_000);
-      runtimeEvent('plugin-package','download','installed',{id:info.id,version:info.version});
-    }catch(error){if(!this.#disposed)this.notice(error instanceof Error?error.message:String(error));}
+      operation.finish('installed',{enabledAutomatically:false});
+    }catch(error){operation.finish('failed',runtimeErrorDetails(error));if(!this.#disposed)this.notice(error instanceof Error?error.message:String(error));}
     finally{this.#busy.delete(id);if(!this.#disposed)await this.#refresh();}
   }
   async #refresh():Promise<void> {
@@ -77,10 +80,17 @@ export class BackgroundPackageMarket {
     try {
       const states=await this.bridge.request<PackageState[]>('explorer.plugins.status');
       if(this.#disposed)return;
-      for(const state of states)this.#states.set(state.id,state);
+      if(this.#statusFailed){runtimeEvent('plugin-market','status','recovered');this.#statusFailed=false;}
+      for(const state of states){
+        const previous=this.#states.get(state.id);
+        if(!previous || previous.installed!==state.installed || previous.phase!==state.phase || previous.error!==state.error)runtimeEvent('plugin-market','package state','changed',{id:state.id,installed:state.installed,phase:state.phase??'idle',downloadedBytes:state.downloaded,totalBytes:state.total,error:state.error});
+        this.#states.set(state.id,state);
+      }
       this.render();
     } catch(error) {
       if(this.#disposed)return;
+      if(!this.#statusFailed)runtimeEvent('plugin-market','status','failed',runtimeErrorDetails(error));
+      this.#statusFailed=true;
       for(const info of PLUGIN_PACKAGES)this.#states.set(info.id,{id:info.id,installed:false,error:String(error)});
       this.render();
     }
