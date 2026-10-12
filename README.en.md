@@ -31,28 +31,26 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Local maintenance version **0.4.25** shows the minimap viewport rectangle only during hover, dragging or source scrolling. It hides on pointer leave or after 800 ms of scroll inactivity. The thumbnail, single far-right scrollbar, shared backgrounds and editing/navigation remain intact. Identity diagnostics/recovery and version retention are preserved. The public release remains v0.4.18.
+Public version **0.4.25** adds code minimap navigation, a single far-right scrollbar and consistent backgrounds. Its viewport rectangle appears during hover/scrolling and hides after about 800 ms without scrolling. Missing activation identity fields receive strict same-PID native verification and pre-cleanup diagnostics. Successful EXE updates retain the current and previous versions and safely remove eligible older entries. Published as [GitHub Release v0.4.25](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.25); plugin assets remain pinned to v0.3.96.
 
-A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow. v0.4.18 retains all v0.4.17 improvements and adds this indicator; v0.4.17 has been withdrawn to draft.
-
-Public version **0.4.18** adds centralized storage and a first-install folder chooser. Updates reuse the selected location. Verified migration copies old settings, plugin resources and logs while retaining their originals. Normal uninstall keeps user data; explicit purge removes only known product paths. Code-Codex preferences and personal media gain native persistence without moving official accounts or chats. Installer UI logs now retain process output and communication details, acknowledge completion pages and monitor responsiveness. Failures trigger bounded read-only checks and a copyable full report, with independent dialog fallback. Completion-window failures are distinguished from installation failures and do not roll back a successful installation. Published as [GitHub Release v0.4.18](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.18); plugin assets remain pinned to v0.3.96.
+A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
 
 ## Install Option 1: Download EXE
 
-Download the installer from [GitHub Release v0.4.18](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.18). [`releases`](releases/) retains the corresponding build assets:
+Download the installer from [GitHub Release v0.4.25](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.25). [`releases`](releases/) retains the corresponding build assets:
 
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.4.18-x64-setup.exe`
-- Alternative: `CodeCodex-0.4.18-x64.msi`
-- Portable package: `CodeCodex-0.4.18-x64.zip`
+- Recommended: `CodeCodex-0.4.25-x64-setup.exe`
+- Alternative: `CodeCodex-0.4.25-x64.msi`
+- Portable package: `CodeCodex-0.4.25-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.4.18-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.4.25-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -155,6 +153,7 @@ MSI installs can also be removed from Windows **Installed apps**.
 - Drag-and-drop movement for workspace files and folders.
 - Main-window file tabs beside the conversation.
 - Basic text preview, syntax highlighting and bounded editing; Markdown rendering is provided by its standalone viewer plugin.
+- Source previews and editors include a syntax-colored minimap, click/drag/wheel/keyboard navigation and a saved toggle. Narrow panes hide it automatically. It sits to the left of the single far-right scrollbar; its viewport rectangle appears during hover or scrolling.
 - A local bridge restricted to bounded workspace operations.
 
 ### Plugins
@@ -301,8 +300,10 @@ workflows are not included in this public source package.
 
 ## Centralized storage
 
-The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.18-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.25-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
 
 Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
 
-Runtime retention remains ten runs with a 5 MiB bound per run; installer reports retain ten files. Update events currently appear primarily in runtime logs. Initial extraction and emergency fallback may use the system temporary folder. Normal uninstall retains user data; explicit purge deletes only known product data paths and preserves unrelated files in the selected folder. Network paths, system folders, drive roots and linked ancestors are rejected. Local v0.4.18 is not yet published; public downloads remain v0.4.4 and unchanged plugin assets stay pinned to v0.3.96.
+Runtime retention remains ten runs with a 5 MiB bound per run; installer reports retain ten files. Update events currently appear primarily in runtime logs. Initial extraction and emergency fallback may use the system temporary folder. Normal uninstall retains user data; explicit purge deletes only known product data paths and preserves unrelated files in the selected folder. Network paths, system folders, drive roots and linked ancestors are rejected. Unchanged downloadable plugin assets remain pinned to public v0.3.96.
+
+After a successful EXE installation, the current and actual previous versions are retained; eligible older versions are safely removed. Running, locked, unverifiable or unrecognized entries remain, with reasons in the installation log's versionRetention field. Sessions are not terminated to reclaim space. MSI continues to use Windows Installer version management.

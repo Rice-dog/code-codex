@@ -1,3 +1,82 @@
+## v0.4.25 — 代码缩略图、启动诊断与旧版本清理
+
+## 简体中文
+
+本版汇总 v0.4.18 之后的维护改进，新增代码缩略图导航，完善启动身份检测和错误记录，并减少旧程序版本长期占用的空间。
+
+### 更新内容
+
+- **代码缩略图**：代码预览和编辑区增加语法着色概览，支持点击定位、拖拽、滚轮和键盘导航，提供开关并保存选择；窄窗口自动隐藏。截断文件只展示已加载部分，不改变现有 64 KiB 文本读取与受限保存边界。
+- **显示与滚动优化**：缩略图位于唯一的最右侧原生滚动条左侧，保留横向滚动；移除代码与缩略图之间的竖向描边，两者共用主题底色和背景透明/蒙版。透明视口块默认隐藏，悬停或拖拽时显示，鼠标移开后隐藏；滚动代码时显示并跟随位置，停止约 0.8 秒后隐藏。
+- **启动检测与有限恢复**：区分激活 PID 不存在和进程路径缺失；仅在必需 CIM 字段缺失时，对同一 PID 执行严格的原生存活、创建时间和精确映像验证，全部通过后才继续。失败报告保留原始错误，增加清理前的进程退出状态、端口归属和端点响应观察，不自动接管其他 PID 或重启 Codex。
+- **旧版本安全清理**：EXE 成功安装提交后保留当前版本和实际上一版；较旧版本在确认路径、文件和使用状态后清理。运行中、锁定、存在未知文件或无法确认的版本保留，并将原因、结果和回收字节写入安装日志。该策略针对 EXE 安装流程，MSI 仍由 Windows Installer 管理。
+
+### 升级说明
+
+- 推荐运行本版 EXE，沿用已有安装目录。当前应用内更新流程为 Installing → Finish；首次安装为 Welcome → License → Installation Folder → Installing → Finish。
+- 插件参数及已下载资源继续保留。24 个下载插件仍使用公开 v0.3.96 的资源，本版不重复上传，也不要求重新下载未改动插件。
+- 本机已安装本版且保留了当前官方会话；新界面代码在下一次通过 Code-Codex 启动时加载。
+
+### 验证与兼容
+
+- Windows x64：UI 生产构建与类型检查通过，locked workspace Rust 测试 **467 项通过、3 项忽略**；生产源码编译的 Chromium 缩略图 fixture **77 项通过**，十格式预览和 Home 路由 fixture 通过。
+- 正式 EXE 本机 v0.4.24 → v0.4.25 更新通过，五个安装组件摘要与 payload 一致，66 个原有数据/插件文件摘要保持，官方 Codex 主进程未退出。观察到的官方包版本为 `26.1007.2314.0`。
+- 核验了 46 项本地资产、42 项未改动插件资源、安装 ZIP 的 18 项白名单，以及最终界面 bundle 确实嵌入核心程序。发布只提供下列五个核心附件。
+- 未重新实测新界面在官方宿主中的注入、公开 v0.4.18 → 本版的升级、独立 MSI 安装界面、macOS 或各背景的真实 GPU 长时间运行。用户报告的远端进程退出问题尚未复现；检测和有限恢复改进不代表所有启动故障均已修复。
+- 包内 README 保留已验证构建时的快照；当前下载链接以本 Release 和仓库主页为准。
+
+### 下载
+
+- 推荐：`CodeCodex-0.4.25-x64-setup.exe`
+- 备选：`CodeCodex-0.4.25-x64.msi`
+- ZIP 包：`CodeCodex-0.4.25-x64.zip`
+- 独立卸载程序：`Uninstall-CodeCodex.exe`
+- 校验文件：`SHA256SUMS.txt`
+
+下载后计算文件的 SHA-256，与本 Release 的 `SHA256SUMS.txt` 同名条目比较。
+
+## English
+
+This release combines the maintenance work since v0.4.18: code minimap navigation, more precise activation identity checks and failure reports, and safer cleanup of older application versions.
+
+### Changes
+
+- **Code minimap:** source previews and editors gain a syntax-colored overview with click, drag, wheel and keyboard navigation. A toggle saves your preference; narrow panes hide it automatically. Truncated previews map loaded content only, retaining the existing 64 KiB text-read and restricted-save boundaries.
+- **Display and scrolling:** the minimap sits to the left of the single far-right native scrollbar, with horizontal scrolling preserved. The vertical divider is removed; code and minimap share theme backgrounds and transparency/masking. The viewport rectangle is hidden at idle, visible during hover or dragging, and hidden on pointer leave. Source scrolling reveals it and updates its position; it hides after about 800 ms without scrolling.
+- **Activation diagnostics and limited recovery:** distinguish an absent activation PID from an unavailable executable path. Only missing required CIM fields allow strict native verification of the same PID's liveness, creation time and exact image; every check must pass before proceeding. Failure reports preserve the original error and add pre-cleanup process exit status, listener ownership and endpoint observations. Other PIDs are not adopted and Codex is not automatically restarted.
+- **Safe version retention:** after a successful EXE installation commit, keep the current and actual previous versions. Older entries are removed only after path, file and usage checks. Running, locked, unrecognized or unverifiable entries are retained, with reasons, outcomes and reclaimed bytes in the installation log. This policy applies to the EXE flow; MSI versions remain managed by Windows Installer.
+
+### Upgrade
+
+- Use this release's EXE to retain the existing installation folder. The current in-app update flow is Installing → Finish; first-time installation is Welcome → License → Installation Folder → Installing → Finish.
+- Existing plugin settings and downloaded resources are retained. The 24 downloadable plugins continue to use public v0.3.96 resources; unchanged plugins do not need to be downloaded again and are not duplicated in this release.
+- This version has already been installed on the development machine without ending its official Codex session. The new UI loads on the next launch through Code-Codex.
+
+### Validation and compatibility
+
+- Windows x64: UI production build and type checks passed; **467 locked workspace Rust tests passed, 3 ignored**. **77 compiled-source Chromium minimap fixture checks** passed, alongside ten file preview formats and Home routing fixtures.
+- The final EXE successfully updated the local installation from v0.4.24 to v0.4.25. Five installed component hashes matched the payload, 66 original data/plugin file hashes were retained, and the official Codex main process stayed running. The observed official package version was `26.1007.2314.0`.
+- All 46 local artifacts, 42 unchanged plugin resources and the 18-file ZIP allowlist were audited, including confirmation that the final UI bundle is embedded in the core program. Only the five core attachments below are published.
+- New UI injection into the official host, the public v0.4.18 upgrade path, independent MSI GUI installation, macOS and extended real-GPU background runs were not retested. The reported remote activation-process exit has not been reproduced; improved diagnostics and limited recovery do not imply that every startup failure is fixed.
+- Bundled READMEs retain the verified build-time snapshot. Use this release and the repository homepage for current download links.
+
+### Downloads
+
+- Recommended: `CodeCodex-0.4.25-x64-setup.exe`
+- Alternative: `CodeCodex-0.4.25-x64.msi`
+- ZIP package: `CodeCodex-0.4.25-x64.zip`
+- Standalone uninstaller: `Uninstall-CodeCodex.exe`
+- Checksums: `SHA256SUMS.txt`
+
+Compute SHA-256 for the downloaded file and compare it with the matching entry in this release's `SHA256SUMS.txt`.
+
+Full changelog: https://github.com/Rice-dog/code-codex/compare/v0.4.18...v0.4.25
+
+
+发布 / Publication: [GitHub Latest v0.4.25](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.25), [PR #53](https://github.com/Rice-dog/code-codex/pull/53), main `69fa5a7`. 五个附件公开下载大小与SHA已核验；包内README保持构建时快照。 / Public sizes and SHA-256 verified for all five attachments; bundled READMEs retain their build-time snapshot.
+
+以下本地维护条目为当时构建状态，不代表当前公开状态。 / Local maintenance entries below describe their historical build state, not the current public release.
+
 ## 本地维护 v0.4.25 / Local maintenance v0.4.25
 
 缩略图透明视口块改为按需显示：悬停或拖拽显示，移开隐藏；滚动代码显示并同步位置，停止滚动800毫秒后隐藏。缩略图及最右侧原生滚动条保持。未 GitHub 发布。
