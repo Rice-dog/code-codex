@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.18-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.25-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -27,6 +27,8 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 ![Codex 中的 Code-Codex 文件树](docs/screenshots/file-tree-conversation.png)
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
+
+当前本地维护版 **0.4.25**：缩略图的透明视口块仅在鼠标悬停、拖拽或滚动代码时显示；移开后隐藏，停止滚动800毫秒后隐藏。保持缩略图与单个最右侧滚动条、统一背景和全部编辑/导航功能。保留进程身份诊断与恢复、旧版本维护。公开版本仍为 v0.4.18。
 
 有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。v0.4.18 合并原 v0.4.17 的全部改进并增加此提示；原 v0.4.17 已撤回为草稿。
 
@@ -101,7 +103,7 @@ EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.18
+./scripts/package.ps1 -Version 0.4.25
 ```
 
 生成结果会写入 `releases/`。

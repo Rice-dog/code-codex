@@ -8,6 +8,8 @@ import { activePageElements, MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.7
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { getBootstrapConfig } from "./bridge";
 import { MAX_SYNTAX_SOURCE_UNITS, highlightSyntaxForPath, type SyntaxHighlight } from "./syntax-highlight";
+import { CodeMinimap, CODE_MINIMAP_PREFERENCE, codeMinimapStyles } from "./code-minimap";
+import { runtimeEvent } from "./runtime-events";
 import { pluginModule, ensurePluginPackage, isPluginPackageLoaded } from "./plugin-runtime";
 import type { ModelPreviewSourceInspection, OfficeDocumentKind, DiagramSourceKind, MainPreviewUnavailableReason, MainPreviewGitDiffView, MainPreviewMediaView, MainPreviewModelView, MainPreviewFileView, MainPreviewState, MainPreviewEditorState, MainPreviewActivateDetail, MainPreviewCloseDetail, MainPreviewDraftDetail, MainPreviewPathDetail, SuppressedAttributes, PdfPreviewJob, NotebookPreviewJob, OfficePreviewJob, DiagramPreviewJob, ModelPreviewJob, FocusSnapshot, NotebookMimeBundle, NotebookModel, CsvModel, DrawioPageSource, DrawioCellGeometry, DrawioVertex, DrawioEdge, DiagramPoint, DiagramSvgBudget, PlantActivityStatement, PlantActivityTheme, PlantActivityModel, PlantLayoutNodeKind, PlantLayoutNode, PlantLayoutEdge, PlantBlockLayout, NotebookCellModel, NotebookOutputModel, NotebookParseBudget, NotebookRenderBudget, OfficeDomBudget, DocxPaginationClock, DocxBlockSplitResult, XlsxWorksheetMeta, ParsedXlsxWorksheet, XlsxSharedStrings, XlsxCellStyle, XlsxPreviewCell, XlsxStyleTable, XlsxRange, MainPreviewLineEnding, MainPreviewFileBase, MainPreviewLoadingView, MainPreviewTextView, MainPreviewEmptyView, MainPreviewModelResource, MainPreviewUnsupportedView, MainPreviewErrorView, MainPreviewActivateEvent, MainPreviewCloseEvent, MainPreviewDraftEvent, MainPreviewSaveEvent, MainPreviewReloadEvent } from './file-preview/contracts';
 export type { ModelPreviewSourceInspection, OfficeDocumentKind, NotebookMimeBundle, NotebookModel, CsvModel, DiagramSourceKind, DrawioPageSource, DrawioCellGeometry, DrawioVertex, DrawioEdge, DiagramPoint, DiagramSvgBudget, PlantActivityStatement, PlantActivityTheme, PlantActivityModel, PlantLayoutNodeKind, PlantLayoutNode, PlantLayoutEdge, PlantBlockLayout, NotebookCellModel, NotebookOutputModel, NotebookParseBudget, NotebookRenderBudget, OfficeDomBudget, DocxPaginationClock, DocxBlockSplitResult, XlsxWorksheetMeta, ParsedXlsxWorksheet, XlsxSharedStrings, XlsxCellStyle, XlsxPreviewCell, XlsxStyleTable, XlsxRange, MainPreviewLineEnding, MainPreviewUnavailableReason, MainPreviewFileBase, MainPreviewLoadingView, MainPreviewTextView, MainPreviewGitDiffView, MainPreviewEmptyView, MainPreviewMediaView, MainPreviewModelResource, MainPreviewModelView, MainPreviewUnsupportedView, MainPreviewErrorView, MainPreviewFileView, MainPreviewState, MainPreviewEditorState, MainPreviewActivateDetail, MainPreviewCloseDetail, MainPreviewDraftDetail, MainPreviewPathDetail, MainPreviewActivateEvent, MainPreviewCloseEvent, MainPreviewDraftEvent, MainPreviewSaveEvent, MainPreviewReloadEvent, SuppressedAttributes, PdfPreviewJob, NotebookPreviewJob, OfficePreviewJob, DiagramPreviewJob, ModelPreviewJob, FocusSnapshot } from './file-preview/contracts';
@@ -485,6 +487,8 @@ const mainPreviewStyles = String.raw`
     .preview-panel,
     .preview-meta-bar,
     .preview-content,
+    .code-minimap,
+    .code-vertical-scrollbar,
     .code-line-numbers,
     .code-editor-stack,
     .code-editor-highlight,
@@ -530,6 +534,8 @@ const mainPreviewStyles = String.raw`
     .preview-panel,
     .preview-meta-bar,
     .preview-content,
+    .code-minimap,
+    .code-vertical-scrollbar,
     .code-line-numbers,
     .code-editor-stack,
     .code-editor-highlight,
@@ -2466,6 +2472,10 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   readonly _syntaxCache = new Map<string, { source: string; highlight: SyntaxHighlight }>();
 
+  _codeMinimap: CodeMinimap | null = null;
+
+  _minimapEnabled = true;
+
   readonly _mediaObjectUrls = new Map<string, {
     readonly bytes: Uint8Array;
     readonly mimeType: string;
@@ -2523,11 +2533,13 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   constructor() {
     super();
+    try { this._minimapEnabled = this.ownerDocument.defaultView?.localStorage.getItem(CODE_MINIMAP_PREFERENCE) !== "false"; }
+    catch { runtimeEvent("code-minimap", "preference read", "unavailable"); }
     const bootstrap = getBootstrapConfig();
     this._clippedLayout = usesClippedMainLayout(bootstrap.codexVersion ?? bootstrap.version);
     this._shadow = this.attachShadow({ mode: "open" });
     this._shadow.innerHTML = `
-      <style>${mainPreviewStyles}${SURFACE_OPACITY_PREVIEW_CSS}</style>
+      <style>${mainPreviewStyles}${SURFACE_OPACITY_PREVIEW_CSS}${codeMinimapStyles}</style>
       <div class="surface">
         <div class="tab-strip" role="tablist" aria-label="Conversation and file previews"></div>
         <div class="panel-mount"></div>
@@ -2562,6 +2574,8 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   _disposeDisconnected(): void {
     this._connected = false;
+    this._codeMinimap?.dispose();
+    this._codeMinimap = null;
     this.ownerDocument.defaultView?.removeEventListener("code-codex:plugin-loaded", this._onPluginLoaded);
     this._cancelPdfPreview();
     this._cancelNotebookPreview();
@@ -2582,6 +2596,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
 
   setSuspended(suspended: boolean): void {
     this._suspended = suspended;
+    this._codeMinimap?.setSuspended(suspended);
     this.toggleAttribute("data-home-suspended", suspended);
     this._syncSuppression();
   }
@@ -2756,6 +2771,8 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
   }
 
   _renderPanel(): void {
+    this._codeMinimap?.dispose();
+    this._codeMinimap = null;
     this._cancelPdfPreview();
     this._cancelNotebookPreview();
     this._cancelOfficePreview();
@@ -2813,7 +2830,33 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     if (editor) content.classList.add("editor-mode");
     if (markdownEditing) content.classList.add("markdown-editor-mode");
     this._renderViewContent(content, view, editor);
-    panel.append(metaBar, content);
+    const source = content.querySelector<HTMLElement>(".code-editor,.literal-text");
+    if (source && (view.kind === "text" || view.kind === "empty")) {
+      const surface = this.ownerDocument.createElement("div");
+      surface.className = "code-surface";
+      surface.append(content);
+      const minimap = new CodeMinimap(surface, editor ? source : content, source, this._minimapEnabled, view.kind === "text" && view.truncated);
+      this._codeMinimap = minimap;
+      minimap.setSource(editor?.draft ?? (view.kind === "text" ? view.text : ""), this._highlightedSource(view.path, editor?.draft ?? (view.kind === "text" ? view.text : "")));
+      minimap.setSuspended(this._suspended);
+      const toggle = this.ownerDocument.createElement("button");
+      toggle.type = "button";
+      toggle.className = "minimap-toggle";
+      toggle.title = "Toggle code minimap";
+      toggle.setAttribute("aria-label", "Toggle code minimap");
+      toggle.setAttribute("aria-pressed", String(this._minimapEnabled));
+      toggle.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M2 3h7M2 6h5M2 9h7M2 12h5M12 2v12M14 3v3m0 2v4"/></svg>';
+      toggle.addEventListener("click", () => {
+        this._minimapEnabled = !this._minimapEnabled;
+        runtimeEvent("code-minimap", "preference", this._minimapEnabled ? "enabled" : "disabled");
+        toggle.setAttribute("aria-pressed", String(this._minimapEnabled));
+        minimap.setEnabled(this._minimapEnabled);
+        try { this.ownerDocument.defaultView?.localStorage.setItem(CODE_MINIMAP_PREFERENCE, String(this._minimapEnabled)); }
+        catch { runtimeEvent("code-minimap", "preference save", "unavailable"); }
+      });
+      metaBar.append(toggle);
+      panel.append(metaBar, surface);
+    } else panel.append(metaBar, content);
     this._panelMount.replaceChildren(panel);
   }
 
@@ -2877,6 +2920,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
         acceptedDraft = textarea.value;
         this._replaceHighlightedSource(code, view.path, textarea.value);
         this._replaceLineNumbers(lineNumbers, stack, textarea.value);
+        if (this._panelMount.contains(textarea)) this._codeMinimap?.setSource(textarea.value, this._highlightedSource(view.path, textarea.value));
         this._syncEditorScroll(textarea);
         this._dispatchPathEvent<MainPreviewDraftDetail>(MAIN_PREVIEW_DRAFT_EVENT, { path: view.path, text: textarea.value });
       });
@@ -2884,6 +2928,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
       textarea.addEventListener("compositionstart", () => stack.classList.add("composing"));
       textarea.addEventListener("compositionend", () => {
         this._replaceHighlightedSource(code, view.path, textarea.value);
+        if (this._panelMount.contains(textarea)) this._codeMinimap?.setSource(textarea.value, this._highlightedSource(view.path, textarea.value));
         stack.classList.remove("composing");
         this._syncEditorScroll(textarea);
       });

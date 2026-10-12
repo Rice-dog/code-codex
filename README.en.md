@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.18-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.25-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -30,6 +30,8 @@ editing, navigation, and file operations.
 ![Code-Codex file tree in Codex](docs/screenshots/file-tree-conversation.png)
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
+
+Local maintenance version **0.4.25** shows the minimap viewport rectangle only during hover, dragging or source scrolling. It hides on pointer leave or after 800 ms of scroll inactivity. The thumbnail, single far-right scrollbar, shared backgrounds and editing/navigation remain intact. Identity diagnostics/recovery and version retention are preserved. The public release remains v0.4.18.
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow. v0.4.18 retains all v0.4.17 improvements and adds this indicator; v0.4.17 has been withdrawn to draft.
 
@@ -93,7 +95,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.18
+./scripts/package.ps1 -Version 0.4.25
 ```
 
 The generated packages are written to `releases/`.

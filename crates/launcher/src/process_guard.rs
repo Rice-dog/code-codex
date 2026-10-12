@@ -1034,6 +1034,8 @@ pub fn verify_process_identity(
     official_executable: &Path,
 ) -> Result<(), ProcessGuardError> {
     let result = verify_process_identity_inner(pid, launched_after, official_executable);
+    #[cfg(windows)]
+    let result = recover_identity_fields(result, pid, launched_after, official_executable);
     crate::process_diagnostics::observe(
         "process identity",
         "Rust identity decision",
@@ -1041,6 +1043,266 @@ pub fn verify_process_identity(
         serde_json::json!({"port":Option::<u16>::None, "pid":Some(pid), "reason":result.as_ref().err().map(ToString::to_string), "securityChecksRequired":true}),
     );
     result
+}
+
+#[cfg(windows)]
+fn recover_identity_fields(
+    result: Result<(), ProcessGuardError>,
+    pid: u32,
+    launched_after: SystemTime,
+    official_executable: &Path,
+) -> Result<(), ProcessGuardError> {
+    match result {
+        Err(ref error) if identity_fields_unavailable(error) => {
+            let original_detail = match error {
+                ProcessGuardError::Detailed(detail) => detail.as_str(),
+                _ => unreachable!(),
+            };
+            crate::process_diagnostics::observe(
+                "process identity",
+                "same PID native recovery",
+                "started",
+                serde_json::json!({"pid":pid,"originalError":error.to_string(),"securityChecksRequired":true,"adoptOtherPid":false}),
+            );
+            let native = verify_process_identity_native(pid, launched_after, official_executable);
+            crate::process_diagnostics::observe(
+                "process identity",
+                "same PID native recovery",
+                if native.is_ok() {
+                    "recovered"
+                } else {
+                    "failed"
+                },
+                serde_json::json!({"pid":pid,"originalError":error.to_string(),"nativeError":native.as_ref().err().map(ToString::to_string),"securityChecksRequired":true}),
+            );
+            native.map_err(|native_error| {
+                ProcessGuardError::Detailed(format!(
+                    "{original_detail}; same PID native recovery failed: {native_error}"
+                ))
+            })
+        }
+        other => other,
+    }
+}
+
+#[cfg(windows)]
+fn identity_fields_unavailable(error: &ProcessGuardError) -> bool {
+    matches!(error, ProcessGuardError::Detailed(message)
+        if message.starts_with("process identity query failed:")
+        && message.contains("last_phase=required activation fields;"))
+}
+
+#[cfg(all(test, windows))]
+mod activation_identity_tests {
+    use super::*;
+
+    #[test]
+    fn native_identity_requires_live_exact_image_and_new_creation_time() {
+        let image = std::env::current_exe().expect("image");
+        let pid = std::process::id();
+        verify_process_identity_native(pid, UNIX_EPOCH, &image).expect("exact identity");
+        assert!(
+            verify_process_identity_native(
+                pid,
+                SystemTime::now() + Duration::from_secs(60),
+                &image
+            )
+            .is_err()
+        );
+        assert!(
+            verify_process_identity_native(
+                pid,
+                UNIX_EPOCH,
+                &trusted_powershell().expect("different image")
+            )
+            .is_err()
+        );
+        assert!(verify_process_identity_native(0, UNIX_EPOCH, &image).is_err());
+        assert!(verify_process_identity_native(u32::MAX, UNIX_EPOCH, &image).is_err());
+    }
+
+    #[test]
+    fn recovery_is_limited_to_missing_cim_fields_and_preserves_first_error() {
+        let image = std::env::current_exe().expect("image");
+        let pid = std::process::id();
+        let missing = || {
+            ProcessGuardError::Detailed("process identity query failed: attempt=1; last_phase=required activation fields; error=process identity is unavailable".into())
+        };
+        recover_identity_fields(Err(missing()), pid, UNIX_EPOCH, &image)
+            .expect("verified recovery");
+        let rejected = recover_identity_fields(
+            Err(missing()),
+            pid,
+            UNIX_EPOCH,
+            &trusted_powershell().expect("image"),
+        )
+        .expect_err("mismatch")
+        .to_string();
+        assert!(rejected.contains("process identity is unavailable"));
+        assert!(rejected.contains("exact_image_match=false"));
+        for error in [
+            "activated executable mismatch",
+            "process identity response is invalid JSON",
+            "process identity query failed: last_phase=Get-CimInstance; category=PermissionDenied",
+        ] {
+            let rejected = recover_identity_fields(
+                Err(ProcessGuardError::Detailed(error.into())),
+                pid,
+                UNIX_EPOCH,
+                &image,
+            )
+            .expect_err("no fallback");
+            assert!(matches!(rejected, ProcessGuardError::Detailed(ref detail) if detail == error));
+        }
+    }
+
+    #[test]
+    fn real_powershell_field_errors_distinguish_absent_pid_and_missing_path() {
+        let pid = u32::MAX.to_string();
+        let image = std::env::current_exe().expect("image");
+        let inputs = [
+            ("CLE_CODEX_PID", std::ffi::OsStr::new(&pid)),
+            ("CLE_CODEX_LAUNCHED_AFTER_MILLIS", std::ffi::OsStr::new("0")),
+            ("CLE_CODEX_EXE", image.as_os_str()),
+        ];
+        let error = diagnostic_query(
+            "process identity",
+            PROCESS_IDENTITY_SCRIPT,
+            &inputs,
+            4096,
+            None,
+            Some(u32::MAX),
+        )
+        .expect_err("missing PID");
+        assert!(error.to_string().contains("activation PID not found"));
+        assert!(identity_fields_unavailable(&error));
+        let script = PROCESS_IDENTITY_SCRIPT.replace("$process=Invoke-CCStep 'Get-CimInstance Win32_Process (activation PID)' { Get-CimInstance Win32_Process -Filter ('ProcessId = '+$processId.ToString($culture)) }", "$process=[pscustomobject]@{ExecutablePath=$null}");
+        let error = diagnostic_query(
+            "process identity",
+            &script,
+            &inputs,
+            4096,
+            None,
+            Some(u32::MAX),
+        )
+        .expect_err("missing executable");
+        assert!(error.to_string().contains("executable path missing"));
+        recover_identity_fields(Err(error), std::process::id(), UNIX_EPOCH, &image)
+            .expect("native recovery after actual PowerShell error");
+    }
+}
+
+/// An independent identity check, never a name/WindowsApps-only fallback.
+/// A fresh handle binds image, creation time and liveness to the same process.
+#[cfg(windows)]
+pub(crate) fn verify_process_identity_native(
+    pid: u32,
+    launched_after: SystemTime,
+    official_executable: &Path,
+) -> Result<(), ProcessGuardError> {
+    use windows_sys::Win32::{
+        Foundation::FILETIME,
+        System::Threading::{
+            GetProcessTimes, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+        },
+    };
+    let failed = |phase: &str| {
+        ProcessGuardError::Detailed(format!(
+            "native identity {phase} failed: pid={pid}; OS error {:?}",
+            io::Error::last_os_error().raw_os_error()
+        ))
+    };
+    if pid == 0 {
+        return Err(ProcessGuardError::Detailed(
+            "native identity rejected PID 0".into(),
+        ));
+    }
+    let activation = crate::process_diagnostics::native_process(pid);
+    let raw = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        )
+    };
+    if raw.is_null() {
+        return Err(failed("OpenProcess"));
+    }
+    let handle = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
+    let ensure_running = || match unsafe { WaitForSingleObject(handle.as_raw_handle().cast(), 0) } {
+        WAIT_TIMEOUT => Ok(()),
+        WAIT_OBJECT_0 => Err(ProcessGuardError::Detailed(format!(
+            "native identity rejected exited PID {pid}"
+        ))),
+        _ => Err(failed("WaitForSingleObject")),
+    };
+    ensure_running()?;
+    let mut buffer = vec![0u16; 32768];
+    let mut length = buffer.len() as u32;
+    if unsafe { QueryFullProcessImageNameW(raw, 0, buffer.as_mut_ptr(), &mut length) } == 0 {
+        return Err(failed("QueryFullProcessImageNameW"));
+    }
+    let mut created: FILETIME = unsafe { std::mem::zeroed() };
+    let mut ended = created;
+    let mut kernel = created;
+    let mut user = created;
+    if unsafe { GetProcessTimes(raw, &mut created, &mut ended, &mut kernel, &mut user) } == 0 {
+        return Err(failed("GetProcessTimes"));
+    }
+    let ticks = ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64;
+    if activation["retainedActivationHandle"] == true
+        && (activation["state"] != "running"
+            || activation["creationFiletime"].as_u64() != Some(ticks))
+    {
+        return Err(ProcessGuardError::Detailed(format!(
+            "native identity rejected changed/exited activation generation: pid={pid}"
+        )));
+    }
+    let created_ms = ticks.checked_sub(116444736000000000).map(|n| n / 10000);
+    let launch_ms = launched_after
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|n| n.as_millis());
+    let time_matches =
+        matches!((created_ms,launch_ms), (Some(created),Some(launch)) if created as u128 >= launch);
+    let observed = dunce::canonicalize(PathBuf::from(String::from_utf16_lossy(
+        &buffer[..length as usize],
+    )))
+    .map_err(|e| {
+        ProcessGuardError::Detailed(format!(
+            "native observed image canonicalization failed: OS error {:?}",
+            e.raw_os_error()
+        ))
+    })?;
+    let official = dunce::canonicalize(official_executable).map_err(|e| {
+        ProcessGuardError::Detailed(format!(
+            "native official image canonicalization failed: OS error {:?}",
+            e.raw_os_error()
+        ))
+    })?;
+    let canonical_match = observed
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&official.to_string_lossy());
+    let same_file = match (
+        SameFileHandle::from_path(&observed),
+        SameFileHandle::from_path(&official),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    let image_matches = observed.is_file() && official.is_file() && (canonical_match || same_file);
+    crate::process_diagnostics::observe(
+        "process identity",
+        "native exact identity",
+        "observed",
+        serde_json::json!({"pid":pid,"creationUnixMs":created_ms,"createdAfterLaunch":time_matches,"canonicalPathsMatch":canonical_match,"sameFile":same_file,"imageMatches":image_matches,"freshReadOnlyHandle":true}),
+    );
+    if !time_matches || !image_matches {
+        return Err(ProcessGuardError::Detailed(format!(
+            "native identity mismatch: pid={pid}; created_after_launch={time_matches}; exact_image_match={image_matches}"
+        )));
+    }
+    ensure_running()
 }
 
 fn verify_process_identity_inner(
@@ -1159,7 +1421,10 @@ $processId=[uint32]::Parse($env:CLE_CODEX_PID,$culture)
 $launchedAfter=[int64]::Parse($env:CLE_CODEX_LAUNCHED_AFTER_MILLIS,$culture)
 $process=Invoke-CCStep 'Get-CimInstance Win32_Process (activation PID)' { Get-CimInstance Win32_Process -Filter ('ProcessId = '+$processId.ToString($culture)) }
 Write-CCObservation 'activation PID observation' 'observed' @{processPresent=($null -ne $process); executableAvailable=($null -ne $process.ExecutablePath)}
-Invoke-CCStep 'required activation fields' { if($null -eq $process -or $null -eq $process.ExecutablePath){throw 'process identity is unavailable'} }
+Invoke-CCStep 'required activation fields' {
+    if($null -eq $process){ Write-CCObservation 'activation identity gap' 'observed' @{missingField='process'; interpretation='activation PID not present in CIM snapshot'}; throw 'process identity is unavailable: activation PID not found' }
+    if([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)){ Write-CCObservation 'activation identity gap' 'observed' @{missingField='ExecutablePath'; interpretation='process exists but executable path unavailable'}; throw 'process identity is unavailable: executable path missing' }
+}
 $actual=Invoke-CCStep 'normalize observed executable' { [IO.Path]::GetFullPath([string]$process.ExecutablePath) }
 $target=Invoke-CCStep 'normalize official executable' { [IO.Path]::GetFullPath($env:CLE_CODEX_EXE) }
 $created=Invoke-CCStep 'convert activation creation time' { ([DateTimeOffset]$process.CreationDate).ToUnixTimeMilliseconds() }

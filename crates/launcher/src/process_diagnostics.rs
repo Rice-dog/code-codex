@@ -284,6 +284,93 @@ fn retryable(events: &[Value], timed_out: bool) -> bool {
         })
 }
 
+fn activation_assessment(activation: &Value, owners: &[Value]) -> &'static str {
+    match activation["state"].as_str() {
+        Some("exited")
+            if owners.iter().any(|owner| {
+                owner["pid"] != activation["pid"] && owner["exactOfficialIdentity"] == true
+            }) =>
+        {
+            "activation PID exited; another new official-image process owns the port; possible handoff or surviving child, not proven"
+        }
+        Some("exited")
+            if activation["exitCode"]
+                .as_u64()
+                .is_some_and(|code| code != 0) =>
+        {
+            "activation PID exited with a nonzero OS status before cleanup; underlying crash/termination cause unknown"
+        }
+        Some("exited") if activation["exitCode"] == 0 => {
+            "activation PID exited with OS status 0 before cleanup; normal-status exit does not prove successful startup"
+        }
+        Some("exited") => "activation PID exited before cleanup; OS exit status unavailable",
+        Some("running") => {
+            "activation PID is running; identity inspection failed; compare CIM and native API errors"
+        }
+        _ => {
+            "activation process state is unavailable; do not infer exit or crash from a failed query"
+        }
+    }
+}
+
+/// Two short read-only samples, taken before the unarmed activation helper is
+/// stopped. Another owner's identity is evidence only, never attach authority.
+#[cfg(windows)]
+pub(crate) fn activation_failure_details(
+    pid: u32,
+    port: u16,
+    official: &std::path::Path,
+    launched_after: std::time::SystemTime,
+) -> String {
+    let started = Instant::now();
+    let mut summary = String::new();
+    for sample in 1..=2 {
+        if sample > 1 {
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        let activation = native_process(pid);
+        let listener_pids = native_listeners("activation failure", port);
+        let mut owners = Vec::new();
+        for owner in listener_pids.iter().take(8) {
+            let mut details = native_process(*owner);
+            let identity = crate::process_guard::verify_process_identity_native(
+                *owner,
+                launched_after,
+                official,
+            );
+            details["exactOfficialIdentity"] = json!(identity.is_ok());
+            details["identityError"] = json!(identity.err().map(|error| error.to_string()));
+            owners.push(details);
+        }
+        let assessment = activation_assessment(&activation, &owners);
+        observe(
+            "activation failure",
+            "pre-cleanup assessment",
+            "observed",
+            json!({"sample":sample,"elapsedMs":started.elapsed().as_millis(),"activation":activation,"port":port,"listenerOwners":owners,"ownerCount":listener_pids.len(),"ownersOmitted":listener_pids.len().saturating_sub(8),"assessment":assessment,"automaticHandoff":false,"crashCauseKnown":false}),
+        );
+        summary.push_str(&format!(
+            "Sample {sample} (+{} ms): {assessment}\nActivation PID {pid}: state={}; OS exit status={}; exit time (Unix ms)={}; loopback port {port} owners={listener_pids:?}; other-owner exact identities={}\n",
+            started.elapsed().as_millis(),activation["state"].as_str().unwrap_or("unknown"),
+            activation["exitCodeHex"].as_str().unwrap_or("unavailable"),activation["exitUnixMs"],
+            owners.iter().filter(|owner| owner["pid"] != pid && owner["exactOfficialIdentity"] == true).count()
+        ));
+    }
+    native_observation("activation failure", Some(port), Some(pid));
+    summary.push_str("Recovery: no other PID adopted and no Codex restart attempted. Port response alone cannot establish a trusted handoff. OS exit status is not the PowerShell query exit code.\n");
+    summary
+}
+
+#[cfg(not(windows))]
+pub(crate) fn activation_failure_details(
+    _pid: u32,
+    _port: u16,
+    _official: &std::path::Path,
+    _launched_after: std::time::SystemTime,
+) -> String {
+    "Activation failure assessment: unavailable on this platform".into()
+}
+
 /// Run only trusted, compiled-in read-only queries. Retry query failures once;
 /// identity/ownership mismatches from parsed output are never retried here.
 #[cfg(windows)]
@@ -726,12 +813,35 @@ pub(crate) fn native_process(pid: u32) -> Value {
     } else {
         "other or unavailable"
     };
-    json!({"pid":pid,"openProcess":true,"retainedActivationHandle":retained_handle.is_some(),"state":match wait {WAIT_OBJECT_0=>"exited",WAIT_TIMEOUT=>"running",_=>"unknown"},"waitOsCode":wait_error,"exitCode":if exit_ok && wait==WAIT_OBJECT_0 {Some(exit)} else {None},"exitCodeHex":if exit_ok && wait==WAIT_OBJECT_0 {Some(format!("0x{exit:08X}"))} else {None},"exitCodeOsCode":exit_error,"imageAvailable":image_ok,"imageLocation":image_kind,"imageOsCode":image_error,"creationUnixMs":if time_ok {millis(created)} else {None},"exitUnixMs":if time_ok {millis(ended)} else {None},"timesOsCode":time_error})
+    json!({"pid":pid,"openProcess":true,"retainedActivationHandle":retained_handle.is_some(),"state":match wait {WAIT_OBJECT_0=>"exited",WAIT_TIMEOUT=>"running",_=>"unknown"},"waitOsCode":wait_error,"exitCode":if exit_ok && wait==WAIT_OBJECT_0 {Some(exit)} else {None},"exitCodeHex":if exit_ok && wait==WAIT_OBJECT_0 {Some(format!("0x{exit:08X}"))} else {None},"exitCodeOsCode":exit_error,"imageAvailable":image_ok,"imageLocation":image_kind,"imageOsCode":image_error,"creationFiletime":if time_ok {Some(((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64)} else {None},"creationUnixMs":if time_ok {millis(created)} else {None},"exitUnixMs":if time_ok {millis(ended)} else {None},"timesOsCode":time_error})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn activation_assessment_separates_exit_handoff_and_unknown() {
+        let exited = json!({"pid":21904,"state":"exited","exitCode":0});
+        assert!(activation_assessment(&exited, &[]).contains("status 0"));
+        let other = json!({"pid":21905,"exactOfficialIdentity":true});
+        assert!(activation_assessment(&exited, &[other]).contains("possible handoff"));
+        assert!(
+            !activation_assessment(
+                &exited,
+                &[json!({"pid":21905,"exactOfficialIdentity":false})]
+            )
+            .contains("handoff")
+        );
+        assert!(
+            activation_assessment(&json!({"pid":1,"state":"exited","exitCode":23}), &[])
+                .contains("nonzero")
+        );
+        assert!(
+            activation_assessment(&json!({"state":"exited"}), &[]).contains("status unavailable")
+        );
+        assert!(activation_assessment(&json!({"state":"running"}), &[]).contains("running"));
+        assert!(activation_assessment(&json!({"openProcess":false}), &[]).contains("do not infer"));
+    }
     #[test]
     fn drains_all_bytes_but_retains_only_the_limit() {
         let capture = drain(io::Cursor::new(vec![42; 100_000]), 17);
@@ -860,5 +970,26 @@ mod tests {
         assert_eq!(process["state"], "exited");
         assert_eq!(process["exitCode"], 23);
         assert_eq!(process["retainedActivationHandle"], true);
+        let listener =
+            std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("listener");
+        let details = activation_failure_details(
+            pid,
+            listener.local_addr().expect("address").port(),
+            &std::env::current_exe().expect("image"),
+            std::time::UNIX_EPOCH,
+        );
+        assert!(details.contains("Sample 1"));
+        assert!(details.contains("Sample 2"));
+        assert!(details.contains("0x00000017"));
+        assert!(details.contains("possible handoff"));
+        assert!(details.contains("no other PID adopted"));
+        assert!(
+            crate::process_guard::verify_process_identity_native(
+                pid,
+                std::time::UNIX_EPOCH,
+                &std::env::current_exe().expect("image")
+            )
+            .is_err()
+        );
     }
 }

@@ -229,15 +229,15 @@ fn enrich_startup_diagnostic(error: &AppError) -> StartupDiagnostic {
 }
 
 async fn complete_startup_failure_probe() {
-    let (port, verified, already_captured) = match startup_trace().lock() {
+    let (port, verified, previous) = match startup_trace().lock() {
         Ok(trace) => (
             trace.renderer_port,
             trace.listener_verified,
-            trace.precleanup_probe.is_some(),
+            trace.precleanup_probe.clone(),
         ),
         Err(_) => return,
     };
-    if already_captured {
+    if failure_probe_complete(previous.as_deref()) {
         return;
     }
     let Some(port) = port else { return };
@@ -247,11 +247,15 @@ async fn complete_startup_failure_probe() {
         TcpStream::connect(("127.0.0.1", port)),
     )
     .await;
-    let mut observations = vec![match tcp {
-        Ok(Ok(_)) => "TCP: loopback connection accepted".to_owned(),
+    let mut observations = previous.into_iter().collect::<Vec<_>>();
+    observations.push(match tcp {
+        Ok(Ok(stream)) => {
+            drop(stream);
+            "TCP: loopback connection accepted".to_owned()
+        }
         Ok(Err(error)) => format!("TCP: connection failed ({error})"),
         Err(_) => "TCP: timed out after 700 ms".to_owned(),
-    }];
+    });
     if let Ok(discovery) = TargetDiscovery::new() {
         observations.push(match discovery.version_detailed(endpoint).await {
             Ok(version) => format!(
@@ -282,6 +286,29 @@ async fn complete_startup_failure_probe() {
         }
     }
     record_precleanup_probe(observations.join("\n"));
+}
+
+fn failure_probe_complete(previous: Option<&str>) -> bool {
+    // A process-only early snapshot must not suppress endpoint diagnostics.
+    // An explicit probe timeout is terminal too; do not retry after cleanup.
+    previous.is_some_and(|text| {
+        text.contains("TCP:") || text.contains("supplementary probes timed out")
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn process_only_snapshot_does_not_suppress_endpoint_diagnostics() {
+    assert!(!failure_probe_complete(Some(
+        "Process: PID 21904 has exited"
+    )));
+    assert!(!failure_probe_complete(None));
+    assert!(failure_probe_complete(Some(
+        "Process: PID 21904 has exited\nTCP: connection failed"
+    )));
+    assert!(failure_probe_complete(Some(
+        "Live-launch supplementary probes timed out after 3 seconds"
+    )));
 }
 
 fn publish_startup_diagnostic(error: &AppError, checks: &str) {
@@ -1279,6 +1306,40 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             record_startup_event("process identity", "verification failed");
             record_precleanup_probe(format!("Process: {}", launched_process_state(launched_pid)));
             record_startup_event(
+                "activation failure diagnosis",
+                "collecting pre-cleanup evidence",
+            );
+            let official = installation.executable.clone();
+            let details = tokio::task::spawn_blocking(move || {
+                process_diagnostics::activation_failure_details(
+                    launched_pid,
+                    port,
+                    &official,
+                    launched_after,
+                )
+            })
+            .await
+            .unwrap_or_else(|_| {
+                "Activation failure observations unavailable (worker failed)".into()
+            });
+            if tokio::time::timeout(Duration::from_secs(3), complete_startup_failure_probe())
+                .await
+                .is_err()
+            {
+                let previous = startup_trace()
+                    .lock()
+                    .ok()
+                    .and_then(|trace| trace.precleanup_probe.clone())
+                    .unwrap_or_default();
+                record_precleanup_probe(format!(
+                    "{previous}\nLive-launch supplementary probes timed out after 3 seconds; preceding process observations retained."
+                ));
+            }
+            record_startup_event(
+                "activation failure diagnosis",
+                "pre-cleanup evidence collected",
+            );
+            record_startup_event(
                 "cleanup",
                 "stopping unarmed activation helper after identity failure",
             );
@@ -1287,6 +1348,12 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
                 "cleanup",
                 "unarmed activation helper stopped; no termination authorized by identity check",
             );
+            let error = match error {
+                ProcessGuardError::Detailed(original) => ProcessGuardError::Detailed(format!(
+                    "{original}\nActivation failure assessment:\n{details}"
+                )),
+                other => other,
+            };
             return Err(error.into());
         }
         record_startup_event("process identity", "official executable verified");
@@ -2756,6 +2823,45 @@ mod tests {
         assert!(details.contains(&format!("PID {}", std::process::id())));
     }
 
+    #[tokio::test]
+    async fn process_failure_preserves_snapshot_and_reads_version_without_dom_probe() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let _guard = process_diagnostics::TEST_TRACE_LOCK.lock().unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("listener");
+        let port = listener.local_addr().expect("address").port();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.expect("accept");
+                let mut request = [0u8; 2048];
+                let count = socket.read(&mut request).await.expect("read");
+                if count > 0 {
+                    assert!(
+                        String::from_utf8_lossy(&request[..count]).starts_with("GET /json/version")
+                    );
+                    let body = format!(
+                        r#"{{"Browser":"Chrome/123.0","Protocol-Version":"1.3","webSocketDebuggerUrl":"ws://127.0.0.1:{port}/devtools/browser/fixture"}}"#
+                    );
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.expect("response");
+                }
+            }
+        });
+        begin_startup_trace("fixture");
+        record_launch_context(port, None, std::process::id());
+        record_precleanup_probe("Process: PID 21904 has exited".into());
+        tokio::time::timeout(Duration::from_secs(3), complete_startup_failure_probe())
+            .await
+            .expect("bounded probe");
+        server.await.expect("server");
+        let trace = startup_trace().lock().expect("trace");
+        let text = trace.precleanup_probe.as_deref().expect("snapshot");
+        assert!(text.contains("PID 21904 has exited"));
+        assert!(text.contains("TCP: loopback connection accepted"));
+        assert!(text.contains("GET /json/version: responded"), "{text}");
+        assert!(text.contains("skipped because listener ownership was not verified"));
+    }
+
     #[test]
     fn target_snapshot_location_excludes_query_and_external_host() {
         assert_eq!(
@@ -3228,6 +3334,20 @@ mod tests {
             startup_diagnostics::parse_diagnostic(&diagnostic.encoded_line().expect("marker"))
                 .expect("decoded");
         assert_eq!(decoded, diagnostic);
+        let error = AppError::from(ProcessGuardError::Detailed("process identity query failed: last_phase=required activation fields; error=process identity is unavailable; same PID native recovery failed: exited\nActivation failure assessment:\nOS exit status=0x00000017; possible handoff not proven".into()));
+        let diagnostic = enrich_startup_diagnostic(&error);
+        assert_eq!(diagnostic.code, "CC-START-PROCESS-005");
+        assert!(diagnostic.reason.contains("OS exit status=0x00000017"));
+        assert!(
+            diagnostic
+                .reason
+                .contains("process identity is unavailable")
+        );
+        assert_eq!(
+            startup_diagnostics::parse_diagnostic(&diagnostic.encoded_line().expect("marker"))
+                .expect("decoded"),
+            diagnostic
+        );
         assert_eq!(
             process_diagnostic(&ProcessGuardError::Detailed(
                 "existing process query failed".into()

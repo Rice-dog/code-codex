@@ -1,3 +1,45 @@
+## 本地维护 v0.4.25 / Local maintenance v0.4.25
+
+缩略图透明视口块改为按需显示：悬停或拖拽显示，移开隐藏；滚动代码显示并同步位置，停止滚动800毫秒后隐藏。缩略图及最右侧原生滚动条保持。未 GitHub 发布。
+
+The minimap viewport rectangle appears during hover, dragging and source scrolling. It hides on pointer leave or after 800 ms without scrolling. The thumbnail and far-right native scrollbar are preserved. Not published to GitHub.
+
+## 本地维护 v0.4.24 / Local maintenance v0.4.24
+
+代码预览/编辑调整为正文 → 缩略图 → 最右侧竖向滚动条，保留横向滚动和全部缩略图导航、编辑与开关功能。沿用 64 KiB 文本读取边界，截断内容明确标注仅已加载部分。保留身份诊断恢复和旧版本维护。未 GitHub 发布。
+
+Source previews and editors now place the minimap to the left of the far-right vertical scrollbar, preserving horizontal scrolling and all navigation, editing, and preference behavior. The 64 KiB text-read limit remains; truncated maps explicitly cover loaded content only. Identity diagnostics/recovery and version retention are preserved. Not published to GitHub.
+
+## 本地维护 v0.4.23 / Local maintenance v0.4.23
+
+代码预览/编辑调整为正文 → 缩略图 → 最右侧竖向滚动条，保留横向滚动和全部缩略图导航、编辑与开关功能。沿用 64 KiB 文本读取边界，截断内容明确标注仅已加载部分。保留身份诊断恢复和旧版本维护。未 GitHub 发布。
+
+Source previews and editors now place the minimap to the left of the far-right vertical scrollbar, preserving horizontal scrolling and all navigation, editing, and preference behavior. The 64 KiB text-read limit remains; truncated maps explicitly cover loaded content only. Identity diagnostics/recovery and version retention are preserved. Not published to GitHub.
+
+## 本地维护 v0.4.22 / Local maintenance v0.4.22
+
+代码预览/编辑调整为正文 → 缩略图 → 最右侧竖向滚动条，保留横向滚动和全部缩略图导航、编辑与开关功能。沿用 64 KiB 文本读取边界，截断内容明确标注仅已加载部分。保留身份诊断恢复和旧版本维护。未 GitHub 发布。
+
+Source previews and editors now place the minimap to the left of the far-right vertical scrollbar, preserving horizontal scrolling and all navigation, editing, and preference behavior. The 64 KiB text-read limit remains; truncated maps explicitly cover loaded content only. Identity diagnostics/recovery and version retention are preserved. Not published to GitHub.
+
+## 本地维护 v0.4.21 / Local maintenance v0.4.21
+
+代码预览/编辑增加右侧代码缩略图，支持同步滚动、点击和拖动导航、键盘定位、开关保存、主题和高 DPI，窄窗口自动隐藏。沿用 64 KiB 文本读取边界，截断内容明确标注仅已加载部分。保留身份诊断恢复和旧版本维护。未 GitHub 发布。
+
+Source previews and editors gain a lightweight right-side minimap with synchronized scrolling, click/drag and keyboard navigation, a persisted toggle, theme and high-DPI support, and automatic hiding in narrow panes. The 64 KiB text-read limit remains; truncated maps explicitly cover loaded content only. Identity diagnostics/recovery and version retention are preserved. Not published to GitHub.
+
+## 本地维护 v0.4.20 / Local maintenance v0.4.20
+
+启动身份失败区分 PID 缺失/路径缺失，清理前补查退出码及端口拥有者，并保存两次观察和明确摘要。仅缺失 CIM 必需字段允许对同一存活 PID 严格原生核验后恢复；不自动接管其他进程。保留旧版本维护。远端原因未复现，不宣称全部故障已修复。未 GitHub 发布。
+
+Activation failures distinguish absent PIDs from unavailable image paths, with two pre-cleanup observations, exit status, listener owners and readable assessments. Missing CIM fields can recover only after exact native identity verification of the same live PID. Other processes are never adopted automatically. Version retention is preserved. The remote cause has not been reproduced; this is not a claim that every failure is fixed. Not published to GitHub.
+
+## 本地维护 v0.4.19 / Local maintenance v0.4.19
+
+成功提交安装后保留当前＋上一版，清理更早且未使用的版本；安全跳过运行中、锁定、重解析或未知内容，并记录逐版本原因、阶段及回收字节。清理失败不回滚成功安装。不改插件市场和文件树；未 GitHub 发布。
+
+Successful EXE installs retain the current and previous version and remove older idle binaries. Running, locked, redirected or unknown entries are retained with per-version reasons, phases and reclaimed bytes. Cleanup failures do not roll back a successful install. Plugin-market and file-tree behavior are unchanged. Not published to GitHub.
+
 ## v0.4.18 — 安装、诊断、集中存储与绿色升级提示
 
 ## 简体中文
