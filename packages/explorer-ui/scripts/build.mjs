@@ -88,11 +88,16 @@ const pluginReleaseVersion = uiManifest.codeCodex?.pluginReleaseVersion ?? uiMan
 if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(pluginReleaseVersion)) throw new Error('Invalid plugin release version');
 const pluginCatalog = await buildBackgroundPackages(root, options, pluginReleaseVersion);
 pluginCatalog.push(...await buildUtilityPackages(root,options,pluginReleaseVersion));
-pluginCatalog.push(await buildStartupPackage(root,options,pluginReleaseVersion));
+const releaseOverrides=uiManifest.codeCodex?.pluginReleaseOverrides??{};
+for(const [id,version] of Object.entries(releaseOverrides)) {
+  if(id!=='codex-startup-transition' || version!==uiManifest.version)throw new Error('Only the changed Startup package may override its release with the current core version');
+}
+pluginCatalog.push(await buildStartupPackage(root,options,releaseOverrides['codex-startup-transition']??pluginReleaseVersion));
 pluginCatalog.push(...await buildFilePreviewPackages(root,options,pluginReleaseVersion));
 if (pluginReleaseVersion !== uiManifest.version) {
   const published = JSON.parse(await readFile(resolve(root, '../../releases/plugins/catalog.json'), 'utf8'));
   for (const plugin of pluginCatalog) {
+    if(releaseOverrides[plugin.id]===uiManifest.version)continue;
     const previous = published.find(p => p.id === plugin.id);
     if (!previous || JSON.stringify(previous) !== JSON.stringify(plugin)) {
       throw new Error(`Plugin ${plugin.id} changed: publish a new matching plugin release instead of retaining v${pluginReleaseVersion}`);

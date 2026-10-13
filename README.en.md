@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.25-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.33-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -30,6 +30,8 @@ editing, navigation, and file operations.
 ![Code-Codex file tree in Codex](docs/screenshots/file-tree-conversation.png)
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
+
+Local candidate **v0.4.33** uses a full-row startup video library with compact cards. Advanced supports magnetic endpoint snapping, cross-track movement and Ctrl+C/V/X or Delete editing. The outer focus outline and footer message row are removed; errors remain in runtime reports. Restore full frame recenters a transformed clip; native styles, Advanced options and projects remain, with explicit empty/failed preview states. Startup package 1.1.7 is required; other plugins remain pinned to v0.3.96. Not published; public download links remain v0.4.25.
 
 Public version **0.4.25** adds code minimap navigation, a single far-right scrollbar and consistent backgrounds. Its viewport rectangle appears during hover/scrolling and hides after about 800 ms without scrolling. Missing activation identity fields receive strict same-PID native verification and pre-cleanup diagnostics. Successful EXE updates retain the current and previous versions and safely remove eligible older entries. Published as [GitHub Release v0.4.25](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.25); plugin assets remain pinned to v0.3.96.
 
@@ -93,7 +95,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.25
+./scripts/package.ps1 -Version 0.4.33
 ```
 
 The generated packages are written to `releases/`.

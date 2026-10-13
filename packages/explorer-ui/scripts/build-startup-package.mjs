@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 /** Builds the optional player. dist/startup-early.js is a separate core loader only. */
 export async function buildStartupPackage(root, options, hostVersion) {
-  const id = 'codex-startup-transition', version = '1.0.0', category = 'appearance';
+  const id = 'codex-startup-transition', version = '1.1.7', category = 'appearance';
   const directory = resolve(root, 'dist/plugins', category, id);
   await mkdir(resolve(directory, 'resources'), { recursive: true });
   const asset = `CodeCodex-plugin-${id}-${version}.js`;
@@ -24,8 +24,8 @@ export async function buildStartupPackage(root, options, hostVersion) {
     source: 'https://github.com/Rice-dog/code-codex', notices: 'THIRD_PARTY_NOTICES_EN.md' };
   await writeFile(resolve(directory, 'manifest.json'), JSON.stringify(descriptor, null, 2) + '\n');
   await writeFile(resolve(directory, `${id}.metafile.json`), JSON.stringify(result.metafile));
-  await writeFile(resolve(directory, 'README.md'), '# Codex Startup Transition\n\nDownloadable API 1 player. Its verified local cache is loaded before the native loading-page hook, with no network request during startup. Core embeds only a lightweight loader and settings contract; the downloaded package supplies playback, media storage and timeline helpers. Missing or invalid cache skips animation and preserves normal Codex startup. Existing local video, trim, minimum duration, fade and background handoff settings are preserved.\n');
-  await writeFile(resolve(directory, 'resources/README.md'), 'Selected user videos remain in their existing IndexedDB library. No personal or official promotional video is bundled with this package. Background startup sources use their independently downloaded, verified caches.\n');
+  await writeFile(resolve(directory, 'README.md'), '# Codex Startup Transition\n\nDownloadable API 1 player. Its verified local cache is loaded before the native loading-page hook, with no network request during startup. Core embeds only a lightweight loader and settings contract; the downloaded package supplies a vertically arranged two-track editor with selection-linked properties below the preview, shared preview/startup composition, media library and timeline helpers. Missing or invalid cache skips animation and preserves normal Codex startup. Existing local video, trim, minimum duration, fade and background handoff settings are preserved.\n');
+  await writeFile(resolve(directory, 'resources/README.md'), 'User videos and thumbnails remain in their existing local IndexedDB library. The bounded two-track project and per-clip effects are stored separately in preferences, without copying media blobs. No personal or official promotional video is bundled with this package. Background startup sources use their independently downloaded, verified caches.\n');
   await writeFile(resolve(directory, 'THIRD_PARTY_NOTICES_EN.md'), await readFile(resolve(root, '../..', 'THIRD_PARTY_NOTICES_EN.md'), 'utf8'));
   return descriptor;
 }

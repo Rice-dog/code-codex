@@ -1,6 +1,6 @@
 {
   "name": "@code-codex/explorer-ui",
-  "version": "0.4.25",
+  "version": "0.4.33",
   "private": true,
   "description": "Dependency-light renderer UI injected into Codex Desktop.",
   "codeCodex": {
@@ -303,6 +303,9 @@
           "checksum": "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
         }
       ]
+    },
+    "pluginReleaseOverrides": {
+      "codex-startup-transition": "0.4.33"
     }
   },
   "type": "module",

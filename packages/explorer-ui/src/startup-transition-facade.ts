@@ -4,9 +4,13 @@ export type { StartupTransitionController, StartupTransitionOptions } from './st
 export const loadStartupVideo: typeof import('./startup-transition-media').loadStartupVideo = async (...args) => startupTransitionModule()?.loadStartupVideo(...args) ?? null;
 export const saveStartupVideo: typeof import('./startup-transition-media').saveStartupVideo = async (...args) => requireStartupTransitionModule().saveStartupVideo(...args);
 export const removeStartupVideo: typeof import('./startup-transition-media').removeStartupVideo = async (...args) => requireStartupTransitionModule().removeStartupVideo(...args);
+export const listStartupVideos: typeof import('./startup-transition-media').listStartupVideos = async (...args) => requireStartupTransitionModule().listStartupVideos(...args);
+export const attachStartupCinema: typeof import('./startup-cinema').attachStartupCinema = (...args) => requireStartupTransitionModule().attachStartupCinema(...args);
 export const mountStartupTransition: typeof import('./startup-transition').mountStartupTransition = (...args) => requireStartupTransitionModule().mountStartupTransition(...args);
 export const formatTimelineTime: typeof import('./startup-transition-timeline').formatTimelineTime = (...args) => requireStartupTransitionModule().formatTimelineTime(...args);
 export const startupTimelineGeometry: typeof import('./startup-transition-timeline').startupTimelineGeometry = (...args) => requireStartupTransitionModule().startupTimelineGeometry(...args);
 export const moveTimelineBoundary: typeof import('./startup-transition-timeline').moveTimelineBoundary = (...args) => requireStartupTransitionModule().moveTimelineBoundary(...args);
 export const sampleStartupVideoFrames: typeof import('./startup-transition-timeline').sampleStartupVideoFrames = (...args) => requireStartupTransitionModule().sampleStartupVideoFrames(...args);
 export const clipFadeOpacity: typeof import('./startup-transition-timeline').clipFadeOpacity = (...args) => requireStartupTransitionModule().clipFadeOpacity(...args);
+
+export const mountStartupVideoEditor: typeof import('./startup-video-editor').mountStartupVideoEditor = (...args) => requireStartupTransitionModule().mountStartupVideoEditor(...args);

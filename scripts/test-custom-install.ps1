@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$PayloadRoot,[string]$Version="0.4.25",[string]$OutputRoot)
+param([string]$PayloadRoot,[string]$Version="0.4.33",[string]$OutputRoot)
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 $testOutputRoot=if($OutputRoot){[IO.Path]::GetFullPath($OutputRoot)}else{Join-Path $repo 'artifacts\storage-upgrade-v0.4.10'}

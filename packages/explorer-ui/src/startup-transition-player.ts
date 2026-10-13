@@ -1,10 +1,11 @@
+import { projectDuration, projectVideoIds } from './startup-video-project';
 import { setStartupBackgroundHold } from './background-startup-hold';
 import { monitorStartupReadiness, startupContentVisible } from './startup-readiness';
 import { loadStartupVideo, type StartupVideo } from "./startup-transition-media";
 import { runtimeEvent } from "./runtime-events";
 import { mountStartupTransition, type StartupTransitionController } from "./startup-transition";
 
-import { readStartupTransitionSettings, type StartupTransitionSettings } from './startup-transition-settings';
+import { readStartupTransitionSettings, writeStartupTransitionSettings, settingsForStartupVideo, startupPlaybackVideoId, advanceStartupVideo, type StartupTransitionSettings } from './startup-transition-settings';
 const LAUNCH_STATE = Symbol.for("code-codex:startup-transition:launch:v1");
 const CONTROLLER_STATE = Symbol.for("code-codex:startup-transition:controller:v1");
 const VISUAL_READY_PROPERTY = "__CODE_CODEX_STARTUP_VISUAL_READY__";
@@ -55,22 +56,38 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
   }
   setStartupBackgroundHold(true);
   let url: string | undefined;
+  let playedVideoId: string | undefined;
+  runtimeEvent('startup-animation','playback mode','selected',{source:settings.source,advancedOptions:settings.advancedOptions,projectMode:settings.source==='video'&&settings.advancedOptions&&settings.project!==null});
   let controller: StartupTransitionController | undefined;
   try {
     runtimeEvent('startup-animation','source','selected',{source:settings.source,backgroundId:settings.source==='background'?settings.backgroundId:null});
     if(settings.source === 'background') {
       if(loadingOnly&&startupDocumentReady()) {resolveVisualReady?.(false);return undefined;}
       controller=mountStartupTransition({target:document.body,fullScreen:true,backgroundId:settings.backgroundId,clipStart:0,clipEnd:4,playbackRate:1,minimumVisiblePercent:100,fadeDurationMs:settings.backgroundFadeSeconds*1000,onComplete:()=>setStartupBackgroundHold(false)});
+    } else if(settings.advancedOptions && settings.project) {
+      const ids=projectVideoIds(settings.project);
+      if(!ids.length||!projectDuration(settings.project)){runtimeEvent('startup-animation','composition','skipped',{reason:'empty video project'});resolveVisualReady?.(false);return undefined;}
+      runtimeEvent('startup-animation','composition media lookup','started',{sourceCount:ids.length,clipCount:settings.project.tracks.flat().length,timeoutMs:10000});
+      let timer:number|undefined;
+      const media=await Promise.race([Promise.all(ids.map(id=>loadStartupVideo(id))),new Promise<null>(resolve=>{timer=window.setTimeout(()=>resolve(null),10000);})]);
+      if(timer!==undefined)clearTimeout(timer);
+      if(!media||media.some(m=>!m)){runtimeEvent('startup-animation','composition media lookup','failed',{reason:media?'referenced media missing':'lookup timeout',missingIds:media?ids.filter((_,i)=>!media[i]):ids});resolveVisualReady?.(false);return undefined;}
+      if(loadingOnly&&startupDocumentReady()){resolveVisualReady?.(false);return undefined;}
+      runtimeEvent('startup-animation','composition media lookup','passed',{sourceCount:media.length,bytes:media.reduce((n,v)=>n+(v?.size??0),0)});
+      controller=mountStartupTransition({target:document.body,fullScreen:true,project:settings.project,media:media as StartupVideo[],minimumVisiblePercent:settings.minimumVisiblePercent,fadePercent:settings.fadePercent,onComplete:()=>setStartupBackgroundHold(false)});
     } else {
     runtimeEvent("startup-animation","video lookup","started",{timeoutMs:10000,loadingOnly,enabled:settings.enabled});
     let lookupReason = "no stored video";
     let lookupTimer: number | undefined;
     const video = await Promise.race([
-      loadStartupVideo().catch(error => { lookupReason=error instanceof Error ? `storage error: ${error.name}: ${error.message}` : `storage error: ${String(error)}`;return null; }),
+      loadStartupVideo(startupPlaybackVideoId(settings)).then(video=>video??loadStartupVideo("selected")).catch(error => { lookupReason=error instanceof Error ? `storage error: ${error.name}: ${error.message}` : `storage error: ${String(error)}`;return null; }),
       new Promise<null>((resolve) => { lookupTimer=window.setTimeout(() => {lookupReason="video lookup exceeded 10000 ms";resolve(null);},10000); }),
     ]);
     if (lookupTimer!==undefined) clearTimeout(lookupTimer);
     if (!video) { runtimeEvent("startup-animation","video lookup","failed",{reason:lookupReason}); resolveVisualReady?.(false); return undefined; }
+    const videoSettings=settingsForStartupVideo(settings,video.id,video.duration);
+    playedVideoId=video.id;
+    runtimeEvent("startup-animation","video library selection","passed",{mode:settings.playbackMode,videoId:video.id,libraryCount:settings.videoOrder.length,fit:videoSettings.videoFit});
     runtimeEvent("startup-animation","video lookup","passed",{bytes:video.blob.size,duration:video.duration,clipStart:settings.clipStart,clipEnd:settings.clipEnd,playbackRate:settings.playbackRate,minimumVisiblePercent:settings.minimumVisiblePercent,fadePercent:settings.fadePercent});
     if (loadingOnly && startupDocumentReady()) { runtimeEvent("startup-animation","launch playback","skipped",{reason:"native document already ready"}); resolveVisualReady?.(false); return undefined; }
     url = URL.createObjectURL(video.blob);
@@ -78,9 +95,9 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
       target: document.body,
       fullScreen: true,
       ...(url ? { videoSrc: url } : {}),
-      ...videoOptions(settings, video),
-      minimumVisiblePercent: settings.minimumVisiblePercent,
-      fadePercent: settings.fadePercent,
+      ...videoOptions(videoSettings, video),
+      minimumVisiblePercent: videoSettings.minimumVisiblePercent,
+      fadePercent: videoSettings.fadePercent,
       onComplete: () => { setStartupBackgroundHold(false); if (url) URL.revokeObjectURL(url); },
     });
     }
@@ -99,6 +116,10 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
       return undefined;
     }
     controller.markRevealed();
+    if(playedVideoId) {
+      const current=readStartupTransitionSettings();
+      if(!writeStartupTransitionSettings(advanceStartupVideo(current,playedVideoId))) runtimeEvent("startup-animation","video library cursor","failed",{reason:"preference storage unavailable"});
+    }
     runtimeEvent("startup-animation","first painted frame","revealed",{phase:controller.phase});
     resolveVisualReady?.(true);
     return controller;

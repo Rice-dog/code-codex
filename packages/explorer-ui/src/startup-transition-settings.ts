@@ -1,8 +1,12 @@
+import { normalizeStartupProject, type StartupVideoProject, type StartupClip } from './startup-video-project';
 import { STARTUP_BACKGROUNDS } from './startup-background';
 
 const STORAGE_KEY = "code-codex:startup-transition:v1";
 
 export interface StartupTransitionSettings {
+  advancedOptions: boolean;
+  project: StartupVideoProject | null;
+  videoClipDefaults: Record<string, StartupClip>;
   enabled: boolean;
   source: 'video' | 'background';
   backgroundId: string;
@@ -13,10 +17,36 @@ export interface StartupTransitionSettings {
   clipEnd: number;
   playbackRate: number;
   videoBrightness: number;
-  videoFit: "cover" | "contain";
+  videoFit: "cover" | "contain" | "cinema";
+  selectedVideoId: string;
+  videoOrder: string[];
+  playbackMode: "fixed" | "sequence" | "random";
+  nextVideoId: string;
+  lastPlayedVideoId: string;
+  videoProfiles: Record<string, StartupVideoProfile>;
+}
+
+export type StartupVideoProfile = Pick<StartupTransitionSettings, "clipStart" | "clipEnd" | "playbackRate" | "videoBrightness" | "videoFit" | "minimumVisiblePercent" | "fadePercent">;
+export function startupVideoProfile(s: StartupTransitionSettings): StartupVideoProfile {
+  return {clipStart:s.clipStart,clipEnd:s.clipEnd,playbackRate:s.playbackRate,videoBrightness:s.videoBrightness,videoFit:s.videoFit,minimumVisiblePercent:s.minimumVisiblePercent,fadePercent:s.fadePercent};
+}
+export function startupPlaybackVideoId(s: StartupTransitionSettings): string {
+  return s.playbackMode === "fixed" ? s.selectedVideoId : s.nextVideoId || s.selectedVideoId;
+}
+export function settingsForStartupVideo(s: StartupTransitionSettings, id: string, duration: number): StartupTransitionSettings {
+  const profile = s.videoProfiles[id] ?? (id === s.selectedVideoId ? startupVideoProfile(s) : {...startupVideoProfile(s),...startupDefaultClip(duration)});
+  return {...s,...profile,selectedVideoId:id};
+}
+export function advanceStartupVideo(s: StartupTransitionSettings, played: string): StartupTransitionSettings {
+  const ids=s.videoOrder;
+  const others=ids.filter(id=>id!==played);
+  const next=s.playbackMode === "sequence" ? ids[(Math.max(0,ids.indexOf(played))+1)%ids.length]
+    : s.playbackMode === "random" ? others[Math.floor(Math.random()*others.length)] : s.selectedVideoId;
+  return {...s,lastPlayedVideoId:played,nextVideoId:next || played};
 }
 
 export const DEFAULT_STARTUP_TRANSITION_SETTINGS: StartupTransitionSettings = {
+  advancedOptions: false, project: null, videoClipDefaults: {},
   enabled: false,
   source: 'video',
   backgroundId: 'particle-image',
@@ -28,6 +58,7 @@ export const DEFAULT_STARTUP_TRANSITION_SETTINGS: StartupTransitionSettings = {
   playbackRate: 1,
   videoBrightness: 1.4,
   videoFit: "cover",
+  selectedVideoId: "selected", videoOrder: [], playbackMode: "sequence", nextVideoId: "selected", lastPlayedVideoId: "", videoProfiles: {},
 };
 
 /** Apply the chosen default trim to a known video without creating an empty clip. */
@@ -54,6 +85,9 @@ export function readStartupTransitionSettings(): StartupTransitionSettings {
     const defaults = DEFAULT_STARTUP_TRANSITION_SETTINGS;
     const legacyDurationMs = Math.max(100, ((saved.clipEnd ?? defaults.clipEnd) - (saved.clipStart ?? defaults.clipStart)) / (saved.playbackRate ?? defaults.playbackRate) * 1000);
     return {
+      advancedOptions: typeof saved.advancedOptions === "boolean" ? saved.advancedOptions : normalizeStartupProject(saved.project) !== null,
+      project: normalizeStartupProject(saved.project),
+      videoClipDefaults: normalizeVideoClipDefaults(saved.videoClipDefaults),
       enabled: saved.enabled === true,
       source: saved.source === 'background' || saved.source === 'video' ? saved.source : defaults.source,
       backgroundId: STARTUP_BACKGROUNDS.some(([id])=>id===saved.backgroundId) ? saved.backgroundId! : defaults.backgroundId,
@@ -64,7 +98,13 @@ export function readStartupTransitionSettings(): StartupTransitionSettings {
       clipEnd: bounded(saved.clipEnd, defaults.clipEnd, 0.1, 3600),
       playbackRate: bounded(saved.playbackRate, defaults.playbackRate, 0.5, 2),
       videoBrightness: bounded(saved.videoBrightness, defaults.videoBrightness, 0.4, 1.4),
-      videoFit: saved.videoFit === "contain" || saved.videoFit === "cover" ? saved.videoFit : defaults.videoFit,
+      videoFit: ["contain", "cover", "cinema"].includes(saved.videoFit ?? "") ? saved.videoFit! : defaults.videoFit,
+      selectedVideoId: typeof saved.selectedVideoId === "string" && saved.selectedVideoId.length <= 256 ? saved.selectedVideoId : "selected",
+      videoOrder: Array.isArray(saved.videoOrder) ? [...new Set(saved.videoOrder.filter((id): id is string=>typeof id === "string" && id.length>0 && id.length<=256))].slice(0,32) : [],
+      playbackMode: "sequence",
+      nextVideoId: typeof saved.nextVideoId === "string" && saved.nextVideoId.length<=256 ? saved.nextVideoId : "selected",
+      lastPlayedVideoId: typeof saved.lastPlayedVideoId === "string" && saved.lastPlayedVideoId.length<=256 ? saved.lastPlayedVideoId : "",
+      videoProfiles: normalizeProfiles(saved.videoProfiles),
     };
   } catch {
     return { ...DEFAULT_STARTUP_TRANSITION_SETTINGS };
@@ -73,9 +113,34 @@ export function readStartupTransitionSettings(): StartupTransitionSettings {
 
 export function writeStartupTransitionSettings(settings: StartupTransitionSettings): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    const profiles = {...settings.videoProfiles};
+    if (settings.selectedVideoId) profiles[settings.selectedVideoId] = startupVideoProfile(settings);
+    for(const id of Object.keys(profiles))if(id!==settings.selectedVideoId&&!settings.videoOrder.includes(id))delete profiles[id];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({...settings,playbackMode:"sequence",project:normalizeStartupProject(settings.project),videoClipDefaults:normalizeVideoClipDefaults(settings.videoClipDefaults),videoProfiles:profiles}));
     return true;
   } catch {
     return false;
   }
+}
+
+function normalizeProfiles(value: unknown): Record<string, StartupVideoProfile> {
+  const result: Record<string, StartupVideoProfile> = Object.create(null);
+  if (!value || typeof value !== "object") return result;
+  for(const [id,p] of Object.entries(value).slice(0,32)) {
+    if(!id || id.length>256 || !p || typeof p!=="object") continue;
+    const v=p as Partial<StartupVideoProfile>, d=DEFAULT_STARTUP_TRANSITION_SETTINGS;
+    result[id]={clipStart:bounded(v.clipStart,d.clipStart,0,3600),clipEnd:bounded(v.clipEnd,d.clipEnd,.1,3600),playbackRate:bounded(v.playbackRate,d.playbackRate,.5,2),videoBrightness:bounded(v.videoBrightness,d.videoBrightness,.4,1.4),minimumVisiblePercent:bounded(v.minimumVisiblePercent,d.minimumVisiblePercent,0,100),fadePercent:bounded(v.fadePercent,d.fadePercent,0,100),videoFit:v.videoFit==="contain"||v.videoFit==="cinema"?v.videoFit:"cover"};
+  }
+  return result;
+}
+
+function normalizeVideoClipDefaults(value: unknown): Record<string, StartupClip> {
+  const result: Record<string, StartupClip> = Object.create(null);
+  if (!value || typeof value !== 'object') return result;
+  for (const [id, raw] of Object.entries(value).slice(0, 32)) {
+    if (!id || id.length > 256 || !raw || typeof raw !== 'object') continue;
+    const clip = normalizeStartupProject({version:1,tracks:[[{...raw,videoId:id,start:0}],[]]})?.tracks[0][0];
+    if (clip) result[id] = clip;
+  }
+  return result;
 }
