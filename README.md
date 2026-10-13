@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.33-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.34-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,7 +28,7 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-本地候选 **v0.4.33**：启动动画素材库外框铺满整行，预览卡保持紧凑；高级支持片段首尾磁吸、跨轨拖动及Ctrl+C/V/X与Delete编辑；移除整体焦点黑框和底部文字行，错误仍记入运行报告。新增恢复完整画面，保留原生样式、高级开关与两轨工程，空/坏预览明确禁用并提示。Startup包1.1.7，其余插件复用v0.3.96。尚未公开发布，下载入口仍为v0.4.25。
+本地候选 **v0.4.34**：修复高级视频库拖入时间轴时高亮却无法放入的问题，缩略图和文件名均可拖至V1/V2。素材库外框铺满整行，预览卡保持紧凑；高级支持片段首尾磁吸、跨轨拖动及Ctrl+C/V/X与Delete编辑；移除整体焦点黑框和底部文字行，错误仍记入运行报告。新增恢复完整画面，保留原生样式、高级开关与两轨工程，空/坏预览明确禁用并提示。Startup包1.1.8，其余插件复用v0.3.96。尚未公开发布，下载入口仍为v0.4.25。
 
 当前公开版本 **0.4.25**：新增代码缩略图导航，优化单滚动条与背景一致性；透明视口块在悬停/滚动时显示，停止滚动约0.8秒后隐藏。启动身份字段缺失时增加严格的同PID原生核验与清理前诊断；EXE更新成功后保留当前及上一版，安全清理较旧版本。已发布为 [GitHub Release v0.4.25](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.25)，插件资源继续复用 v0.3.96。
 
@@ -105,7 +105,7 @@ EXE 成功安装后保留当前版本与实际上一版，安全清理更旧的�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.33
+./scripts/package.ps1 -Version 0.4.34
 ```
 
 生成结果会写入 `releases/`。

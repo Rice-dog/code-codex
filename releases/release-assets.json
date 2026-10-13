@@ -1,27 +1,27 @@
 ﻿[
     {
-        "assetName":  "CodeCodex-0.4.33-x64-setup.exe",
-        "path":  "CodeCodex-0.4.33-x64-setup.exe",
-        "size":  11876573,
-        "sha256":  "1a20fcb78bef5f189c49869c984e28a40e2b06d89c9d167fd7a0f4e04f28e9af"
+        "assetName":  "CodeCodex-0.4.34-x64-setup.exe",
+        "path":  "CodeCodex-0.4.34-x64-setup.exe",
+        "size":  11877035,
+        "sha256":  "b8f1bce7c649c1de3011d5d08c4e3ec684bae4b06de56d43c42c1588d25f49e2"
     },
     {
-        "assetName":  "CodeCodex-0.4.33-x64.msi",
-        "path":  "CodeCodex-0.4.33-x64.msi",
+        "assetName":  "CodeCodex-0.4.34-x64.msi",
+        "path":  "CodeCodex-0.4.34-x64.msi",
         "size":  7094272,
-        "sha256":  "04fbf89baed8ec9b0525a5b952fcbc65227c0571f2f9f1a205df8d584698650b"
+        "sha256":  "16e9bb1d0944cded195936264a91fa4a573a1bb2198f3caafec171f191245ef9"
     },
     {
-        "assetName":  "CodeCodex-0.4.33-x64.zip",
-        "path":  "CodeCodex-0.4.33-x64.zip",
-        "size":  9302725,
-        "sha256":  "90b0e0146905d5722cce94d9e39f910c1c06be1e7ca3959cf542a2d5d03ab6a0"
+        "assetName":  "CodeCodex-0.4.34-x64.zip",
+        "path":  "CodeCodex-0.4.34-x64.zip",
+        "size":  9303187,
+        "sha256":  "d2a03cbf8503fa980da90ffc48726e2d90077f0b64ce6e0480414e748ff6cf4b"
     },
     {
         "assetName":  "Uninstall-CodeCodex.exe",
         "path":  "Uninstall-CodeCodex.exe",
         "size":  788992,
-        "sha256":  "077a3258064e01033adf97471b22310f6cd1f28506cbefdfa9afa994a2791f23"
+        "sha256":  "4b109edefa84cb3dc6494dda4056fb9d42b287a82d713ce6938103f1ad88b6ba"
     },
     {
         "assetName":  "CodeCodex-background-glow-horizon-1.0.0.js",
@@ -192,10 +192,10 @@
         "sha256":  "1fcdf42d099e7159e1cf07517882c6b21ba7e99aa23be9c3c9e0a8fed6ffe77e"
     },
     {
-        "assetName":  "CodeCodex-plugin-codex-startup-transition-1.1.7.js",
-        "path":  "plugins/appearance/codex-startup-transition/CodeCodex-plugin-codex-startup-transition-1.1.7.js",
-        "size":  68227,
-        "sha256":  "d84233b8e2858e7c24e7362901241cffa7db6ce792850efac67ee79fab432b40"
+        "assetName":  "CodeCodex-plugin-codex-startup-transition-1.1.8.js",
+        "path":  "plugins/appearance/codex-startup-transition/CodeCodex-plugin-codex-startup-transition-1.1.8.js",
+        "size":  68661,
+        "sha256":  "f957963cdd8e409ae532768168542a7993b452f6fce229465593d42eef794836"
     },
     {
         "assetName":  "CodeCodex-plugin-markdown-preview-1.0.0.js",
@@ -270,9 +270,9 @@
         "sha256":  "c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2"
     },
     {
-        "assetName":  "CodeCodex-plugin-catalog-0.4.33.json",
+        "assetName":  "CodeCodex-plugin-catalog-0.4.34.json",
         "path":  "plugins/catalog.json",
         "size":  25262,
-        "sha256":  "f253659c4c102be6a0b4d756fd4ea37e37b8b0be2e4ef32f22d98e379aebf2a6"
+        "sha256":  "28bbd2e93bac565e0ace12b70fd05ad112780ae7df842dd20e085b0e84c0f2ca"
     }
 ]

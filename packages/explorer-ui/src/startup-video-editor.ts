@@ -206,7 +206,7 @@ export function mountStartupVideoEditor(target: HTMLElement, language: 'zh' | 'e
     for (const [i, m] of Array.from(media.entries()).slice(libraryPage*3,libraryPage*3+3)) {
       const item = document.createElement('article'); item.className = `particle-library-item${m.id === selectedMedia ? ' is-selected' : ''}`;
       const button = document.createElement('button'); button.className = 'particle-library-select'; button.type = 'button'; button.dataset.media = m.id; button.draggable = true; button.title = m.name; button.disabled = busy; button.setAttribute('aria-pressed', String(m.id === selectedMedia));
-      const img = document.createElement('img'); img.className = 'particle-library-thumb'; img.alt = ''; if(thumbnailUrls.has(m.id))img.src=thumbnailUrls.get(m.id)!;else if(frameImages.get(m.id)?.[0])img.src=frameImages.get(m.id)![0]!; if (m.thumbnail) { if(!thumbnailUrls.has(m.id))thumbnailUrls.set(m.id,URL.createObjectURL(m.thumbnail));img.src=thumbnailUrls.get(m.id)!; }
+      const img = document.createElement('img'); img.className = 'particle-library-thumb'; img.alt = ''; img.draggable = false; if(thumbnailUrls.has(m.id))img.src=thumbnailUrls.get(m.id)!;else if(frameImages.get(m.id)?.[0])img.src=frameImages.get(m.id)![0]!; if (m.thumbnail) { if(!thumbnailUrls.has(m.id))thumbnailUrls.set(m.id,URL.createObjectURL(m.thumbnail));img.src=thumbnailUrls.get(m.id)!; }
       const name = document.createElement('span'); name.className = 'particle-library-name'; name.textContent = `${m.name} · ${m.duration.toFixed(1)} s`;
       button.append(img, name); item.append(button);
       if(m.id===selectedMedia){const current=document.createElement('span');current.className='particle-library-live';current.textContent=text('当前','CURRENT');item.append(current);}
@@ -359,23 +359,30 @@ export function mountStartupVideoEditor(target: HTMLElement, language: 'zh' | 'e
   root.addEventListener('dragstart', raw => {
     const event = raw as DragEvent, button = (event.target as Element).closest<HTMLButtonElement>('[data-media]');
     if(!button||button.disabled||busy){event.preventDefault();return;}
+    // Drag the media card, not the browser's thumbnail file/URL. Keep the
+    // private drag out of the file tree and the official application's handlers.
+    event.stopPropagation();event.dataTransfer?.clearData();
     draggedMedia=button.dataset.media!;event.dataTransfer?.setData('application/x-codecodex-video',draggedMedia);
     if(event.dataTransfer)event.dataTransfer.effectAllowed='copy';
+    runtimeEvent('startup-editor','media drag','started',{videoId:draggedMedia});
   }, {signal:abort.signal});
   root.addEventListener('dragover',raw=>{
     const event=raw as DragEvent,lane=laneAt(event.clientX,event.clientY);clearDropTargets();
-    if(!lane||busy||!Array.from(event.dataTransfer?.types??[]).includes('application/x-codecodex-video'))return;
-    event.preventDefault();const m=media.find(m=>m.id===draggedMedia),track=Number(lane.parentElement!.dataset.track),rect=lane.getBoundingClientRect();
+    if(!Array.from(event.dataTransfer?.types??[]).includes('application/x-codecodex-video'))return;
+    event.preventDefault();event.stopPropagation();
+    if(!lane||busy){if(event.dataTransfer)event.dataTransfer.dropEffect='none';return;}
+    const m=media.find(m=>m.id===draggedMedia),track=Number(lane.parentElement!.dataset.track),rect=lane.getBoundingClientRect();
     let candidate=m?{...(mediaDefaults[m.id]??newStartupClip(m.id,m.duration)),id:'',start:Math.max(0,(event.clientX-rect.left)/rect.width*span)}:undefined;
     if(candidate&&!event.shiftKey){const result=snapStartupClip(candidate,project,track,{mode:'move',threshold:8*span/Math.max(1,rect.width),playhead:player?.time??0,sourceDuration:m!.duration});candidate=result.clip;showSnap(result.time);}
     const allowed=!candidate||(project.tracks[track]!.length<16&&canPlaceClip(project.tracks[track]!,candidate));
     lane.dataset.dropState=allowed?'allowed':'blocked';if(event.dataTransfer)event.dataTransfer.dropEffect=allowed?'copy':'none';
   },{signal:abort.signal});
   root.addEventListener('dragleave',raw=>{if(!(raw as DragEvent).relatedTarget||!root.contains((raw as DragEvent).relatedTarget as Node))clearDropTargets();},{signal:abort.signal});
-  root.addEventListener('dragend',()=>{draggedMedia='';clearDropTargets();},{signal:abort.signal});
+  root.addEventListener('dragend',raw=>{if(draggedMedia){raw.stopPropagation();runtimeEvent('startup-editor','media drag','ended',{videoId:draggedMedia,dropEffect:(raw as DragEvent).dataTransfer?.dropEffect??'none'});}draggedMedia='';clearDropTargets();},{signal:abort.signal});
   root.addEventListener('drop',raw=>{
     const event=raw as DragEvent,lane=laneAt(event.clientX,event.clientY),id=event.dataTransfer?.getData('application/x-codecodex-video');clearDropTargets();draggedMedia='';
-    if(!lane||!id)return;event.preventDefault();
+    if(!id)return;event.preventDefault();event.stopPropagation();
+    if(!lane){runtimeEvent('startup-editor','media drop','blocked',{reason:'outside tracks',videoId:id});return;}
     if(busy||!media.some(m=>m.id===id)){message(text('此素材暂不可拖入。','This media cannot be placed now.'),true);runtimeEvent('startup-editor','media drop','blocked',{reason:busy?'import busy':'unknown media'});return;}
     selectedMedia=id;const rect=lane.getBoundingClientRect(),track=Number(lane.parentElement!.dataset.track);
     insert(track,Math.max(0,(event.clientX-rect.left)/rect.width*span),!event.shiftKey);renderLibrary();

@@ -1,5 +1,5 @@
 import {build} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
-import {writeFileSync,mkdirSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import assert from 'node:assert/strict';
 const result=await build({write:false,bundle:true,format:'esm',platform:'node',stdin:{contents:"export {snapStartupClip} from './startup-video-snapping';export {newStartupClip,clipDuration} from './startup-video-project';",resolveDir:'packages/explorer-ui/src',loader:'ts'}});
 const {snapStartupClip:snap,newStartupClip:newClip,clipDuration}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'));
@@ -19,4 +19,5 @@ check('Left trim moves in and start while preserving tail',()=>{const c={...clip
 check('Left trim cannot seek negative source in',()=>snap({...clip,start:.05,in:0},p,1,{...opt,mode:'in'}).time===null);
 check('Snap cannot create same-track overlap',()=>snap(clip,{version:1,tracks:[[other],[{...other,id:'occupied',start:9},clip]]},1,opt).time===null);
 check('Negative start is never accepted',()=>snap({...clip,start:-5.95},p,1,opt).clip.start<0&&snap({...clip,start:-5.95},p,1,opt).time===null);
-const dir='artifacts/startup-panel-v0.4.33';mkdirSync(dir,{recursive:true});const report={passed:true,checks};writeFileSync(dir+'/snapping-result.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+const version=JSON.parse(readFileSync('packages/explorer-ui/package.json','utf8')).version;
+const dir=`artifacts/startup-panel-v${version}`;mkdirSync(dir,{recursive:true});const report={version,passed:true,checks};writeFileSync(dir+'/snapping-result.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));
