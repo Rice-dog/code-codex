@@ -1,12 +1,65 @@
-## 本地维护 v0.4.47 / Local maintenance v0.4.47
+## v0.4.47 — 基础实时启动动画与固定视频选择
 
-启动动画固定播放素材库中当前选中的视频。普通播放器和原生早期启动均忽略旧轮播游标；开始播放后不会切换下次素材，旧sequence/random设置保留选中ID并迁移成fixed。所选原视频缺失时记录ID和失败原因并跳过动画，不改播另一视频。视频库、逐素材参数、基础实时预览、加号卡片与叉号删除保持。
+## 简体中文
 
-Startup包升级为1.1.17；核心47与所选视频恢复规则同步，其他23包/默认媒体不变。上一轮46的基础模式、卡片操作、诊断和安装修复保持。本轮只修复选源，此前发现的就绪长等待问题尚未改动；完整官方冷启动未重启验证，当前为本地维护版本，未发布GitHub。
+本版汇总 v0.4.25 之后的维护更新，恢复启动动画的基础实时播放，新增紧凑视频素材库，并让启动始终使用当前选中的视频。
 
-Startup always plays the video currently selected in the library. Both the normal player and native early startup ignore legacy rotation cursors and never advance the selection after playback begins. Legacy sequence/random settings retain the selected ID and normalize to fixed playback. A missing selected original is logged and skipped instead of substituting another video. The library, per-video profiles, realtime preview, plus card and delete cross remain.
+### 更新内容
 
-Startup package is 1.1.17; core 47 uses the matching selected-source restoration rule. The other 23 plugins and default media remain unchanged. This change addresses source selection only; the previously observed readiness wait remains unresolved. A full official-app cold launch has not been restarted for validation, and this local maintenance build has not been published to GitHub. Earlier records follow.
+- **启动动画与视频库**：保留基础预览、逐素材裁剪、速度、亮度、画面适配和淡出。使用等尺寸加号卡片添加视频，悬停或键盘聚焦时显示删除叉号。启动固定播放当前选中素材，旧轮播设置迁移为固定播放；所选文件缺失时记录原因并跳过动画，不替换成另一视频。
+- **恢复原视频实时播放**：移除高级选项、双轨编辑和 Ctrl+S 预合成缓存。原视频与基础参数保留，旧高级状态迁移回基础设置；仅退役派生缓存。影院填充使用单个视频和 GPU 模糊背景，处理模糊采样边缘。
+- **故障信息更具体**：启动、调试端点、进程核验、App Server、工作区、存储和安装错误补充实际操作、角色与底层原因。保留过程记录、自检结果及支持代码，不将一般连接失败直接判断为网络或版本问题。
+- **安装与存储维护**：完善集中安装目录的路径检查、文件身份绑定与恢复记录；保留当前安装向导和更新流程。
+
+### 升级说明
+
+- 推荐运行本版 EXE，沿用现有安装目录；当前文件树内更新进入 Installing → Finish，首次安装为 Welcome → License → Installation Folder → Installing → Finish。
+- 启动动画插件升级为 **1.1.17**，由插件市场按需下载。其余 23 个插件及默认媒体继续使用公开 v0.3.96，不重复上传或要求重新下载未改动资源。
+- 更新后通过 Code-Codex 重新启动官方应用以加载新版核心界面；原视频库和基础参数保留。当前选中哪个视频，之后启动就播放哪个。
+
+### 验证与限制
+
+- Windows x64：生产 UI 构建和类型检查通过；最终源码的 locked Rust workspace 测试 **476 项通过、3 项忽略**。基础 UI fixture 29 项、默认/旧设置检查 25 项、隔离新 renderer 文档启动检查 7 项通过。
+- 最终 EXE 本机 v0.4.46 → v0.4.47 安装成功，五个组件摘要与 payload 一致，54 个原媒体/设置/其他插件文件摘要保持；当前官方窗口确认加载插件 1.1.17，原视频播放及 Play/Pause 操作通过。
+- **已知限制**：偶发动画等待 Codex 就绪时间过长的问题尚未修复；本轮没有重新验证官方应用的完整冷启动、公开 v0.4.25 的直接升级、独立 MSI 安装或 macOS。短时窗口播放存在丢帧，未据此认定播放性能已全面解决。检测更详细不表示所有启动故障均已修复。
+- 包内 README 保留已核验构建时的快照；公开下载信息以本 Release 和仓库主页为准。
+
+### 下载
+
+推荐 `CodeCodex-0.4.47-x64-setup.exe`；备选 `CodeCodex-0.4.47-x64.msi`；ZIP 包 `CodeCodex-0.4.47-x64.zip`；独立卸载器 `Uninstall-CodeCodex.exe`。另提供新版 Startup 插件和插件目录清单。使用本 Release 的 `SHA256SUMS.txt` 核对全部七个附件中的六个程序/目录文件。
+
+## English
+
+This release combines maintenance since v0.4.25, restores basic realtime startup playback, adds a compact video library, and always starts with the currently selected video.
+
+### Changes
+
+- **Startup and video library:** retain preview and per-video trim, speed, brightness, fit and fade. Add videos through an equal-sized plus card; a delete cross appears on hover or keyboard focus. Startup uses the selected item, migrating legacy rotation settings to fixed playback. A missing selected file is logged and skipped instead of playing a different video.
+- **Original realtime playback:** remove advanced options, two-track editing and Ctrl+S precomposition. Retain original videos and basic profiles, migrate old advanced preferences to basic settings, and retire derived caches only. Cinema fill uses one video with a GPU-blurred backdrop and handles blur sampling edges.
+- **Specific diagnostics:** startup, debugging endpoint, process identity, App Server, workspace, storage and installation failures include the actual operation, role and underlying cause. Process traces, self-check results and support codes remain available; a generic connection failure is not automatically blamed on network connectivity or app version.
+- **Installation and storage:** strengthen centralized-folder path checks, file identity binding and recovery records, retaining the existing installation wizard and update flow.
+
+### Upgrade
+
+- Use the EXE to retain the existing installation folder. Current in-app updates use Installing → Finish; first-time installation uses Welcome → License → Installation Folder → Installing → Finish.
+- Startup plugin **1.1.17** is downloaded on demand through the market. The other 23 plugins and default media remain on public v0.3.96; unchanged resources are neither duplicated nor required to be downloaded again.
+- Restart the official app through Code-Codex after updating to load the new core UI. Original videos and basic preferences are retained. The selected video stays selected for subsequent launches.
+
+### Validation and limitations
+
+- Windows x64: production UI build and type checks passed; **476 locked Rust workspace tests passed, 3 ignored** on the final source. The basic UI fixture passed 29 checks, defaults/legacy settings passed 25 checks, and isolated fresh-renderer startup documents passed 7 checks.
+- The final EXE successfully updated the development installation from v0.4.46 to v0.4.47. Five installed component hashes matched the payload; 54 original media/settings/other-plugin file hashes were retained. The current official window loaded plugin 1.1.17, and original-video playback and Play/Pause passed.
+- **Known limitations:** occasional excessive waiting for Codex readiness remains unresolved. Full official-app cold launch, direct upgrade from public v0.4.25, independent MSI installation and macOS were not retested. Dropped frames occurred during a short window playback check; this does not establish a complete performance fix. More detailed detection does not mean every startup failure is resolved.
+- Bundled READMEs retain the verified build-time snapshot. Use this release and the repository homepage for current download information.
+
+### Downloads
+
+Recommended: `CodeCodex-0.4.47-x64-setup.exe`; alternative: `CodeCodex-0.4.47-x64.msi`; ZIP package: `CodeCodex-0.4.47-x64.zip`; standalone uninstaller: `Uninstall-CodeCodex.exe`. The updated Startup plugin and plugin catalog are also provided. Verify the six program/catalog files among the seven attachments against this release's `SHA256SUMS.txt`.
+
+Full changelog: https://github.com/Rice-dog/code-codex/compare/v0.4.25...v0.4.47
+
+
+发布 / Publication: [GitHub Latest v0.4.47](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.47), [PR #55](https://github.com/Rice-dog/code-codex/pull/55), main `67eb590`. 七个附件公开下载大小、SHA-256 和 API digest 已核验。包内 README 保持构建时快照。 / All seven public attachments were verified for size, SHA-256 and API digest; bundled READMEs retain their build-time snapshot.
 
 ## v0.4.25 — 代码缩略图、启动诊断与旧版本清理
 
