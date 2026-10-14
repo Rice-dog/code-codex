@@ -9,12 +9,35 @@ use thiserror::Error;
 const MAX_UI_BUNDLE_BYTES: u64 = 16 * 1024 * 1024;
 const EMBEDDED_UI_BUNDLE: &str = include_str!("../../../packages/explorer-ui/dist/explorer.js");
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum BootstrapError {
+    #[error("{operation}: {error}; {detail}")]
+    Context {
+        operation: &'static str,
+        detail: String,
+        #[source]
+        error: Box<BootstrapError>,
+    },
     #[error("the Explorer UI bundle was not found")]
     BundleNotFound,
     #[error("the Explorer UI bundle is invalid")]
     InvalidBundle,
+}
+
+impl BootstrapError {
+    pub fn context(self, operation: &'static str, detail: impl std::fmt::Display) -> Self {
+        Self::Context {
+            operation,
+            detail: detail.to_string().chars().take(1024).collect(),
+            error: Box::new(self),
+        }
+    }
+    pub fn kind(&self) -> &Self {
+        match self {
+            Self::Context { error, .. } => error.kind(),
+            other => other,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -42,18 +65,44 @@ pub fn resolve_bundle(explicit: Option<&Path>) -> Result<BundleSource, Bootstrap
         return validate_bundle_path(explicit).map(BundleSource::DevelopmentOverride);
     }
     if EMBEDDED_UI_BUNDLE.is_empty() || EMBEDDED_UI_BUNDLE.len() as u64 > MAX_UI_BUNDLE_BYTES {
-        return Err(BootstrapError::InvalidBundle);
+        return Err(BootstrapError::InvalidBundle.context(
+            "validating UI bundle",
+            format!(
+                "maxBytes={MAX_UI_BUNDLE_BYTES}; expected nonempty regular file or embedded bundle"
+            ),
+        ));
     }
     Ok(BundleSource::Embedded)
 }
 
 fn validate_bundle_path(path: &Path) -> Result<PathBuf, BootstrapError> {
-    let canonical = dunce::canonicalize(path).map_err(|_| BootstrapError::BundleNotFound)?;
-    let metadata = canonical
-        .metadata()
-        .map_err(|_| BootstrapError::InvalidBundle)?;
+    let canonical = dunce::canonicalize(path).map_err(|error| {
+        BootstrapError::BundleNotFound.context(
+            "resolving UI bundle path",
+            format!(
+                "ioKind={:?}; osCode={:?}",
+                error.kind(),
+                error.raw_os_error()
+            ),
+        )
+    })?;
+    let metadata = canonical.metadata().map_err(|error| {
+        BootstrapError::InvalidBundle.context(
+            "reading UI bundle metadata",
+            format!(
+                "ioKind={:?}; osCode={:?}",
+                error.kind(),
+                error.raw_os_error()
+            ),
+        )
+    })?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_UI_BUNDLE_BYTES {
-        return Err(BootstrapError::InvalidBundle);
+        return Err(BootstrapError::InvalidBundle.context(
+            "validating UI bundle",
+            format!(
+                "maxBytes={MAX_UI_BUNDLE_BYTES}; expected nonempty regular file or embedded bundle"
+            ),
+        ));
     }
     Ok(canonical)
 }
@@ -73,13 +122,26 @@ pub fn build_bootstrap(
     let bundle = match bundle_source {
         BundleSource::Embedded => EMBEDDED_UI_BUNDLE,
         BundleSource::DevelopmentOverride(path) => {
-            development_bundle =
-                std::fs::read_to_string(path).map_err(|_| BootstrapError::InvalidBundle)?;
+            development_bundle = std::fs::read_to_string(path).map_err(|error| {
+                BootstrapError::InvalidBundle.context(
+                    "reading UTF-8 UI bundle",
+                    format!(
+                        "ioKind={:?}; osCode={:?}",
+                        error.kind(),
+                        error.raw_os_error()
+                    ),
+                )
+            })?;
             &development_bundle
         }
     };
     if bundle.len() as u64 > MAX_UI_BUNDLE_BYTES {
-        return Err(BootstrapError::InvalidBundle);
+        return Err(BootstrapError::InvalidBundle.context(
+            "validating UI bundle",
+            format!(
+                "maxBytes={MAX_UI_BUNDLE_BYTES}; expected nonempty regular file or embedded bundle"
+            ),
+        ));
     }
     let metadata = BootstrapMetadata {
         token: token.expose(),
@@ -95,7 +157,9 @@ pub fn build_bootstrap(
             .flatten()
             .is_some(),
     };
-    let metadata = serde_json::to_string(&metadata).map_err(|_| BootstrapError::InvalidBundle)?;
+    let metadata = serde_json::to_string(&metadata).map_err(|error| {
+        BootstrapError::InvalidBundle.context("serializing bootstrap metadata", error)
+    })?;
     Ok(format!(
         "(()=>{{'use strict';if(window!==window.top||location.protocol!=='app:'||location.host!=='-'){{return;}}const bootstrap=Object.freeze({metadata});Object.defineProperty(window,'__CODE_CODEX_BOOTSTRAP__',{{value:bootstrap,writable:false,configurable:true,enumerable:false}});try{{\n{bundle}\n}}finally{{try{{delete window.__CODE_CODEX_BOOTSTRAP__;}}catch(_error){{}}}}if(bootstrap.startupSplashActive){{return Promise.race([Promise.resolve(window.__CODE_CODEX_STARTUP_VISUAL_READY__),new Promise(resolve=>setTimeout(()=>resolve(false),5000))]);}}}})();\n//# sourceURL=code-codex://explorer.js"
     ))

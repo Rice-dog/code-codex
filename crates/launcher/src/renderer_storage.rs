@@ -17,7 +17,7 @@ fn directory(path: &Path) -> io::Result<()> {
     workspace_service::application_paths::validate_directory_path(path)?;
     fs::create_dir_all(path)
 }
-fn regular(path: &Path) -> io::Result<fs::Metadata> {
+pub(crate) fn regular(path: &Path) -> io::Result<fs::Metadata> {
     let m = fs::symlink_metadata(path)?;
     #[cfg(windows)]
     {
@@ -31,7 +31,7 @@ fn regular(path: &Path) -> io::Result<fs::Metadata> {
     }
     Ok(m)
 }
-fn atomic(path: &Path, value: &Value) -> io::Result<()> {
+pub(crate) fn atomic(path: &Path, value: &Value) -> io::Result<()> {
     if path.exists() {
         regular(path)?;
     }
@@ -42,7 +42,7 @@ fn atomic(path: &Path, value: &Value) -> io::Result<()> {
     candidate.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
-fn read_json(path: &Path, limit: u64) -> io::Result<Value> {
+pub(crate) fn read_json(path: &Path, limit: u64) -> io::Result<Value> {
     if regular(path)?.len() > limit {
         return Err(err("Resource metadata exceeds its limit"));
     }
@@ -53,7 +53,7 @@ fn text<'a>(p: &'a Value, key: &str) -> io::Result<&'a str> {
         .as_str()
         .ok_or_else(|| err("Required resource field missing"))
 }
-fn scope_path(root: &Path, scope: &str) -> io::Result<PathBuf> {
+pub(crate) fn scope_path(root: &Path, scope: &str) -> io::Result<PathBuf> {
     if !matches!(scope, "startup" | "particle-image" | "pixel-sculpt") {
         return Err(err("Unknown media scope"));
     }
@@ -177,8 +177,12 @@ fn diagnostic_at(root: &Path) -> Value {
     };
     let started = std::time::Instant::now();
     let mut scopes = Vec::new();
-    for scope in ["startup", "particle-image", "pixel-sculpt"] {
-        let path = root.join("media").join(scope);
+    for scope in [
+        "startup",
+        "particle-image",
+        "pixel-sculpt",
+    ] {
+        let path = scope_path(root, scope).unwrap_or_else(|_| root.join("invalid"));
         let entries = match workspace_service::application_paths::validate_directory_path(&path)
             .and_then(|_| fs::read_dir(&path))
         {
@@ -285,7 +289,10 @@ pub(crate) fn request_context(params: &Value) -> Value {
         .filter(|s| {
             matches!(
                 *s,
-                "settings.read"
+                "cache.status"
+                    | "cache.publish"
+                    | "cache.prepare"
+                    | "settings.read"
                     | "settings.write"
                     | "media.list"
                     | "media.read"
@@ -295,12 +302,15 @@ pub(crate) fn request_context(params: &Value) -> Value {
             )
         })
         .unwrap_or("unknown");
-    let scope = params["scope"]
-        .as_str()
-        .filter(|s| matches!(*s, "startup" | "particle-image" | "pixel-sculpt"));
+    let scope = params["scope"].as_str().filter(|s| {
+        matches!(
+            *s,
+            "startup" | "particle-image" | "pixel-sculpt"
+        )
+    });
     json!({"action":action,"scope":scope,"offset":params["offset"].as_u64(),"encodedChunkBytes":params["data"].as_str().map(str::len),"contentOmitted":true})
 }
-fn handle(root: &Path, p: Value) -> io::Result<Value> {
+pub(crate) fn handle(root: &Path, p: Value) -> io::Result<Value> {
     workspace_service::application_paths::validate_directory_path(root)?;
     let action = text(&p, "action")?;
     if action == "settings.read" {
@@ -330,7 +340,8 @@ fn handle(root: &Path, p: Value) -> io::Result<Value> {
                 && name.as_bytes()[..64].iter().all(|b| b.is_ascii_hexdigit())
             {
                 records.push(read_json(&entry.path(), 64 * 1024)?);
-                if records.len() > 64 {
+                if records.len() > 64
+                {
                     return Err(err("Media record limit exceeded"));
                 }
             }
@@ -606,4 +617,14 @@ mod tests {
             json!([])
         );
     }
+}
+
+#[cfg(test)]
+#[test]
+fn retired_startup_movie_scope_cannot_read_write_or_publish() {
+    let root=tempfile::tempdir().unwrap();
+    for action in ["media.list","media.write","cache.status","cache.publish"] {
+        assert!(handle(root.path(),json!({"action":action,"scope":"startup-render","id":"a","job":"b"})).is_err(),"{action}");
+    }
+    assert!(!root.path().join("cache/startup-video").exists());
 }

@@ -25,7 +25,8 @@ pub(crate) fn error_details(error: &(dyn Error + 'static)) -> Value {
         }
         current = cause.source();
     }
-    json!({"errorChain":chain,"chainTruncated":source.is_some(),"nativeErrors":native})
+    let request=error.downcast_ref::<reqwest::Error>().map(|request|json!({"timeout":request.is_timeout(),"connect":request.is_connect(),"body":request.is_body(),"decode":request.is_decode(),"redirect":request.is_redirect(),"status":request.status().map(|status|status.as_u16()),"phaseAttribution":"Library flags and native errors are observations; DNS/TCP/TLS origin is not inferred."}));
+    json!({"errorChain":chain,"chainTruncated":source.is_some(),"nativeErrors":native,"requestFlags":request})
 }
 
 fn transient_transport(error: &(dyn Error + 'static)) -> bool {

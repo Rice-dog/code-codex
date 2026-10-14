@@ -134,7 +134,7 @@ try {
   await open();
   // Preserve only this fixture's generated record, then use the production
   // Remove button to exercise the empty-video state without changing settings.
-  await evaluate(`(async()=>{window.fixtureSavedVideo=await new Promise((resolve,reject)=>{const request=indexedDB.open('code-codex-startup-transition',1);request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,read=db.transaction('video','readonly').objectStore('video').get('selected');read.onsuccess=()=>{db.close();resolve(read.result)};read.onerror=()=>{db.close();reject(read.error)}}});${shadow}.querySelector('.startupTransition-remove').click();})()`);
+  await evaluate(`(async()=>{window.fixtureSavedVideo=await new Promise((resolve,reject)=>{const request=indexedDB.open('code-codex-startup-transition',1);request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,read=db.transaction('video','readonly').objectStore('video').get('selected');read.onsuccess=()=>{db.close();resolve(read.result)};read.onerror=()=>{db.close();reject(read.error)}}});${shadow}.querySelector('.startupTransition-library .particle-library-item.is-selected .particle-library-delete').click();})()`);
   for (let i = 0; i < 100 && await evaluate(`!!${shadow}.querySelector('.startupTransition-video-still').src`); i++) await delay(30);
   await switchSource('background');
   await evaluate(`${shadow}.querySelector('.startupTransition-close').click()`);

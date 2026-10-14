@@ -91,8 +91,15 @@ const NAVIGATION_QUALIFICATION_INTERVAL: Duration = Duration::from_millis(250);
 const RECENTLY_QUALIFIED_TARGET_TTL: Duration = Duration::from_secs(30);
 const CANDIDATE_APPROVAL_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum CdpError {
+    #[error("{operation}: {error}; {detail}")]
+    Context {
+        operation: &'static str,
+        detail: String,
+        #[source]
+        error: Box<CdpError>,
+    },
     #[error("the CDP endpoint is unavailable")]
     EndpointUnavailable,
     #[error("the CDP endpoint returned invalid data")]
@@ -115,6 +122,22 @@ pub enum CdpError {
     WebSocket,
     #[error("the CDP session returned invalid protocol data")]
     Protocol,
+}
+
+impl CdpError {
+    pub fn context(self, operation: &'static str, detail: impl std::fmt::Display) -> Self {
+        Self::Context {
+            operation,
+            detail: detail.to_string().chars().take(2048).collect(),
+            error: Box::new(self),
+        }
+    }
+    pub fn kind(&self) -> &Self {
+        match self {
+            Self::Context { error, .. } => error.kind(),
+            other => other,
+        }
+    }
 }
 
 /// Random per-launch bearer capability. Debug formatting never reveals it.
@@ -265,7 +288,9 @@ impl TargetDiscovery {
             let (mut socket, _) =
                 connect_async_with_config(&target.web_socket_debugger_url, Some(config), false)
                     .await
-                    .map_err(|_| CdpError::WebSocket)?;
+                    .map_err(|error| {
+                        CdpError::WebSocket.context("WebSocket connection or receive", error)
+                    })?;
             send_command(
                 &mut socket,
                 1,
@@ -281,7 +306,9 @@ impl TargetDiscovery {
                     .next()
                     .await
                     .ok_or(CdpError::WebSocket)?
-                    .map_err(|_| CdpError::WebSocket)?;
+                    .map_err(|error| {
+                        CdpError::WebSocket.context("WebSocket connection or receive", error)
+                    })?;
                 let Message::Text(text) = message else {
                     continue;
                 };
@@ -311,7 +338,7 @@ impl TargetDiscovery {
     {
         self.get_json_detailed(url)
             .await
-            .map_err(|(error, _)| error)
+            .map_err(|(error, detail)| error.context("CDP HTTP discovery", detail))
     }
 
     async fn get_json_detailed<T>(&self, url: String) -> Result<T, (CdpError, String)>
@@ -1372,7 +1399,8 @@ where
         }
         None => connection.await,
     };
-    let (mut socket, _) = connection.map_err(|_| CdpError::WebSocket)?;
+    let (mut socket, _) = connection
+        .map_err(|error| CdpError::WebSocket.context("renderer WebSocket handshake", error))?;
     match cold_startup_deadline {
         Some(deadline) => tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
@@ -1735,7 +1763,7 @@ where
             },
             incoming = reader.next() => {
                 let Some(incoming) = incoming else { break; };
-                let incoming = incoming.map_err(|_| CdpError::WebSocket)?;
+                let incoming = incoming.map_err(|error| CdpError::WebSocket.context("WebSocket connection or receive", error))?;
                 match incoming {
                     Message::Text(text) => {
                         let message = parse_cdp_message(text.as_ref())?;
@@ -2184,6 +2212,7 @@ async fn send_command<S>(
 ) -> Result<(), CdpError>
 where
     S: futures_util::Sink<Message> + Unpin,
+    S::Error: std::fmt::Display,
 {
     let encoded = serde_json::to_string(&json!({
         "id": id,
@@ -2194,7 +2223,12 @@ where
     writer
         .send(Message::Text(encoded.into()))
         .await
-        .map_err(|_| CdpError::WebSocket)
+        .map_err(|error| {
+            CdpError::WebSocket.context(
+                "sending renderer command",
+                format!("method={method}; commandId={id}; cause={error}"),
+            )
+        })
 }
 
 async fn send_command_before_deadline<S>(
@@ -2206,6 +2240,7 @@ async fn send_command_before_deadline<S>(
 ) -> Result<(), CdpError>
 where
     S: futures_util::Sink<Message> + Unpin,
+    S::Error: std::fmt::Display,
 {
     match deadline {
         Some(deadline) => tokio::time::timeout_at(
@@ -2228,8 +2263,15 @@ where
 {
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let incoming = socket.next().await.ok_or(CdpError::WebSocket)?;
-            let incoming = incoming.map_err(|_| CdpError::WebSocket)?;
+            let incoming = socket.next().await.ok_or_else(|| {
+                CdpError::WebSocket.context(
+                    "waiting for command reply",
+                    format!("stream ended; commandId={expected_id}"),
+                )
+            })?;
+            let incoming = incoming.map_err(|error| {
+                CdpError::WebSocket.context("WebSocket connection or receive", error)
+            })?;
             let Message::Text(text) = incoming else {
                 continue;
             };
@@ -2239,13 +2281,29 @@ where
                 continue;
             }
             if message.get("error").is_some() {
-                return Err(CdpError::Protocol);
+                return Err(CdpError::Protocol.context(
+                    "command reply rejected",
+                    format!(
+                        "commandId={expected_id}; remoteCode={:?}; remote message/body omitted",
+                        message.pointer("/error/code").and_then(Value::as_i64)
+                    ),
+                ));
             }
-            return message.get("result").cloned().ok_or(CdpError::Protocol);
+            return message.get("result").cloned().ok_or_else(|| {
+                CdpError::Protocol.context(
+                    "command reply validation",
+                    format!("commandId={expected_id}; missing result"),
+                )
+            });
         }
     })
     .await
-    .map_err(|_| CdpError::WebSocket)?
+    .map_err(|error| {
+        CdpError::WebSocket.context(
+            "waiting for renderer command reply",
+            format!("commandId={expected_id}; timeoutMs=3000; cause={error}"),
+        )
+    })?
 }
 
 async fn wait_for_command_before_deadline<S>(
@@ -2270,9 +2328,26 @@ where
 
 fn parse_cdp_message(text: &str) -> Result<Value, CdpError> {
     if text.len() > MAX_CDP_MESSAGE_BYTES {
-        return Err(CdpError::Protocol);
+        return Err(CdpError::Protocol.context(
+            "validating renderer protocol frame",
+            format!(
+                "observedBytes={}; maxBytes={MAX_CDP_MESSAGE_BYTES}",
+                text.len()
+            ),
+        ));
     }
-    serde_json::from_str(text).map_err(|_| CdpError::Protocol)
+    serde_json::from_str(text).map_err(|error| {
+        CdpError::Protocol.context(
+            "parsing renderer protocol JSON",
+            format!(
+                "observedBytes={}; line={}; column={}; category={:?}",
+                text.len(),
+                error.line(),
+                error.column(),
+                error.classify()
+            ),
+        )
+    })
 }
 
 fn renderer_probe_matches(result: &Value) -> bool {
@@ -2427,6 +2502,55 @@ fn bootstrap_evaluation_succeeded(message: &Value, expected_id: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn detailed_protocol_errors_preserve_kind_and_hide_payload() {
+        let error = parse_cdp_message("private-source-secret").unwrap_err();
+        assert!(matches!(error.kind(), CdpError::Protocol));
+        let reason = error.to_string();
+        assert!(reason.contains("parsing renderer protocol JSON"));
+        assert!(reason.contains("line="));
+        assert!(!reason.contains("private-source-secret"));
+        let nested = error.context("outer operation", "safe metadata");
+        assert!(matches!(nested.kind(), CdpError::Protocol));
+        assert!(nested.to_string().contains("outer operation"));
+        let bounded = CdpError::WebSocket.context("test", "x".repeat(5000));
+        assert!(bounded.to_string().len() < 2200);
+    }
+    #[tokio::test]
+    async fn discovery_preserves_http_status_and_json_location() {
+        for (status, body) in [
+            (503, "private-source-secret"),
+            (200, "private-source-secret"),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0; 1024];
+                let _ = stream.read(&mut request).await;
+                stream.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            });
+            let error = TargetDiscovery::new()
+                .unwrap()
+                .version(CdpEndpoint::loopback(port))
+                .await
+                .unwrap_err();
+            let message = error.to_string();
+            assert!(message.contains("CDP HTTP discovery"));
+            assert!(!message.contains("private-source-secret"));
+            if status == 503 {
+                assert!(matches!(error.kind(), CdpError::EndpointUnavailable));
+                assert!(message.contains("503"));
+            } else {
+                assert!(matches!(error.kind(), CdpError::InvalidEndpoint));
+                assert!(message.contains("JSON"));
+            }
+            server.await.unwrap();
+        }
+    }
+
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -3619,7 +3743,11 @@ mod tests {
 
         let discovery = TargetDiscovery::new().expect("discovery");
         let result = discovery.version(CdpEndpoint::loopback(port)).await;
-        assert!(matches!(result, Err(CdpError::EndpointUnavailable)));
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|error| matches!(error.kind(), CdpError::EndpointUnavailable))
+        );
         server.await.expect("server task");
     }
 
@@ -3832,7 +3960,12 @@ mod tests {
             .await
             .expect("session stop")
             .expect("session task");
-        assert!(result.is_ok() || matches!(result, Err(CdpError::WebSocket)));
+        assert!(
+            result.is_ok()
+                || result
+                    .as_ref()
+                    .is_err_and(|error| matches!(error.kind(), CdpError::WebSocket))
+        );
     }
 
     #[tokio::test]
@@ -3934,7 +4067,12 @@ mod tests {
         assert_eq!(probes, 4);
         cancellation.cancel();
         let result = session.await.expect("session task");
-        assert!(result.is_ok() || matches!(result, Err(CdpError::WebSocket)));
+        assert!(
+            result.is_ok()
+                || result
+                    .as_ref()
+                    .is_err_and(|error| matches!(error.kind(), CdpError::WebSocket))
+        );
     }
 
     #[tokio::test]
@@ -4289,7 +4427,12 @@ mod tests {
         );
         cancellation.cancel();
         let result = session.await.expect("session task");
-        assert!(result.is_ok() || matches!(result, Err(CdpError::WebSocket)));
+        assert!(
+            result.is_ok()
+                || result
+                    .as_ref()
+                    .is_err_and(|error| matches!(error.kind(), CdpError::WebSocket))
+        );
     }
 
     #[tokio::test]
@@ -4448,7 +4591,12 @@ mod tests {
         );
         cancellation.cancel();
         let result = session.await.expect("session task");
-        assert!(result.is_ok() || matches!(result, Err(CdpError::WebSocket)));
+        assert!(
+            result.is_ok()
+                || result
+                    .as_ref()
+                    .is_err_and(|error| matches!(error.kind(), CdpError::WebSocket))
+        );
     }
 
     #[tokio::test]

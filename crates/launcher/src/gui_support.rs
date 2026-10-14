@@ -1277,6 +1277,10 @@ impl ProgressDialog {
         self.child.is_some()
     }
 
+    pub(crate) fn startup_failure(&self) -> Option<&str> {
+        self.startup_error.as_deref()
+    }
+
     pub(crate) fn wait_for_setup_selection(
         &mut self,
     ) -> Result<Option<std::ffi::OsString>, String> {

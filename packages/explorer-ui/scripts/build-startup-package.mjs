@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 /** Builds the optional player. dist/startup-early.js is a separate core loader only. */
 export async function buildStartupPackage(root, options, hostVersion) {
-  const id = 'codex-startup-transition', version = '1.1.8', category = 'appearance';
+  const id = 'codex-startup-transition', version = '1.1.16', category = 'appearance';
   const directory = resolve(root, 'dist/plugins', category, id);
   await mkdir(resolve(directory, 'resources'), { recursive: true });
   const asset = `CodeCodex-plugin-${id}-${version}.js`;
@@ -16,7 +16,7 @@ export async function buildStartupPackage(root, options, hostVersion) {
     sourcemap: false, metafile: true, outfile: resolve(directory, asset),
   });
   const bytes = await readFile(resolve(directory, asset));
-  if (bytes.length > 512 * 1024) throw new Error(`Startup player package exceeds its isolated 512 KiB budget: ${bytes.length}`);
+  if (bytes.length > 1536 * 1024) throw new Error(`Startup player package exceeds its isolated 1.5 MiB budget: ${bytes.length}`);
   const descriptor = { id, name: 'Codex Startup Transition', category, api: 1, version,
     releaseTag: `v${hostVersion}`, asset, relativePath: asset, size: bytes.length,
     sha256: createHash('sha256').update(bytes).digest('hex'), resources: [],
@@ -24,8 +24,8 @@ export async function buildStartupPackage(root, options, hostVersion) {
     source: 'https://github.com/Rice-dog/code-codex', notices: 'THIRD_PARTY_NOTICES_EN.md' };
   await writeFile(resolve(directory, 'manifest.json'), JSON.stringify(descriptor, null, 2) + '\n');
   await writeFile(resolve(directory, `${id}.metafile.json`), JSON.stringify(result.metafile));
-  await writeFile(resolve(directory, 'README.md'), '# Codex Startup Transition\n\nDownloadable API 1 player. Its verified local cache is loaded before the native loading-page hook, with no network request during startup. Core embeds only a lightweight loader and settings contract; the downloaded package supplies a vertically arranged two-track editor with selection-linked properties below the preview, shared preview/startup composition, media library and timeline helpers. Missing or invalid cache skips animation and preserves normal Codex startup. Existing local video, trim, minimum duration, fade and background handoff settings are preserved.\n');
-  await writeFile(resolve(directory, 'resources/README.md'), 'User videos and thumbnails remain in their existing local IndexedDB library. The bounded two-track project and per-clip effects are stored separately in preferences, without copying media blobs. No personal or official promotional video is bundled with this package. Background startup sources use their independently downloaded, verified caches.\n');
-  await writeFile(resolve(directory, 'THIRD_PARTY_NOTICES_EN.md'), await readFile(resolve(root, '../..', 'THIRD_PARTY_NOTICES_EN.md'), 'utf8'));
+  await writeFile(resolve(directory,'README.md'),'# Codex Startup Transition\n\nDownloadable API 1 player with the original video library, single-video preview and realtime trim, speed, brightness, fit and fade settings. Advanced tracks and Ctrl+S precomposition have been removed. Startup plays the original local video without encoding a derived movie. Core retains a lightweight loading-page hook; playback failures preserve normal Codex startup.\n');
+  await writeFile(resolve(directory,'resources/README.md'),'Original user videos and thumbnails stay in the existing local IndexedDB library and native media storage. No derived movie cache or advanced project is used. Default startup media remains independently downloadable.\n');
+  await writeFile(resolve(directory,'THIRD_PARTY_NOTICES_EN.md'),await readFile(resolve(root,'../..','THIRD_PARTY_NOTICES_EN.md'),'utf8'));
   return descriptor;
 }

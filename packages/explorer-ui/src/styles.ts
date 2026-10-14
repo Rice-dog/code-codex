@@ -3557,6 +3557,20 @@ export const styles = String.raw`
   .startup-video-library .particle-library-toolbar { margin-bottom: 0; }
   .startup-video-library .particle-library-clear { margin-left: 0; }
   .startup-video-library .particle-library-thumb { filter: none; }
+  .startup-video-library .particle-library-delete svg {
+    width: 14px; height: 14px; fill: none; stroke: currentColor;
+    stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .startup-video-library .particle-library-item:focus-within .particle-library-delete:not(:disabled) { opacity: 1; }
+  .startup-video-library .startupTransition-add-card { border-style: dashed; color: var(--cle-muted); }
+  .startup-video-library .startup-video-add-preview { display: grid; place-items: center; background: transparent; }
+  .startup-video-library .startup-video-add-preview svg {
+    width: 28px; height: 28px; fill: none; stroke: currentColor;
+    stroke-width: 1.5; stroke-linecap: round;
+  }
+  .startup-video-library .startupTransition-add-card:hover:not(:disabled) { color: var(--cle-ink); background: var(--cle-hover); border-color: var(--cle-signal); }
+  .startup-video-library .startupTransition-add-card:focus-visible { outline: 2px solid var(--cle-signal); outline-offset: 2px; }
+  .startup-video-library .startupTransition-add-card:disabled { opacity: .45; }
   .startup-video-library .startup-video-library-summary,.startupTransition-library-summary { margin: 0 0 0 auto; font-size: 9px; color: var(--cle-muted); }
   .startup-video-pager { display: flex; align-items: center; justify-content: space-between; margin: 0 8px; }
   .startup-video-pager output { color: var(--cle-muted); font: 9px/16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }

@@ -1,8 +1,20 @@
-## 本地候选 v0.4.34 / Local candidate v0.4.34
+## 本地维护 v0.4.46 / Local maintenance v0.4.46
 
-本次修复高级视频库拖拽时轨道高亮但松手无片段，缩略图和文件名均可拖入V1/V2，并保留碰撞检查和保存失败回滚。启动动画加入多视频素材库和影院填充，保留普通单视频界面；高级选项提供原生样式的双视频轨道和选中片段属性。支持独立缩放、位置、透明度、模糊及颜色效果、跨轨拖动、首尾磁吸和 Ctrl+C/V/X、Delete 编辑。素材库外框整行、卡片紧凑，移除高级时间输入、复制/删除按钮、整体焦点黑框及底部文字；错误仍进入 Runtime Information。启动预览和实际启动共用合成，保留就绪/最短展示/淡出机制。Startup 包为1.1.8，其它23包仍复用v0.3.96。已在本机验证安装，尚未发布到GitHub。
+当前版本已在本机安装验证，尚未发布到 GitHub。保留此前详细启动、CDP、App Server、网络、原生桥与安装错误记录；修复安装脚本遗漏共享函数的问题，并在构建/打包前校验三个内嵌存储合同。可选旧缓存清理失败会记录原因，不再让已提交的安装变成失败。
 
-This update fixes library drags highlighting the timeline without inserting on release. Thumbnails and filenames can be dragged onto V1/V2, with collision checks and save-failure rollback retained. Startup animation adds a multi-video library and cinema fill while retaining the basic single-video panel. Advanced options provide two video tracks and selection-linked properties using native styles. Per-clip scale, position, opacity, blur and color effects, cross-track dragging, endpoint snapping and Ctrl+C/V/X or Delete editing are supported. The library spans the row with compact cards; advanced timing inputs, copy/delete buttons, the outer focus outline and footer text are removed, with errors retained in Runtime Information. Preview and startup share composition and retain ready/minimum/fade behavior. Startup package 1.1.8 is required; the other 23 packages remain on v0.3.96. Verified and installed locally, not published to GitHub.
+启动动画只保留基础面板和原视频实时播放。高级开关、双轨编辑器、Ctrl+S预合成及派生视频缓存已删除；裁剪、播放速度、亮度、画面适配、视频库顺序循环、最短展示和就绪后淡出保留，参数即时保存。旧高级设置兼容恢复基础视频参数，原视频库保留；旧合成缓存按受控路径退役。
+
+视频库通过等尺寸加号卡片添加、素材右上角叉号删除；每页两个视频和一个加号。修复叉号缺少SVG描边，悬停与键盘焦点可见；32个视频/512MB限制保持。启动插件为1.1.16，其它23个插件复用v0.3.96，核心安装包不内置插件和用户素材。
+
+验证包含v0.4.45的476项Rust测试（3项忽略）、v0.4.46的生产编译/29项基础与素材库浏览器检查、三种窗口尺寸回归、正式EXE45→46安装，以及当前官方窗口中的卡片/播放检查。原文件保留、安装进入Finish。没有关闭官方会话，未验证完整官方冷启动或其它用户设备；历史记录如下。
+
+The current version was installed and verified locally and has not been published to GitHub. It retains detailed startup, CDP, App Server, network, native bridge and installation diagnostics. Embedded storage contracts are checked before building and packaging; optional obsolete-cache cleanup failures are recorded without failing an already committed installation.
+
+Startup animation now uses the basic panel and original video with live settings. Advanced mode, the two-track editor, Ctrl+S composition and derived movie caches are removed. Trimming, speed, brightness, fit, ordered looping, minimum display time and readiness-driven fading remain, with immediate preference persistence. Legacy advanced preferences recover the basic video profile; original videos are preserved and retired movie caches are removed within verified paths.
+
+The library adds videos through an equal-size plus card and removes them through the top-right cross. Each page contains two videos and a plus card. Explicit SVG strokes restore the cross on hover and keyboard focus. The existing 32-video/512 MB limits remain. Startup package is 1.1.16; the other 23 plugins reuse v0.3.96. Core installers do not bundle plugins or personal media.
+
+Validation includes the v0.4.45 Rust suite (476 passed, 3 ignored), v0.4.46 production compilation, 29 basic/library browser checks, three viewport regressions, the production EXE update from 45 to 46, and card/playback checks in the running official window. Installation reaches Finish and original files are preserved. The official session was not restarted; a full cold launch and other user devices remain untested. Earlier release records follow.
 
 ## v0.4.25 — 代码缩略图、启动诊断与旧版本清理
 

@@ -7,6 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'assert-storage-contract.ps1')
 $UiRoot = Join-Path $RepoRoot "packages\explorer-ui"
 $PreviousMsvcRustFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
 $StaticCrtFlag = "-C target-feature=+crt-static"

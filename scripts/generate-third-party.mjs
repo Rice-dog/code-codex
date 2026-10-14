@@ -519,7 +519,7 @@ ${embeddedWasm.wasmPackVersion}, and target ${embeddedWasm.target}.
 
 ${packageTable(embeddedRustRows, true)}
 
-## Frontend dependencies bundled into the executable
+## Frontend dependencies bundled into the executable or optional plugin packages
 
 ${packageTable(npmRuntimeRows, true)}
 

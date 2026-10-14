@@ -504,6 +504,11 @@ enum AppError {
     Resolver(#[from] ResolverError),
     #[error(transparent)]
     Cdp(#[from] CdpError),
+    #[error("Windows 10 main-process inspector failed during {operation}: {details}")]
+    MainInspector {
+        operation: &'static str,
+        details: String,
+    },
     #[error("Codex debugging endpoint did not become available: {0}")]
     CdpStartup(String),
     #[error("no compatible Codex renderer target was found: {0}")]
@@ -565,6 +570,7 @@ impl AppError {
             | Self::Launch(_) => exit_codes::STARTUP_FAILURE,
             Self::Plugin(_)
             | Self::Cdp(_)
+            | Self::MainInspector { .. }
             | Self::CdpStartup(_)
             | Self::CdpTarget(_)
             | Self::ProcessGuard(_)
@@ -582,7 +588,68 @@ impl AppError {
         use process_guard::ProcessGuardError;
 
         let reason = self.to_string();
+        if let Self::Discovery(DiscoveryError::Context { .. }) = self {
+            let Self::Discovery(error) = self else {
+                unreachable!()
+            };
+            let mut diagnostic = Self::Discovery(error.kind().clone()).startup_diagnostic();
+            diagnostic.reason = reason;
+            return diagnostic;
+        }
+        if let Self::ProcessGuard(ProcessGuardError::Context { .. }) = self {
+            let Self::ProcessGuard(error) = self else {
+                unreachable!()
+            };
+            let mut diagnostic = Self::ProcessGuard(error.kind().clone()).startup_diagnostic();
+            diagnostic.reason = reason;
+            return diagnostic;
+        }
+        if let Self::Resolver(ResolverError::Context { .. }) = self {
+            let Self::Resolver(error) = self else {
+                unreachable!()
+            };
+            let mut diagnostic = Self::Resolver(error.kind().clone()).startup_diagnostic();
+            diagnostic.reason = reason;
+            return diagnostic;
+        }
+        if let Self::Bootstrap(BootstrapError::Context { .. }) = self {
+            let Self::Bootstrap(error) = self else {
+                unreachable!()
+            };
+            let mut diagnostic = Self::Bootstrap(error.kind().clone()).startup_diagnostic();
+            diagnostic.reason = reason;
+            return diagnostic;
+        }
         match self {
+            Self::MainInspector { operation, details } => {
+                let code = match *operation {
+                    "waiting for main inspector TCP listener" => "CC-START-MAIN-001",
+                    "waiting for main inspector target" | "selecting main inspector target" => {
+                        "CC-START-MAIN-002"
+                    }
+                    "main inspector WebSocket transport" | "main inspector receive" => {
+                        "CC-START-MAIN-003"
+                    }
+                    "verifying main inspector listener owner" => "CC-START-MAIN-004",
+                    "waiting for main inspector Debugger.paused" => "CC-START-MAIN-005",
+                    "main inspector command response" | "main inspector command reply timeout" => {
+                        "CC-START-MAIN-006"
+                    }
+                    _ => "CC-START-MAIN-007",
+                };
+                StartupDiagnostic::new(
+                    code,
+                    "Preparing the Windows 10 window compatibility patch",
+                    &format!("Windows 10 main-process failure: {operation}"),
+                    details.clone(),
+                    "Compare the inspector operation/port and process observations below. This failure precedes renderer qualification; firewall, process exit and rejected launch arguments require separate evidence.",
+                )
+            }
+            Self::Resolver(ResolverError::Context { .. })
+            | Self::Bootstrap(BootstrapError::Context { .. })
+            | Self::Discovery(DiscoveryError::Context { .. }) => {
+                unreachable!("context normalized above")
+            }
             Self::Plugin(_) => StartupDiagnostic::new(
                 "CC-PLUGIN-CACHE-001",
                 "Preparing background packages",
@@ -646,9 +713,9 @@ impl AppError {
             Self::Discovery(DiscoveryError::InvalidExecutable) => StartupDiagnostic::new(
                 "CC-START-DISCOVERY-002",
                 "Verifying Codex Desktop",
-                "The Codex installation could not be verified",
+                "The selected Codex executable could not be validated",
                 reason,
-                "Repair or reinstall the official Codex Desktop app.",
+                "Check the configured executable and the recorded path operation. Remove an invalid explicit override to use official package discovery; do not bypass package identity or access checks.",
             ),
             Self::Discovery(DiscoveryError::AppServerNotFound) => StartupDiagnostic::new(
                 "CC-START-APP-001",
@@ -891,7 +958,8 @@ fn workspace_diagnostic(error: &WorkspaceError) -> (&'static str, &'static str) 
 }
 
 fn cdp_diagnostic(error: &CdpError) -> (&'static str, &'static str, &'static str, &'static str) {
-    match error {
+    match error.kind() {
+        CdpError::Context { .. } => unreachable!("kind unwraps context"),
         CdpError::InvalidEndpoint => (
             "CC-START-CDP-006",
             "Reading the Codex debugging endpoint",
@@ -962,7 +1030,8 @@ fn cdp_diagnostic(error: &CdpError) -> (&'static str, &'static str, &'static str
 }
 
 fn process_diagnostic(error: &ProcessGuardError) -> (&'static str, &'static str) {
-    match error {
+    match error.kind() {
+        ProcessGuardError::Context { .. } => unreachable!("kind unwraps context"),
         ProcessGuardError::PortUnavailable => (
             "CC-START-PROCESS-001",
             "A local debugging port could not be reserved",
@@ -1301,7 +1370,9 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             verify_process_identity(launched_pid, launched_after, &official_executable)
         })
         .await
-        .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        .map_err(|error| {
+            ProcessGuardError::OwnershipUnknown.context("run ownership worker", error)
+        })?;
         if let Err(error) = identity_result {
             record_startup_event("process identity", "verification failed");
             record_precleanup_probe(format!("Process: {}", launched_process_state(launched_pid)));
@@ -1429,7 +1500,7 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
             verify_listener_owner(port, launched_pid, launched_after)
         })
         .await
-        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+        .map_err(|error|ProcessGuardError::OwnershipUnknown.context("run ownership worker",error))??;
         tracing::info!(event = "cdp_owner_verified");
         record_listener_verified();
         record_startup_event("listener ownership", "verified against launched process");
@@ -1545,7 +1616,9 @@ async fn attach(args: AttachArgs) -> Result<(), AppError> {
     let executable = installation.executable.clone();
     tokio::task::spawn_blocking(move || verify_listener_executable(args.port, &executable))
         .await
-        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+        .map_err(|error| {
+            ProcessGuardError::OwnershipUnknown.context("attach ownership worker", error)
+        })??;
     record_listener_verified();
     record_startup_event("listener ownership", "verified official executable");
     record_startup_event("CDP version", "waiting for attached endpoint");
@@ -1570,7 +1643,9 @@ async fn attach(args: AttachArgs) -> Result<(), AppError> {
     let executable = installation.executable.clone();
     tokio::task::spawn_blocking(move || verify_listener_executable(args.port, &executable))
         .await
-        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+        .map_err(|error| {
+            ProcessGuardError::OwnershipUnknown.context("attach ownership worker", error)
+        })??;
     tracing::info!(event = "authorized_cdp_attach");
     record_startup_event("renderer discovery", "attached supervisor started");
     supervise(
@@ -1602,7 +1677,9 @@ async fn activate(args: ActivateArgs) -> Result<(), AppError> {
     let executable = installation.executable.clone();
     let port = tokio::task::spawn_blocking(move || discover_listener_port(&executable))
         .await
-        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+        .map_err(|error| {
+            ProcessGuardError::OwnershipUnknown.context("activate ownership worker", error)
+        })??;
     let Some(port) = port else {
         tracing::info!(
             event = "live_activation_skipped",
@@ -1642,7 +1719,9 @@ async fn activate(args: ActivateArgs) -> Result<(), AppError> {
     let executable = installation.executable.clone();
     tokio::task::spawn_blocking(move || verify_listener_executable(port, &executable))
         .await
-        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+        .map_err(|error| {
+            ProcessGuardError::OwnershipUnknown.context("activate ownership worker", error)
+        })??;
     record_listener_verified();
     record_startup_event("listener ownership", "verified official executable");
     tracing::info!(
@@ -1842,14 +1921,25 @@ impl cdp_client::EndpointVerifier for ProcessEndpointVerifier {
 async fn wait_for_endpoint(endpoint: CdpEndpoint, timeout: Duration) -> Result<(), CdpError> {
     let discovery = TargetDiscovery::new()?;
     let started = Instant::now();
+    let mut attempts = 0u32;
     loop {
-        match discovery.version(endpoint).await {
+        attempts += 1;
+        let last = match discovery.version(endpoint).await {
             Ok(version) if version.is_supported() => return Ok(()),
-            Ok(_) => return Err(CdpError::UnsupportedProtocol),
-            Err(_) => {}
-        }
+            Ok(version) => {
+                return Err(CdpError::UnsupportedProtocol.context(
+                    "checking renderer CDP protocol",
+                    format!(
+                        "port={}; observedProtocol={}; expectedProtocol=1.3",
+                        endpoint.port(),
+                        version.protocol_version
+                    ),
+                ));
+            }
+            Err(error) => error.to_string(),
+        };
         if started.elapsed() >= timeout {
-            return Err(CdpError::EndpointUnavailable);
+            return Err(CdpError::EndpointUnavailable.context("waiting for attached renderer CDP endpoint",format!("port={}; path=/json/version; timeoutMs={}; elapsedMs={}; attempts={attempts}; lastResult={last}",endpoint.port(),timeout.as_millis(),started.elapsed().as_millis())));
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
@@ -2370,11 +2460,18 @@ impl MainInspectorSession {
             "method": method,
             "params": params
         }))
-        .map_err(|_| CdpError::Protocol)?;
+        .map_err(|error| {
+            CdpError::Protocol.context(
+                "main inspector command encoding",
+                format!("method={method}; commandId={id}; cause={error}"),
+            )
+        })?;
         self.socket
             .send(Message::Text(command.into()))
             .await
-            .map_err(|_| CdpError::WebSocket)?;
+            .map_err(|error| {
+                CdpError::WebSocket.context("main inspector WebSocket transport", error)
+            })?;
 
         tokio::time::timeout(MAIN_INSPECTOR_COMMAND_TIMEOUT, async {
             for _ in 0..MAIN_INSPECTOR_MESSAGE_LIMIT {
@@ -2386,24 +2483,24 @@ impl MainInspectorSession {
                             .and_then(|result| result.get("exceptionDetails"))
                             .is_some()
                     {
-                        return Err(CdpError::Protocol);
+                        return Err(CdpError::Protocol.context("main inspector command response",format!("method={method}; commandId={id}; remoteCode={:?}; exceptionPresent={}; response body omitted",message.pointer("/error/code").and_then(Value::as_i64),message.pointer("/result/exceptionDetails").is_some())));
                     }
-                    return message.get("result").cloned().ok_or(CdpError::Protocol);
+                    return message.get("result").cloned().ok_or_else(||CdpError::Protocol.context("main inspector command response",format!("method={method}; commandId={id}; missing result")));
                 }
                 if message.get("method").and_then(Value::as_str).is_some() {
                     if is_debugger_paused_event(&message) {
                         if self.pending_paused_event.replace(message).is_some() {
-                            return Err(CdpError::Protocol);
+                            return Err(CdpError::Protocol.context("main inspector message validation","unexpected command/event shape or duplicate pause; protocol payload omitted"));
                         }
                     }
                     continue;
                 }
-                return Err(CdpError::Protocol);
+                return Err(CdpError::Protocol.context("main inspector message validation","unexpected command/event shape or duplicate pause; protocol payload omitted"));
             }
-            Err(CdpError::Protocol)
+            Err(CdpError::Protocol.context("main inspector message budget",format!("maxMessages={MAIN_INSPECTOR_MESSAGE_LIMIT}; expected response not received")))
         })
         .await
-        .map_err(|_| CdpError::Protocol)?
+        .map_err(|error| CdpError::Protocol.context("main inspector command reply timeout",format!("method={method}; commandId={id}; timeoutMs={}; cause={error}",MAIN_INSPECTOR_COMMAND_TIMEOUT.as_millis())))?
     }
 
     async fn wait_for_paused_call_frame(&mut self) -> Result<String, CdpError> {
@@ -2418,13 +2515,21 @@ impl MainInspectorSession {
                     return paused_call_frame_id(&message);
                 }
                 if message.get("method").and_then(Value::as_str).is_none() {
-                    return Err(CdpError::Protocol);
+                    return Err(CdpError::Protocol.context("main inspector message validation","unexpected command/event shape or duplicate pause; protocol payload omitted"));
                 }
             }
-            Err(CdpError::Protocol)
+            Err(CdpError::Protocol.context("main inspector message budget",format!("maxMessages={MAIN_INSPECTOR_MESSAGE_LIMIT}; expected response not received")))
         })
         .await
-        .map_err(|_| CdpError::Protocol)?
+        .map_err(|error| {
+            CdpError::Protocol.context(
+                "waiting for main inspector Debugger.paused",
+                format!(
+                    "timeoutMs={}; cause={error}",
+                    MAIN_INSPECTOR_STARTUP_TIMEOUT.as_millis()
+                ),
+            )
+        })?
     }
 }
 
@@ -2465,92 +2570,161 @@ async fn initialize_electron_main_process(
     launched_pid: u32,
     launched_after: SystemTime,
 ) -> Result<(), AppError> {
-    wait_for_tcp_listener(endpoint, MAIN_INSPECTOR_STARTUP_TIMEOUT).await?;
-    verify_owned_listener(endpoint, launched_pid, launched_after).await?;
+    let result: Result<(), AppError> = async {
+        wait_for_tcp_listener(endpoint, MAIN_INSPECTOR_STARTUP_TIMEOUT).await?;
+        verify_owned_listener(endpoint, launched_pid, launched_after).await?;
 
-    let target = wait_for_main_inspector_target(endpoint, MAIN_INSPECTOR_STARTUP_TIMEOUT).await?;
-    let websocket_url = validate_main_inspector_target(endpoint, &target)?;
-    let websocket_config = WebSocketConfig::default()
-        .max_message_size(Some(MAIN_INSPECTOR_MESSAGE_BYTES))
-        .max_frame_size(Some(MAIN_INSPECTOR_MESSAGE_BYTES));
-    let (mut socket, _) =
-        connect_async_with_config(websocket_url.as_str(), Some(websocket_config), false)
-            .await
-            .map_err(|_| CdpError::WebSocket)?;
+        let target =
+            wait_for_main_inspector_target(endpoint, MAIN_INSPECTOR_STARTUP_TIMEOUT).await?;
+        let websocket_url = validate_main_inspector_target(endpoint, &target)?;
+        let websocket_config = WebSocketConfig::default()
+            .max_message_size(Some(MAIN_INSPECTOR_MESSAGE_BYTES))
+            .max_frame_size(Some(MAIN_INSPECTOR_MESSAGE_BYTES));
+        let (mut socket, _) =
+            connect_async_with_config(websocket_url.as_str(), Some(websocket_config), false)
+                .await
+                .map_err(|error| {
+                    CdpError::WebSocket.context("main inspector WebSocket transport", error)
+                })?;
 
-    // Pin the connected inspector to the launched official process immediately
-    // before evaluating the fixed, non-user-controlled initializer.
-    if let Err(error) = verify_owned_listener(endpoint, launched_pid, launched_after).await {
-        let _ = socket.close(None).await;
-        return Err(error);
+        // Pin the connected inspector to the launched official process immediately
+        // before evaluating the fixed, non-user-controlled initializer.
+        if let Err(error) = verify_owned_listener(endpoint, launched_pid, launched_after).await {
+            let _ = socket.close(None).await;
+            return Err(error);
+        }
+
+        // `--inspect-brk` begins in a pre-execution context where `process` and
+        // CommonJS `require` are unavailable. Advance to the first paused call
+        // frame, then install the hook before Codex's main module executes.
+        let mut session = MainInspectorSession::new(socket);
+        session.command(1, "Runtime.enable", json!({})).await?;
+        session.command(2, "Debugger.enable", json!({})).await?;
+        session
+            .command(3, "Runtime.runIfWaitingForDebugger", json!({}))
+            .await?;
+        let call_frame_id = session.wait_for_paused_call_frame().await?;
+
+        let evaluation = session
+            .command(
+                4,
+                "Debugger.evaluateOnCallFrame",
+                json!({
+                    "callFrameId": call_frame_id,
+                    "expression": ELECTRON_MAIN_TRANSPARENCY_PATCH,
+                    "returnByValue": true,
+                    "silent": false
+                }),
+            )
+            .await;
+        let resume = session.command(5, "Debugger.resume", json!({})).await;
+        let _ = session.socket.send(Message::Close(None)).await;
+        drop(session);
+
+        let evaluation = evaluation?;
+        resume?;
+        let patch: ElectronMainPatchResult =
+            serde_json::from_value(evaluation.pointer("/result/value").cloned().ok_or_else(
+                || {
+                    CdpError::Protocol.context(
+                        "validating main inspector patch result",
+                        "missing result.value",
+                    )
+                },
+            )?)
+            .map_err(|error| {
+                CdpError::Protocol.context(
+                    "decoding main inspector patch status",
+                    format!(
+                        "category={:?}; line={}; column={}",
+                        error.classify(),
+                        error.line(),
+                        error.column()
+                    ),
+                )
+            })?;
+        if !patch.surface_hook_enabled {
+            return Err(CdpError::Protocol
+                .context(
+                    "validating Windows10 surface hook",
+                    "surfaceHookEnabled=false",
+                )
+                .into());
+        }
+        tracing::debug!(
+            event = "electron_main_transparency_patch_applied",
+            constructor_hook_count = patch.constructor_hook_count
+        );
+        wait_for_tcp_listener_closed(endpoint, MAIN_INSPECTOR_SHUTDOWN_TIMEOUT).await?;
+        Ok(())
     }
-
-    // `--inspect-brk` begins in a pre-execution context where `process` and
-    // CommonJS `require` are unavailable. Advance to the first paused call
-    // frame, then install the hook before Codex's main module executes.
-    let mut session = MainInspectorSession::new(socket);
-    session.command(1, "Runtime.enable", json!({})).await?;
-    session.command(2, "Debugger.enable", json!({})).await?;
-    session
-        .command(3, "Runtime.runIfWaitingForDebugger", json!({}))
-        .await?;
-    let call_frame_id = session.wait_for_paused_call_frame().await?;
-
-    let evaluation = session
-        .command(
-            4,
-            "Debugger.evaluateOnCallFrame",
-            json!({
-                "callFrameId": call_frame_id,
-                "expression": ELECTRON_MAIN_TRANSPARENCY_PATCH,
-                "returnByValue": true,
-                "silent": false
-            }),
-        )
-        .await;
-    let resume = session.command(5, "Debugger.resume", json!({})).await;
-    let _ = session.socket.send(Message::Close(None)).await;
-    drop(session);
-
-    let evaluation = evaluation?;
-    resume?;
-    let patch: ElectronMainPatchResult = serde_json::from_value(
-        evaluation
-            .pointer("/result/value")
-            .cloned()
-            .ok_or(CdpError::Protocol)?,
-    )
-    .map_err(|_| CdpError::Protocol)?;
-    if !patch.surface_hook_enabled {
-        return Err(CdpError::Protocol.into());
-    }
-    tracing::debug!(
-        event = "electron_main_transparency_patch_applied",
-        constructor_hook_count = patch.constructor_hook_count
-    );
-    wait_for_tcp_listener_closed(endpoint, MAIN_INSPECTOR_SHUTDOWN_TIMEOUT).await?;
-    Ok(())
+    .await;
+    result.map_err(|error| {
+        let operation = match &error {
+            AppError::Cdp(CdpError::Context { operation, .. }) => *operation,
+            AppError::ProcessGuard(_) => "verifying main inspector listener owner",
+            _ => "initializing main-process surface patch",
+        };
+        AppError::MainInspector {
+            operation,
+            details: format!(
+                "Role: Windows10 main inspector; port={}; launchedPid={}\n{}",
+                endpoint.port(),
+                launched_pid,
+                error
+            ),
+        }
+    })
 }
 
 async fn receive_main_inspector_json(socket: &mut MainInspectorSocket) -> Result<Value, CdpError> {
     loop {
         match socket.next().await {
             Some(Ok(Message::Text(text))) => {
-                let message: Value =
-                    serde_json::from_str(text.as_ref()).map_err(|_| CdpError::Protocol)?;
+                let message: Value = serde_json::from_str(text.as_ref()).map_err(|error| {
+                    CdpError::Protocol.context(
+                        "parsing main inspector JSON",
+                        format!(
+                            "line={}; column={}; category={:?}",
+                            error.line(),
+                            error.column(),
+                            error.classify()
+                        ),
+                    )
+                })?;
                 if !message.is_object() {
-                    return Err(CdpError::Protocol);
+                    return Err(CdpError::Protocol
+                        .context("validating main inspector frame", "expected JSON object"));
                 }
                 return Ok(message);
             }
             Some(Ok(Message::Ping(payload))) => socket
                 .send(Message::Pong(payload))
                 .await
-                .map_err(|_| CdpError::WebSocket)?,
+                .map_err(|error| CdpError::WebSocket.context("main inspector Ping reply", error))?,
             Some(Ok(Message::Pong(_))) => {}
-            Some(Ok(Message::Close(_))) | None => return Err(CdpError::WebSocket),
-            Some(Ok(_)) => return Err(CdpError::Protocol),
-            Some(Err(_)) => return Err(CdpError::WebSocket),
+            Some(Ok(Message::Close(close))) => {
+                return Err(CdpError::WebSocket.context(
+                    "main inspector receive",
+                    format!(
+                        "peer closeCode={:?}; peer reason omitted",
+                        close.map(|frame| u16::from(frame.code))
+                    ),
+                ));
+            }
+            None => {
+                return Err(CdpError::WebSocket.context(
+                    "main inspector receive",
+                    "stream ended without command reply",
+                ));
+            }
+            Some(Ok(_)) => {
+                return Err(CdpError::Protocol
+                    .context("main inspector receive", "unexpected non-JSON frame"));
+            }
+            Some(Err(error)) => {
+                return Err(CdpError::WebSocket.context("main inspector receive", error));
+            }
         }
     }
 }
@@ -2564,7 +2738,12 @@ fn paused_call_frame_id(message: &Value) -> Result<String, CdpError> {
         .pointer("/params/callFrames/0/callFrameId")
         .and_then(Value::as_str)
         .filter(|call_frame_id| !call_frame_id.is_empty() && call_frame_id.len() <= 1_024)
-        .ok_or(CdpError::Protocol)?;
+        .ok_or_else(|| {
+            CdpError::Protocol.context(
+                "validating main inspector paused call frame",
+                "callFrameId missing, empty or longer than 1024 bytes",
+            )
+        })?;
     Ok(call_frame_id.to_owned())
 }
 
@@ -2576,23 +2755,56 @@ async fn verify_owned_listener(
     let port = endpoint.port();
     tokio::task::spawn_blocking(move || verify_listener_owner(port, launched_pid, launched_after))
         .await
-        .map_err(|_| ProcessGuardError::OwnershipUnknown)??;
+        .map_err(|error| {
+            ProcessGuardError::OwnershipUnknown
+                .context("verify_owned_listener ownership worker", error)
+        })??;
     Ok(())
 }
 
 async fn wait_for_tcp_listener(endpoint: CdpEndpoint, timeout: Duration) -> Result<(), CdpError> {
     let started = Instant::now();
+    let mut attempts = 0u32;
     loop {
-        if TcpStream::connect(("127.0.0.1", endpoint.port()))
-            .await
-            .is_ok()
-        {
-            return Ok(());
-        }
+        attempts = attempts.saturating_add(1);
+        let remaining = timeout.saturating_sub(started.elapsed());
+        let budget = remaining.min(Duration::from_millis(500));
+        let last =
+            match tokio::time::timeout(budget, TcpStream::connect(("127.0.0.1", endpoint.port())))
+                .await
+            {
+                Ok(Ok(_)) => return Ok(()),
+                Ok(Err(error)) => format!(
+                    "ioKind={:?}; osCode={:?}; cause={error}",
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+                Err(_) => format!(
+                    "TCP attempt timed out; attemptBudgetMs={}",
+                    budget.as_millis()
+                ),
+            };
         if started.elapsed() >= timeout {
-            return Err(CdpError::EndpointUnavailable);
+            let detail = format!(
+                "port={}; timeoutMs={}; elapsedMs={}; attempts={attempts}; lastConnection={last}",
+                endpoint.port(),
+                timeout.as_millis(),
+                started.elapsed().as_millis()
+            );
+            record_startup_event("main inspector TCP listener", "TCP listener wait timed out");
+            process_diagnostics::observe(
+                "main inspector",
+                "TCP listener wait",
+                "failed",
+                json!({"code":"CC-START-MAIN-001","port":endpoint.port(),"timeoutMs":timeout.as_millis(),"elapsedMs":started.elapsed().as_millis(),"attempts":attempts,"reason":detail}),
+            );
+            return Err(CdpError::EndpointUnavailable
+                .context("waiting for main inspector TCP listener", detail));
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(
+            Duration::from_millis(100).min(timeout.saturating_sub(started.elapsed())),
+        )
+        .await;
     }
 }
 
@@ -2609,7 +2821,15 @@ async fn wait_for_tcp_listener_closed(
             return Ok(());
         }
         if started.elapsed() >= timeout {
-            return Err(CdpError::Protocol);
+            return Err(CdpError::Protocol.context(
+                "waiting for main inspector listener shutdown",
+                format!(
+                    "port={}; timeoutMs={}; elapsedMs={}; listener still accepted TCP",
+                    endpoint.port(),
+                    timeout.as_millis(),
+                    started.elapsed().as_millis()
+                ),
+            ));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2621,17 +2841,34 @@ async fn wait_for_main_inspector_target(
 ) -> Result<cdp_client::CdpTarget, CdpError> {
     let discovery = TargetDiscovery::new()?;
     let started = Instant::now();
+    let mut attempts = 0u32;
     loop {
-        if let Ok(targets) = discovery.targets(endpoint).await {
-            if targets.len() == 1 {
-                return targets.into_iter().next().ok_or(CdpError::InvalidEndpoint);
+        attempts += 1;
+        let last = match discovery.targets(endpoint).await {
+            Ok(mut targets) if targets.len() == 1 => return Ok(targets.remove(0)),
+            Ok(targets) if targets.len() > 1 => {
+                return Err(CdpError::InvalidEndpoint.context(
+                    "selecting main inspector target",
+                    format!(
+                        "port={}; observedTargets={}; expectedTargets=1",
+                        endpoint.port(),
+                        targets.len()
+                    ),
+                ));
             }
-            if targets.len() > 1 {
-                return Err(CdpError::InvalidEndpoint);
-            }
-        }
+            Ok(_) => "target list is empty".to_owned(),
+            Err(error) => error.to_string(),
+        };
         if started.elapsed() >= timeout {
-            return Err(CdpError::EndpointUnavailable);
+            return Err(CdpError::EndpointUnavailable.context(
+                "waiting for main inspector target",
+                format!(
+                    "port={}; timeoutMs={}; elapsedMs={}; attempts={attempts}; lastResult={last}",
+                    endpoint.port(),
+                    timeout.as_millis(),
+                    started.elapsed().as_millis()
+                ),
+            ));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2787,6 +3024,61 @@ async fn diagnose_cdp(endpoint: CdpEndpoint) -> Value {
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn inspector_timeout_retains_port_budget_attempts_and_os_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let error = wait_for_tcp_listener(CdpEndpoint::loopback(port), Duration::from_millis(40))
+            .await
+            .unwrap_err();
+        let detail = error.to_string();
+        for field in [
+            "main inspector TCP",
+            "timeoutMs=40",
+            "elapsedMs=",
+            "attempts=",
+        ] {
+            assert!(detail.contains(field), "{detail}");
+        }
+        assert!(detail.contains(&format!("port={port}")));
+        assert!(
+            (detail.contains("ioKind=") && detail.contains("osCode="))
+                || detail.contains("attemptBudgetMs=")
+        );
+        let diagnostic = AppError::MainInspector {
+            operation: "waiting for main inspector TCP listener",
+            details: detail.clone(),
+        }
+        .startup_diagnostic();
+        assert_eq!(diagnostic.code, "CC-START-MAIN-001");
+        assert!(diagnostic.stage.contains("Windows 10"));
+        assert_eq!(diagnostic.reason, detail);
+    }
+    #[test]
+    fn contextual_errors_keep_specific_support_codes() {
+        let diagnostic = AppError::Resolver(ResolverError::Io.context(
+            "writing App Server request",
+            "ioKind=BrokenPipe; requestNumber=4",
+        ))
+        .startup_diagnostic();
+        assert_eq!(diagnostic.code, "CC-START-APP-005");
+        assert!(diagnostic.reason.contains("BrokenPipe"));
+        let diagnostic = AppError::Bootstrap(
+            BootstrapError::InvalidBundle.context("reading UI bundle", "ioKind=PermissionDenied"),
+        )
+        .startup_diagnostic();
+        assert_eq!(diagnostic.code, "CC-START-UI-002");
+        assert!(diagnostic.reason.contains("PermissionDenied"));
+        let diagnostic = AppError::Discovery(
+            DiscoveryError::AppServerNotFound
+                .context("staging official App Server", "cause=access denied"),
+        )
+        .startup_diagnostic();
+        assert!(diagnostic.reason.contains("staging official"));
+    }
+
     #[test]
     fn early_animation_bundle_is_isolated_and_rejects_late_replay() {
         assert!(super::early_startup::SOURCE.len() < 512 * 1024);

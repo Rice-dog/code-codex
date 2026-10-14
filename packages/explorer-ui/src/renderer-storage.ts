@@ -90,7 +90,8 @@ export function reconnectRendererStorage(request:Request){
   // for interactive UI traffic. Never retry a write after an ambiguous result.
   state.request=<T>(method:string,params?:Record<string,unknown>,timeout?:number)=>{
     const next=(state.dispatch??Promise.resolve()).catch(()=>{}).then(async()=>{
-      const delay=50-(performance.now()-(state.lastDispatch??-Infinity));
+      const interval=50;
+      const delay=interval-(performance.now()-(state.lastDispatch??-Infinity));
       if(delay>0)await new Promise(resolve=>setTimeout(resolve,delay));
       state.lastDispatch=performance.now();
       return request<T>(method,params,timeout);

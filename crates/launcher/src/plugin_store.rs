@@ -113,8 +113,17 @@ pub(crate) fn catalog() -> Result<Vec<Package>, BridgeError> {
     parse_catalog(CATALOG)
 }
 fn parse_catalog(source: &str) -> Result<Vec<Package>, BridgeError> {
-    let packages: Vec<Package> = serde_json::from_str(source)
-        .map_err(|_| error("PLUGIN_CATALOG", "The embedded plugin catalog is invalid."))?;
+    let packages: Vec<Package> = serde_json::from_str(source).map_err(|parse| {
+        error(
+            "PLUGIN_CATALOG",
+            format!(
+                "Embedded plugin catalog JSON failed: category={:?}; line={}; column={}",
+                parse.classify(),
+                parse.line(),
+                parse.column()
+            ),
+        )
+    })?;
     if packages.is_empty() || packages.len() > 64 {
         return Err(error(
             "PLUGIN_CATALOG",
@@ -399,10 +408,10 @@ fn verify(p: &Package, bytes: &[u8]) -> Result<(), BridgeError> {
             ));
         }
     }
-    std::str::from_utf8(bytes).map_err(|_| {
+    std::str::from_utf8(bytes).map_err(|decode| {
         error(
             "PLUGIN_ENCODING",
-            "The verified plugin must be UTF-8 JavaScript.",
+            format!("Verified JavaScript UTF-8 decoding failed: validUpTo={}; errorLength={:?}; bytes={}",decode.valid_up_to(),decode.error_len(),bytes.len()),
         )
     })?;
     Ok(())
@@ -432,8 +441,16 @@ fn sources_for(root: &Path, p: &Package) -> Result<Vec<String>, BridgeError> {
     for r in &p.resources {
         if r.kind == "script" {
             sources.push(
-                String::from_utf8(verified[&r.asset].clone())
-                    .map_err(|_| error("PLUGIN_ENCODING", "Invalid script encoding"))?,
+                String::from_utf8(verified[&r.asset].clone()).map_err(|decode| {
+                    error(
+                        "PLUGIN_ENCODING",
+                        format!(
+                            "Resource script UTF-8 decoding failed: validUpTo={}; errorLength={:?}",
+                            decode.utf8_error().valid_up_to(),
+                            decode.utf8_error().error_len()
+                        ),
+                    )
+                })?,
             );
             continue;
         }
@@ -482,8 +499,16 @@ fn sources_for(root: &Path, p: &Package) -> Result<Vec<String>, BridgeError> {
         sources.push(source);
     }
     sources.push(
-        String::from_utf8(verified[&p.asset].clone())
-            .map_err(|_| error("PLUGIN_ENCODING", "Invalid main script encoding"))?,
+        String::from_utf8(verified[&p.asset].clone()).map_err(|decode| {
+            error(
+                "PLUGIN_ENCODING",
+                format!(
+                    "Main script UTF-8 decoding failed: validUpTo={}; errorLength={:?}",
+                    decode.utf8_error().valid_up_to(),
+                    decode.utf8_error().error_len()
+                ),
+            )
+        })?,
     );
     // This marker is emitted only after every asset has been read and verified
     // and after the package's main registration script. It allows the early
@@ -612,7 +637,7 @@ pub(crate) fn status() -> Result<Value, BridgeError> {
     let packages = catalog()?;
     let jobs = jobs()
         .lock()
-        .map_err(|_| error("PLUGIN_STATE", "Plugin operation state unavailable."))?;
+        .map_err(|_|error("PLUGIN_STATE","Plugin download state lock is poisoned; operation state could not be inspected safely; no lock bypass was attempted."))?;
     Ok(Value::Array(packages.iter().map(|p|{
         let job=jobs.get(&p.id);
         let closure=dependency_order(&packages,&p.id).expect("catalog dependencies were validated");
@@ -690,7 +715,7 @@ pub(crate) fn cancel(id: &str) -> Result<Value, BridgeError> {
     package(id)?;
     let jobs = jobs()
         .lock()
-        .map_err(|_| error("PLUGIN_STATE", "Plugin operation state unavailable."))?;
+        .map_err(|_|error("PLUGIN_STATE","Plugin download state lock is poisoned; operation state could not be inspected safely; no lock bypass was attempted."))?;
     if let Some(job) = jobs.get(id) {
         job.cancel.cancel();
     }
@@ -766,7 +791,7 @@ async fn install_inner(
     {
         let mut jobs = jobs()
             .lock()
-            .map_err(|_| error("PLUGIN_STATE", "Plugin operation state unavailable."))?;
+            .map_err(|_|error("PLUGIN_STATE","Plugin download state lock is poisoned; operation state could not be inspected safely; no lock bypass was attempted."))?;
         if jobs
             .get(id)
             .is_some_and(|j| ["downloading", "verifying", "committing"].contains(&j.phase))

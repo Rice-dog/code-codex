@@ -5,7 +5,7 @@ import {resolve} from 'node:path';
 import {createServer} from 'node:http';
 import {launchFixture,delay} from './browser-fixture.mjs';
 const root=resolve(import.meta.dirname,'..');
-const expected={advancedOptions:false,project:null,videoClipDefaults:{},enabled:false,source:'video',backgroundId:'particle-image',backgroundFadeSeconds:3,minimumVisiblePercent:45,fadePercent:3,clipStart:29,clipEnd:60.093016,playbackRate:1,videoBrightness:1.4,videoFit:'cover',selectedVideoId:'selected',videoOrder:[],playbackMode:'sequence',nextVideoId:'selected',lastPlayedVideoId:'',videoProfiles:{}};
+const expected={enabled:false,source:'video',backgroundId:'particle-image',backgroundFadeSeconds:3,minimumVisiblePercent:45,fadePercent:3,clipStart:29,clipEnd:60.093016,playbackRate:1,videoBrightness:1.4,videoFit:'cover',selectedVideoId:'selected',videoOrder:[],playbackMode:'sequence',nextVideoId:'selected',lastPlayedVideoId:'',videoProfiles:{}};
 const source=buildSync({stdin:{contents:"import {DEFAULT_STARTUP_TRANSITION_SETTINGS,readStartupTransitionSettings,startupDefaultClip} from './startup-transition-plugin';window.defaultsFixture={defaults:DEFAULT_STARTUP_TRANSITION_SETTINGS,read:readStartupTransitionSettings,clip:startupDefaultClip};",resolveDir:resolve(root,'packages/explorer-ui/src'),loader:'ts'},bundle:true,write:false,format:'iife',define:{__CODE_CODEX_STARTUP_TRANSITION_CSS__:JSON.stringify(readFileSync(resolve(root,'packages/explorer-ui/src/startup-transition.css'),'utf8'))}}).outputFiles[0].text;
 const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><body>Settings fixture</body>');});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -16,11 +16,11 @@ try{
  for(let i=0;i<200&&!(await browser.evaluate('location.protocol==="http:"&&document.readyState==="complete"'));i++)await delay(40);
  await browser.evaluate(source);
  const nativeText=readFileSync(resolve(root,'crates/launcher/src/early_startup.rs'),'utf8');
- const queryLine=nativeText.split('\n').find(line=>line.includes('"expression"')&&line.includes('projectMode:'));
+ const queryLine=nativeText.split('\n').find(line=>line.includes('"expression"')&&line.includes('videoId:s?.nextVideoId'));
  const query=JSON.parse(queryLine.trim().slice('"expression":'.length).replace(/,$/,''));
- for(const [label,saved,expectedMode] of [['basic retained project',{advancedOptions:false,project:{version:1,tracks:[[],[]]}},false],['advanced enabled',{advancedOptions:true,project:{version:1,tracks:[[],[]]}},true],['legacy project migration',{project:{version:1,tracks:[[],[]]}},true],['old single video',{},false]]){
+ for(const [label,saved,expectedId] of [['ordinary next',{nextVideoId:'second'},'second'],['legacy advanced ignored',{advancedOptions:true,project:{version:1,tracks:[[{videoId:'advanced-source'}],[]]},selectedVideoId:'selected',nextVideoId:'second'},'second'],['old single video',{},'selected']]){
   await browser.evaluate(`localStorage.setItem('code-codex:startup-transition:v1',${JSON.stringify(JSON.stringify(saved))})`);
-  check('native early selection '+label,(await browser.evaluate(query)).projectMode,expectedMode);
+  check('native early selection '+label,(await browser.evaluate(query)).videoId,expectedId);
  }
  await browser.evaluate(`localStorage.removeItem('code-codex:startup-transition:v1')`);
 
@@ -29,10 +29,11 @@ try{
  check('missing individual parameters use the same defaults',await browser.evaluate('defaultsFixture.read()'),expected);
  await browser.evaluate(`localStorage.setItem('code-codex:startup-transition:v1','{broken')`);
  check('malformed settings recover to current defaults',await browser.evaluate('defaultsFixture.read()'),expected);
- const project={version:1,tracks:[[],[]]};
- for(const [name,flag,value] of [['existing project migrates advanced on',undefined,true],['explicit basic mode wins over retained project',false,false],['explicit advanced mode retained',true,true]]){
-  await browser.evaluate(`localStorage.setItem('code-codex:startup-transition:v1',${JSON.stringify(JSON.stringify({project,advancedOptions:flag}))})`);
-  check(name,await browser.evaluate('defaultsFixture.read().advancedOptions'),value);
+ const profile={clipStart:2,clipEnd:17,playbackRate:1.5,videoBrightness:.65,videoFit:'contain',minimumVisiblePercent:62,fadePercent:11};
+ for(const flag of [true,false]){
+  await browser.evaluate(`localStorage.setItem('code-codex:startup-transition:v1',${JSON.stringify(JSON.stringify({...expected,...profile,advancedOptions:flag,advancedTiming:{fadePercent:90},project:{version:1,tracks:[[],[]]},videoProfiles:{selected:profile}}))})`);
+  const value=await browser.evaluate('defaultsFixture.read()');check('retired advanced/basic preferences preserve basic profiles '+flag,[value.clipStart,value.fadePercent,value.videoFit],[2,11,'contain']);
+  check('retired fields are absent '+flag,['advancedOptions','advancedTiming','project','videoClipDefaults'].some(k=>k in value),false);
  }
  for(const mode of ['fixed','random']){await browser.evaluate(`localStorage.setItem('code-codex:startup-transition:v1',JSON.stringify({playbackMode:'${mode}',selectedVideoId:'first',nextVideoId:'second'}))`);check('old '+mode+' preferences migrate to ordered looping',await browser.evaluate('defaultsFixture.read().playbackMode'),'sequence');check('native looping chooses same next source for old '+mode,(await browser.evaluate(query)).videoId,'second');}
  const personal={...expected,enabled:true,source:'background',backgroundId:'milky-way',backgroundFadeSeconds:.7,minimumVisiblePercent:62,fadePercent:11,clipStart:2,clipEnd:17,playbackRate:1.5,videoBrightness:.65,videoFit:'contain'};

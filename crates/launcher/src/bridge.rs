@@ -379,7 +379,11 @@ impl UpdateChecker {
             ));
         }
         if !status.is_success() {
-            return Err(update_unavailable_error());
+            return Err(operation_error(
+                update_unavailable_error(),
+                "reading latest release HTTP status",
+                format!("status={}", status.as_u16()),
+            ));
         }
         if !response_is_json(&response)
             || response
@@ -486,16 +490,16 @@ impl UpdateChecker {
                 .content_length()
                 .is_some_and(|length| length != asset.size || length > MAX_UPDATE_ASSET_BYTES)
         {
-            return Err(update_download_error());
+            return Err(operation_error(update_download_error(),"validating installer HTTP headers",format!("status={}; trustedFinalHost={}; contentLength={:?}; expectedBytes={}; maxBytes={MAX_UPDATE_ASSET_BYTES}",response.status().as_u16(),trusted_update_download_host(response.url()),response.content_length(),asset.size)));
         }
 
         let directory = tempfile::Builder::new()
             .prefix("CodeCodex-Update-")
-            .tempdir_in(workspace_service::application_paths::temp_root().map_err(|_| update_download_error())?)
-            .map_err(|_| update_download_error())?;
+            .tempdir_in(workspace_service::application_paths::temp_root().map_err(|error|operation_error(update_download_error(),"resolving update temporary root",error))?)
+            .map_err(|error|update_local_error("creating update temporary directory",&error))?;
         let installer_path = directory.path().join(&asset.name);
         let mut file =
-            std::fs::File::create(&installer_path).map_err(|_| update_download_error())?;
+            std::fs::File::create(&installer_path).map_err(|error|update_local_error("creating downloaded installer file",&error))?;
         let mut digest = sha2::Sha256::new();
         let mut downloaded = 0_u64;
         let mut last_percent = 0;
@@ -510,7 +514,7 @@ impl UpdateChecker {
                 return Err(update_download_error());
             }
             file.write_all(&chunk)
-                .map_err(|_| update_download_error())?;
+                .map_err(|error|update_local_error("writing downloaded installer chunk",&error))?;
             sha2::Digest::update(&mut digest, &chunk);
             transfer.observe(&trace.operation,downloaded,asset.size);
             let percent = downloaded.saturating_mul(100) / asset.size.max(1);
@@ -520,14 +524,14 @@ impl UpdateChecker {
             }
         }
         progress.publish("verifying", json!({"receivedBytes":downloaded}));
-        file.sync_all().map_err(|_| update_download_error())?;
+        file.sync_all().map_err(|error|update_local_error("flushing downloaded installer file",&error))?;
         drop(file);
         let observed_digest=format!("{:x}",sha2::Digest::finalize(digest));
         operation.event("installer integrity","checked",json!({"expectedBytes":asset.size,"receivedBytes":downloaded,"expectedSha256":expected_digest,"observedSha256":observed_digest,"matches":downloaded==asset.size && observed_digest==expected_digest}));
         if downloaded != asset.size
             || observed_digest != expected_digest
         {
-            return Err(update_verification_error());
+            return Err(operation_error(update_verification_error(),"verifying downloaded installer",format!("expectedBytes={}; receivedBytes={downloaded}; digestMatches={}",asset.size,observed_digest==expected_digest)));
         }
 
         Ok(DownloadedUpdate {
@@ -546,6 +550,35 @@ impl UpdateChecker {
         }
         result
     }
+}
+
+fn operation_error(
+    mut base: BridgeError,
+    operation: &str,
+    detail: impl std::fmt::Display,
+) -> BridgeError {
+    base.message = format!(
+        "{} Operation: {}; details: {}",
+        base.message,
+        operation,
+        crate::runtime_log::redaction::text(&detail.to_string())
+    );
+    base
+}
+
+fn update_local_error(operation: &str, error: &std::io::Error) -> BridgeError {
+    operation_error(
+        BridgeError::new(
+            "UPDATE_LOCAL_IO",
+            "The update's local temporary file operation failed.",
+        ),
+        operation,
+        format!(
+            "ioKind={:?}; osCode={:?}; cause={error}",
+            error.kind(),
+            error.raw_os_error()
+        ),
+    )
 }
 
 fn update_transport_error(mut base: BridgeError, error: &reqwest::Error) -> BridgeError {
@@ -576,7 +609,9 @@ fn classify_update(
     current_version: &str,
     release: GithubLatestRelease,
 ) -> Result<UpdateCheckResult, BridgeError> {
-    let current = Version::parse(current_version).map_err(|_| update_internal_error())?;
+    let current = Version::parse(current_version).map_err(|error| {
+        operation_error(update_internal_error(), "parsing installed version", error)
+    })?;
     if release.tag_name.len() > 80 {
         return Err(update_invalid_response_error());
     }
@@ -584,7 +619,13 @@ fn classify_update(
         .tag_name
         .strip_prefix('v')
         .unwrap_or(&release.tag_name);
-    let latest = Version::parse(latest_text).map_err(|_| update_invalid_response_error())?;
+    let latest = Version::parse(latest_text).map_err(|error| {
+        operation_error(
+            update_invalid_response_error(),
+            "parsing release version",
+            error,
+        )
+    })?;
     if !latest.pre.is_empty() || !latest.build.is_empty() {
         return Err(update_invalid_response_error());
     }
@@ -705,7 +746,7 @@ fn launch_downloaded_update(update: DownloadedUpdate) -> Result<UpdateInstallRes
         .map_err(|error| {
             UPDATE_INSTALLER_ACTIVE.store(false, Ordering::Release);
             operation.finish("failed",json!({"phase":"spawn","osCode":error.raw_os_error(),"kind":format!("{:?}",error.kind())}));
-            update_launch_error()
+            operation_error(update_launch_error(),"starting verified installer process",format!("ioKind={:?}; osCode={:?}",error.kind(),error.raw_os_error()))
         })?;
     operation.event("installer process", "started", json!({"pid":child.id()}));
     let started = Instant::now();
@@ -763,7 +804,10 @@ fn await_installer_window(
                     "failed",
                     json!({"osCode":error.raw_os_error(),"kind":format!("{:?}",error.kind())}),
                 );
-                return Err(update_launch_error());
+                return Err(update_local_error(
+                    "checking installer process state",
+                    &error,
+                ));
             }
             _ if started.elapsed() >= budget => return Ok(false),
             _ => thread::sleep(Duration::from_millis(50)),
@@ -2425,8 +2469,18 @@ impl NativeBridge {
 
     async fn context(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         self.ensure_epoch(epoch)?;
-        let params: ContextParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ContextParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "context",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let request_generation = self.begin_context_request(epoch)?;
         let requested_thread = params
             .thread_id
@@ -2469,7 +2523,16 @@ impl NativeBridge {
             compatible: true,
             reason: None,
         };
-        serde_json::to_value(result).map_err(|_| internal_error())
+        serde_json::to_value(result).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "context",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn replace_context(
@@ -2539,8 +2602,18 @@ impl NativeBridge {
     }
 
     async fn git_history(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: GitHistoryParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: GitHistoryParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "git_history",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let skip = params.skip.unwrap_or(0);
         let limit = params.limit.unwrap_or(DEFAULT_GIT_HISTORY_LIMIT);
         if skip > MAX_GIT_HISTORY_SKIP || limit == 0 || limit > MAX_GIT_HISTORY_LIMIT {
@@ -2604,12 +2677,31 @@ impl NativeBridge {
             commits,
             has_more,
         })
-        .map_err(|_| internal_error())
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "git_history",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn git_commit(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: GitCommitParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: GitCommitParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "git_commit",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         if !valid_git_hash(&params.hash) {
             return Err(BridgeError::invalid_request());
         }
@@ -2666,12 +2758,31 @@ impl NativeBridge {
             files,
             files_truncated,
         })
-        .map_err(|_| internal_error())
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "git_commit",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn git_diff(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: GitDiffParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: GitDiffParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "git_diff",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         if !valid_git_hash(&params.hash) || !valid_git_relative_path(&params.path) {
             return Err(BridgeError::invalid_request());
         }
@@ -2699,7 +2810,16 @@ impl NativeBridge {
             content: String::from_utf8_lossy(&output.stdout.bytes).into_owned(),
             truncated: output.stdout.truncated,
         })
-        .map_err(|_| internal_error())
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "git_diff",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     fn git_context(&self, epoch: u64) -> Result<ActiveContext, BridgeError> {
@@ -2738,8 +2858,18 @@ impl NativeBridge {
     }
 
     async fn media_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: MediaChunkParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: MediaChunkParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "media_chunk",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         if params.length == 0
             || params.length > MAX_MEDIA_CHUNK_BYTES
             || params.offset >= params.expected_size_bytes
@@ -2769,19 +2899,47 @@ impl NativeBridge {
         .await;
         self.ensure_active_context(&context, epoch)?;
         let chunk = chunk
-            .map_err(|_| internal_error())?
+            .map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "media_chunk",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            })?
             .map_err(map_media_error)?;
         serde_json::to_value(MediaChunkResult {
             offset: chunk.offset,
             data_base64: BASE64_STANDARD.encode(chunk.data),
             eof: chunk.eof,
         })
-        .map_err(|_| internal_error())
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "media_chunk",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn model_resource_info(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ModelResourceInfoParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ModelResourceInfoParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "model_resource_info",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         if !valid_content_version(&params.expected_model_version) {
             return Err(BridgeError::invalid_request());
         }
@@ -2804,14 +2962,42 @@ impl NativeBridge {
         .await;
         self.ensure_active_context(&context, epoch)?;
         let info: ModelResourceInfo = info
-            .map_err(|_| internal_error())?
+            .map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "model_resource_info",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            })?
             .map_err(map_media_error)?;
-        serde_json::to_value(info).map_err(|_| internal_error())
+        serde_json::to_value(info).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "model_resource_info",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn model_resource_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ModelResourceChunkParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ModelResourceChunkParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "model_resource_chunk",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         if params.length == 0
             || params.length > MAX_MEDIA_CHUNK_BYTES
             || params.offset >= params.expected_size_bytes
@@ -2843,19 +3029,47 @@ impl NativeBridge {
         .await;
         self.ensure_active_context(&context, epoch)?;
         let chunk = chunk
-            .map_err(|_| internal_error())?
+            .map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "model_resource_chunk",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            })?
             .map_err(map_media_error)?;
         serde_json::to_value(MediaChunkResult {
             offset: chunk.offset,
             data_base64: BASE64_STANDARD.encode(chunk.data),
             eof: chunk.eof,
         })
-        .map_err(|_| internal_error())
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "model_resource_chunk",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn entry_create(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: EntryCreateParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: EntryCreateParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_create",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let entry = self
             .active_workspace_operation(epoch, move |workspace| {
                 workspace.create_entry(
@@ -2865,23 +3079,61 @@ impl NativeBridge {
                 )
             })
             .await?;
-        serde_json::to_value(entry).map_err(|_| internal_error())
+        serde_json::to_value(entry).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "entry_create",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn entry_rename(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: EntryRenameParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: EntryRenameParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_rename",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let entry = self
             .active_workspace_operation(epoch, move |workspace| {
                 workspace.rename_entry(&params.relative_path, &params.new_name)
             })
             .await?;
-        serde_json::to_value(entry).map_err(|_| internal_error())
+        serde_json::to_value(entry).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "entry_rename",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn entry_move(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: EntryMoveParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: EntryMoveParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_move",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let entry = self
             .active_workspace_operation(epoch, move |workspace| {
                 workspace.move_entry(
@@ -2890,7 +3142,16 @@ impl NativeBridge {
                 )
             })
             .await?;
-        serde_json::to_value(entry).map_err(|_| internal_error())
+        serde_json::to_value(entry).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "entry_move",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn entry_move_batch(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
@@ -2911,8 +3172,16 @@ impl NativeBridge {
                 results.push(entry);
             }
 
-            return serde_json::to_value(json!({ "entries": results }))
-                .map_err(|_| internal_error());
+            return serde_json::to_value(json!({ "entries": results })).map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "entry_move_batch",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            });
         }
 
         // Fall back to single-entry move for backward compatibility
@@ -2920,8 +3189,18 @@ impl NativeBridge {
     }
 
     async fn entry_copy(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: BatchCopyParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: BatchCopyParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_copy",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         if params.source_paths.is_empty() || params.source_paths.len() > 1024 {
             return Err(BridgeError::invalid_request());
         }
@@ -2937,12 +3216,31 @@ impl NativeBridge {
             results.push(entry);
         }
 
-        serde_json::to_value(json!({ "entries": results })).map_err(|_| internal_error())
+        serde_json::to_value(json!({ "entries": results })).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "entry_copy",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn entry_delete(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: EntryPathParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: EntryPathParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_delete",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         self.active_workspace_operation(epoch, move |workspace| {
             workspace.delete_entry(&params.relative_path)
         })
@@ -2964,8 +3262,18 @@ impl NativeBridge {
     where
         F: FnOnce(&Path) -> Result<(), WorkspaceError> + Send + 'static,
     {
-        let params: EntryPathParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: EntryPathParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_reveal_with_opener",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         self.active_workspace_operation(epoch, move |workspace| {
             let target = workspace.reveal_path(&params.relative_path)?;
             opener(&target)
@@ -2975,8 +3283,18 @@ impl NativeBridge {
     }
 
     async fn entry_import_begin(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ImportBeginParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ImportBeginParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_import_begin",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         match (params.kind, params.size_bytes) {
             (EntryCreateKind::File, Some(_)) | (EntryCreateKind::Directory, None) => {}
             _ => return Err(BridgeError::invalid_request()),
@@ -3019,7 +3337,16 @@ impl NativeBridge {
             Ok(())
         })
         .await
-        .map_err(|_| internal_error())??;
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "entry_import_begin",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })??;
 
         Ok(json!({
             "sessionId": response_session_id,
@@ -3032,8 +3359,18 @@ impl NativeBridge {
         params: Value,
         epoch: u64,
     ) -> Result<Value, BridgeError> {
-        let params: ImportDirectoryParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ImportDirectoryParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_import_directory",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         self.active_import_operation(epoch, params.session_id, move |session| {
             session.create_directory(&params.relative_path)
         })
@@ -3046,8 +3383,18 @@ impl NativeBridge {
         params: Value,
         epoch: u64,
     ) -> Result<Value, BridgeError> {
-        let params: ImportFileBeginParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ImportFileBeginParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_import_file_begin",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         self.active_import_operation(epoch, params.session_id, move |session| {
             session.begin_file(&params.relative_path, params.size_bytes)
         })
@@ -3056,11 +3403,27 @@ impl NativeBridge {
     }
 
     async fn entry_import_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ImportChunkParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ImportChunkParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_import_chunk",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let bytes = BASE64_STANDARD
             .decode(params.data_base64)
-            .map_err(|_| BridgeError::invalid_request())?;
+            .map_err(|error| {
+                operation_error(
+                    BridgeError::invalid_request(),
+                    "entry_import_chunk",
+                    format!("base64DecodeError={error}; rejected payload omitted"),
+                )
+            })?;
         if bytes.is_empty() || bytes.len() > MAX_IMPORT_CHUNK_BYTES {
             return Err(BridgeError::invalid_request());
         }
@@ -3077,16 +3440,36 @@ impl NativeBridge {
         params: Value,
         epoch: u64,
     ) -> Result<Value, BridgeError> {
-        let params: ImportSessionParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ImportSessionParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_import_file_finish",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         self.active_import_operation(epoch, params.session_id, |session| session.finish_file())
             .await?;
         Ok(json!({ "finished": true }))
     }
 
     async fn entry_import_commit(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ImportSessionParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ImportSessionParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_import_commit",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         validate_import_session_id(&params.session_id)?;
         let bridge = self.clone();
         let entry = tokio::task::spawn_blocking(move || {
@@ -3102,13 +3485,32 @@ impl NativeBridge {
             active.session.commit().map_err(map_import_error)
         })
         .await
-        .map_err(|_| internal_error())??;
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "entry_import_commit",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })??;
         Ok(json!({ "entry": entry }))
     }
 
     async fn entry_import_abort(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ImportSessionParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ImportSessionParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "entry_import_abort",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         validate_import_session_id(&params.session_id)?;
         let bridge = self.clone();
         tokio::task::spawn_blocking(move || {
@@ -3122,7 +3524,16 @@ impl NativeBridge {
             active.session.abort().map_err(map_import_error)
         })
         .await
-        .map_err(|_| internal_error())??;
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "entry_import_abort",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })??;
         Ok(json!({ "aborted": true }))
     }
 
@@ -3156,7 +3567,16 @@ impl NativeBridge {
             result
         })
         .await
-        .map_err(|_| internal_error())?
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "active_import_operation",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })?
     }
 
     async fn active_workspace_operation<T, F>(
@@ -3182,7 +3602,16 @@ impl NativeBridge {
             operation(context.workspace.clone()).map_err(map_workspace_error)
         })
         .await
-        .map_err(|_| internal_error())?
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "active_workspace_operation",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })?
     }
 
     async fn preview_save_with_writer<F>(
@@ -3197,8 +3626,18 @@ impl NativeBridge {
             + 'static,
     {
         self.ensure_epoch(epoch)?;
-        let params: PreviewSaveParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: PreviewSaveParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "preview_save_with_writer",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         if params.expected_version.len() != 64
             || !params
                 .expected_version
@@ -3209,7 +3648,13 @@ impl NativeBridge {
         }
         let content = BASE64_STANDARD
             .decode(params.content_base64)
-            .map_err(|_| BridgeError::invalid_request())?;
+            .map_err(|error| {
+                operation_error(
+                    BridgeError::invalid_request(),
+                    "preview_save_with_writer",
+                    format!("base64DecodeError={error}; rejected payload omitted"),
+                )
+            })?;
         if content.len() > MAX_PREVIEW_BYTES {
             return Err(map_workspace_error(WorkspaceError::ContentTooLarge));
         }
@@ -3232,10 +3677,28 @@ impl NativeBridge {
                 content,
             )
             .map_err(map_workspace_error)?;
-            serde_json::to_value(preview).map_err(|_| internal_error())
+            serde_json::to_value(preview).map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "preview_save_with_writer",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            })
         })
         .await
-        .map_err(|_| internal_error())?
+        .map_err(|error| {
+            operation_error(
+                internal_error(),
+                "preview_save_with_writer",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })?
     }
 
     async fn list_with_scanner<F>(
@@ -3248,8 +3711,18 @@ impl NativeBridge {
         F: FnOnce(Arc<Workspace>, ListOptions) -> Result<ListPage, WorkspaceError> + Send + 'static,
     {
         self.ensure_epoch(epoch)?;
-        let params: ListParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: ListParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "list_with_scanner",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let context = {
             let state = lock_unpoisoned(&self.inner.state);
             self.ensure_epoch(epoch)?;
@@ -3269,9 +3742,27 @@ impl NativeBridge {
         let page = tokio::task::spawn_blocking(move || scanner(workspace, options)).await;
         self.ensure_active_context(&context, epoch)?;
         let page = page
-            .map_err(|_| internal_error())?
+            .map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "list_with_scanner",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            })?
             .map_err(map_workspace_error)?;
-        serde_json::to_value(page).map_err(|_| internal_error())
+        serde_json::to_value(page).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "list_with_scanner",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn preview_with_reader<F>(
@@ -3284,8 +3775,18 @@ impl NativeBridge {
         F: FnOnce(Arc<Workspace>, String) -> Result<PreviewResult, WorkspaceError> + Send + 'static,
     {
         self.ensure_epoch(epoch)?;
-        let params: PreviewParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: PreviewParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "preview_with_reader",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let context = {
             let state = lock_unpoisoned(&self.inner.state);
             self.ensure_epoch(epoch)?;
@@ -3299,9 +3800,27 @@ impl NativeBridge {
             tokio::task::spawn_blocking(move || reader(workspace, params.relative_path)).await;
         self.ensure_active_context(&context, epoch)?;
         let preview = preview
-            .map_err(|_| internal_error())?
+            .map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "preview_with_reader",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            })?
             .map_err(map_workspace_error)?;
-        serde_json::to_value(preview).map_err(|_| internal_error())
+        serde_json::to_value(preview).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "preview_with_reader",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn media_info_with_reader<F>(
@@ -3314,8 +3833,18 @@ impl NativeBridge {
         F: FnOnce(Arc<Workspace>, String) -> Result<MediaInfo, WorkspaceError> + Send + 'static,
     {
         self.ensure_epoch(epoch)?;
-        let params: MediaInfoParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: MediaInfoParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "media_info_with_reader",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         let context = {
             let state = lock_unpoisoned(&self.inner.state);
             self.ensure_epoch(epoch)?;
@@ -3329,15 +3858,41 @@ impl NativeBridge {
             tokio::task::spawn_blocking(move || reader(workspace, params.relative_path)).await;
         self.ensure_active_context(&context, epoch)?;
         let info = info
-            .map_err(|_| internal_error())?
+            .map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "media_info_with_reader",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            })?
             .map_err(map_media_error)?;
-        serde_json::to_value(info).map_err(|_| internal_error())
+        serde_json::to_value(info).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "media_info_with_reader",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn settings_get(&self, params: Value) -> Result<Value, BridgeError> {
         require_empty_object(&params)?;
-        serde_json::to_value(read_unpoisoned(&self.inner.settings).clone())
-            .map_err(|_| internal_error())
+        serde_json::to_value(read_unpoisoned(&self.inner.settings).clone()).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "settings_get",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })
     }
 
     async fn update_startup(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
@@ -3371,10 +3926,25 @@ impl NativeBridge {
             return Err(update_busy_error());
         }
         self.ensure_epoch(epoch)?;
-        let params: UpdateInstallParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
-        let requested =
-            Version::parse(&params.latest_version).map_err(|_| BridgeError::invalid_request())?;
+        let params: UpdateInstallParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "update_install",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
+        let requested = Version::parse(&params.latest_version).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "update_install",
+                format!("versionParseError={error}; rejected version value omitted"),
+            )
+        })?;
         if requested.to_string() != params.latest_version
             || !requested.pre.is_empty()
             || !requested.build.is_empty()
@@ -3422,8 +3992,18 @@ impl NativeBridge {
 
     fn window_transparency_set(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         self.ensure_epoch(epoch)?;
-        let params: WindowTransparencyParams =
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
+        let params: WindowTransparencyParams = serde_json::from_value(params).map_err(|error| {
+            operation_error(
+                BridgeError::invalid_request(),
+                "window_transparency_set",
+                format!(
+                    "category={:?}; line={}; column={}; rejected payload omitted",
+                    error.classify(),
+                    error.line(),
+                    error.column()
+                ),
+            )
+        })?;
         self.inner
             .window_transparency
             .set_enabled(params.enabled, &self.inner.lifecycle_epoch, epoch)
@@ -3457,13 +4037,44 @@ impl NativeBridge {
         let patch: SettingsPatch = if params.get("settings").is_some() {
             serde_json::from_value::<SettingsWrapper>(params)
                 .map(|wrapper| wrapper.settings)
-                .map_err(|_| BridgeError::invalid_request())?
+                .map_err(|error| {
+                    operation_error(
+                        BridgeError::invalid_request(),
+                        "settings_set_with_preparer",
+                        format!(
+                            "category={:?}; line={}; column={}; rejected payload omitted",
+                            error.classify(),
+                            error.line(),
+                            error.column()
+                        ),
+                    )
+                })?
         } else {
-            serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?
+            serde_json::from_value(params).map_err(|error| {
+                operation_error(
+                    BridgeError::invalid_request(),
+                    "settings_set_with_preparer",
+                    format!(
+                        "category={:?}; line={}; column={}; rejected payload omitted",
+                        error.classify(),
+                        error.line(),
+                        error.column()
+                    ),
+                )
+            })?
         };
         let mut updated = read_unpoisoned(&self.inner.settings).clone();
         updated.apply(patch).map_err(map_workspace_error)?;
-        let response = serde_json::to_value(&updated).map_err(|_| internal_error())?;
+        let response = serde_json::to_value(&updated).map_err(|error| {
+            operation_error(
+                internal_error(),
+                "settings_set_with_preparer",
+                format!(
+                    "exceptionType={}; cause={error}",
+                    std::any::type_name_of_val(&error)
+                ),
+            )
+        })?;
         let store = self.inner.settings_store.clone();
         let to_prepare = updated.clone();
         let prepared = tokio::task::spawn_blocking(move || prepare(store, to_prepare)).await;
@@ -3471,7 +4082,16 @@ impl NativeBridge {
         let _state = lock_unpoisoned(&self.inner.state);
         self.ensure_epoch(epoch)?;
         let prepared = prepared
-            .map_err(|_| internal_error())?
+            .map_err(|error| {
+                operation_error(
+                    internal_error(),
+                    "settings_set_with_preparer",
+                    format!(
+                        "exceptionType={}; cause={error}",
+                        std::any::type_name_of_val(&error)
+                    ),
+                )
+            })?
             .map_err(map_workspace_error)?;
         prepared.commit().map_err(map_workspace_error)?;
         *settings = updated;
@@ -4473,9 +5093,13 @@ fn map_resolver_error(error: ResolverError) -> BridgeError {
         "failed",
         crate::network_diagnostics::error_details(&error),
     );
-    match error {
+    match error.kind() {
         ResolverError::NoWorkspace | ResolverError::InvalidThreadId => no_context_error(),
-        _ => internal_error(),
+        _ => operation_error(
+            BridgeError::new("APP_SERVER_FAILED", "The App Server operation failed."),
+            "workspace resolution",
+            &error,
+        ),
     }
 }
 
@@ -4532,6 +5156,29 @@ fn map_media_error(error: WorkspaceError) -> BridgeError {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn update_local_failure_keeps_operation_and_native_cause() {
+        let error = update_local_error(
+            "writing installer chunk",
+            &std::io::Error::from_raw_os_error(5),
+        );
+        assert_eq!(error.code, "UPDATE_LOCAL_IO");
+        assert!(error.message.contains("writing installer chunk"));
+        assert!(error.message.contains("osCode=Some(5)"));
+        let mapped = map_resolver_error(
+            ResolverError::Io.context("reading App Server stdout", "EOF; requestNumber=8"),
+        );
+        assert_eq!(mapped.code, "APP_SERVER_FAILED");
+        assert!(mapped.message.contains("EOF"));
+        let hidden = operation_error(
+            internal_error(),
+            "update_local_failure_keeps_operation_and_native_cause",
+            "Bearer SENTINEL-secret",
+        );
+        assert!(!hidden.message.contains("SENTINEL"));
+    }
+
     use std::fs;
     use std::sync::mpsc as std_mpsc;
 

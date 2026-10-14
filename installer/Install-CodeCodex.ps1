@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.34",
+    [string]$Version = "0.4.46",
     [string]$InstallRoot,
     [switch]$SelectDirectory,
     [switch]$NoActivate
@@ -8,6 +8,35 @@ param(
 
 # storage-contract:start
 # Shared install/uninstall location contract. No recursive operation follows a reparse point.
+function Remove-CodeCodexRetiredStartupCache([string]$Root) {
+    $report = [ordered]@{outcome='not-run';relativePath='data/cache/startup-video';removedBytes=0L;originalMediaPreserved=$true}
+    try {
+        $owned = Assert-CodeCodexRoot $Root -Owned
+        $target = [IO.Path]::GetFullPath((Join-Path $owned 'data\cache\startup-video'))
+        if (-not $target.StartsWith($owned+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Retired cache escaped the application root.' }
+        $cursor = $target
+        while (-not $cursor.Equals($owned,[StringComparison]::OrdinalIgnoreCase)) {
+            $node = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+            if ($node -and (-not $node.PSIsContainer -or ($node.Attributes -band [IO.FileAttributes]::ReparsePoint))) { throw "Redirected retired cache ancestor refused: $cursor" }
+            $cursor = Split-Path -Parent $cursor
+        }
+        if (-not (Test-Path -LiteralPath $target)) { $report.outcome='absent'; return $report }
+        $queue = [Collections.Generic.Queue[string]]::new(); $queue.Enqueue($target)
+        $count = 0
+        while ($queue.Count) {
+            foreach ($node in Get-ChildItem -LiteralPath $queue.Dequeue() -Force -ErrorAction Stop) {
+                $count++; if ($count -gt 4096) { throw 'Retired cache enumeration budget exceeded.' }
+                if ($node.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Redirected retired cache child refused: $($node.Name)" }
+                if ($node.PSIsContainer) { $queue.Enqueue($node.FullName) } else { $report.removedBytes += $node.Length }
+            }
+        }
+        # Exact absolute target and every ancestor/child have been checked above.
+        Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+        $report.outcome='removed'
+    } catch { $report.outcome='retained'; $report.reason=$_.Exception.Message; $report.removedBytes=0L }
+    return $report
+}
+
 function Get-CodeCodexRegisteredRoot {
     $entry = Get-ItemProperty 'HKCU:\Software\CodeCodex' -ErrorAction SilentlyContinue
     if ($entry -and $entry.InstallPath) { return [string]$entry.InstallPath }
@@ -51,6 +80,22 @@ function Assert-CodeCodexRoot([string]$Root, [switch]$Owned) {
     return $full
 }
 
+function Get-CodeCodexDataHash([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item -isnot [IO.FileInfo] -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Migration hash input must be a regular file: $Path"
+    }
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $algorithm = $null
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '')
+    } finally {
+        if ($algorithm) { $algorithm.Dispose() }
+        $stream.Dispose()
+    }
+}
+
 function Copy-CodeCodexDataTree([string]$Source, [string]$Destination) {
     $item = Get-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
     if (-not $item) { return }
@@ -73,7 +118,7 @@ function Copy-CodeCodexDataTree([string]$Source, [string]$Destination) {
         $stage = $Destination + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
         try {
             Copy-Item -LiteralPath $Source -Destination $stage
-            if ((Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash) { throw 'Migrated resource hash mismatch.' }
+            if ((Get-CodeCodexDataHash $Source) -ne (Get-CodeCodexDataHash $stage)) { throw 'Migrated resource hash mismatch.' }
             [IO.File]::Move($stage, $Destination)
             $script:MigrationCopied++
         } finally { if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Force } }
@@ -514,7 +559,7 @@ function Save-CodeCodexInstallReport([string]$Outcome) {
         $folder = if ($owned) { Join-Path $InstallRoot 'logs\install' } else { Join-Path $env:TEMP 'CodeCodex\logs\install' }
         $null = Assert-CodeCodexRoot $folder
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
-        $report=[ordered]@{schema=1;version=$Version;outcome=$Outcome;timeline=@($script:InstallTrace.ToArray());migrationCopied=$script:MigrationCopied;migrationSkipped=$script:MigrationSkipped;rollbackIssues=@($script:CleanupIssues);versionRetention=$script:VersionRetentionReport}
+        $report=[ordered]@{schema=1;version=$Version;outcome=$Outcome;timeline=@($script:InstallTrace.ToArray());migrationCopied=$script:MigrationCopied;migrationSkipped=$script:MigrationSkipped;rollbackIssues=@($script:CleanupIssues);versionRetention=$script:VersionRetentionReport;retiredStartupCache=$script:RetiredStartupCacheReport}
         $path=Join-Path $folder ('install-'+[DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')+'-'+$PID+'.json')
         [IO.File]::WriteAllText($path,($report|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
         Get-ChildItem -LiteralPath $folder -Filter 'install-*.json' -File | Sort-Object Name -Descending | Select-Object -Skip 10 | ForEach-Object { if(-not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)){Remove-Item -LiteralPath $_.FullName -Force} }
@@ -622,6 +667,7 @@ function Remove-CodeCodexOldVersions([string]$Root, [string]$Current, [string]$P
 $script:CreatedVersionRoot = $false
 $script:InstallCommitted = $false
 $script:VersionRetentionReport = [ordered]@{policy='current-and-previous';outcome='not-run';reason='installation has not committed'}
+$script:RetiredStartupCacheReport = [ordered]@{outcome='not-run';reason='installation has not committed'}
 $previousVersionMarker = $null
 $previousInstallTypeMarker = $null
 $script:VersionSnapshotTaken = $false
@@ -914,6 +960,20 @@ if ($script:VersionRetentionReport.outcome -ne 'passed') {
     Write-Warning 'Some older application versions were retained. See versionRetention in the installation log for details.'
 }
 
+$script:InstallOperation = "Retiring obsolete startup movie cache"
+Publish-CodeCodexProgress 97 "Removing obsolete startup movies" "Keeping the original video library and basic parameters."
+try {
+    $script:RetiredStartupCacheReport = Remove-CodeCodexRetiredStartupCache $InstallRoot
+} catch {
+    # Optional maintenance must not turn a committed installation into a failure.
+    $script:RetiredStartupCacheReport = [ordered]@{
+        outcome='retained'; relativePath='data/cache/startup-video'; removedBytes=0L
+        originalMediaPreserved=$true; reason=$_.Exception.Message
+        exceptionType=$_.Exception.GetType().FullName
+    }
+}
+if ($script:RetiredStartupCacheReport.outcome -eq 'retained') { Write-Warning 'Obsolete startup movies were retained because safe cleanup could not be completed; see retiredStartupCache in the installation log.' }
+Trace-Install 'Retired startup cache' $script:RetiredStartupCacheReport.outcome
 $installedCommandLine = Join-Path $VersionRoot "code-codex.exe"
 Publish-CodeCodexProgress 98 "Activating Code-Codex" "Refreshing any currently open Codex window."
 try {

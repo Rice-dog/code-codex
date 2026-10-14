@@ -1,12 +1,8 @@
-import { normalizeStartupProject, type StartupVideoProject, type StartupClip } from './startup-video-project';
 import { STARTUP_BACKGROUNDS } from './startup-background';
 
 const STORAGE_KEY = "code-codex:startup-transition:v1";
 
 export interface StartupTransitionSettings {
-  advancedOptions: boolean;
-  project: StartupVideoProject | null;
-  videoClipDefaults: Record<string, StartupClip>;
   enabled: boolean;
   source: 'video' | 'background';
   backgroundId: string;
@@ -46,7 +42,6 @@ export function advanceStartupVideo(s: StartupTransitionSettings, played: string
 }
 
 export const DEFAULT_STARTUP_TRANSITION_SETTINGS: StartupTransitionSettings = {
-  advancedOptions: false, project: null, videoClipDefaults: {},
   enabled: false,
   source: 'video',
   backgroundId: 'particle-image',
@@ -80,14 +75,17 @@ function bounded(value: unknown, fallback: number, min: number, max: number): nu
 
 export function readStartupTransitionSettings(): StartupTransitionSettings {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as (Partial<StartupTransitionSettings> & { minimumVisibleMs?: number; exitDurationMs?: number }) | null;
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as (Partial<StartupTransitionSettings> & { minimumVisibleMs?: number; exitDurationMs?: number; advancedOptions?: boolean; project?: {version?:number} }) | null;
     if (!saved || typeof saved !== "object") return { ...DEFAULT_STARTUP_TRANSITION_SETTINGS };
     const defaults = DEFAULT_STARTUP_TRANSITION_SETTINGS;
     const legacyDurationMs = Math.max(100, ((saved.clipEnd ?? defaults.clipEnd) - (saved.clipStart ?? defaults.clipStart)) / (saved.playbackRate ?? defaults.playbackRate) * 1000);
+    // Retired advanced preferences must not overwrite the original basic profile.
+    const profiles=normalizeProfiles(saved.videoProfiles);
+    if(saved.advancedOptions===true || (saved.advancedOptions===undefined&&saved.project?.version===1)){
+      const profile=profiles[saved.selectedVideoId??'selected']??startupVideoProfile(defaults);
+      Object.assign(saved,profile);
+    }
     return {
-      advancedOptions: typeof saved.advancedOptions === "boolean" ? saved.advancedOptions : normalizeStartupProject(saved.project) !== null,
-      project: normalizeStartupProject(saved.project),
-      videoClipDefaults: normalizeVideoClipDefaults(saved.videoClipDefaults),
       enabled: saved.enabled === true,
       source: saved.source === 'background' || saved.source === 'video' ? saved.source : defaults.source,
       backgroundId: STARTUP_BACKGROUNDS.some(([id])=>id===saved.backgroundId) ? saved.backgroundId! : defaults.backgroundId,
@@ -116,7 +114,8 @@ export function writeStartupTransitionSettings(settings: StartupTransitionSettin
     const profiles = {...settings.videoProfiles};
     if (settings.selectedVideoId) profiles[settings.selectedVideoId] = startupVideoProfile(settings);
     for(const id of Object.keys(profiles))if(id!==settings.selectedVideoId&&!settings.videoOrder.includes(id))delete profiles[id];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({...settings,playbackMode:"sequence",project:normalizeStartupProject(settings.project),videoClipDefaults:normalizeVideoClipDefaults(settings.videoClipDefaults),videoProfiles:profiles}));
+    const {enabled,source,backgroundId,backgroundFadeSeconds,minimumVisiblePercent,fadePercent,clipStart,clipEnd,playbackRate,videoBrightness,videoFit,selectedVideoId,videoOrder,nextVideoId,lastPlayedVideoId}=settings;
+    localStorage.setItem(STORAGE_KEY,JSON.stringify({enabled,source,backgroundId,backgroundFadeSeconds,minimumVisiblePercent,fadePercent,clipStart,clipEnd,playbackRate,videoBrightness,videoFit,selectedVideoId,videoOrder,playbackMode:'sequence',nextVideoId,lastPlayedVideoId,videoProfiles:profiles}));
     return true;
   } catch {
     return false;
@@ -130,17 +129,6 @@ function normalizeProfiles(value: unknown): Record<string, StartupVideoProfile> 
     if(!id || id.length>256 || !p || typeof p!=="object") continue;
     const v=p as Partial<StartupVideoProfile>, d=DEFAULT_STARTUP_TRANSITION_SETTINGS;
     result[id]={clipStart:bounded(v.clipStart,d.clipStart,0,3600),clipEnd:bounded(v.clipEnd,d.clipEnd,.1,3600),playbackRate:bounded(v.playbackRate,d.playbackRate,.5,2),videoBrightness:bounded(v.videoBrightness,d.videoBrightness,.4,1.4),minimumVisiblePercent:bounded(v.minimumVisiblePercent,d.minimumVisiblePercent,0,100),fadePercent:bounded(v.fadePercent,d.fadePercent,0,100),videoFit:v.videoFit==="contain"||v.videoFit==="cinema"?v.videoFit:"cover"};
-  }
-  return result;
-}
-
-function normalizeVideoClipDefaults(value: unknown): Record<string, StartupClip> {
-  const result: Record<string, StartupClip> = Object.create(null);
-  if (!value || typeof value !== 'object') return result;
-  for (const [id, raw] of Object.entries(value).slice(0, 32)) {
-    if (!id || id.length > 256 || !raw || typeof raw !== 'object') continue;
-    const clip = normalizeStartupProject({version:1,tracks:[[{...raw,videoId:id,start:0}],[]]})?.tracks[0][0];
-    if (clip) result[id] = clip;
   }
   return result;
 }

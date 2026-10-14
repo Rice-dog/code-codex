@@ -1,2 +1,2 @@
-// Library, composition and editor are validated together against the production package.
-import './test-startup-two-track.mjs';
+// Video-library regression lives in the basic realtime fixture.
+import './test-startup-basic.mjs';

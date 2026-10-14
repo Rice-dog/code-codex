@@ -43,7 +43,10 @@ export function monitorStartupReadiness(controller: StartupTransitionController)
   let taskObserver: PerformanceObserver | undefined;
   let pendingLongTask = false;
   let candidateSince: number | undefined;
-  const dispose = () => { cancelAnimationFrame(frame); taskObserver?.disconnect(); };
+  let content=nativeContent(),nextContentCheck=started+200;
+  let taskCount=0,longestTask=0,nextTaskReport=started+2000;
+  const flushTasks=()=>{if(!taskCount)return;runtimeEvent('startup-animation','readiness long task','observed',{count:taskCount,longestMs:Math.round(longestTask)});taskCount=0;longestTask=0;};
+  const dispose = () => { cancelAnimationFrame(frame); taskObserver?.disconnect(); flushTasks(); };
   runtimeEvent('startup-animation', 'readiness monitor', 'started', {
     strategy: 'visible native Codex content plus stable painted frames', stableMs: STABLE_MS,
     maxFrameGapMs: MAX_FRAME_GAP_MS, officialPhaseDirectlyReadable: false,
@@ -55,16 +58,15 @@ export function monitorStartupReadiness(controller: StartupTransitionController)
       const tasks = list.getEntries().filter(entry => entry.duration >= 50);
       if (!tasks.length) return;
       pendingLongTask ||= tasks.some(task => task.duration > MAX_FRAME_GAP_MS);
-      runtimeEvent('startup-animation', 'readiness long task', 'observed', {
-        count: tasks.length, longestMs: Math.round(Math.max(...tasks.map(task => task.duration))),
-      });
+      taskCount+=tasks.length;longestTask=Math.max(longestTask,...tasks.map(task=>task.duration));
     });
     taskObserver.observe({ type: 'longtask' });
   }
   const tick = (now: number) => {
     if (controller.phase !== 'loading') { dispose(); return; }
     const gap = now - lastFrame; lastFrame = now; maxGap = Math.max(maxGap, gap);
-    const content = nativeContent();
+    if(now>=nextContentCheck){content=nativeContent();nextContentCheck=now+200;}
+    if(now>=nextTaskReport){flushTasks();nextTaskReport=now+2000;}
     const elapsed = now - started;
     const contentFallback = elapsed >= 60000 && content.shell;
     const candidate = document.visibilityState === 'visible' && document.readyState === 'complete'

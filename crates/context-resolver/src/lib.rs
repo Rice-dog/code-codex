@@ -69,7 +69,7 @@ impl RequestTrace {
         diagnostic(
             "request",
             outcome,
-            json!({"method":self.method,"requestNumber":self.number,"durationMs":self.started.elapsed().as_millis(),"reason":error.map(ToString::to_string)}),
+            json!({"method":self.method,"requestNumber":self.number,"durationMs":self.started.elapsed().as_millis(),"reason":error.map(ToString::to_string),"code":error.map(|error|match error.kind(){ResolverError::Timeout=>"APP_TIMEOUT",ResolverError::Spawn=>"APP_SPAWN",ResolverError::Io=>"APP_IO",ResolverError::Remote{..}=>"APP_REMOTE",_=>"APP_PROTOCOL"})}),
         );
         self.finished = true;
     }
@@ -82,8 +82,15 @@ impl Drop for RequestTrace {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum ResolverError {
+    #[error("{operation}: {error}; {detail}")]
+    Context {
+        operation: &'static str,
+        detail: String,
+        #[source]
+        error: Box<ResolverError>,
+    },
     #[error("the App Server process could not be started")]
     Spawn,
     #[error("App Server I/O failed")]
@@ -98,6 +105,22 @@ pub enum ResolverError {
     NoWorkspace,
     #[error("the thread ID is invalid")]
     InvalidThreadId,
+}
+
+impl ResolverError {
+    pub fn context(self, operation: &'static str, detail: impl std::fmt::Display) -> Self {
+        Self::Context {
+            operation,
+            detail: detail.to_string().chars().take(2048).collect(),
+            error: Box::new(self),
+        }
+    }
+    pub fn kind(&self) -> &Self {
+        match self {
+            Self::Context { error, .. } => error.kind(),
+            other => other,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -203,9 +226,22 @@ impl AppServerClient {
         process.wrap(KillOnDrop);
         #[cfg(windows)]
         process.wrap(JobObject);
-        let mut child = process.spawn().map_err(|_| ResolverError::Spawn)?;
-        let stdout = child.stdout().take().ok_or(ResolverError::Spawn)?;
-        let stdin = child.stdin().take().ok_or(ResolverError::Spawn)?;
+        let mut child = process.spawn().map_err(|error| {
+            ResolverError::Spawn.context(
+                "starting App Server child",
+                format!(
+                    "ioKind={:?}; osCode={:?}; cause={error}",
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+            )
+        })?;
+        let stdout = child.stdout().take().ok_or_else(|| {
+            ResolverError::Spawn.context("acquiring App Server stdout", "child has no piped stdout")
+        })?;
+        let stdin = child.stdin().take().ok_or_else(|| {
+            ResolverError::Spawn.context("acquiring App Server stdin", "child has no piped stdin")
+        })?;
         let client = Self::connect_io_inner(BufReader::new(stdout), stdin, guard).await?;
         *client.inner.child.lock().await = Some(child);
         Ok(client)
@@ -286,7 +322,9 @@ impl AppServerClient {
                 self.cache(&workspace).await;
                 Ok(workspace)
             }
-            Err(ResolverError::Remote { .. }) => self.resolve_from_list(thread_id).await,
+            Err(error) if matches!(error.kind(), ResolverError::Remote { .. }) => {
+                self.resolve_from_list(thread_id).await
+            }
             Err(error) => Err(error),
         }
     }
@@ -373,17 +411,27 @@ impl AppServerClient {
         if let Err(e)=write_result {
             diagnostic("request write","failed",json!({"requestNumber":id,"ioKind":format!("{:?}",e.kind()),"osErrorCode":e.raw_os_error()}));
             self.inner.pending.lock().await.remove(&id);
-            return Err(ResolverError::Io);
+            return Err(ResolverError::Io.context("writing App Server request", format!("requestNumber={id}; ioKind={:?}; osCode={:?}; cause={e}",e.kind(),e.raw_os_error())));
         }
         match tokio::time::timeout(self.inner.timeout, receiver).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(ResolverError::Io),
+            Ok(Err(error)) => Err(ResolverError::Io.context("waiting for App Server reply", format!("requestNumber={id}; response channel closed; cause={error}"))),
             Err(_) => {
                 self.inner.pending.lock().await.remove(&id);
-                Err(ResolverError::Timeout)
+                Err(ResolverError::Timeout.context("waiting for App Server reply", format!("requestNumber={id}; timeoutMs={}",self.inner.timeout.as_millis())))
             }
         }
         }.await;
+        let result = result.map_err(|error| {
+            error.context(
+                "App Server request",
+                format!(
+                    "method={}; requestNumber={id}; timeoutMs={}",
+                    trace.method,
+                    self.inner.timeout.as_millis()
+                ),
+            )
+        });
         trace.finish(
             if result.is_ok() { "passed" } else { "failed" },
             result.as_ref().err(),
@@ -405,11 +453,26 @@ impl AppServerClient {
         let mut encoded = serde_json::to_vec(&message).map_err(|_| ResolverError::Protocol)?;
         encoded.push(b'\n');
         let mut writer = self.inner.writer.lock().await;
-        writer
-            .write_all(&encoded)
-            .await
-            .map_err(|_| ResolverError::Io)?;
-        writer.flush().await.map_err(|_| ResolverError::Io)
+        writer.write_all(&encoded).await.map_err(|error| {
+            ResolverError::Io.context(
+                "writing App Server notification",
+                format!(
+                    "ioKind={:?}; osCode={:?}; cause={error}",
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+            )
+        })?;
+        writer.flush().await.map_err(|error| {
+            ResolverError::Io.context(
+                "flushing App Server notification",
+                format!(
+                    "ioKind={:?}; osCode={:?}; cause={error}",
+                    error.kind(),
+                    error.raw_os_error()
+                ),
+            )
+        })
     }
 
     #[must_use]
@@ -426,11 +489,23 @@ async fn read_loop<R>(
     R: AsyncBufRead + Unpin,
 {
     let mut line = String::new();
+    let mut terminal = ResolverError::Io.context(
+        "reading App Server stdout",
+        "stream ended (EOF); child exit code not observed here",
+    );
     loop {
         line.clear();
         let read = match reader.read_line(&mut line).await {
             Ok(read) => read,
             Err(error) => {
+                terminal = ResolverError::Io.context(
+                    "reading App Server stdout",
+                    format!(
+                        "ioKind={:?}; osCode={:?}; cause={error}",
+                        error.kind(),
+                        error.raw_os_error()
+                    ),
+                );
                 diagnostic(
                     "transport read",
                     "failed",
@@ -444,6 +519,10 @@ async fn read_loop<R>(
             break;
         }
         if line.len() > MAX_MESSAGE_BYTES {
+            terminal = ResolverError::Protocol.context(
+                "reading App Server frame",
+                format!("observedBytes={}; maxBytes={MAX_MESSAGE_BYTES}", line.len()),
+            );
             diagnostic(
                 "protocol frame",
                 "failed",
@@ -455,7 +534,7 @@ async fn read_loop<R>(
             diagnostic(
                 "protocol frame",
                 "rejected",
-                json!({"reason":"Invalid JSON","observedBytes":line.len()}),
+                json!({"code":"APP_PROTOCOL","reason":"Invalid JSON","observedBytes":line.len(),"parseLocation":serde_json::from_str::<Value>(&line).err().map(|error|format!("line={}, column={}, category={:?}",error.line(),error.column(),error.classify()))}),
             );
             continue;
         };
@@ -498,7 +577,7 @@ async fn read_loop<R>(
             json!({"pendingCount":pending.len()}),
         );
         for (_, sender) in pending.drain() {
-            let _ = sender.send(Err(ResolverError::Io));
+            let _ = sender.send(Err(terminal.clone()));
         }
     }
 }
@@ -559,6 +638,31 @@ pub fn executable_exists(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn context_keeps_resolver_error_family_and_bounded_details() {
+        let error = ResolverError::Timeout
+            .context("reply wait", "timeoutMs=10")
+            .context("request", "method=thread/read; requestNumber=3");
+        assert!(matches!(error.kind(), ResolverError::Timeout));
+        let text = error.to_string();
+        assert!(text.contains("method=thread/read"));
+        assert!(text.contains("timeoutMs=10"));
+        assert!(matches!(
+            ResolverError::Remote { code: 42 }
+                .context("request", "method=thread/read")
+                .kind(),
+            ResolverError::Remote { code: 42 }
+        ));
+        assert!(
+            ResolverError::Io
+                .context("bounded", "x".repeat(4096))
+                .to_string()
+                .len()
+                < 2200
+        );
+    }
+
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex, split};

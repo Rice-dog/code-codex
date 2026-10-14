@@ -72,15 +72,14 @@ async fn restore_native_media(
     db_name: &str,
     store: &str,
     preferred_video_ids: &[String],
-    project_mode: bool,
 ) -> Result<(), String> {
     let listed = crate::renderer_storage::request(json!({"action":"media.list","scope":scope}))
         .map_err(|e| e.to_string())?;
-    let video_ids = startup_restore_video_ids(&listed, preferred_video_ids, project_mode);
+    let video_ids=vec![startup_restore_video_id(&listed,preferred_video_ids.first().map(String::as_str).unwrap_or("selected")).to_owned()];
     event(
         "native startup media",
         "selection",
-        json!({"scope":scope,"projectMode":project_mode,"sourceCount":video_ids.len(),"networkRequested":false}),
+        json!({"scope":scope,"sourceCount":video_ids.len(),"networkRequested":false}),
     );
     for doc in listed.as_array().into_iter().flatten().filter(|doc| {
         scope != "startup"
@@ -143,52 +142,6 @@ async fn restore_native_media(
         work?;
     }
     Ok(())
-}
-
-fn startup_restore_video_ids(
-    listed: &Value,
-    preferred: &[String],
-    project_mode: bool,
-) -> Vec<String> {
-    if !project_mode {
-        return vec![
-            startup_restore_video_id(
-                listed,
-                preferred.first().map(String::as_str).unwrap_or("selected"),
-            )
-            .to_owned(),
-        ];
-    }
-    let mut seen = std::collections::HashSet::new();
-    preferred
-        .iter()
-        .filter(|id| !id.is_empty() && id.len() <= 256 && seen.insert((*id).clone()))
-        .take(32)
-        .cloned()
-        .collect()
-}
-
-#[cfg(test)]
-#[test]
-fn startup_restore_project_sources_are_unique_bounded_and_never_replaced() {
-    let listed = json!([{"id":"selected"},{"id":"first"},{"id":"second"},{"id":"unused"}]);
-    let ids = vec![
-        "first".to_owned(),
-        "second".to_owned(),
-        "first".to_owned(),
-        "missing".to_owned(),
-    ];
-    assert_eq!(
-        startup_restore_video_ids(&listed, &ids, true),
-        vec!["first", "second", "missing"]
-    );
-    assert_eq!(
-        startup_restore_video_ids(&listed, &["missing".to_owned()], false),
-        vec!["selected"]
-    );
-    assert!(startup_restore_video_ids(&listed, &[], true).is_empty());
-    let large = (0..40).map(|n| format!("source-{n}")).collect::<Vec<_>>();
-    assert_eq!(startup_restore_video_ids(&listed, &large, true).len(), 32);
 }
 
 fn startup_restore_video_id<'a>(listed: &Value, preferred: &'a str) -> &'a str {
@@ -382,7 +335,7 @@ async fn session(
         ),
     }
     let selected = command(&mut socket, &mut id, "Runtime.evaluate", json!({
-        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:'',projectMode:(s?.advancedOptions===true||(typeof s?.advancedOptions!=='boolean'&&s?.project?.version===1))&&s?.project?.version===1&&Array.isArray(s.project.tracks)&&s.project.tracks.length===2,videoIds:s?.project?.version===1&&Array.isArray(s.project.tracks)?[...new Set(s.project.tracks.flat().map(c=>c?.videoId).filter(id=>typeof id==='string'&&id.length>0&&id.length<=256))].slice(0,32):[],videoId:s?.nextVideoId||s?.selectedVideoId||'selected'}}catch{return {enabled:false,backgroundId:''}}})()",
+        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:'',videoId:s?.nextVideoId||s?.selectedVideoId||'selected'}}catch{return {enabled:false,backgroundId:''}}})()",
         "returnByValue":true
     })).await.ok().and_then(|value|value.pointer("/result/value").cloned()).unwrap_or(Value::Null);
     let enabled = selected
@@ -413,23 +366,7 @@ async fn session(
                 scope,
                 db,
                 store,
-                &if selected["projectMode"].as_bool() == Some(true) {
-                    selected["videoIds"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|id| id.as_str().map(str::to_owned))
-                        .take(32)
-                        .collect::<Vec<_>>()
-                } else {
-                    vec![
-                        selected["videoId"]
-                            .as_str()
-                            .unwrap_or("selected")
-                            .to_owned(),
-                    ]
-                },
-                selected["projectMode"].as_bool().unwrap_or(false),
+                &[selected["videoId"].as_str().unwrap_or("selected").to_owned()],
             )
             .await
             {
@@ -565,7 +502,7 @@ async fn session(
             let _ = socket.close(None).await;
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 

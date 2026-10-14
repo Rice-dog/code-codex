@@ -18,7 +18,7 @@
 
 .codex-startup--has-video { opacity: 1; transition: none; }
 .codex-startup--fullscreen { position: fixed; }
-.codex-startup--exiting { opacity: 0; filter: blur(13px); pointer-events: none; }
+.codex-startup--exiting { opacity: 0; pointer-events: none; }
 
 .codex-startup__video { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
 .codex-startup--has-video .codex-startup__video { opacity: 1; }

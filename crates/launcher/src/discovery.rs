@@ -35,8 +35,15 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 use crate::process_guard::trusted_powershell;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum DiscoveryError {
+    #[error("{operation}: {error}; {detail}")]
+    Context {
+        operation: &'static str,
+        detail: String,
+        #[source]
+        error: Box<DiscoveryError>,
+    },
     #[error("Codex Desktop was not found")]
     CodexNotFound,
     #[error(
@@ -63,6 +70,22 @@ pub enum DiscoveryError {
     InvalidExecutable,
     #[error("the Codex App Server executable was not found")]
     AppServerNotFound,
+}
+
+impl DiscoveryError {
+    pub fn context(self, operation: &'static str, detail: impl std::fmt::Display) -> Self {
+        Self::Context {
+            operation,
+            detail: detail.to_string().chars().take(1024).collect(),
+            error: Box::new(self),
+        }
+    }
+    pub fn kind(&self) -> &Self {
+        match self {
+            Self::Context { error, .. } => error.kind(),
+            other => other,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -581,7 +604,9 @@ fn contained_file(root: &Path, candidate: &Path) -> Option<PathBuf> {
 }
 
 fn canonical_executable(path: &Path) -> Result<PathBuf, DiscoveryError> {
-    let canonical = dunce::canonicalize(path).map_err(|_| DiscoveryError::InvalidExecutable)?;
+    let canonical = dunce::canonicalize(path).map_err(|error| {
+        DiscoveryError::InvalidExecutable.context("canonical_executable", format!("cause={error}"))
+    })?;
     if !canonical.is_file() {
         return Err(DiscoveryError::InvalidExecutable);
     }
@@ -639,8 +664,10 @@ pub fn discover_app_server_source(
     installation: Option<&CodexInstallation>,
 ) -> Result<AppServerSource, DiscoveryError> {
     if let Some(explicit) = explicit {
-        let executable =
-            canonical_executable(explicit).map_err(|_| DiscoveryError::AppServerNotFound)?;
+        let executable = canonical_executable(explicit).map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("discover_app_server_source", format!("cause={error}"))
+        })?;
         return Ok(AppServerSource {
             executable,
             kind: AppServerSourceKind::ExplicitDevelopmentOverride,
@@ -659,7 +686,10 @@ pub fn discover_app_server_source(
         .as_deref()
         .ok_or(DiscoveryError::AppServerNotFound)
         .and_then(|path| {
-            canonical_executable(path).map_err(|_| DiscoveryError::AppServerNotFound)
+            canonical_executable(path).map_err(|error| {
+                DiscoveryError::AppServerNotFound
+                    .context("discover_app_server_source", format!("cause={error}"))
+            })
         })?;
 
     #[cfg(windows)]
@@ -733,7 +763,9 @@ fn trusted_windows_path() -> Result<std::ffi::OsString, DiscoveryError> {
         }
     }
     directories.push(windows);
-    env::join_paths(directories).map_err(|_| DiscoveryError::AppServerNotFound)
+    env::join_paths(directories).map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("trusted_windows_path", format!("cause={error}"))
+    })
 }
 
 #[cfg(windows)]
@@ -746,11 +778,16 @@ const MAX_STALE_STAGE_SCAN: usize = 32;
 #[cfg(windows)]
 fn open_stage_root() -> Result<(PathBuf, File, Vec<File>), DiscoveryError> {
     let staging_parent = std::env::temp_dir();
-    let temp =
-        dunce::canonicalize(staging_parent).map_err(|_| DiscoveryError::AppServerNotFound)?;
+    let temp = dunce::canonicalize(staging_parent).map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("open_stage_root", format!("cause={error}"))
+    })?;
     let requested = temp.join(STAGE_ROOT_NAME);
-    std::fs::create_dir_all(&requested).map_err(|_| DiscoveryError::AppServerNotFound)?;
-    let root = dunce::canonicalize(&requested).map_err(|_| DiscoveryError::AppServerNotFound)?;
+    std::fs::create_dir_all(&requested).map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("open_stage_root", format!("cause={error}"))
+    })?;
+    let root = dunce::canonicalize(&requested).map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("open_stage_root", format!("cause={error}"))
+    })?;
     if !root.is_dir()
         || !path_starts_with(&root, &temp)
         || root.file_name().and_then(|name| name.to_str()) != Some(STAGE_ROOT_NAME)
@@ -872,8 +909,9 @@ fn validated_stale_stage(path: &Path) -> bool {
 
 #[cfg(windows)]
 fn is_reparse_point(path: &Path) -> Result<bool, DiscoveryError> {
-    let metadata =
-        std::fs::symlink_metadata(path).map_err(|_| DiscoveryError::AppServerNotFound)?;
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("is_reparse_point", format!("cause={error}"))
+    })?;
     Ok(metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
 }
 
@@ -907,10 +945,14 @@ fn open_locked_directory_nofollow(path: &Path, write_dac: bool) -> Result<File, 
         .share_mode(FILE_SHARE_READ)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
-    let metadata = opened
-        .metadata()
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        .map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("open_locked_directory_nofollow", format!("cause={error}"))
+        })?;
+    let metadata = opened.metadata().map_err(|error| {
+        DiscoveryError::AppServerNotFound
+            .context("open_locked_directory_nofollow", format!("cause={error}"))
+    })?;
     let attributes = metadata.file_attributes();
     if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || attributes & FILE_ATTRIBUTE_DIRECTORY == 0
     {
@@ -941,34 +983,44 @@ fn bind_locked_stage_directory_with(
 
 #[cfg(windows)]
 fn same_file_identity(left: &File, right: &File) -> Result<bool, DiscoveryError> {
-    let left = SameFileHandle::from_file(
-        left.try_clone()
-            .map_err(|_| DiscoveryError::AppServerNotFound)?,
-    )
-    .map_err(|_| DiscoveryError::AppServerNotFound)?;
-    let right = SameFileHandle::from_file(
-        right
-            .try_clone()
-            .map_err(|_| DiscoveryError::AppServerNotFound)?,
-    )
-    .map_err(|_| DiscoveryError::AppServerNotFound)?;
+    let left = SameFileHandle::from_file(left.try_clone().map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("same_file_identity", format!("cause={error}"))
+    })?)
+    .map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("same_file_identity", format!("cause={error}"))
+    })?;
+    let right = SameFileHandle::from_file(right.try_clone().map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("same_file_identity", format!("cause={error}"))
+    })?)
+    .map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("same_file_identity", format!("cause={error}"))
+    })?;
     Ok(left == right)
 }
 
 #[cfg(windows)]
 fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, DiscoveryError> {
-    let official = canonical_executable(official).map_err(|_| DiscoveryError::AppServerNotFound)?;
+    let official = canonical_executable(official).map_err(|error| {
+        DiscoveryError::AppServerNotFound
+            .context("stage_packaged_app_server", format!("cause={error}"))
+    })?;
     let mut official_handle = OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ)
         .open(&official)
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        .map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("stage_packaged_app_server", format!("cause={error}"))
+        })?;
 
     let (stage_root, _stage_root_lock, ancestry_handles) = open_stage_root()?;
     let directory = TempDirBuilder::new()
         .prefix(STAGE_DIRECTORY_PREFIX)
         .tempdir_in(stage_root)
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        .map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("stage_packaged_app_server", format!("cause={error}"))
+        })?;
     let executable = directory.path().join("codex.exe");
 
     // Lock the still-empty parent before creating anything by path. A parent
@@ -985,14 +1037,20 @@ fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, Discove
         .create_new(true)
         .share_mode(FILE_SHARE_READ)
         .open(&executable)
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        .map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("stage_packaged_app_server", format!("cause={error}"))
+        })?;
 
     let mut executable_acl_handle = OpenOptions::new()
         .read(true)
         .access_mode(READ_CONTROL | WRITE_DAC)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .open(&executable)
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        .map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("stage_packaged_app_server", format!("cause={error}"))
+        })?;
     deny_staged_executable_mutation(&mut executable_acl_handle)?;
     deny_stage_child_creation(&mut directory_handle)?;
     ensure_stage_contains_only_executable(directory.path(), &executable)?;
@@ -1009,20 +1067,25 @@ fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, Discove
     let mut official_hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
-        let read = official_handle
-            .read(&mut buffer)
-            .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        let read = official_handle.read(&mut buffer).map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("stage_packaged_app_server", format!("cause={error}"))
+        })?;
         if read == 0 {
             break;
         }
         official_hasher.update(&buffer[..read]);
         executable_handle
             .write_all(&buffer[..read])
-            .map_err(|_| DiscoveryError::AppServerNotFound)?;
+            .map_err(|error| {
+                DiscoveryError::AppServerNotFound
+                    .context("stage_packaged_app_server", format!("cause={error}"))
+            })?;
     }
-    executable_handle
-        .sync_all()
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+    executable_handle.sync_all().map_err(|error| {
+        DiscoveryError::AppServerNotFound
+            .context("stage_packaged_app_server", format!("cause={error}"))
+    })?;
     let official_digest: [u8; 32] = official_hasher.finalize().into();
 
     // The locked file DACL protects the deliberate handle transition. The
@@ -1034,10 +1097,14 @@ fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, Discove
         .share_mode(FILE_SHARE_READ)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(&executable)
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
-    let spawn_metadata = spawn_path_handle
-        .metadata()
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        .map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("stage_packaged_app_server", format!("cause={error}"))
+        })?;
+    let spawn_metadata = spawn_path_handle.metadata().map_err(|error| {
+        DiscoveryError::AppServerNotFound
+            .context("stage_packaged_app_server", format!("cause={error}"))
+    })?;
     if spawn_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
         || spawn_metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0
     {
@@ -1058,7 +1125,10 @@ fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, Discove
     // redirect spawn to bytes other than the official open anchor.
     spawn_path_handle
         .seek(SeekFrom::Start(0))
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        .map_err(|error| {
+            DiscoveryError::AppServerNotFound
+                .context("stage_packaged_app_server", format!("cause={error}"))
+        })?;
     let staged_digest = sha256_reader(&mut spawn_path_handle)?;
     if staged_digest != official_digest {
         return Err(DiscoveryError::AppServerNotFound);
@@ -1101,9 +1171,9 @@ fn deny_staged_executable_mutation(executable_acl_handle: &mut File) -> Result<(
 
 #[cfg(windows)]
 fn set_protected_dacl(handle: &mut File, sddl: &str) -> Result<(), DiscoveryError> {
-    let descriptor: LocalBox<SecurityDescriptor> = sddl
-        .parse()
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+    let descriptor: LocalBox<SecurityDescriptor> = sddl.parse().map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("set_protected_dacl", format!("cause={error}"))
+    })?;
     let dacl = descriptor.dacl().ok_or(DiscoveryError::AppServerNotFound)?;
     windows_permissions::wrappers::SetSecurityInfo(
         handle,
@@ -1114,7 +1184,9 @@ fn set_protected_dacl(handle: &mut File, sddl: &str) -> Result<(), DiscoveryErro
         Some(dacl),
         None,
     )
-    .map_err(|_| DiscoveryError::AppServerNotFound)
+    .map_err(|error| {
+        DiscoveryError::AppServerNotFound.context("set_protected_dacl", format!("cause={error}"))
+    })
 }
 
 #[cfg(windows)]
@@ -1122,19 +1194,31 @@ fn ensure_stage_contains_only_executable(
     directory: &Path,
     executable: &Path,
 ) -> Result<(), DiscoveryError> {
-    let mut entries =
-        std::fs::read_dir(directory).map_err(|_| DiscoveryError::AppServerNotFound)?;
+    let mut entries = std::fs::read_dir(directory).map_err(|error| {
+        DiscoveryError::AppServerNotFound.context(
+            "ensure_stage_contains_only_executable",
+            format!("cause={error}"),
+        )
+    })?;
     let entry = entries
         .next()
         .transpose()
-        .map_err(|_| DiscoveryError::AppServerNotFound)?
+        .map_err(|error| {
+            DiscoveryError::AppServerNotFound.context(
+                "ensure_stage_contains_only_executable",
+                format!("cause={error}"),
+            )
+        })?
         .ok_or(DiscoveryError::AppServerNotFound)?;
     if entry.path() != executable || entries.next().is_some() {
         return Err(DiscoveryError::AppServerNotFound);
     }
-    let file_type = entry
-        .file_type()
-        .map_err(|_| DiscoveryError::AppServerNotFound)?;
+    let file_type = entry.file_type().map_err(|error| {
+        DiscoveryError::AppServerNotFound.context(
+            "ensure_stage_contains_only_executable",
+            format!("cause={error}"),
+        )
+    })?;
     if !file_type.is_file() || file_type.is_symlink() {
         return Err(DiscoveryError::AppServerNotFound);
     }
@@ -1146,9 +1230,9 @@ fn sha256_reader(reader: &mut File) -> Result<[u8; 32], DiscoveryError> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|_| DiscoveryError::AppServerNotFound)?;
+        let read = reader.read(&mut buffer).map_err(|error| {
+            DiscoveryError::AppServerNotFound.context("sha256_reader", format!("cause={error}"))
+        })?;
         if read == 0 {
             break;
         }

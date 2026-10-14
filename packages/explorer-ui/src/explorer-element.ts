@@ -5,7 +5,7 @@ import {normalizeGitHistory,normalizeGitCommit,normalizeGitDiff,gitHistoryError}
 import {transparentPresentation,applyTransparentPresentation,clearTransparentPresentation} from './utility-plugin-facade';
 import { ParticleImageRenderer, GlowHorizonRenderer, HeavenlyCloudRenderer, AuroraIonosphereRenderer, MilkyWayRenderer, MountainRenderer, BlinkingSquaresRenderer, CloudTrainRenderer, PixelSculptRenderer, BlackHoleRenderer, populateGlowHorizonLayer } from './background-plugin-facade';
 import { connectBackgroundPackages } from './background-plugin-runtime';
-import { ensureBackgroundPackage } from './plugin-load-diagnostics';
+import { ensureBackgroundPackage, ensurePluginPackage } from './plugin-load-diagnostics';
 import { BackgroundPackageMarket } from './background-package-market';
 import {
   DEFAULT_PARTICLE_BACKGROUND_SETTINGS,
@@ -138,9 +138,9 @@ import { PIXEL_SCULPT_DEFAULTS, normalizePixelSculptSettings, readPixelSculptBac
 import { ActiveThreadTracker } from "./active-thread";
 import { SurfaceOpacityPlugin, surfaceOpacityCardMarkup, surfaceOpacityPanelMarkup, SURFACE_OPACITY_TREE_CSS } from "./surface-opacity";
 import { BLINKING_SQUARES_DEFAULTS, type BlinkingSquaresSettings } from "./blinking-squares-settings";
-import { DEFAULT_STARTUP_TRANSITION_SETTINGS, startupTransitionModule, readStartupTransitionSettings, writeStartupTransitionSettings, startupDefaultClip, settingsForStartupVideo, startupVideoProfile, type StartupTransitionSettings } from "./startup-transition-plugin";
+import { DEFAULT_STARTUP_TRANSITION_SETTINGS, readStartupTransitionSettings, writeStartupTransitionSettings, startupDefaultClip, settingsForStartupVideo, startupVideoProfile, type StartupTransitionSettings } from "./startup-transition-plugin";
 import { STARTUP_BACKGROUNDS, mountStartupBackground } from './startup-background';
-import { loadStartupVideo, removeStartupVideo, saveStartupVideo, listStartupVideos, attachStartupCinema, mountStartupVideoEditor, type StartupVideo } from "./startup-transition-facade";
+import { loadStartupVideo, removeStartupVideo, saveStartupVideo, listStartupVideos, attachStartupCinema, type StartupVideo } from "./startup-transition-facade";
 import { observePluginControls } from "./runtime-information";
 import { runtimeEvent, runtimeTaskLabel } from "./runtime-events";
 import { beginRuntimeOperation, runtimeErrorDetails, recordCaughtRuntimeError } from "./runtime-operations";
@@ -5524,8 +5524,6 @@ function startupTransitionPanelMarkup(): string {
       <div class="particle-control-row"><label for="cle-startupTransition-source">${bilingualLabelMarkup("动画来源", "Animation source")}</label><select id="cle-startupTransition-source"><option value="video">Video</option><option value="background">Background plugin</option></select></div>
       <div class="particle-control-row startupTransition-background-controls" hidden><label for="cle-startupTransition-background">${bilingualLabelMarkup("背景插件", "Background plugin")}</label><select id="cle-startupTransition-background">${STARTUP_BACKGROUNDS.map(([id,name])=>`<option value="${id}">${name}</option>`).join("")}</select></div>
       <div class="particle-control-row startupTransition-background-fade" hidden><label for="cle-startupTransition-background-fade">${bilingualLabelMarkup("背景淡化时间", "Background fade duration")}</label><input id="cle-startupTransition-background-fade" type="range" min="0.1" max="10" step="0.1" value="1"><span class="particle-control-value"><output>1.0 s</output></span></div>
-      <label class="particle-toggle-row startupTransition-advanced-row" for="cle-startupTransition-advanced">${bilingualLabelMarkup("高级选项", "Advanced options")}<input id="cle-startupTransition-advanced" type="checkbox" role="switch"></label>
-      <div class="startupTransition-editor-slot"></div>
       <div class="startupTransition-preview-workspace legacy-startup-workspace">
         <div class="startupTransition-preview-stage" aria-label="Startup transition preview"><video class="startupTransition-video-still" muted playsinline preload="metadata" hidden></video></div>
         <div class="startupTransition-timeline" role="group" aria-label="视频时间轴">
@@ -5552,7 +5550,7 @@ function startupTransitionPanelMarkup(): string {
         </div>
       </div>
       <section class="particle-settings-group particle-source-details startup-video-library startupTransition-library" open><header class="particle-source-summary">${bilingualLabelMarkup("视频素材库", "Video library")}<span class="startup-video-library-count particle-source-count"></span></header>
-        <div class="particle-library-toolbar"><button class="particle-library-add startupTransition-upload" type="button">${bilingualLabelMarkup("添加视频", "Add videos")}</button><button class="particle-library-clear startupTransition-remove" type="button" disabled>${bilingualLabelMarkup("移除当前", "Remove current")}</button><input class="startupTransition-file" type="file" accept="video/*" multiple hidden><span class="startupTransition-library-summary"></span></div>
+        <div class="particle-library-toolbar"><input class="startupTransition-file" type="file" accept="video/*" multiple hidden><span class="startupTransition-library-summary"></span></div>
         <div class="particle-library-grid startupTransition-library-grid"></div>
         <div class="startup-video-pager"><button class="particle-library-clear startup-video-prev" type="button" aria-label="Previous page">‹</button><output class="startup-video-page"></output><button class="particle-library-clear startup-video-next" type="button" aria-label="Next page">›</button></div>
         <p class="startupTransition-video-info"></p>
@@ -5697,7 +5695,6 @@ export class CodeCodexElement extends HTMLElement {
   #startupVideos: StartupVideo[] = [];
   #startupLibraryPage = 0;
   #startupLibraryUrls: string[] = [];
-  #startupEditor: ReturnType<typeof mountStartupVideoEditor> | undefined;
   #startupCinema: ReturnType<typeof attachStartupCinema> | undefined;
   #startupStillUrl: string | undefined;
   #startupTimelineFramesAbort: AbortController | undefined;
@@ -6565,6 +6562,7 @@ this.#showActionNotice(String(error),"error");}}
   }
 
   #disposeDisconnected(): void {
+    this.#backgroundPackageMarket?.dispose();this.#backgroundPackageMarket=undefined;
     this.#surfaceOpacity.stop();
     this.#closeContextMenu(false);
     this.#closePreviewMarket(false);
@@ -6573,7 +6571,6 @@ this.#showActionNotice(String(error),"error");}}
     this.#stopStartupPreview();
     if (this.#startupStillUrl) URL.revokeObjectURL(this.#startupStillUrl);
     this.#startupStillUrl = undefined;
-    this.#startupEditor?.dispose();this.#startupEditor=undefined;
     this.#startupCinema?.dispose();this.#startupCinema=undefined;
     this.#startupLibraryUrls.forEach(url=>URL.revokeObjectURL(url));this.#startupLibraryUrls=[];
     this.#closeUpdateDialog(false);
@@ -13956,7 +13953,6 @@ this.#showActionNotice(String(error),"error");}}
     this.#startupVideoGeneration += 1;
     this.#startupTimelineFramesAbort?.abort();
     this.#stopStartupPreview();
-    this.#startupEditor?.dispose();this.#startupEditor=undefined;
     this.#startupCinema?.dispose(); this.#startupCinema=undefined;
     this.#releaseStartupVideoPreview();
     const panel = this.#shadow.querySelector<HTMLElement>("#cle-startupTransition-settings");
@@ -14023,7 +14019,6 @@ this.#showActionNotice(String(error),"error");}}
     const settings = readStartupTransitionSettings();
     const panel = this.#required<HTMLElement>("#cle-startupTransition-settings");
     const backgroundMode = settings.source === 'background';
-    if(backgroundMode){this.#startupEditor?.dispose();this.#startupEditor=undefined;}
     if (backgroundMode && panel.matches(':popover-open')) this.#ensureStartupBackgroundPreview(settings.backgroundId);
     this.#required<HTMLSelectElement>('#cle-startupTransition-source').value=settings.source;
     this.#required<HTMLSelectElement>('#cle-startupTransition-background').value=settings.backgroundId;
@@ -14039,7 +14034,7 @@ this.#showActionNotice(String(error),"error");}}
     backgroundFade.closest<HTMLElement>('.particle-control-row')!.hidden = !backgroundMode;
     backgroundFade.value = String(settings.backgroundFadeSeconds);
     backgroundFade.parentElement!.querySelector<HTMLOutputElement>('output')!.value = `${settings.backgroundFadeSeconds.toFixed(1)} s`;
-    for(const element of panel.querySelectorAll<HTMLElement>('.startupTransition-timeline, .startupTransition-upload, #cle-startupTransition-fit')) {
+    for(const element of panel.querySelectorAll<HTMLElement>('.startupTransition-timeline, #cle-startupTransition-fit')) {
       (element.matches('.startupTransition-timeline') ? element : element.closest<HTMLElement>('fieldset, .startupTransition-library')!).hidden=backgroundMode;
     }
     this.#required<HTMLVideoElement>('.startupTransition-video-still').hidden=backgroundMode || !this.#startupVideo;
@@ -14062,28 +14057,10 @@ this.#showActionNotice(String(error),"error");}}
     }
     this.#required<HTMLSelectElement>("#cle-startupTransition-fit").value = settings.videoFit;
     this.#backgroundPackageMarket?.queueRender();
-    const slot=this.#required<HTMLElement>('.startupTransition-editor-slot');
-    const advancedMode = !backgroundMode && settings.advancedOptions;
-    const advancedToggle = this.#required<HTMLInputElement>('#cle-startupTransition-advanced');
-    advancedToggle.checked = settings.advancedOptions;
-    advancedToggle.disabled = this.#startupVideoPending;
-    advancedToggle.closest<HTMLElement>('label')!.hidden = backgroundMode;
-    slot.hidden = !advancedMode;
-    this.#required<HTMLElement>('.legacy-startup-workspace').hidden = advancedMode;
-    this.#required<HTMLElement>('.startupTransition-library').hidden = backgroundMode || advancedMode;
-    panel.querySelectorAll<HTMLElement>('.particle-settings-scroll > .startupTransition-parameter-grid').forEach(el=>el.hidden=backgroundMode || advancedMode);
-    this.#required<HTMLButtonElement>('.startupTransition-reset').parentElement!.hidden=backgroundMode || advancedMode;
-    if(!advancedMode){this.#startupEditor?.dispose();this.#startupEditor=undefined;}
+    this.#required<HTMLElement>('.startupTransition-library').hidden = backgroundMode;
+    panel.querySelectorAll<HTMLElement>('.particle-settings-scroll > .startupTransition-parameter-grid').forEach(el=>el.hidden=backgroundMode);
+    this.#required<HTMLButtonElement>('.startupTransition-reset').parentElement!.hidden=backgroundMode;
     if(backgroundMode)this.#releaseStartupVideoPreview();
-    if(!startupTransitionModule())return;
-    if(advancedMode){
-      this.#releaseStartupVideoPreview();
-      if(panel.matches(':popover-open')) {
-        this.#startupEditor ??= mountStartupVideoEditor(slot,englishSource?'en':'zh');
-        this.#startupEditor.setLanguage(englishSource?'en':'zh');
-      }
-      return;
-    }
     const english = panel.dataset.language === "en";
     const timeline = this.#required<HTMLElement>(".startupTransition-timeline");
     const geometry = startupTimelineGeometry(
@@ -14137,8 +14114,8 @@ this.#showActionNotice(String(error),"error");}}
     still.style.filter = `brightness(${settings.videoBrightness})`;
     this.#renderStartupTransport();
     for (const button of this.#shadow.querySelectorAll<HTMLButtonElement>(".startupTransition-transport button")) button.disabled = !this.#startupVideo || this.#startupVideoPending;
-    this.#required<HTMLButtonElement>(".startupTransition-remove").disabled = !this.#startupVideo || this.#startupVideoPending;
-    this.#required<HTMLButtonElement>(".startupTransition-upload").disabled = this.#startupVideoPending;
+    const addCard = this.#shadow.querySelector<HTMLButtonElement>('.startupTransition-add-card');
+    if (addCard) addCard.disabled = this.#startupVideoPending || this.#startupVideos.length >= 32;
     const info = this.#required<HTMLElement>(".startupTransition-video-info");
     info.textContent = this.#startupVideoPending ? (panel.dataset.language === "en" ? "Saving video…" : "正在保存视频…")
       : this.#startupVideo ? `${this.#startupVideo.name} · ${(this.#startupVideo.size / 1048576).toFixed(1)} MB · ${this.#startupVideo.duration.toFixed(1)} s`
@@ -14146,7 +14123,6 @@ this.#showActionNotice(String(error),"error");}}
   }
 
   #setStartupVideo(video: StartupVideo | null): void {
-    this.#startupEditor?.dispose();this.#startupEditor=undefined;
     this.#startupCinema?.dispose();this.#startupCinema=undefined;
     this.#stopStartupPreview();
     this.#startupTimelineFramesAbort?.abort();
@@ -14197,16 +14173,16 @@ this.#showActionNotice(String(error),"error");}}
   async #loadStartupVideoForPanel(): Promise<void> {
     const generation=++this.#startupVideoGeneration;
     const settings=readStartupTransitionSettings();
-    if(settings.source !== 'video' || settings.advancedOptions){this.#renderStartupTransition();return;}
+    if(settings.source !== 'video'){this.#renderStartupTransition();return;}
     try {
       const records=await listStartupVideos();
       const current=readStartupTransitionSettings();
-      if(!this.#connected || generation!==this.#startupVideoGeneration || current.source!=='video' || current.advancedOptions || !this.#shadow.querySelector('#cle-startupTransition-settings')?.matches(':popover-open'))return;
+      if(!this.#connected || generation!==this.#startupVideoGeneration || current.source!=='video' || !this.#shadow.querySelector('#cle-startupTransition-settings')?.matches(':popover-open'))return;
       this.#startupVideos=records;
       const video=records.find(v=>v.id===current.selectedVideoId)??records[0]??null;
       const next=video?settingsForStartupVideo(current,video.id,video.duration):current;
       if(!writeStartupTransitionSettings({...next,videoOrder:records.map(v=>v.id),selectedVideoId:video?.id??'',nextVideoId:records.some(v=>v.id===current.nextVideoId)?current.nextVideoId:video?.id??''}))throw new Error('Local preference unavailable');
-      this.#startupLibraryPage=Math.floor(Math.max(0,records.findIndex(v=>v.id===video?.id))/3);
+      this.#startupLibraryPage=Math.floor(Math.max(0,records.findIndex(v=>v.id===video?.id))/2);
       this.#setStartupVideo(video);this.#renderStartupVideoLibrary();
     }catch(error){
       recordCaughtRuntimeError('startup basic video load',error);
@@ -14220,14 +14196,13 @@ this.#showActionNotice(String(error),"error");}}
     const panel=this.#required<HTMLElement>('#cle-startupTransition-settings'), english=panel.dataset.language==='en';
     const summary=this.#required<HTMLElement>('.startupTransition-library-summary');
     summary.textContent=`${(this.#startupVideos.reduce((n,v)=>n+v.size+(v.thumbnail?.size??0),0)/1048576).toFixed(1)}/512 MB`;
-    if(!this.#startupVideos.length){const p=document.createElement('p');p.className='particle-library-empty';p.textContent=english?'Add videos to your local library.':'添加视频到本机素材库。';grid.append(p);}
-    const pages=Math.max(1,Math.ceil(this.#startupVideos.length/3));
+    const pages=Math.max(1,Math.ceil(this.#startupVideos.length/2));
     this.#startupLibraryPage=Math.max(0,Math.min(pages-1,this.#startupLibraryPage));
     this.#required<HTMLElement>('.startupTransition-library .startup-video-library-count').textContent=`${this.#startupVideos.length} / 32`;
     this.#required<HTMLOutputElement>('.startup-video-page').value=`${this.#startupLibraryPage+1} / ${pages}`;
     this.#required<HTMLButtonElement>('.startup-video-prev').disabled=this.#startupLibraryPage===0;
     this.#required<HTMLButtonElement>('.startup-video-next').disabled=this.#startupLibraryPage>=pages-1;
-    for(const [index,record] of Array.from(this.#startupVideos.entries()).slice(this.#startupLibraryPage*3,this.#startupLibraryPage*3+3)) {
+    for(const [index,record] of Array.from(this.#startupVideos.entries()).slice(this.#startupLibraryPage*2,this.#startupLibraryPage*2+2)) {
       const item=document.createElement('article');item.className='particle-library-item';item.classList.toggle('is-selected',this.#startupVideo?.id===record.id);
       const select=document.createElement('button');select.type='button';select.className='particle-library-select';select.disabled=this.#startupVideoPending;select.setAttribute('aria-pressed',String(this.#startupVideo?.id===record.id));select.title=record.name;select.dataset.startupVideoId=record.id;
       const thumb=document.createElement(record.thumbnail?'img':'span');thumb.className='particle-library-thumb';
@@ -14238,15 +14213,18 @@ this.#showActionNotice(String(error),"error");}}
       select.addEventListener('click',()=>{if(this.#startupVideoPending)return;this.#startupVideoGeneration++;const s=readStartupTransitionSettings();writeStartupTransitionSettings({...settingsForStartupVideo(s,record.id,record.duration),nextVideoId:record.id});this.#setStartupVideo(record);this.#renderStartupVideoLibrary();runtimeEvent('startup-animation','library selection','changed',{videoId:record.id});});
       const remove=document.createElement('button');remove.type='button';remove.className='particle-library-delete';remove.innerHTML=icons.close;remove.disabled=this.#startupVideoPending;remove.setAttribute('aria-label',english?`Remove ${record.name}`:`移除 ${record.name}`);remove.addEventListener('click',()=>{void this.#removeStartupLibraryVideo(record.id);});item.append(remove);grid.append(item);
     }
+    const addItem = document.createElement('article');addItem.className='particle-library-item startup-video-add-item';
+    const add = document.createElement('button');add.type='button';add.className='particle-library-select startupTransition-add-card';
+    const label=english?'Add videos':'添加视频';add.setAttribute('aria-label',label);
+    add.disabled=this.#startupVideoPending || this.#startupVideos.length>=32;
+    add.title=this.#startupVideos.length>=32?(english?'Video library limit: 32 videos':'视频素材库上限：32 个视频'):label;
+    add.innerHTML='<span class="particle-library-thumb startup-video-add-preview" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="particle-library-name" aria-hidden="true">&nbsp;</span>';
+    add.addEventListener('click',()=>this.#required<HTMLInputElement>('.startupTransition-file').click());addItem.append(add);grid.append(addItem);
     this.#positionStartupTransition();
   }
 
   async #removeStartupLibraryVideo(id: string): Promise<void> {
     if(this.#startupVideoPending)return;
-    if(readStartupTransitionSettings().project?.tracks.flat().some(c=>c.videoId===id)){
-      this.#showStartupTransitionError(this.#required<HTMLElement>('#cle-startupTransition-settings').dataset.language==='en'?'This video is used in the advanced project. Remove its clips there first.':'此视频在高级工程中使用，请先在高级选项中移除对应片段。');
-      runtimeEvent('startup-animation','library remove','blocked',{videoId:id,reason:'referenced by retained advanced project'});return;
-    }
     const generation=++this.#startupVideoGeneration;this.#startupVideoPending=true;this.#renderStartupTransition();this.#renderStartupVideoLibrary();
     try {await removeStartupVideo(id);const s=readStartupTransitionSettings();const remaining=this.#startupVideos.filter(v=>v.id!==id);const selected=remaining.find(v=>v.id===s.selectedVideoId)??remaining[0];const profiles={...s.videoProfiles};delete profiles[id];
       writeStartupTransitionSettings({...s,...(selected?settingsForStartupVideo({...s,videoProfiles:profiles},selected.id,selected.duration):{}),selectedVideoId:selected?.id??'',videoProfiles:profiles,videoOrder:remaining.map(v=>v.id),nextVideoId:remaining.some(v=>v.id===s.nextVideoId)?s.nextVideoId:selected?.id??''});
@@ -14420,6 +14398,7 @@ this.#showActionNotice(String(error),"error");}}
     this.#startupTransitionEventsBound = true;
     const panel = this.#required<HTMLElement>("#cle-startupTransition-settings");
     const trigger = this.#required<HTMLButtonElement>(".startupTransition-settings-trigger");
+    panel.addEventListener('startup-cinema-error',event=>this.#showStartupTransitionError((event as CustomEvent<string>).detail));
     const saveSource = () => {
       this.#stopStartupPreview();
       const source=this.#required<HTMLSelectElement>('#cle-startupTransition-source').value==='background'?'background':'video';
@@ -14432,16 +14411,6 @@ this.#showActionNotice(String(error),"error");}}
       this.#positionStartupTransition();
     };
     for(const selector of ['#cle-startupTransition-source','#cle-startupTransition-background']) this.#required<HTMLElement>(selector).addEventListener('change',saveSource);
-    this.#required<HTMLInputElement>('#cle-startupTransition-advanced').addEventListener('change',event=>{
-      const advancedOptions=(event.currentTarget as HTMLInputElement).checked;
-      if(!writeStartupTransitionSettings({...readStartupTransitionSettings(),advancedOptions})){
-        this.#showActionNotice('Startup transition setting could not be saved','error');this.#renderStartupTransition();return;
-      }
-      this.#startupVideoGeneration++;
-      this.#stopStartupPreview();this.#releaseStartupVideoPreview();
-      this.#renderStartupTransition();void this.#loadStartupVideoForPanel();this.#positionStartupTransition();
-      runtimeEvent('startup-animation','advanced options','changed',{advancedOptions,projectRetained:readStartupTransitionSettings().project!==null});
-    });
     this.#required<HTMLInputElement>('#cle-startupTransition-background-fade').addEventListener('input', event => {
       const backgroundFadeSeconds = Number((event.target as HTMLInputElement).value);
       if (!writeStartupTransitionSettings({ ...readStartupTransitionSettings(), backgroundFadeSeconds })) this.#showActionNotice('Startup transition setting could not be saved', 'error');
@@ -14485,13 +14454,13 @@ this.#showActionNotice(String(error),"error");}}
       const target = event.target as HTMLElement;
       if ((event.code === "Space" || event.key === " ") && !event.ctrlKey && !event.altKey && !event.metaKey && !target.closest('textarea, select, [contenteditable="true"], input:not([type="range"])')) {
         event.preventDefault(); event.stopPropagation();
-        if (!event.repeat) { if(this.#startupEditor)this.#startupEditor.togglePlayback();else this.#toggleStartupPlayback(); }
+        if (!event.repeat) { this.#toggleStartupPlayback(); }
       }
     });
     panel.addEventListener("toggle", () => {
       const open = panel.matches(":popover-open");
       trigger.setAttribute("aria-expanded", String(open));
-      if (!open) {this.#stopStartupPreview();this.#startupEditor?.dispose();this.#startupEditor=undefined;
+      if (!open) {this.#stopStartupPreview();
     this.#startupCinema?.dispose();this.#startupCinema=undefined;this.#releaseStartupVideoPreview();this.#startupVideoGeneration++;}
     });
     this.#previewMarketPopover.addEventListener("scroll", () => this.#positionStartupTransition());
@@ -14564,7 +14533,6 @@ this.#showActionNotice(String(error),"error");}}
       });
     }
     const fileInput = this.#required<HTMLInputElement>(".startupTransition-file");
-    this.#required<HTMLButtonElement>(".startupTransition-upload").addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", async () => {
       const files=Array.from(fileInput.files??[]);fileInput.value="";
       if(!files.length || this.#startupVideoPending)return;
@@ -14579,7 +14547,7 @@ this.#showActionNotice(String(error),"error");}}
           const active=this.#connected&&generation===this.#startupVideoGeneration;
           const updated=active && added===0?settingsForStartupVideo(current,video.id,video.duration):current;
           if(!writeStartupTransitionSettings({...updated,videoProfiles:{...current.videoProfiles,[video.id]:startupVideoProfile(settingsForStartupVideo(current,video.id,video.duration))},videoOrder:[...new Set([...current.videoOrder,video.id])],nextVideoId:active&&added===0?video.id:current.nextVideoId}))throw new Error("Video saved, but its settings could not be saved");
-          added++;
+              added++;
         } catch(error){failure=error;recordCaughtRuntimeError("startup video import",error);}
       }
       runtimeEvent('startup-animation','library import',failure?'partial':'passed',{added,requested:files.length});
@@ -14588,13 +14556,10 @@ this.#showActionNotice(String(error),"error");}}
       this.#startupVideoPending=false;
       if(this.#connected&&panel.matches(":popover-open")){this.#renderStartupTransition();this.#renderStartupVideoLibrary();if(active&&failure)this.#showStartupTransitionError(failure);}
     });
-    this.#required<HTMLButtonElement>(".startupTransition-remove").addEventListener("click", () => {
-      if(this.#startupVideo)void this.#removeStartupLibraryVideo(this.#startupVideo.id);
-    });
     for(const [selector,delta] of [['.startup-video-prev',-1],['.startup-video-next',1]] as const)this.#required<HTMLButtonElement>(selector).addEventListener('click',()=>{this.#startupLibraryPage+=delta;this.#renderStartupVideoLibrary();});
     this.#required<HTMLButtonElement>(".startupTransition-reset").addEventListener("click", () => {
       const settings = readStartupTransitionSettings();
-      if (!writeStartupTransitionSettings({ ...settings, ...DEFAULT_STARTUP_TRANSITION_SETTINGS, advancedOptions:settings.advancedOptions, project:settings.project, videoClipDefaults:settings.videoClipDefaults, enabled: settings.enabled, selectedVideoId:settings.selectedVideoId, videoOrder:settings.videoOrder, videoProfiles:settings.videoProfiles, nextVideoId:settings.selectedVideoId, ...startupDefaultClip(this.#startupVideo?.duration) })) {
+      if (!writeStartupTransitionSettings({ ...settings, ...DEFAULT_STARTUP_TRANSITION_SETTINGS, enabled: settings.enabled, selectedVideoId:settings.selectedVideoId, videoOrder:settings.videoOrder, videoProfiles:settings.videoProfiles, nextVideoId:settings.selectedVideoId, ...startupDefaultClip(this.#startupVideo?.duration) })) {
         this.#showActionNotice("Startup transition setting could not be saved", "error");
       }
       this.#renderStartupTransition();

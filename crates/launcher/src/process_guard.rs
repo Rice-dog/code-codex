@@ -35,8 +35,15 @@ use windows_sys::Win32::System::Threading::{
     OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
 };
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum ProcessGuardError {
+    #[error("{operation}: {error}; {detail}")]
+    Context {
+        operation: &'static str,
+        detail: String,
+        #[source]
+        error: Box<ProcessGuardError>,
+    },
     #[error("a random loopback debugging port could not be reserved")]
     PortUnavailable,
     #[error("the CDP listener process could not be verified")]
@@ -49,6 +56,22 @@ pub enum ProcessGuardError {
     ExecutableMismatch,
     #[error("process verification failed: {0}")]
     Detailed(String),
+}
+
+impl ProcessGuardError {
+    pub fn context(self, operation: &'static str, detail: impl std::fmt::Display) -> Self {
+        Self::Context {
+            operation,
+            detail: detail.to_string().chars().take(2048).collect(),
+            error: Box::new(self),
+        }
+    }
+    pub fn kind(&self) -> &Self {
+        match self {
+            Self::Context { error, .. } => error.kind(),
+            other => other,
+        }
+    }
 }
 
 /// Owns a launched Codex process for the complete debug-enabled lifetime.
@@ -952,7 +975,9 @@ pub struct PortReservation {
 impl PortReservation {
     pub fn reserve() -> Result<Self, ProcessGuardError> {
         let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-            .map_err(|_| ProcessGuardError::PortUnavailable)?;
+            .map_err(|error| {
+                ProcessGuardError::PortUnavailable.context("reserve", format!("cause={error}"))
+            })?;
         Ok(Self { listener })
     }
 
@@ -960,7 +985,9 @@ impl PortReservation {
         self.listener
             .local_addr()
             .map(|address| address.port())
-            .map_err(|_| ProcessGuardError::PortUnavailable)
+            .map_err(|error| {
+                ProcessGuardError::PortUnavailable.context("port", format!("cause={error}"))
+            })
     }
 
     pub fn release(self) {
@@ -1337,10 +1364,16 @@ fn verify_process_identity_inner(
         }
         let launched_after_millis: i64 = launched_after
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?
+            .map_err(|error| {
+                ProcessGuardError::OwnershipUnknown
+                    .context("verify_process_identity_inner", format!("cause={error}"))
+            })?
             .as_millis()
             .try_into()
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+            .map_err(|error| {
+                ProcessGuardError::OwnershipUnknown
+                    .context("verify_process_identity_inner", format!("cause={error}"))
+            })?;
         let pid_input = pid.to_string();
         let launch_input = launched_after_millis.to_string();
         let output = diagnostic_query(
@@ -1494,10 +1527,16 @@ fn verify_listener_owner_inner(
             .map_err(|error| ProcessGuardError::Detailed(format!("listener ownership response is invalid JSON: port={port}, category={:?}, line={}, column={}", error.classify(), error.line(), error.column())))?;
         let launched_after_millis = launched_after
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?
+            .map_err(|error| {
+                ProcessGuardError::OwnershipUnknown
+                    .context("verify_listener_owner_inner", format!("cause={error}"))
+            })?
             .as_millis()
             .try_into()
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+            .map_err(|error| {
+                ProcessGuardError::OwnershipUnknown
+                    .context("verify_listener_owner_inner", format!("cause={error}"))
+            })?;
         crate::process_diagnostics::observe(
             "listener ownership",
             "CIM snapshot",
@@ -1609,8 +1648,10 @@ pub fn discover_listener_port(
         const MAX_OUTPUT_BYTES: usize = 256 * 1024;
         const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $script:ccStep='Get-CimInstance (debugging port discovery)'; Write-CCObservation $script:ccStep 'started' @{}; $items=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.CommandLine -and $_.CommandLine -match '(?i)(^|\s)--remote-debugging-port(?:=|\s+)' } | Select-Object ExecutablePath,CommandLine); [pscustomobject]@{Candidates=$items} | ConvertTo-Json -Compress -Depth 3"#;
 
-        let official_executable = dunce::canonicalize(official_executable)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        let official_executable = dunce::canonicalize(official_executable).map_err(|error| {
+            ProcessGuardError::OwnershipUnknown
+                .context("discover_listener_port", format!("cause={error}"))
+        })?;
         if !official_executable.is_file() {
             return Err(ProcessGuardError::OwnershipUnknown);
         }
@@ -1623,7 +1664,10 @@ pub fn discover_listener_port(
             None,
         )?;
         let snapshot: DebugListenerCandidates =
-            serde_json::from_slice(&output).map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+            serde_json::from_slice(&output).map_err(|error| {
+                ProcessGuardError::OwnershipUnknown
+                    .context("discover_listener_port", format!("cause={error}"))
+            })?;
         let expected = official_executable.to_string_lossy().to_lowercase();
         let mut candidate_ports = HashSet::new();
         for candidate in snapshot.candidates {
@@ -2567,7 +2611,10 @@ pub fn verify_listener_owner_fast(
         let created = ticks.saturating_sub(116444736000000000) / 10000;
         let expected = launched_after
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?
+            .map_err(|error| {
+                ProcessGuardError::OwnershipUnknown
+                    .context("verify_listener_owner_fast", format!("cause={error}"))
+            })?
             .as_millis();
         if (created as u128) < expected {
             return Err(ProcessGuardError::OwnershipMismatch);

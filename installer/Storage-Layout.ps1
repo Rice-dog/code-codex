@@ -1,4 +1,33 @@
 # Shared install/uninstall location contract. No recursive operation follows a reparse point.
+function Remove-CodeCodexRetiredStartupCache([string]$Root) {
+    $report = [ordered]@{outcome='not-run';relativePath='data/cache/startup-video';removedBytes=0L;originalMediaPreserved=$true}
+    try {
+        $owned = Assert-CodeCodexRoot $Root -Owned
+        $target = [IO.Path]::GetFullPath((Join-Path $owned 'data\cache\startup-video'))
+        if (-not $target.StartsWith($owned+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Retired cache escaped the application root.' }
+        $cursor = $target
+        while (-not $cursor.Equals($owned,[StringComparison]::OrdinalIgnoreCase)) {
+            $node = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+            if ($node -and (-not $node.PSIsContainer -or ($node.Attributes -band [IO.FileAttributes]::ReparsePoint))) { throw "Redirected retired cache ancestor refused: $cursor" }
+            $cursor = Split-Path -Parent $cursor
+        }
+        if (-not (Test-Path -LiteralPath $target)) { $report.outcome='absent'; return $report }
+        $queue = [Collections.Generic.Queue[string]]::new(); $queue.Enqueue($target)
+        $count = 0
+        while ($queue.Count) {
+            foreach ($node in Get-ChildItem -LiteralPath $queue.Dequeue() -Force -ErrorAction Stop) {
+                $count++; if ($count -gt 4096) { throw 'Retired cache enumeration budget exceeded.' }
+                if ($node.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Redirected retired cache child refused: $($node.Name)" }
+                if ($node.PSIsContainer) { $queue.Enqueue($node.FullName) } else { $report.removedBytes += $node.Length }
+            }
+        }
+        # Exact absolute target and every ancestor/child have been checked above.
+        Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+        $report.outcome='removed'
+    } catch { $report.outcome='retained'; $report.reason=$_.Exception.Message; $report.removedBytes=0L }
+    return $report
+}
+
 function Get-CodeCodexRegisteredRoot {
     $entry = Get-ItemProperty 'HKCU:\Software\CodeCodex' -ErrorAction SilentlyContinue
     if ($entry -and $entry.InstallPath) { return [string]$entry.InstallPath }
@@ -42,6 +71,22 @@ function Assert-CodeCodexRoot([string]$Root, [switch]$Owned) {
     return $full
 }
 
+function Get-CodeCodexDataHash([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item -isnot [IO.FileInfo] -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Migration hash input must be a regular file: $Path"
+    }
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $algorithm = $null
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '')
+    } finally {
+        if ($algorithm) { $algorithm.Dispose() }
+        $stream.Dispose()
+    }
+}
+
 function Copy-CodeCodexDataTree([string]$Source, [string]$Destination) {
     $item = Get-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
     if (-not $item) { return }
@@ -64,7 +109,7 @@ function Copy-CodeCodexDataTree([string]$Source, [string]$Destination) {
         $stage = $Destination + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
         try {
             Copy-Item -LiteralPath $Source -Destination $stage
-            if ((Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash) { throw 'Migrated resource hash mismatch.' }
+            if ((Get-CodeCodexDataHash $Source) -ne (Get-CodeCodexDataHash $stage)) { throw 'Migrated resource hash mismatch.' }
             [IO.File]::Move($stage, $Destination)
             $script:MigrationCopied++
         } finally { if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Force } }

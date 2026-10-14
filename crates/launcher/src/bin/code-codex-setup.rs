@@ -117,11 +117,11 @@ fn main() -> ExitCode {
         }
     }
     if branded_wizard && !progress.window_ready() {
-        deliver_failure(
-            &mut progress,
-            "The setup window could not be initialized; installation has not started.",
-            false,
+        let detail = format!(
+            "Setup window readiness failed before installation started. Operation: opening the branded setup window. Cause: {}",
+            progress.startup_failure().unwrap_or("No startup cause was captured; inspect the UI process timeline and bounded helper output.")
         );
+        deliver_failure(&mut progress, &detail, false);
         return ExitCode::FAILURE;
     }
     if interactive {

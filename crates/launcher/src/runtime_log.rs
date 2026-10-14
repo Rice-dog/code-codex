@@ -91,7 +91,7 @@ struct RunLog {
 
 impl RunLog {
     fn document(&self) -> String {
-        let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES,"redactionPolicy":1,"faultSchema":1,"failureTotal":self.failure_total,"failureCounts":self.failure_counts,"oversizedEvents":self.oversized_events,"failureSummaryScope":"entire run including trimmed events; detailed events are retained only within limits"});
+        let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES,"redactionPolicy":1,"faultSchema":2,"failureTotal":self.failure_total,"failureCounts":self.failure_counts,"oversizedEvents":self.oversized_events,"failureSummaryScope":"entire run including trimmed events; detailed events are retained only within limits"});
         format!(
             "{}\n{}",
             header,

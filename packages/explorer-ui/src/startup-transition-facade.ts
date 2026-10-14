@@ -12,5 +12,3 @@ export const startupTimelineGeometry: typeof import('./startup-transition-timeli
 export const moveTimelineBoundary: typeof import('./startup-transition-timeline').moveTimelineBoundary = (...args) => requireStartupTransitionModule().moveTimelineBoundary(...args);
 export const sampleStartupVideoFrames: typeof import('./startup-transition-timeline').sampleStartupVideoFrames = (...args) => requireStartupTransitionModule().sampleStartupVideoFrames(...args);
 export const clipFadeOpacity: typeof import('./startup-transition-timeline').clipFadeOpacity = (...args) => requireStartupTransitionModule().clipFadeOpacity(...args);
-
-export const mountStartupVideoEditor: typeof import('./startup-video-editor').mountStartupVideoEditor = (...args) => requireStartupTransitionModule().mountStartupVideoEditor(...args);
