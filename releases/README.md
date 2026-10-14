@@ -1,20 +1,12 @@
-## 本地维护 v0.4.46 / Local maintenance v0.4.46
+## 本地维护 v0.4.47 / Local maintenance v0.4.47
 
-当前版本已在本机安装验证，尚未发布到 GitHub。保留此前详细启动、CDP、App Server、网络、原生桥与安装错误记录；修复安装脚本遗漏共享函数的问题，并在构建/打包前校验三个内嵌存储合同。可选旧缓存清理失败会记录原因，不再让已提交的安装变成失败。
+启动动画固定播放素材库中当前选中的视频。普通播放器和原生早期启动均忽略旧轮播游标；开始播放后不会切换下次素材，旧sequence/random设置保留选中ID并迁移成fixed。所选原视频缺失时记录ID和失败原因并跳过动画，不改播另一视频。视频库、逐素材参数、基础实时预览、加号卡片与叉号删除保持。
 
-启动动画只保留基础面板和原视频实时播放。高级开关、双轨编辑器、Ctrl+S预合成及派生视频缓存已删除；裁剪、播放速度、亮度、画面适配、视频库顺序循环、最短展示和就绪后淡出保留，参数即时保存。旧高级设置兼容恢复基础视频参数，原视频库保留；旧合成缓存按受控路径退役。
+Startup包升级为1.1.17；核心47与所选视频恢复规则同步，其他23包/默认媒体不变。上一轮46的基础模式、卡片操作、诊断和安装修复保持。本轮只修复选源，此前发现的就绪长等待问题尚未改动；完整官方冷启动未重启验证，当前为本地维护版本，未发布GitHub。
 
-视频库通过等尺寸加号卡片添加、素材右上角叉号删除；每页两个视频和一个加号。修复叉号缺少SVG描边，悬停与键盘焦点可见；32个视频/512MB限制保持。启动插件为1.1.16，其它23个插件复用v0.3.96，核心安装包不内置插件和用户素材。
+Startup always plays the video currently selected in the library. Both the normal player and native early startup ignore legacy rotation cursors and never advance the selection after playback begins. Legacy sequence/random settings retain the selected ID and normalize to fixed playback. A missing selected original is logged and skipped instead of substituting another video. The library, per-video profiles, realtime preview, plus card and delete cross remain.
 
-验证包含v0.4.45的476项Rust测试（3项忽略）、v0.4.46的生产编译/29项基础与素材库浏览器检查、三种窗口尺寸回归、正式EXE45→46安装，以及当前官方窗口中的卡片/播放检查。原文件保留、安装进入Finish。没有关闭官方会话，未验证完整官方冷启动或其它用户设备；历史记录如下。
-
-The current version was installed and verified locally and has not been published to GitHub. It retains detailed startup, CDP, App Server, network, native bridge and installation diagnostics. Embedded storage contracts are checked before building and packaging; optional obsolete-cache cleanup failures are recorded without failing an already committed installation.
-
-Startup animation now uses the basic panel and original video with live settings. Advanced mode, the two-track editor, Ctrl+S composition and derived movie caches are removed. Trimming, speed, brightness, fit, ordered looping, minimum display time and readiness-driven fading remain, with immediate preference persistence. Legacy advanced preferences recover the basic video profile; original videos are preserved and retired movie caches are removed within verified paths.
-
-The library adds videos through an equal-size plus card and removes them through the top-right cross. Each page contains two videos and a plus card. Explicit SVG strokes restore the cross on hover and keyboard focus. The existing 32-video/512 MB limits remain. Startup package is 1.1.16; the other 23 plugins reuse v0.3.96. Core installers do not bundle plugins or personal media.
-
-Validation includes the v0.4.45 Rust suite (476 passed, 3 ignored), v0.4.46 production compilation, 29 basic/library browser checks, three viewport regressions, the production EXE update from 45 to 46, and card/playback checks in the running official window. Installation reaches Finish and original files are preserved. The official session was not restarted; a full cold launch and other user devices remain untested. Earlier release records follow.
+Startup package is 1.1.17; core 47 uses the matching selected-source restoration rule. The other 23 plugins and default media remain unchanged. This change addresses source selection only; the previously observed readiness wait remains unresolved. A full official-app cold launch has not been restarted for validation, and this local maintenance build has not been published to GitHub. Earlier records follow.
 
 ## v0.4.25 — 代码缩略图、启动诊断与旧版本清理
 

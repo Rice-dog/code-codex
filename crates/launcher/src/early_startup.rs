@@ -75,7 +75,9 @@ async fn restore_native_media(
 ) -> Result<(), String> {
     let listed = crate::renderer_storage::request(json!({"action":"media.list","scope":scope}))
         .map_err(|e| e.to_string())?;
-    let video_ids=vec![startup_restore_video_id(&listed,preferred_video_ids.first().map(String::as_str).unwrap_or("selected")).to_owned()];
+    let preferred = preferred_video_ids.first().map(String::as_str).unwrap_or("selected");
+    // Never restore a different startup video when the chosen source is unavailable.
+    let video_ids=vec![startup_restore_video_id(&listed,scope,preferred).to_owned()];
     event(
         "native startup media",
         "selection",
@@ -144,8 +146,8 @@ async fn restore_native_media(
     Ok(())
 }
 
-fn startup_restore_video_id<'a>(listed: &Value, preferred: &'a str) -> &'a str {
-    if listed
+fn startup_restore_video_id<'a>(listed: &Value, scope: &str, preferred: &'a str) -> &'a str {
+    if scope == "startup" || listed
         .as_array()
         .into_iter()
         .flatten()
@@ -161,14 +163,15 @@ fn startup_restore_video_id<'a>(listed: &Value, preferred: &'a str) -> &'a str {
 #[test]
 fn startup_restore_selects_one_video_without_restoring_library() {
     let listed = json!([{"id":"selected"},{"id":"second"},{"id":"third"}]);
-    assert_eq!(startup_restore_video_id(&listed, "second"), "second");
-    assert_eq!(startup_restore_video_id(&listed, "missing"), "selected");
+    assert_eq!(startup_restore_video_id(&listed, "startup", "second"), "second");
+    assert_eq!(startup_restore_video_id(&listed, "startup", "missing"), "missing");
+    assert_eq!(startup_restore_video_id(&listed, "particle-image", "missing"), "selected");
     assert_eq!(
         listed
             .as_array()
             .unwrap()
             .iter()
-            .filter(|doc| doc["id"] == startup_restore_video_id(&listed, "third"))
+            .filter(|doc| doc["id"] == startup_restore_video_id(&listed, "startup", "third"))
             .count(),
         1
     );
@@ -335,7 +338,7 @@ async fn session(
         ),
     }
     let selected = command(&mut socket, &mut id, "Runtime.evaluate", json!({
-        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:'',videoId:s?.nextVideoId||s?.selectedVideoId||'selected'}}catch{return {enabled:false,backgroundId:''}}})()",
+        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:'',videoId:s?.selectedVideoId??'selected'}}catch{return {enabled:false,backgroundId:''}}})()",
         "returnByValue":true
     })).await.ok().and_then(|value|value.pointer("/result/value").cloned()).unwrap_or(Value::Null);
     let enabled = selected

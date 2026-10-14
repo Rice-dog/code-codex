@@ -16,7 +16,7 @@ export interface StartupTransitionSettings {
   videoFit: "cover" | "contain" | "cinema";
   selectedVideoId: string;
   videoOrder: string[];
-  playbackMode: "fixed" | "sequence" | "random";
+  playbackMode: "fixed";
   nextVideoId: string;
   lastPlayedVideoId: string;
   videoProfiles: Record<string, StartupVideoProfile>;
@@ -27,18 +27,11 @@ export function startupVideoProfile(s: StartupTransitionSettings): StartupVideoP
   return {clipStart:s.clipStart,clipEnd:s.clipEnd,playbackRate:s.playbackRate,videoBrightness:s.videoBrightness,videoFit:s.videoFit,minimumVisiblePercent:s.minimumVisiblePercent,fadePercent:s.fadePercent};
 }
 export function startupPlaybackVideoId(s: StartupTransitionSettings): string {
-  return s.playbackMode === "fixed" ? s.selectedVideoId : s.nextVideoId || s.selectedVideoId;
+  return s.selectedVideoId;
 }
 export function settingsForStartupVideo(s: StartupTransitionSettings, id: string, duration: number): StartupTransitionSettings {
   const profile = s.videoProfiles[id] ?? (id === s.selectedVideoId ? startupVideoProfile(s) : {...startupVideoProfile(s),...startupDefaultClip(duration)});
   return {...s,...profile,selectedVideoId:id};
-}
-export function advanceStartupVideo(s: StartupTransitionSettings, played: string): StartupTransitionSettings {
-  const ids=s.videoOrder;
-  const others=ids.filter(id=>id!==played);
-  const next=s.playbackMode === "sequence" ? ids[(Math.max(0,ids.indexOf(played))+1)%ids.length]
-    : s.playbackMode === "random" ? others[Math.floor(Math.random()*others.length)] : s.selectedVideoId;
-  return {...s,lastPlayedVideoId:played,nextVideoId:next || played};
 }
 
 export const DEFAULT_STARTUP_TRANSITION_SETTINGS: StartupTransitionSettings = {
@@ -53,7 +46,7 @@ export const DEFAULT_STARTUP_TRANSITION_SETTINGS: StartupTransitionSettings = {
   playbackRate: 1,
   videoBrightness: 1.4,
   videoFit: "cover",
-  selectedVideoId: "selected", videoOrder: [], playbackMode: "sequence", nextVideoId: "selected", lastPlayedVideoId: "", videoProfiles: {},
+  selectedVideoId: "selected", videoOrder: [], playbackMode: "fixed", nextVideoId: "selected", lastPlayedVideoId: "", videoProfiles: {},
 };
 
 /** Apply the chosen default trim to a known video without creating an empty clip. */
@@ -99,8 +92,8 @@ export function readStartupTransitionSettings(): StartupTransitionSettings {
       videoFit: ["contain", "cover", "cinema"].includes(saved.videoFit ?? "") ? saved.videoFit! : defaults.videoFit,
       selectedVideoId: typeof saved.selectedVideoId === "string" && saved.selectedVideoId.length <= 256 ? saved.selectedVideoId : "selected",
       videoOrder: Array.isArray(saved.videoOrder) ? [...new Set(saved.videoOrder.filter((id): id is string=>typeof id === "string" && id.length>0 && id.length<=256))].slice(0,32) : [],
-      playbackMode: "sequence",
-      nextVideoId: typeof saved.nextVideoId === "string" && saved.nextVideoId.length<=256 ? saved.nextVideoId : "selected",
+      playbackMode: "fixed",
+      nextVideoId: typeof saved.selectedVideoId === "string" && saved.selectedVideoId.length<=256 ? saved.selectedVideoId : "selected",
       lastPlayedVideoId: typeof saved.lastPlayedVideoId === "string" && saved.lastPlayedVideoId.length<=256 ? saved.lastPlayedVideoId : "",
       videoProfiles: normalizeProfiles(saved.videoProfiles),
     };
@@ -114,8 +107,8 @@ export function writeStartupTransitionSettings(settings: StartupTransitionSettin
     const profiles = {...settings.videoProfiles};
     if (settings.selectedVideoId) profiles[settings.selectedVideoId] = startupVideoProfile(settings);
     for(const id of Object.keys(profiles))if(id!==settings.selectedVideoId&&!settings.videoOrder.includes(id))delete profiles[id];
-    const {enabled,source,backgroundId,backgroundFadeSeconds,minimumVisiblePercent,fadePercent,clipStart,clipEnd,playbackRate,videoBrightness,videoFit,selectedVideoId,videoOrder,nextVideoId,lastPlayedVideoId}=settings;
-    localStorage.setItem(STORAGE_KEY,JSON.stringify({enabled,source,backgroundId,backgroundFadeSeconds,minimumVisiblePercent,fadePercent,clipStart,clipEnd,playbackRate,videoBrightness,videoFit,selectedVideoId,videoOrder,playbackMode:'sequence',nextVideoId,lastPlayedVideoId,videoProfiles:profiles}));
+    const {enabled,source,backgroundId,backgroundFadeSeconds,minimumVisiblePercent,fadePercent,clipStart,clipEnd,playbackRate,videoBrightness,videoFit,selectedVideoId,videoOrder,lastPlayedVideoId}=settings;
+    localStorage.setItem(STORAGE_KEY,JSON.stringify({enabled,source,backgroundId,backgroundFadeSeconds,minimumVisiblePercent,fadePercent,clipStart,clipEnd,playbackRate,videoBrightness,videoFit,selectedVideoId,videoOrder,playbackMode:'fixed',nextVideoId:selectedVideoId,lastPlayedVideoId,videoProfiles:profiles}));
     return true;
   } catch {
     return false;
