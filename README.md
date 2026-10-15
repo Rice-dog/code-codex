@@ -28,28 +28,26 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-本地候选 **v0.4.51**：保留Win10兼容及空插件缓存文件树修复；启动示例下载区分连接/下载/校验，响应头及传输停顿有明确超时和错误记录，安装目录菜单统一为英文。两份原视频已经在独立startup-examples-v1公开，并通过本轮真实下载校验；Startup1.1.18继续复用公开v0.4.48，本候选尚未公开发布。
-
-当前公开版本 **v0.4.48 / Startup 1.1.18**：修复包辅助程序阻塞退出监测导致的迟到启动误报，正常结束与真实故障分别记录。顶部 Code-Codex 菜单新增“打开安装目录”；视频素材库标题旁新增灰色“下载示例”按钮，以原位置进度下载 The Intelligence Age 与 Introducing GPT-5，按内容去重，保留选源与参数。示例独立按需下载，不内置安装包。基础界面、加号卡片添加/悬停删除与所选原视频实时播放保持不变；无高级模式或预合成缓存。其余23个插件及默认媒体继续复用 v0.3.96。已发布为 [GitHub Release v0.4.48](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.48)。485项原生测试通过、4项忽略；完整官方冷启动、独立MSI安装和远端用户交接尚未实测，偶发动画就绪等待过长仍未修复。
+当前公开版本 **v0.4.51 / Startup 1.1.18**：修复 Win10 原生运行时误等 Electron 主调试端口，以及未下载启动动画插件时文件树停在 WAIT 的问题；身份、端口归属与界面就绪检查保持。示例下载区分连接等待和实际进度，补充响应头/传输停顿超时与 404 等具体错误；安装目录入口统一为 Open Installation Folder。两份官方宣传视频仍通过独立资源 Release 按需下载，原视频库、选源、逐视频参数及基础实时播放保持；无高级模式或预合成缓存。播放器继续复用 v0.4.48，其余23插件及默认媒体复用 v0.3.96。已发布为 [GitHub Release v0.4.51](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.51)。499项原生回归通过、5项忽略、1项既有桌面遮挡用例排除；界面回归及真实示例下载通过。未在报错用户的 Win10 网络复验，未执行本版本机/独立MSI安装或完整官方冷启动；偶发动画就绪等待过长不在此次修复范围。
 
 有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。
 
 ## 安装方式一：直接下载 EXE
 
-推荐从 [GitHub Release v0.4.48](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.48) 下载安装包；[`releases`](releases/) 保留对应构建资产：
+推荐从 [GitHub Release v0.4.51](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.51) 下载安装包；[`releases`](releases/) 保留对应构建资产：
 
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.4.48-x64-setup.exe`
-- 备选：`CodeCodex-0.4.48-x64.msi`
-- 便携包：`CodeCodex-0.4.48-x64.zip`
+- 推荐：`CodeCodex-0.4.51-x64-setup.exe`
+- 备选：`CodeCodex-0.4.51-x64.msi`
+- 便携包：`CodeCodex-0.4.51-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.4.48-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.4.51-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -63,7 +61,7 @@ Get-FileHash .\CodeCodex-0.4.48-x64-setup.exe -Algorithm SHA256
 
 ### 集中目录与自定义安装
 
-EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.4.48-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
+EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.4.51-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
 
 - `versions/`：不可变程序版本；`integration/`：快捷方式与安装事务。
 - `data/`：文件树设置、插件参数与用户图片/视频；官方 Codex 账号、聊天、项目文件仍由官方客户端管理。

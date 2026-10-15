@@ -1,8 +1,59 @@
-## 本地候选 v0.4.51 / Local candidate v0.4.51
+## v0.4.51 — Win10兼容、文件树与示例下载修复
 
-示例素材已在独立startup-examples-v1公开，两份原视频本轮真实GET及SHA校验通过，无需重复上传。下载等待服务器响应时改为“连接中…”，收到字节后才显示实际下载百分比；响应头等待及每次传输停顿各20秒上限，保留120秒整请求上限，细分连接等待/数据停顿/404素材不存在及其它HTTP错误并记录阶段与字节。安装目录菜单统一为Open Installation Folder。保留Win10兼容和空可选插件缓存文件树修复，原视频库、实时播放与Startup1.1.18/pin48保持。本候选尚未公开发布；尚未复现截图用户本身的网络环境，不能仅凭0%判定底层网络原因。
+## 简体中文
 
-Both original example videos are already public in the separate startup-examples-v1 release and passed current real GET/SHA verification; no duplicate upload is needed. The control shows Connecting while awaiting a response and actual percentages after receiving bytes. Header waits and each body-idle wait are bounded at20 seconds, alongside the existing120-second request limit. Diagnostics distinguish header wait, stalled transfer, missing assets (404) and other HTTP errors, with phase and byte counts. The installation-folder menu always reads Open Installation Folder. Windows10 compatibility and the empty-optional-cache file-tree fix are retained; the original library, realtime playback and Startup1.1.18/pin48 remain unchanged. This candidate is not public. The screenshot user's network has not been reproduced, so0% alone does not establish its underlying cause.
+本版集中修复 Windows 10 启动兼容、文件树停留在 “Waiting for local task”，以及启动动画示例下载时长时间只显示 0% 的问题。
+
+### 更新内容
+
+- **Windows 10 启动兼容**：区分原生 Chromium 与 Electron 调试能力。原生运行时不再等待不存在的 Node 主进程调试端口；其他降级路径必须通过原进程身份、端口归属和原生界面就绪核验。无法证实安全条件时继续明确报错，不跳过验证。降级时可能使用不透明窗口表面。
+- **文件树初始化修复**：未下载启动动画插件时，核心不再调用其时间轴实现。新用户无需安装任何动画插件即可识别本地任务、读取目录并建立文件监听；修复初始化中断后只留下 WAIT 面板的问题。
+- **示例下载反馈与错误细分**：等待服务器响应时显示“连接中…”，收到数据后显示真实进度。响应头等待与每次数据停顿各有 20 秒上限，并保留原连接/整请求上限。区分等待超时、数据停顿、404 素材不存在及其他 HTTP 错误，记录阶段、素材标识和已接收字节。失败恢复按钮，可再次重试；大小和 SHA-256 校验继续生效。
+- **菜单语言统一**：Code-Codex 菜单中的安装目录入口统一为 **Open Installation Folder**，包括中文 Windows/宿主界面。
+- **运行信息补全**：增加 Win10 主调试器具体故障分类、受控启动开关摘要、IPv4/IPv6 监听与进程观察、安全降级依据，以及可选动画模块跳过/可用状态；不采集完整命令行或会话正文。
+
+### 升级与资源
+
+- 推荐使用本版 EXE 安装程序；已有安装沿用原目录与数据。文件树内更新保留 Installing → Finish，首次安装保留完整向导。
+- **启动动画播放器仍为 1.1.18，复用 v0.4.48**；其他 23 个插件与默认媒体继续复用 v0.3.96，无需每次发布重复下载全部插件。
+- 两份示例已在独立的 [startup-examples-v1](https://github.com/Rice-dog/code-codex/releases/tag/startup-examples-v1) 发布，按需下载，不内置安装包。本轮重新验证了两份原视频的公开下载与 SHA-256。素材来源为维护者提供的 OpenAI 官方宣传片，项目 MIT 许可证不授予这些视频的许可。
+- 原视频库、所选素材、逐视频参数及基础实时播放保持；没有恢复高级编辑或预合成缓存。
+- 附件包含 EXE、MSI、ZIP、卸载器、本版插件目录快照及 SHA256SUMS.txt。校验清单只列出本条 Release 的另外五个附件。
+
+### 验证与边界
+
+复用本地已验证的 v0.4.51 原包：499 项原生回归通过、5 项忽略；1 项既有桌面透明命中测试因先前系统窗口遮挡而在本轮排除，不计为通过。另有 16 项菜单/示例界面检查、31 项空插件缓存回归、29 项基础动画回归，以及原生公开素材下载校验通过。浏览器界面检查使用隔离环境和模拟原生桥。
+
+尚未在报错用户的 Win10 网络环境复验，未执行本版本机安装、完整官方冷启动或独立 MSI 安装。0% 截图本身不能确定 DNS、代理、TCP 或 TLS 的具体原因。本版不承诺修复所有网络故障；偶发动画就绪等待过长不在此次修复范围。
+
+## English
+
+This release addresses Windows 10 startup compatibility, file trees remaining at “Waiting for local task,” and startup-example downloads appearing stuck at 0%.
+
+### Changes
+
+- **Windows 10 startup compatibility:** distinguishes native Chromium from Electron inspector capabilities. Native runtimes no longer wait for a nonexistent Node main-process inspector. Other fallback paths require verified original-process identity, listener ownership and qualified native-UI readiness. Unproven conditions remain explicit failures; verification is not bypassed. Fallback may use an opaque window surface.
+- **File-tree initialization:** core no longer invokes the optional startup player's timeline implementation when that package is absent. New installations can resolve local tasks, list files and establish watchers without downloading an animation plugin, fixing the partially initialized WAIT panel.
+- **Example-download feedback and errors:** shows Connecting while awaiting a response, then actual byte progress. Response-header waits and each body-idle wait are bounded at 20 seconds, alongside the existing connection/whole-request limits. Errors distinguish header waits, stalled transfers, missing assets (404) and other HTTP failures, with phase, asset identity and received-byte counts. Failure restores the retry button; size and SHA-256 verification remain mandatory.
+- **Consistent menu language:** the installation-directory entry always reads **Open Installation Folder**, including Chinese Windows/host interfaces.
+- **Runtime information:** adds specific Win10 inspector fault categories, controlled debug-switch summaries, IPv4/IPv6 listener and process observations, guarded-fallback evidence and optional-player availability/skip events. Full command lines and conversation content are not collected.
+
+### Upgrade and resources
+
+- The EXE installer is recommended. Existing installations retain their directory and data. In-app updates keep Installing → Finish; fresh installations retain the full wizard.
+- **The startup player remains 1.1.18, served from v0.4.48.** The other 23 plugins and default media remain served from v0.3.96; every application release does not require downloading all plugins again.
+- Both optional examples are already published in the separate [startup-examples-v1](https://github.com/Rice-dog/code-codex/releases/tag/startup-examples-v1) release and are not bundled in the installer. Public downloads and SHA-256 were reverified. These are OpenAI promotional clips supplied by the maintainer; the project's MIT license does not license the videos.
+- The original video library, selection, per-video settings and basic realtime playback are preserved. Advanced editing and precomposition caches are not restored.
+- Attachments are the EXE, MSI, ZIP, uninstaller, versioned plugin-catalog snapshot and SHA256SUMS.txt. The checksum file lists the other five attachments of this release only.
+
+### Validation and limits
+
+This publication reuses the validated v0.4.51 payload: 499 native regression tests passed, 5 were ignored; one existing desktop transparency hit-test was excluded after prior system-window occlusion and is not counted as passing. Also passed: 16 menu/example UI checks, 31 empty-optional-cache checks, 29 basic-animation checks, and native public-example download verification. Browser UI checks use isolated environments and a simulated native bridge.
+
+The affected user's Windows 10 network has not been retested. This version has not been installed locally, tested through a complete official-client cold launch or installed independently as an MSI. A 0% screenshot alone cannot establish a DNS, proxy, TCP or TLS cause. This release does not claim to fix every network failure; occasional excessive animation-readiness waiting is outside this change.
+
+
+发布 / Publication: [Latest v0.4.51](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.51), [PR #61](https://github.com/Rice-dog/code-codex/pull/61), tag/main `9106b87`. 六附件公开下载大小/SHA/API digest全部核验；包内README保持构建快照。 / All six public attachment sizes, SHA-256 and API digests verified; bundled READMEs retain their build-time snapshot.
 
 ## v0.4.48 — 启动监督修复、安装目录与动画示例
 
