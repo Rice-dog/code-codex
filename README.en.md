@@ -31,28 +31,26 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Local candidate **v0.4.52** fixes example-download RPC names being rejected by the native lowercase-only method grammar, leaving the UI at Connecting. Download, status and chunk names now use lowercase dotted names. Actual authorization/dispatch regressions and immediate client-side rejection of invalid method names are added without relaxing security rules. Windows10 compatibility, empty-cache file trees and basic realtime playback remain; Startup1.1.18 stays pinned to public v0.4.48. This candidate is not publicly released.
-
-Public version **v0.4.51 / Startup 1.1.18** fixes Windows 10 native runtimes waiting for an Electron inspector and file trees remaining at WAIT when the optional startup player is absent; identity, listener-ownership and readiness checks remain mandatory. Example downloads distinguish connection waiting from actual progress, with bounded header/body-idle waits and specific 404/transport errors. The menu consistently reads Open Installation Folder. The two promotional examples remain optional downloads in a separate resource release. The original library, selection, per-video settings and basic realtime playback are preserved; no advanced editing or precomposition cache. The player remains served from v0.4.48; the other 23 plugins/default media from v0.3.96. Published as [GitHub Release v0.4.51](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.51). 499 native tests passed, 5 ignored, one existing occluded desktop test excluded; UI regressions and real example downloads passed. No affected-user Windows 10 network retest, local/independent MSI installation of this version or full official cold launch is claimed. Occasional excessive animation-readiness waiting is outside this change.
+Public version **v0.4.52 / Startup 1.1.18** fixes uppercase startup-example RPC names being rejected during native authorization, leaving the download button at Connecting. Download, status and chunk endpoints now use lowercase dotted names; the client rejects invalid method names immediately without relaxing native security rules. Windows 10 compatibility, empty-cache file trees, network deadlines/integrity checks, the original library, selection, per-video settings and basic realtime playback remain; no advanced editing or precomposition cache. The player remains served from v0.4.48; the other 23 plugins/default media from v0.3.96. Published as [GitHub Release v0.4.52](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.52). Restart through the Code-Codex shortcut after upgrading so both UI and native code load the new protocol. 503 native tests passed, 5 ignored, one existing occluded desktop test excluded; real authorization/dispatch, immediate client failures, UI regressions and a separate public-media download/integrity test passed. No affected-user retest, local/independent MSI installation of this version or full official cold launch is claimed. Simulated UI checks are not a complete native end-to-end download.
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
 
 ## Install Option 1: Download EXE
 
-Download the installer from [GitHub Release v0.4.51](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.51). [`releases`](releases/) retains the corresponding build assets:
+Download the installer from [GitHub Release v0.4.52](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.52). [`releases`](releases/) retains the corresponding build assets:
 
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.4.51-x64-setup.exe`
-- Alternative: `CodeCodex-0.4.51-x64.msi`
-- Portable package: `CodeCodex-0.4.51-x64.zip`
+- Recommended: `CodeCodex-0.4.52-x64-setup.exe`
+- Alternative: `CodeCodex-0.4.52-x64.msi`
+- Portable package: `CodeCodex-0.4.52-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.4.51-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.4.52-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -302,7 +300,7 @@ workflows are not included in this public source package.
 
 ## Centralized storage
 
-The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.51-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.52-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
 
 Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
 

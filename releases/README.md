@@ -1,8 +1,57 @@
-## 本地候选 v0.4.52 / Local candidate v0.4.52
+## v0.4.52 — 修复动画示例下载接口鉴权
 
-修复示例下载、进度查询和分块接口使用大写字母，违反原生小写方法名规则的问题。接口统一为explorer.startup.examples.*，前端发送前立即拒绝非法方法名；原生校验条件保持，拒绝日志补固定原因。新增真实SecureGate/鉴权分发、生产TS协议与后端路由契约、原生handler和renderer函数绑定回归；不再仅依赖绕过鉴权的模拟对象桥来证明下载链路。视频资源、去重、进度与网络超时/校验机制保持。Startup1.1.18继续pin48，其它插件和媒体不变；本候选尚未公开发布，用户现场仍待验证。
+## 简体中文
 
-Fixes uppercase example-download, progress-status and chunk RPC names violating the native lowercase-only grammar. Endpoints now use explorer.startup.examples.*; the client immediately rejects invalid method names. Native security conditions stay unchanged, with fixed rejection-reason diagnostics added. Regressions exercise real SecureGate/authorized dispatch, production-TS/backend route contracts, native handlers and the renderer function binding; a simulated ObjectBridge alone no longer establishes RPC validity. Media resources, deduplication, progress and network deadlines/integrity checks are retained. Startup1.1.18 remains pinned to48 and other plugin/media bytes remain unchanged. This candidate is not public and still needs affected-user verification.
+修复启动动画“下载示例”长时间停在“连接中”的接口错误：旧接口名包含大写字母，被原生安全门拒绝，下载尚未进入网络层。本版统一前后端协议，并补上实际鉴权边界的回归测试。
+
+### 更新内容
+
+- **示例下载接口修复**：下载、状态查询和分块传输统一使用小写的 `explorer.startup.examples.*` 接口，原生分发与进度查询同步更新。
+- **非法方法即时失败**：前端发送前检查接口名，非法名称立即报告 `INVALID_METHOD` 并清除等待状态，不再把接口错误伪装成长时间连接等待。
+- **保留安全边界**：不放宽原生方法名、令牌、重放、限流及容量校验；旧大写接口不作为兼容别名放行。拒绝日志增加固定原因，不输出未鉴权请求内容或令牌。
+- **补全回归覆盖**：新增从生产前端接口字符串进入实际鉴权及分发函数的测试、前后端路由契约检查、原生处理器测试，以及前端函数绑定的即时失败检查，避免仅用绕过鉴权的模拟对象桥验证接口。
+
+### 升级说明
+
+- 推荐使用本版 EXE。**安装后请通过 Code-Codex 快捷方式重新启动**，让核心界面与原生程序同时加载新版；不能只更换播放器插件或继续使用旧界面。
+- 原视频库、当前选源、逐视频参数、基础实时播放、示例去重及失败后重试保持不变。响应头/传输停顿超时、SHA-256 校验和原子缓存提交仍生效。
+- Startup 播放器仍为 **1.1.18 / v0.4.48**；其余 23 个插件和默认媒体继续复用 v0.3.96，无需为本次接口修复重新下载全部插件。
+- 两份示例继续从独立 [startup-examples-v1](https://github.com/Rice-dog/code-codex/releases/tag/startup-examples-v1) 按需下载，不内置安装包。视频为维护者提供的 OpenAI 官方宣传素材，项目 MIT 许可证不授予这些视频的许可。
+- 附件包含 EXE、MSI、ZIP、卸载器、本版目录清单快照及 SHA256SUMS.txt；校验文件列出本条 Release 的另外五个附件。
+
+### 验证与限制
+
+复用已验证的 v0.4.52 原包：503 项原生回归通过、5 项忽略；1 项既有桌面透明命中测试因先前系统窗口遮挡而在本轮排除，不计为通过。包括 55 项 CDP 客户端检查、14 项前端通信检查、16 项菜单/示例界面检查、31 项空插件缓存回归、29 项基础动画回归，以及原生公开示例 GET/大小/SHA 校验。
+
+实际鉴权/分发测试使用 fixture 响应处理器，界面导入测试使用模拟原生 RPC；公开素材下载另由原生模块验证。这些分层结果不等于已在报错用户会话完成全链路复验。本版本未安装到本机、未独立安装 MSI、未执行完整官方冷启动或报错用户 Win10 现场复验。不承诺修复所有外部网络故障；偶发动画就绪等待过长不在本轮修复范围。
+
+## English
+
+Fixes the startup-animation Download examples control remaining at Connecting because uppercase RPC names were rejected by the native security gate before any HTTP download began. This release aligns the frontend/native protocol and adds regressions at the actual authorization boundary.
+
+### Changes
+
+- **Example-download RPC repair:** download, status and chunk transfer use lowercase `explorer.startup.examples.*` endpoints, with matching native dispatch and progress queries.
+- **Immediate invalid-method failure:** the frontend validates method names before sending. Invalid names report `INVALID_METHOD` and clear the pending request immediately, rather than masquerading as a long connection wait.
+- **Security boundaries retained:** native method grammar, tokens, replay protection, rate and capacity limits remain enforced. Legacy uppercase names are not permitted as aliases. Rejection logs add fixed reasons without exposing unauthenticated request contents or tokens.
+- **Regression coverage:** production frontend method strings exercise actual authorization/dispatch code, with backend-route contracts, native-handler tests and frontend function-binding checks. An ObjectBridge mock that bypasses authentication is no longer the sole evidence of protocol validity.
+
+### Upgrade
+
+- The EXE installer is recommended. **Restart through the Code-Codex shortcut after installation** so the core UI and native program both load the new version. Updating only the player plugin or retaining an old UI is insufficient.
+- The original library, selection, per-video settings, basic realtime playback, deduplication and retry behavior are preserved. Header/body-idle deadlines, SHA-256 verification and atomic cache commits remain in effect.
+- The startup player remains **1.1.18, served from v0.4.48**. The other 23 plugins and default media remain served from v0.3.96; this protocol fix does not require downloading every plugin again.
+- Both examples remain optional downloads in [startup-examples-v1](https://github.com/Rice-dog/code-codex/releases/tag/startup-examples-v1), outside the installer. They are OpenAI promotional clips supplied by the maintainer; the project's MIT license does not license the videos.
+- Attachments are the EXE, MSI, ZIP, uninstaller, versioned catalog snapshot and SHA256SUMS.txt. The checksum file lists the other five attachments of this release.
+
+### Validation and limits
+
+This publication reuses the validated v0.4.52 payload: 503 native tests passed, 5 were ignored; one existing desktop transparency hit-test was excluded after prior system-window occlusion and is not counted as passing. Coverage includes 55 CDP-client checks, 14 frontend-bridge checks, 16 menu/example UI checks, 31 empty-optional-cache checks, 29 basic-animation checks and native public-example GET/size/SHA verification.
+
+Actual authorization/dispatch tests use a fixture response handler; UI import tests simulate native RPC. Public media downloads are verified separately by native code. These layered results do not establish a complete retest in the affected user's session. This version has not been installed locally or independently as an MSI, tested through a complete official-client cold launch, or retested on the affected Windows10 machine. It does not claim to fix all external network failures; occasional excessive animation-readiness waiting is outside this change.
+
+
+发布 / Publication: [Latest v0.4.52](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.52), [PR #63](https://github.com/Rice-dog/code-codex/pull/63), tag/main `ce89de0`. 六附件公开下载大小/SHA/API digest全部核验；包内README保持构建快照。 / All six public attachment sizes, SHA-256 and API digests verified; bundled READMEs retain their build-time snapshot.
 
 ## v0.4.51 — Win10兼容、文件树与示例下载修复
 
