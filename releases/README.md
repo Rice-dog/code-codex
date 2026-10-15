@@ -1,3 +1,9 @@
+## 本地候选 v0.4.52 / Local candidate v0.4.52
+
+修复示例下载、进度查询和分块接口使用大写字母，违反原生小写方法名规则的问题。接口统一为explorer.startup.examples.*，前端发送前立即拒绝非法方法名；原生校验条件保持，拒绝日志补固定原因。新增真实SecureGate/鉴权分发、生产TS协议与后端路由契约、原生handler和renderer函数绑定回归；不再仅依赖绕过鉴权的模拟对象桥来证明下载链路。视频资源、去重、进度与网络超时/校验机制保持。Startup1.1.18继续pin48，其它插件和媒体不变；本候选尚未公开发布，用户现场仍待验证。
+
+Fixes uppercase example-download, progress-status and chunk RPC names violating the native lowercase-only grammar. Endpoints now use explorer.startup.examples.*; the client immediately rejects invalid method names. Native security conditions stay unchanged, with fixed rejection-reason diagnostics added. Regressions exercise real SecureGate/authorized dispatch, production-TS/backend route contracts, native handlers and the renderer function binding; a simulated ObjectBridge alone no longer establishes RPC validity. Media resources, deduplication, progress and network deadlines/integrity checks are retained. Startup1.1.18 remains pinned to48 and other plugin/media bytes remain unchanged. This candidate is not public and still needs affected-user verification.
+
 ## v0.4.51 — Win10兼容、文件树与示例下载修复
 
 ## 简体中文

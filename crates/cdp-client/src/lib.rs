@@ -595,8 +595,11 @@ impl SecureGate {
 
         let request: BindingRequest =
             serde_json::from_str(payload).map_err(|_| BridgeError::invalid_request())?;
-        if !valid_request_id(&request.id) || !valid_method(&request.method) {
-            return Err(BridgeError::invalid_request());
+        if !valid_request_id(&request.id) {
+            return Err(BridgeError::new("INVALID_REQUEST", "The native request ID format is invalid."));
+        }
+        if !valid_method(&request.method) {
+            return Err(BridgeError::new("INVALID_REQUEST", "The native request method must use lowercase ASCII letters or dots."));
         }
         if !self.token.matches(&request.token) {
             return Err(BridgeError::new(
@@ -2156,7 +2159,7 @@ where
             // Local metadata only. Never echo IDs to unauthenticated callers.
             observe_rejection(
                 "binding authorization",
-                json!({"code":error.code,"payloadBytes":payload.len(),"documentQualified":document_qualified,"payloadOmitted":true}),
+                json!({"code":error.code,"reason":error.message,"payloadBytes":payload.len(),"documentQualified":document_qualified,"payloadOmitted":true}),
             );
             return Ok(());
         }
@@ -2848,6 +2851,82 @@ mod tests {
         });
         gate.authorize(&valid.to_string()).await.expect("valid");
         assert!(gate.authorize(&valid.to_string()).await.is_err());
+    }
+
+    // Read the actual caller, not a duplicated list of supposedly valid names.
+    // ObjectBridge fixtures bypass this production CDP authorization boundary.
+    fn startup_example_renderer_methods() -> Vec<&'static str> {
+        let source = include_str!("../../../packages/explorer-ui/src/startup-video-examples.ts");
+        let mut methods: Vec<_> = source.split(['\'', '"'])
+            .filter(|part| part.starts_with("explorer.")).collect();
+        methods.sort_unstable();
+        methods.dedup();
+        assert_eq!(methods.len(), 3);
+        methods
+    }
+
+    #[tokio::test]
+    async fn startup_example_renderer_methods_cross_real_binding_authorization() {
+        let token = CapabilityToken::generate();
+        let gate = SecureGate::new(token.clone());
+        let (sender, mut receiver) = mpsc::channel(4);
+        let mut tasks = JoinSet::new();
+        let slots = Arc::new(Semaphore::new(MAX_IN_FLIGHT_REQUESTS));
+        let mut pending = VecDeque::new();
+        let backend = include_str!("../../launcher/src/bridge.rs");
+        for (index, method) in startup_example_renderer_methods().into_iter().enumerate() {
+            assert!(backend.contains(&format!("\"{method}\" =>")), "missing native dispatch: {method}");
+            let payload = json!({"id":format!("sample-{index}"),"token":token.expose(),"method":method,"params":{"id":"the-intelligence-age"}}).to_string();
+            authorize_binding_request(&payload, &gate, true, &mut pending, Arc::new(EchoHandler), sender.clone(), slots.clone(), &mut tasks, 7).await.unwrap();
+            let message = tokio::time::timeout(Duration::from_millis(500), receiver.recv()).await
+                .unwrap_or_else(|_| panic!("renderer method rejected before dispatch: {method}"))
+                .expect("authenticated response");
+            assert_eq!(message.document_epoch, 7);
+            assert_eq!(message.payload["ok"], true);
+            assert_eq!(message.payload["result"]["accepted"], method);
+            assert_eq!(message.payload["id"], format!("sample-{index}"));
+            tasks.join_next().await.unwrap().unwrap();
+        }
+        assert!(pending.is_empty() && tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn startup_example_rpc_does_not_relax_capability_or_replay_guards() {
+        let token = CapabilityToken::generate();
+        let gate = SecureGate::new(token.clone());
+        for (index, method) in startup_example_renderer_methods().into_iter().enumerate() {
+            let mut payload = json!({"id":format!("protected-example-{index}"),"token":"incorrect","method":method,"params":{}});
+            assert_eq!(gate.authorize(&payload.to_string()).await.unwrap_err().code, "UNAUTHORIZED");
+            payload["token"] = json!(token.expose());
+            gate.authorize(&payload.to_string()).await.unwrap();
+            assert_eq!(gate.authorize(&payload.to_string()).await.unwrap_err().code, "INVALID_REQUEST");
+        }
+        let legacy = json!({"id":"legacy-example","token":token.expose(),"method":"explorer.startupExamples.download","params":{}});
+        let error = gate.authorize(&legacy.to_string()).await.unwrap_err();
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.message.contains("lowercase"));
+    }
+
+    #[test]
+    fn production_renderer_rpc_literals_obey_native_method_grammar() {
+        fn inspect(directory: &std::path::Path, checked: &mut usize) {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() { inspect(&path, checked); continue; }
+                if path.extension().is_none_or(|extension| extension != "ts") { continue; }
+                let source = std::fs::read_to_string(&path).unwrap();
+                for method in source.split(['\'', '"']) {
+                    if method.starts_with("explorer.") && method.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) {
+                        assert!(valid_method(method), "invalid RPC literal in {}: {method}", path.display());
+                        *checked += 1;
+                    }
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/explorer-ui/src");
+        let mut checked = 0;
+        inspect(&root, &mut checked);
+        assert!(checked > 50);
     }
 
     #[tokio::test]

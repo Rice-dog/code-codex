@@ -4329,7 +4329,7 @@ impl BridgeHandler for NativeBridge {
         let method = request.method.clone();
         let started = std::time::Instant::now();
         let log_operation = !method.starts_with("explorer.runtime.")
-            && method != "explorer.startupExamples.status"
+            && method != "explorer.startup.examples.status"
             && method != "explorer.plugins.status"
             && !method.ends_with(".chunk")
             && !method.ends_with(".resource.chunk");
@@ -4358,13 +4358,13 @@ impl BridgeHandler for NativeBridge {
                   })
                 },
                 "explorer.runtime.check" => Ok(crate::support_checks::run().await),
-                "explorer.startupExamples.status" => crate::startup_examples::status(),
-                "explorer.startupExamples.download" => {
+                "explorer.startup.examples.status" => crate::startup_examples::status(),
+                "explorer.startup.examples.download" => {
                     if request.params.as_object().is_none_or(|p|p.keys().any(|k|k!="id")){return Err(BridgeError::invalid_request());}
                     let id=request.params.get("id").and_then(Value::as_str).ok_or_else(BridgeError::invalid_request)?;
                     crate::startup_examples::download(id).await
                 }
-                "explorer.startupExamples.chunk" => {
+                "explorer.startup.examples.chunk" => {
                     if request.params.as_object().is_none_or(|p|p.keys().any(|k|k!="id"&&k!="offset")){return Err(BridgeError::invalid_request());}
                     let id=request.params.get("id").and_then(Value::as_str).ok_or_else(BridgeError::invalid_request)?;
                     let offset=request.params.get("offset").and_then(Value::as_u64).and_then(|n|usize::try_from(n).ok()).ok_or_else(BridgeError::invalid_request)?;
@@ -5237,6 +5237,22 @@ mod tests {
         let bridge = NativeBridge::new(None, Some(workspace), settings_store, Settings::default());
         bridge.initialize_manual().await;
         (directory, bridge)
+    }
+
+    #[tokio::test]
+    async fn startup_example_rpc_routes_to_bounded_native_handlers() {
+        let (_directory, bridge) = manual_bridge().await;
+        let status = bridge.handle(request("explorer.startup.examples.status", json!({}))).await.unwrap();
+        assert_eq!(status.as_array().unwrap().len(), 2);
+        // Invalid IDs are rejected by the actual sample handler before any
+        // network, application cache or user video library is touched.
+        for method in ["explorer.startup.examples.download", "explorer.startup.examples.chunk"] {
+            let params = if method.ends_with(".chunk") { json!({"id":"fixture-not-a-sample","offset":0}) } else { json!({"id":"fixture-not-a-sample"}) };
+            let error = bridge.handle(request(method, params)).await.unwrap_err();
+            assert_eq!(error.code, "EXAMPLE_ID", "wrong native dispatch for {method}");
+            let error = bridge.handle(request(method, json!({"id":"the-intelligence-age","url":"SENTINEL_EXTERNAL"}))).await.unwrap_err();
+            assert_eq!(error.code, "INVALID_REQUEST");
+        }
     }
 
     #[tokio::test]

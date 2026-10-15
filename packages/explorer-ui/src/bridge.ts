@@ -240,6 +240,15 @@ export class ExplorerBridge extends EventTarget {
   }
 
   #send(binding: NonNullable<typeof window.__codeCodex>, request: BridgeRequest): unknown {
+    // Match SecureGate's grammar before sending. Rejected native ingress must
+    // not echo untrusted IDs; a local typo should instead fail immediately.
+    if (request.method.length === 0 || request.method.length > 128 || /[^a-z.]/.test(request.method)) {
+      throw new ExplorerBridgeError({
+        code: 'INVALID_METHOD',
+        message: 'Native request methods must use 1–128 lowercase ASCII letters or dots.',
+        data: { methodOmitted: true, methodLength: request.method.length, networkRequested: false },
+      });
+    }
     const encoded=JSON.stringify(request),payloadBytes=new TextEncoder().encode(encoded).byteLength;
     // The native ingress has a separate 96 KiB authenticated binding budget,
     // smaller than the CDP frame limit. Never let a rejected write look hung.

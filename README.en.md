@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.51-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.52-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -30,6 +30,8 @@ editing, navigation, and file operations.
 ![Code-Codex file tree in Codex](docs/screenshots/file-tree-conversation.png)
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
+
+Local candidate **v0.4.52** fixes example-download RPC names being rejected by the native lowercase-only method grammar, leaving the UI at Connecting. Download, status and chunk names now use lowercase dotted names. Actual authorization/dispatch regressions and immediate client-side rejection of invalid method names are added without relaxing security rules. Windows10 compatibility, empty-cache file trees and basic realtime playback remain; Startup1.1.18 stays pinned to public v0.4.48. This candidate is not publicly released.
 
 Public version **v0.4.51 / Startup 1.1.18** fixes Windows 10 native runtimes waiting for an Electron inspector and file trees remaining at WAIT when the optional startup player is absent; identity, listener-ownership and readiness checks remain mandatory. Example downloads distinguish connection waiting from actual progress, with bounded header/body-idle waits and specific 404/transport errors. The menu consistently reads Open Installation Folder. The two promotional examples remain optional downloads in a separate resource release. The original library, selection, per-video settings and basic realtime playback are preserved; no advanced editing or precomposition cache. The player remains served from v0.4.48; the other 23 plugins/default media from v0.3.96. Published as [GitHub Release v0.4.51](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.51). 499 native tests passed, 5 ignored, one existing occluded desktop test excluded; UI regressions and real example downloads passed. No affected-user Windows 10 network retest, local/independent MSI installation of this version or full official cold launch is claimed. Occasional excessive animation-readiness waiting is outside this change.
 
@@ -93,7 +95,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.51
+./scripts/package.ps1 -Version 0.4.52
 ```
 
 The generated packages are written to `releases/`.

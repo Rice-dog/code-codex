@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.51",
+    [string]$Version = "0.4.52",
     [string]$InstallRoot,
     [switch]$SelectDirectory,
     [switch]$NoActivate

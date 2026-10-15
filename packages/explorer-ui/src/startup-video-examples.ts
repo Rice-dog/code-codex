@@ -34,16 +34,16 @@ export async function downloadStartupExamples(request:Request,signal:AbortSignal
   for(const [index,s] of missing.entries()) {
     active(signal);let polling=false;
     const report=(received:number,phase:ExampleProgress['phase'])=>onProgress({phase,percent:Math.min(99,Math.floor((completedBytes+received)/totalBytes*100)),index:index+1,total:missing.length});
-    const poll=async()=>{if(polling||signal.aborted)return;polling=true;try{const statuses=await request<Status[]>('explorer.startupExamples.status');if(!signal.aborted){const status=statuses.find(j=>j.id===s.id);if(status)report(Math.min(s.size,status.receivedBytes),status.phase==='verifying'||status.phase==='ready'?'verifying':status.receivedBytes>0?'downloading':'connecting');}}catch(error){if(!signal.aborted)runtimeEvent('startup-examples','progress query','failed',{id:s.id,reason:String(error)});}finally{polling=false;}};
+    const poll=async()=>{if(polling||signal.aborted)return;polling=true;try{const statuses=await request<Status[]>('explorer.startup.examples.status');if(!signal.aborted){const status=statuses.find(j=>j.id===s.id);if(status)report(Math.min(s.size,status.receivedBytes),status.phase==='verifying'||status.phase==='ready'?'verifying':status.receivedBytes>0?'downloading':'connecting');}}catch(error){if(!signal.aborted)runtimeEvent('startup-examples','progress query','failed',{id:s.id,reason:String(error)});}finally{polling=false;}};
     const timer=setInterval(()=>{void poll();},400);
     try {
       report(0,'connecting');
-      await cancellable(request('explorer.startupExamples.download',{id:s.id},260000),signal);
+      await cancellable(request('explorer.startup.examples.download',{id:s.id},260000),signal);
       const chunks:Uint8Array<ArrayBuffer>[]=[];let offset=0,lastChunk=-Infinity;
       while(offset<s.size){
         active(signal);
         const delay=20-(performance.now()-lastChunk);if(delay>0)await new Promise(resolve=>setTimeout(resolve,delay));active(signal);lastChunk=performance.now();
-        const part=await cancellable(request<{data:string;nextOffset:number;size:number}>('explorer.startupExamples.chunk',{id:s.id,offset}),signal);
+        const part=await cancellable(request<{data:string;nextOffset:number;size:number}>('explorer.startup.examples.chunk',{id:s.id,offset}),signal);
         const bytes=Uint8Array.from(atob(part.data),c=>c.charCodeAt(0));
         if(part.size!==s.size||bytes.length===0||bytes.length>65536||part.nextOffset!==offset+bytes.length||part.nextOffset>s.size)throw new Error('Example transfer returned an invalid chunk');
         chunks.push(bytes);offset=part.nextOffset;

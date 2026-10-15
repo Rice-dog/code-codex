@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.51-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.52-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -27,6 +27,8 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 ![Codex 中的 Code-Codex 文件树](docs/screenshots/file-tree-conversation.png)
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
+
+本地候选 **v0.4.52**：修复示例下载RPC使用大写字母导致原生鉴权拒绝、界面长时间停在连接中的问题；下载、状态、分块统一为小写协议名。新增真实安全门/分发回归及前端非法接口名即时拒绝，原有鉴权规则不放宽。保留Win10兼容、空缓存文件树与基础实时播放，Startup1.1.18继续复用公开v0.4.48。本候选尚未公开发布。
 
 当前公开版本 **v0.4.51 / Startup 1.1.18**：修复 Win10 原生运行时误等 Electron 主调试端口，以及未下载启动动画插件时文件树停在 WAIT 的问题；身份、端口归属与界面就绪检查保持。示例下载区分连接等待和实际进度，补充响应头/传输停顿超时与 404 等具体错误；安装目录入口统一为 Open Installation Folder。两份官方宣传视频仍通过独立资源 Release 按需下载，原视频库、选源、逐视频参数及基础实时播放保持；无高级模式或预合成缓存。播放器继续复用 v0.4.48，其余23插件及默认媒体复用 v0.3.96。已发布为 [GitHub Release v0.4.51](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.51)。499项原生回归通过、5项忽略、1项既有桌面遮挡用例排除；界面回归及真实示例下载通过。未在报错用户的 Win10 网络复验，未执行本版本机/独立MSI安装或完整官方冷启动；偶发动画就绪等待过长不在此次修复范围。
 
@@ -103,7 +105,7 @@ EXE 成功安装后保留当前版本与实际上一版，安全清理更旧的�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.51
+./scripts/package.ps1 -Version 0.4.52
 ```
 
 生成结果会写入 `releases/`。
