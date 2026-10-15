@@ -15,7 +15,7 @@ license = "MIT"
 
 [workspace.dependencies]
 async-trait = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4.5", features = ["derive", "env"] }
 constant_time_eq = "0.4"
 directories = "6.0"
