@@ -13,6 +13,7 @@ mod process_guard;
 mod renderer_storage;
 mod runtime_log;
 mod startup_diagnostics;
+mod startup_examples;
 mod support_checks;
 
 use std::path::PathBuf;
@@ -199,6 +200,9 @@ fn startup_trace_report() -> String {
                 state.dropped_events
             ));
             report.push_str(&state.events.join("\n"));
+        }
+        if let Some(layout) = state.last_layout_diagnostic {
+            report.push_str(&format!("\nLast bounded renderer layout observation (not proof of successful injection): {layout}"));
         }
     }
     report
@@ -554,6 +558,8 @@ enum LaunchFailure {
         os_code: Option<i32>,
         kind: std::io::ErrorKind,
     },
+    #[error("the activated Codex process exited with status {code} (0x{code:08X})")]
+    ProcessExited { code: u32 },
     #[error("the installation diagnostic result could not be serialized")]
     DiagnosticSerialization,
 }
@@ -1171,6 +1177,11 @@ fn launch_diagnostic(error: &LaunchFailure) -> (&'static str, &'static str, &'st
             "Monitoring Codex Desktop",
             "The Codex process could not be monitored",
         ),
+        LaunchFailure::ProcessExited { .. } => (
+            "CC-START-CODEX-008",
+            "Monitoring Codex Desktop",
+            "The activated Codex process exited with a nonzero status",
+        ),
         LaunchFailure::DiagnosticSerialization => (
             "CC-START-CODEX-007",
             "Preparing diagnostics",
@@ -1532,6 +1543,9 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
                     os_code: error.raw_os_error(),
                     kind: error.kind(),
                 })?;
+                child.exit_code().map_err(|error| LaunchFailure::ProcessWait {
+                    os_code: error.raw_os_error(), kind: error.kind(),
+                })?;
                 supervisor_result
             }
         }
@@ -1540,6 +1554,17 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     let supervisor_started = startup_trace()
         .lock()
         .is_ok_and(|trace| trace.supervisor_progress.is_some());
+    // A transport failure can win the select at the same time as process exit.
+    // Reconcile against the retained activation handle before any cleanup.
+    let result = if supervisor_started {
+        match child.exit_code() {
+            Ok(code) => reconcile_supervisor_exit(result, code),
+            Err(error) => {
+                runtime_log::record("startup", "exit status", "unavailable", json!({"ioKind":format!("{:?}",error.kind()),"osCode":error.raw_os_error()}));
+                result
+            }
+        }
+    } else { result };
     record_startup_event(
         if supervisor_started {
             "renderer supervisor"
@@ -1586,6 +1611,44 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     }
     drop(early_player);
     result
+}
+
+fn reconcile_supervisor_exit(result: Result<(), AppError>, exit_code: Option<u32>) -> Result<(), AppError> {
+    let transport_or_qualification = match &result {
+        Ok(()) => true,
+        Err(AppError::Cdp(error)) => matches!(error.kind(), CdpError::EndpointUnavailable | CdpError::WebSocket | CdpError::NoCompatibleTarget | CdpError::IncompatibleRenderer),
+        _ => false,
+    };
+    match exit_code {
+        Some(0) if transport_or_qualification => {
+            let previous = result.as_ref().err().map(ToString::to_string);
+            runtime_log::record("startup", "activation process exit", "normal", json!({"exitCode":0,"priorSupervisorError":previous,"errorPopup":false,"pluginMountedNotInferred":true}));
+            record_startup_event("process exit", "normal exit; renderer supervision ended without an error popup");
+            Ok(())
+        }
+        Some(code) if code != 0 && transport_or_qualification => {
+            runtime_log::record("startup", "activation process exit", "failed", json!({"exitCode":code,"priorSupervisorError":result.as_ref().err().map(ToString::to_string)}));
+            Err(LaunchFailure::ProcessExited { code }.into())
+        }
+        _ => result,
+    }
+}
+
+#[cfg(test)]
+mod supervisor_exit_tests {
+    use super::*;
+    #[test]
+    fn normal_exit_preserves_transport_history_without_a_fatal_popup() {
+        assert!(reconcile_supervisor_exit(Err(CdpError::EndpointUnavailable.into()),Some(0)).is_ok());
+        assert!(reconcile_supervisor_exit(Err(CdpError::IncompatibleRenderer.into()),Some(0)).is_ok());
+        assert!(reconcile_supervisor_exit(Err(CdpError::WebSocket.into()),None).is_err());
+    }
+    #[test]
+    fn nonzero_exit_and_security_failures_are_not_hidden() {
+        assert!(matches!(reconcile_supervisor_exit(Err(CdpError::EndpointUnavailable.into()),Some(23)),Err(AppError::Launch(LaunchFailure::ProcessExited{code:23}))));
+        assert!(reconcile_supervisor_exit(Err(CdpError::EndpointIdentityMismatch.into()),Some(0)).is_err());
+        assert!(reconcile_supervisor_exit(Err(CdpError::Protocol.into()),Some(0)).is_err());
+    }
 }
 
 async fn attach(args: AttachArgs) -> Result<(), AppError> {

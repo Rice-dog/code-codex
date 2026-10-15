@@ -3552,6 +3552,16 @@ export const styles = String.raw`
   .startup-video-library { flex: 0 0 auto; box-sizing: border-box; width: 100%; min-width: 0; justify-self: stretch; padding: 8px 0 !important; border: 1px solid var(--cle-rule); border-radius: 7px; background: var(--cle-subtle); }
   .startup-video-library .particle-library-grid { width: calc(100% - 16px); max-width: 462px; margin: 0 8px; box-sizing: border-box; }
   .startup-video-library .particle-source-summary { cursor: default; }
+  .startup-examples-control { flex: 0 0 96px; width: 96px; height: 22px; margin-inline-start: 8px; }
+  .startup-examples-download,.startup-examples-progress { box-sizing: border-box; width: 100%; height: 22px; border: 1px solid var(--cle-rule); border-radius: 5px; background: transparent; color: var(--cle-muted); font: inherit; font-size: 10px; line-height: 20px; padding: 0 6px; }
+  .startup-examples-download { cursor: pointer; }
+  .startup-examples-download:hover:not(:disabled) { color: var(--cle-ink); background: var(--cle-hover); }
+  .startup-examples-download:disabled { opacity: .5; cursor: default; }
+  .startup-examples-download:focus-visible { outline: 1px solid var(--cle-muted); outline-offset: 2px; }
+  .startup-examples-progress { display: block; position: relative; overflow: hidden; text-align: center; padding: 0; }
+  .startup-examples-progress-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--cle-muted); opacity: .16; }
+  .startup-examples-progress-label { position: relative; font-size: 9px; }
+  .startup-examples-control [hidden] { display: none !important; }
   .startup-video-library .particle-source-summary::before { display: none; }
   .startup-video-library-count { color: var(--cle-muted); font-weight: 400; font: 9px/16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
   .startup-video-library .particle-library-toolbar { margin-bottom: 0; }

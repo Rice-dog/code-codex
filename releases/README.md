@@ -1,3 +1,9 @@
+## 本地维护 v0.4.48 / Local maintenance v0.4.48
+
+修复包helper阻塞退出监测与迟到启动误报，正常exit0按原handle结束监督；真实非零/安全/协议/存活资格错误仍报告。顶部Code-Codex菜单增加打开安装目录。视频库标题旁添加灰色下载示例按钮、原位置进度和内容去重；The Intelligence Age/Introducing GPT-5保留原字节，固定选源/profile不变。Startup1.1.18，其余23包pin v0.3.96。示例独立托管startup-examples-v1，应用48尚未GitHub发布。485 Rust（4忽略）、15维护UI/29基础/25默认/7 early、原生真实公开样例GET通过；本轮未完整官方冷启动、独立MSI安装或远端用户机器复现。
+
+Fix blocking package-helper exit observation and delayed false startup errors, ending supervision on verified normal exit; genuine nonzero/security/protocol/live qualification failures remain errors. The menu opens the installation root. A subdued library button downloads original The Intelligence Age/Introducing GPT-5 examples with inline progress and content deduplication, preserving selection/profiles. Startup1.1.18; the other 23 packages stay on v0.3.96. Samples are independently hosted as startup-examples-v1; app48 is not published. 485 Rust tests (4 ignored), 15 maintenance UI/29 basic/25 defaults/7 early checks and real native public-sample GET passed. Full official cold launch, independent MSI installation and remote-user reproduction were not performed.
+
 ## v0.4.47 — 基础实时启动动画与固定视频选择
 
 ## 简体中文

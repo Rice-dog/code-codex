@@ -32,7 +32,7 @@ use win32job::{ExtendedLimitInfo, Job};
 use windows_sys::Win32::Foundation::{WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForSingleObject,
 };
 
 #[derive(Debug, Clone, Error)]
@@ -103,6 +103,7 @@ pub struct CodexPackageGuard {
     helper: tokio::process::Child,
     control: Option<tokio::process::ChildStdin>,
     pid: u32,
+    activation_handle: OwnedHandle,
     armed: bool,
     stderr_reader: Option<tokio::task::JoinHandle<()>>,
 }
@@ -344,10 +345,18 @@ impl CodexProcessGuard {
                 )));
             }
 
+            let raw = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, activation.process_id) };
+            if raw.is_null() {
+                let error = io::Error::last_os_error();
+                stop_unarmed_package_helper(helper, Some(control), stderr_reader).await;
+                return Err(error);
+            }
+            let activation_handle = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
             Ok(Self::Package(Box::new(CodexPackageGuard {
                 helper,
                 control: Some(control),
                 pid: activation.process_id,
+                activation_handle,
                 armed: false,
                 stderr_reader,
             })))
@@ -391,27 +400,28 @@ impl CodexProcessGuard {
         match self {
             Self::Child(child) => child.wait_for_exit().await,
             #[cfg(windows)]
-            Self::Package(package) => match package.helper.wait().await {
-                Ok(status) if status.success() => Ok(()),
-                Ok(status) => {
-                    tracing::warn!(
-                        event = "package_activation_helper_failed",
-                        pid = package.pid,
-                        %status,
-                        recovery = "wait_for_activated_process"
-                    );
-                    wait_for_process_exit(package.pid).await
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        event = "package_activation_helper_wait_failed",
-                        pid = package.pid,
-                        %error,
-                        recovery = "wait_for_activated_process"
-                    );
-                    wait_for_process_exit(package.pid).await
+            Self::Package(package) => {
+                let mut helper_exit_observed=false;
+                loop {
+                    if process_handle_exit_code(&package.activation_handle)?.is_some() { return Ok(()); }
+                    if !helper_exit_observed {
+                        match package.helper.try_wait() {
+                            Ok(Some(status)) => { helper_exit_observed=true;crate::runtime_log::record("startup","package helper exit","observed",serde_json::json!({"helperExitCode":status.code(),"activationPid":package.pid,"activationStillRunning":true,"waitingForRetainedActivationHandle":true})); }
+                            Err(error) => {helper_exit_observed=true;crate::runtime_log::record("startup","package helper exit","unavailable",serde_json::json!({"ioKind":format!("{:?}",error.kind()),"osCode":error.raw_os_error()}));}
+                            _=>{}
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             },
+        }
+    }
+
+    pub fn exit_code(&mut self) -> io::Result<Option<u32>> {
+        match self {
+            Self::Child(child) => Ok(child.child.try_wait()?.and_then(|s| s.code()).map(|c| c as u32)),
+            #[cfg(windows)]
+            Self::Package(package) => process_handle_exit_code(&package.activation_handle),
         }
     }
 
@@ -454,24 +464,45 @@ pub fn launched_process_state(pid: u32) -> String {
 }
 
 #[cfg(windows)]
-async fn wait_for_process_exit(pid: u32) -> io::Result<()> {
-    let raw_handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
-    if raw_handle.is_null() {
-        return Err(io::Error::last_os_error());
-    }
-    let handle = unsafe { OwnedHandle::from_raw_handle(raw_handle.cast()) };
-
-    loop {
-        match unsafe { WaitForSingleObject(handle.as_raw_handle().cast(), 0) } {
-            WAIT_OBJECT_0 => return Ok(()),
-            WAIT_TIMEOUT => tokio::time::sleep(Duration::from_millis(100)).await,
-            WAIT_FAILED => return Err(io::Error::last_os_error()),
-            status => {
-                return Err(io::Error::other(format!(
-                    "unexpected process wait status {status}"
-                )));
-            }
+fn process_handle_exit_code(handle: &OwnedHandle) -> io::Result<Option<u32>> {
+    match unsafe { WaitForSingleObject(handle.as_raw_handle().cast(), 0) } {
+        WAIT_TIMEOUT => Ok(None),
+        WAIT_OBJECT_0 => {
+            let mut code = 0;
+            if unsafe { GetExitCodeProcess(handle.as_raw_handle().cast(), &mut code) } == 0 { return Err(io::Error::last_os_error()); }
+            Ok(Some(code))
         }
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+#[cfg(all(test,windows))]
+mod activation_wait_tests {
+    use super::*;
+    #[tokio::test]
+    async fn retained_activation_exit_does_not_wait_for_a_blocked_helper() {
+        let powershell=trusted_powershell().expect("PowerShell");
+        let mut target=TokioCommand::new(&powershell).args(["-NoProfile","-NonInteractive","-Command","Start-Sleep -Milliseconds 900; exit 0"]).creation_flags(0x0800_0000).spawn().expect("target");
+        let pid=target.id().unwrap();
+        let raw=unsafe{OpenProcess(PROCESS_SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,0,pid)};assert!(!raw.is_null());
+        let handle=unsafe{OwnedHandle::from_raw_handle(raw.cast())};
+        let mut helper=TokioCommand::new(&powershell).args(["-NoProfile","-NonInteractive","-Command","[Console]::In.ReadLine() | Out-Null"]).creation_flags(0x0800_0000).stdin(Stdio::piped()).stdout(Stdio::null()).spawn().expect("helper");
+        let control=helper.stdin.take();
+        let mut guard=CodexProcessGuard::Package(Box::new(CodexPackageGuard{helper,control,pid,activation_handle:handle,armed:false,stderr_reader:None}));
+        tokio::time::timeout(Duration::from_secs(8),guard.wait_for_exit()).await.expect("must observe original exit independently").unwrap();
+        assert_eq!(guard.exit_code().unwrap(),Some(0));
+        if let CodexProcessGuard::Package(p)=&mut guard{assert!(p.helper.try_wait().unwrap().is_none());}
+        guard.terminate().await;target.wait().await.unwrap();
+    }
+    #[tokio::test]
+    async fn clr_control_reader_is_nonblocking_with_an_open_stdin_pipe() {
+        let csharp=PACKAGE_ACTIVATION_SCRIPT.split("$source = @'\n").nth(1).unwrap().split("\n'@").next().unwrap();
+        let command=format!("$code=@'\n{csharp}\n'@\nAdd-Type -TypeDefinition $code; $pending=[CodexLiveExplorerPackageGuard.ControlInput]::BeginRead(); [Console]::Out.WriteLine('monitor-live'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 500; [Console]::Out.WriteLine('monitor-finished')");
+        let mut helper=TokioCommand::new(trusted_powershell().unwrap()).args(["-NoProfile","-NonInteractive","-Command",&command]).creation_flags(0x0800_0000).stdin(Stdio::piped()).stdout(Stdio::piped()).kill_on_drop(true).spawn().unwrap();
+        let mut output=BufReader::new(helper.stdout.take().unwrap());let mut line=String::new();
+        tokio::time::timeout(Duration::from_secs(10),output.read_line(&mut line)).await.expect("open stdin must not block monitor").unwrap();assert_eq!(line.trim(),"monitor-live");
+        line.clear();tokio::time::timeout(Duration::from_secs(3),output.read_line(&mut line)).await.unwrap().unwrap();assert_eq!(line.trim(),"monitor-finished");
+        tokio::time::timeout(Duration::from_secs(3),helper.wait()).await.unwrap().unwrap();
     }
 }
 
@@ -479,7 +510,8 @@ async fn wait_for_process_exit(pid: u32) -> io::Result<()> {
 impl CodexPackageGuard {
     async fn terminate(&mut self) {
         if let Some(mut control) = self.control.take() {
-            let _ = control.write_all(b"terminate\n").await;
+            let message = if process_handle_exit_code(&self.activation_handle).ok().flatten().is_some() { b"release\n".as_slice() } else { b"terminate\n".as_slice() };
+            let _ = control.write_all(message).await;
             let _ = control.flush().await;
             let _ = control.shutdown().await;
         }
@@ -567,6 +599,18 @@ using System.Runtime.InteropServices;
 
 namespace CodexLiveExplorerPackageGuard
 {
+    public static class ControlInput
+    {
+        // Console.In.ReadLineAsync can block synchronously on .NET Framework.
+        // Run the actual read on a CLR thread, never a PowerShell scriptblock.
+        public static System.Threading.Tasks.Task<string> BeginRead()
+        {
+            return System.Threading.Tasks.Task.Factory.StartNew(
+                () => Console.In.ReadLine(), System.Threading.CancellationToken.None,
+                System.Threading.Tasks.TaskCreationOptions.LongRunning,
+                System.Threading.Tasks.TaskScheduler.Default);
+        }
+    }
     [Flags]
     public enum ActivateOptions : uint
     {
@@ -836,10 +880,15 @@ $terminationIssued = $false
 $terminationSucceeded = $false
 $processExited = $false
 $monitorFailed = $false
-$readTask = [Console]::In.ReadLineAsync()
+$readTask = [CodexLiveExplorerPackageGuard.ControlInput]::BeginRead()
 
 try {
     while ($true) {
+        if ($activatedProcess.HasExited) {
+            Write-CCActivation 'activation PID exit' 'observed' @{pid=$activatedProcessId;exitCode=$activatedProcess.ExitCode}
+            $processExited = $true
+            break
+        }
         if (-not $inputClosed -and $readTask.IsCompleted) {
             $line = $readTask.Result
             if ($null -eq $line) {
@@ -862,6 +911,10 @@ try {
                         $inputClosed = $true
                     }
                 }
+                elseif ($controlMessage -eq 'release') {
+                    $armed = $false
+                    $inputClosed = $true
+                }
                 else {
                     $inputClosed = $true
                     if ($armed) {
@@ -869,7 +922,7 @@ try {
                     }
                 }
                 if (-not $inputClosed) {
-                    $readTask = [Console]::In.ReadLineAsync()
+                    $readTask = [CodexLiveExplorerPackageGuard.ControlInput]::BeginRead()
                 }
             }
         }
@@ -879,6 +932,7 @@ try {
         }
 
         if ($terminateRequested -and -not $terminationIssued) {
+            if ($activatedProcess.HasExited) { $processExited = $true; break }
             $terminationHResult = [int]$controller.TerminateAllProcesses($packageFullName)
             Write-CCActivation 'TerminateAllProcesses' 'returned' @{hresult=$terminationHResult}
             $terminationIssued = $true
@@ -2412,10 +2466,13 @@ mod tests {
             .stderr(Stdio::null());
         let mut helper = helper_command.spawn().expect("spawn failing helper");
         let control = helper.stdin.take();
+        let raw = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, activated_pid) };
+        assert!(!raw.is_null());
         let mut guard = CodexProcessGuard::Package(Box::new(CodexPackageGuard {
             helper,
             control,
             pid: activated_pid,
+            activation_handle: unsafe { OwnedHandle::from_raw_handle(raw.cast()) },
             armed: true,
             stderr_reader: None,
         }));

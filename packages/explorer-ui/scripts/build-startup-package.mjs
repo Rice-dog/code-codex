@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 /** Builds the optional player. dist/startup-early.js is a separate core loader only. */
 export async function buildStartupPackage(root, options, hostVersion) {
-  const id = 'codex-startup-transition', version = '1.1.17', category = 'appearance';
+  const id = 'codex-startup-transition', version = '1.1.18', category = 'appearance';
   const directory = resolve(root, 'dist/plugins', category, id);
   await mkdir(resolve(directory, 'resources'), { recursive: true });
   const asset = `CodeCodex-plugin-${id}-${version}.js`;

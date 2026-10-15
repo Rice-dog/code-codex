@@ -122,6 +122,9 @@ if (earlyBundleBytes >= earlyBundleLimit) {
 
 // Only the tiny verified-cache startup dispatcher is embedded in the core.
 
+// Define optional example data only for the core, after pinned plugins and early loader.
+// Object-valued defines can perturb minifier identifiers even in unrelated builds.
+options.define.__CODE_CODEX_STARTUP_EXAMPLES__ = JSON.stringify(JSON.parse(await readFile(resolve(root,"../../resources/startup-examples/catalog.json"),"utf8")));
 if (watch) {
   const injector = await context({
     ...options,

@@ -552,6 +552,10 @@ function revealExplorer(): CodeCodexElement | null {
 
 const applicationMenuActions = {
   openRuntimeInformation: () => { void openRuntimeInformation(); },
+  openInstallationFolder: () => {
+    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG) ?? revealExplorer();
+    if (explorer?.isConnected) explorer.openInstallationFolder();
+  },
   isExplorerVisible: () => {
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG);
     return !sessionDismissed() && Boolean(explorer?.isConnected && !explorer.hasAttribute("data-home-view-hidden") && explorer.dataset.collapsed !== "true");

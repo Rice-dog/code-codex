@@ -4,6 +4,7 @@ interface ApplicationMenuActions {
   openPreviewMarket(): void;
   checkForUpdates(): void;
   openRuntimeInformation(): void;
+  openInstallationFolder(): void;
 }
 
 interface MenuMount {
@@ -160,6 +161,11 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   updateItem.setAttribute("role", "menuitem");
   updateItem.tabIndex = -1;
   updateItem.textContent = "Check for Updates…";
+  const installationItem = document.createElement("button");
+  installationItem.type = "button";
+  installationItem.setAttribute("role", "menuitem");
+  installationItem.tabIndex = -1;
+  installationItem.textContent = document.documentElement.lang.toLowerCase().startsWith("zh") ? "打开安装目录" : "Open Installation Folder";
   const repositoryItem = document.createElement("a");
   repositoryItem.href = REPOSITORY_URL;
   repositoryItem.target = "_blank";
@@ -169,14 +175,14 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   repositoryItem.textContent = "Open GitHub Repository";
   const separator = document.createElement("div");
   separator.setAttribute("role", "separator");
-  popup.append(treeItem, marketItem, runtimeItem, separator, updateItem, repositoryItem);
+  popup.append(treeItem, marketItem, runtimeItem, installationItem, separator, updateItem, repositoryItem);
 
   // Keep this sibling separate from Codex's React-owned Radix menubar. It
   // shares the visual row without joining Radix's private keyboard collection.
   mount.topBar.insertBefore(host, mount.menubar.nextSibling);
   document.body.append(popup);
 
-  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, updateItem, repositoryItem];
+  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, installationItem, updateItem, repositoryItem];
   const position = () => {
     if (popup.hidden) return;
     const rect = trigger.getBoundingClientRect();
@@ -225,6 +231,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   treeItem.addEventListener("click", () => { close(); actions.toggleExplorer(); }, { signal });
   marketItem.addEventListener("click", () => { close(); actions.openPreviewMarket(); }, { signal });
   runtimeItem.addEventListener("click", () => { close(); actions.openRuntimeInformation(); }, { signal });
+  installationItem.addEventListener("click", () => { close(); actions.openInstallationFolder(); }, { signal });
   updateItem.addEventListener("click", () => { close(); actions.checkForUpdates(); }, { signal });
   repositoryItem.addEventListener("click", () => close(), { signal });
   document.addEventListener("pointerdown", (event) => {

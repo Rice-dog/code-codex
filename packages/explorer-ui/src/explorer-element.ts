@@ -143,6 +143,8 @@ import { STARTUP_BACKGROUNDS, mountStartupBackground } from './startup-backgroun
 import { loadStartupVideo, removeStartupVideo, saveStartupVideo, listStartupVideos, attachStartupCinema, type StartupVideo } from "./startup-transition-facade";
 import { observePluginControls } from "./runtime-information";
 import { runtimeEvent, runtimeTaskLabel } from "./runtime-events";
+import { downloadStartupExamples, type ExampleProgress } from './startup-video-examples';
+import { flushStartupVideoPersistence } from './renderer-storage';
 import { beginRuntimeOperation, runtimeErrorDetails, recordCaughtRuntimeError } from "./runtime-operations";
 import { clipFadeOpacity, formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-facade";
 import { activePageElements, MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
@@ -5549,7 +5551,7 @@ function startupTransitionPanelMarkup(): string {
           </div>
         </div>
       </div>
-      <section class="particle-settings-group particle-source-details startup-video-library startupTransition-library" open><header class="particle-source-summary">${bilingualLabelMarkup("视频素材库", "Video library")}<span class="startup-video-library-count particle-source-count"></span></header>
+      <section class="particle-settings-group particle-source-details startup-video-library startupTransition-library" open><header class="particle-source-summary">${bilingualLabelMarkup("视频素材库", "Video library")}<span class="startup-examples-control"><button type="button" class="startup-examples-download">${bilingualLabelMarkup("下载示例", "Download examples")}</button><span class="startup-examples-progress" role="progressbar" aria-label="Downloading startup examples" aria-valuemin="0" aria-valuemax="100" hidden><span class="startup-examples-progress-fill"></span><span class="startup-examples-progress-label"></span></span></span><span class="startup-video-library-count particle-source-count"></span></header>
         <div class="particle-library-toolbar"><input class="startupTransition-file" type="file" accept="video/*" multiple hidden><span class="startupTransition-library-summary"></span></div>
         <div class="particle-library-grid startupTransition-library-grid"></div>
         <div class="startup-video-pager"><button class="particle-library-clear startup-video-prev" type="button" aria-label="Previous page">‹</button><output class="startup-video-page"></output><button class="particle-library-clear startup-video-next" type="button" aria-label="Next page">›</button></div>
@@ -5693,6 +5695,8 @@ export class CodeCodexElement extends HTMLElement {
   #startupTransitionPending = false;
   #startupVideo: StartupVideo | null = null;
   #startupVideos: StartupVideo[] = [];
+  #startupExamplesAbort: AbortController | undefined;
+  #startupExamplesProgress: ExampleProgress | undefined;
   #startupLibraryPage = 0;
   #startupLibraryUrls: string[] = [];
   #startupCinema: ReturnType<typeof attachStartupCinema> | undefined;
@@ -6675,6 +6679,13 @@ this.#showActionNotice(String(error),"error");}}
 
   checkForUpdates(): void {
     void this.#checkForUpdates();
+  }
+  openInstallationFolder(): void {
+    if (!this.#bridge?.available) { this.#showActionNotice("Code-Codex is disconnected", "error"); return; }
+    void this.#bridge.request("explorer.installation.open").catch(error => {
+      recordCaughtRuntimeError("open installation folder", error);
+      if (this.#connected) this.#showActionNotice(error instanceof Error ? error.message : String(error), "error");
+    });
   }
 
   async disable(): Promise<void> {
@@ -13950,6 +13961,8 @@ this.#showActionNotice(String(error),"error");}}
 
 
   #closeStartupTransition(): void {
+    this.#startupExamplesAbort?.abort();this.#startupExamplesAbort=undefined;
+    if(this.#startupExamplesProgress){this.#startupExamplesProgress=undefined;this.#startupVideoPending=false;}
     this.#startupVideoGeneration += 1;
     this.#startupTimelineFramesAbort?.abort();
     this.#stopStartupPreview();
@@ -14191,6 +14204,7 @@ this.#showActionNotice(String(error),"error");}}
   }
 
   #renderStartupVideoLibrary(): void {
+    this.#renderStartupExamplesControl();
     this.#startupLibraryUrls.forEach(url=>URL.revokeObjectURL(url));this.#startupLibraryUrls=[];
     const grid=this.#required<HTMLElement>('.startupTransition-library-grid');grid.replaceChildren();
     const panel=this.#required<HTMLElement>('#cle-startupTransition-settings'), english=panel.dataset.language==='en';
@@ -14221,6 +14235,50 @@ this.#showActionNotice(String(error),"error");}}
     add.innerHTML='<span class="particle-library-thumb startup-video-add-preview" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="particle-library-name" aria-hidden="true">&nbsp;</span>';
     add.addEventListener('click',()=>this.#required<HTMLInputElement>('.startupTransition-file').click());addItem.append(add);grid.append(addItem);
     this.#positionStartupTransition();
+  }
+
+  #renderStartupExamplesControl():void {
+    const button=this.#shadow.querySelector<HTMLButtonElement>('.startup-examples-download');
+    const bar=this.#shadow.querySelector<HTMLElement>('.startup-examples-progress');
+    if(!button||!bar)return;
+    const progress=this.#startupExamplesProgress;
+    button.hidden=Boolean(progress);button.disabled=this.#startupVideoPending||!this.#bridge?.available;
+    bar.hidden=!progress;
+    if(progress){
+      const english=this.#shadow.querySelector<HTMLElement>('#cle-startupTransition-settings')?.dataset.language==='en';
+      const labels=english?{checking:'Checking',downloading:'Downloading',verifying:'Verifying',importing:'Saving',complete:'Done'}:{checking:'检查',downloading:'下载',verifying:'校验',importing:'保存',complete:'完成'};
+      bar.setAttribute('aria-valuenow',String(progress.percent));
+      this.#required<HTMLElement>('.startup-examples-progress-fill').style.width=progress.percent+'%';
+      this.#required<HTMLElement>('.startup-examples-progress-label').textContent=`${labels[progress.phase]} ${progress.percent}%`;
+    }
+  }
+
+  async #downloadStartupExamples():Promise<void> {
+    if(this.#startupVideoPending||!this.#bridge?.available)return;
+    const bridge=this.#bridge,controller=new AbortController();this.#startupExamplesAbort=controller;
+    this.#required<HTMLElement>('.startupTransition-error').hidden=true;
+    this.#startupVideoPending=true;this.#startupExamplesProgress={phase:'checking',percent:0,index:0,total:2};
+    this.#renderStartupTransition();this.#renderStartupVideoLibrary();
+    const active=()=>this.#connected&&this.#startupExamplesAbort===controller&&!controller.signal.aborted&&this.#bridge===bridge;
+    try {
+      const result=await downloadStartupExamples(bridge.request.bind(bridge),controller.signal,p=>{if(active()){this.#startupExamplesProgress=p;this.#renderStartupExamplesControl();}},async video=>{
+        if(!active())return;
+        const current=readStartupTransitionSettings();
+        const profileSettings=settingsForStartupVideo(current,video.id,video.duration);
+        const next=current.selectedVideoId?current:profileSettings;
+        if(!writeStartupTransitionSettings({...next,videoOrder:[...new Set([...current.videoOrder,video.id])],videoProfiles:{...current.videoProfiles,[video.id]:startupVideoProfile(profileSettings)}}))throw new Error('Example video was saved, but its preferences could not be saved');
+        if(getBootstrapConfig().centralizedStorage)await flushStartupVideoPersistence();
+      });
+      if(active()){
+        this.#showActionNotice(this.#required<HTMLElement>('#cle-startupTransition-settings').dataset.language==='en'?(result.alreadyDownloaded?'Examples already downloaded':'Examples downloaded'):(result.alreadyDownloaded?'示例已下载':'示例下载完成'));
+        if(result.added)await this.#loadStartupVideoForPanel();
+      }
+    }catch(error){
+      if(error instanceof DOMException&&error.name==='AbortError'){runtimeEvent('startup-examples','panel import','cancelled',{cachedDownloadsMayFinish:true});}
+      else{recordCaughtRuntimeError('startup examples download/import',error);if(active())this.#showStartupTransitionError(error);}
+    }finally{
+      if(this.#startupExamplesAbort===controller){this.#startupExamplesAbort=undefined;this.#startupExamplesProgress=undefined;this.#startupVideoPending=false;if(this.#connected){this.#renderStartupTransition();this.#renderStartupVideoLibrary();}}
+    }
   }
 
   async #removeStartupLibraryVideo(id: string): Promise<void> {
@@ -14533,6 +14591,7 @@ this.#showActionNotice(String(error),"error");}}
       });
     }
     const fileInput = this.#required<HTMLInputElement>(".startupTransition-file");
+    this.#required<HTMLButtonElement>('.startup-examples-download').addEventListener('click',()=>{void this.#downloadStartupExamples();});
     fileInput.addEventListener("change", async () => {
       const files=Array.from(fileInput.files??[]);fileInput.value="";
       if(!files.length || this.#startupVideoPending)return;

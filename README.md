@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.47-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.48-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -27,6 +27,8 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 ![Codex 中的 Code-Codex 文件树](docs/screenshots/file-tree-conversation.png)
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
+
+本地候选 **v0.4.48 / Startup 1.1.18**：修复包辅助程序阻塞退出监测导致的迟到启动报错；正常结束与真正故障分开记录。Code-Codex 菜单新增打开安装目录；视频库标题旁新增下载示例按钮，下载 The Intelligence Age 与 Introducing GPT-5，显示进度并按内容去重，保留当前视频与参数。示例独立按需下载，不内置安装包。生产构建、类型检查、485 项 Rust 测试及基础/示例界面回归已通过；应用版本尚未公开发布。
 
 当前公开版本 **v0.4.47**：启动动画保留基础界面和原视频素材库，直接实时播放原视频，固定使用当前选中的素材；加号卡片添加、悬停叉号删除。高级选项、双轨编辑和 Ctrl+S 预合成已移除，原视频与基础参数保留；旧派生缓存按受控范围清理。启动和安装诊断补充具体操作与底层原因。Startup 插件为 1.1.17，其余 23 个插件及默认媒体继续复用 v0.3.96。已发布为 [GitHub Release v0.4.47](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.47)。偶发动画就绪等待时间过长仍未修复，完整官方冷启动及公开旧版直接升级尚未重新实测。
 
@@ -103,7 +105,7 @@ EXE 成功安装后保留当前版本与实际上一版，安全清理更旧的�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.47
+./scripts/package.ps1 -Version 0.4.48
 ```
 
 生成结果会写入 `releases/`。

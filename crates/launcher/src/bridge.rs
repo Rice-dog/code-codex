@@ -4329,6 +4329,7 @@ impl BridgeHandler for NativeBridge {
         let method = request.method.clone();
         let started = std::time::Instant::now();
         let log_operation = !method.starts_with("explorer.runtime.")
+            && method != "explorer.startupExamples.status"
             && method != "explorer.plugins.status"
             && !method.ends_with(".chunk")
             && !method.ends_with(".resource.chunk");
@@ -4357,6 +4358,30 @@ impl BridgeHandler for NativeBridge {
                   })
                 },
                 "explorer.runtime.check" => Ok(crate::support_checks::run().await),
+                "explorer.startupExamples.status" => crate::startup_examples::status(),
+                "explorer.startupExamples.download" => {
+                    if request.params.as_object().is_none_or(|p|p.keys().any(|k|k!="id")){return Err(BridgeError::invalid_request());}
+                    let id=request.params.get("id").and_then(Value::as_str).ok_or_else(BridgeError::invalid_request)?;
+                    crate::startup_examples::download(id).await
+                }
+                "explorer.startupExamples.chunk" => {
+                    if request.params.as_object().is_none_or(|p|p.keys().any(|k|k!="id"&&k!="offset")){return Err(BridgeError::invalid_request());}
+                    let id=request.params.get("id").and_then(Value::as_str).ok_or_else(BridgeError::invalid_request)?;
+                    let offset=request.params.get("offset").and_then(Value::as_u64).and_then(|n|usize::try_from(n).ok()).ok_or_else(BridgeError::invalid_request)?;
+                    crate::startup_examples::chunk(id,offset)
+                }
+                "explorer.installation.open" => {
+                    if request.params.as_object().is_some_and(|p| !p.is_empty()) { return Err(BridgeError::invalid_request()); }
+                    let root = workspace_service::application_paths::install_root().map_err(|e|BridgeError::new("INSTALLATION_ROOT",format!("Resolving the installation folder failed: {e}")))?.ok_or_else(||BridgeError::new("INSTALLATION_UNAVAILABLE","No installed Code-Codex directory was found."))?;
+                    workspace_service::application_paths::validate_install_root(&root).map_err(|e|BridgeError::new("INSTALLATION_ROOT",format!("Validating the installation folder failed: {e}")))?;
+                    #[cfg(windows)]
+                    {
+                        tokio::task::spawn_blocking(move || reveal_in_file_explorer(&root)).await.map_err(|e|BridgeError::new("INSTALLATION_OPEN",format!("Installation folder worker failed: {e}")))?.map_err(|e|BridgeError::new("INSTALLATION_OPEN",format!("Opening the installation folder failed: {e}")))?;
+                        Ok(json!({"opened":true}))
+                    }
+                    #[cfg(not(windows))]
+                    { Err(BridgeError::new("UNSUPPORTED","Opening the installation folder is unavailable on this platform.")) }
+                }
                 "explorer.runtime.list" => {
                     crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))
                 }

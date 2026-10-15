@@ -85,6 +85,14 @@ function installHooks(){
   for(const name of ['put','add','delete','clear'] as const){const original=IDBObjectStore.prototype[name];Object.defineProperty(IDBObjectStore.prototype,name,{configurable:true,writable:true,value:function(this:IDBObjectStore,...args:unknown[]){const result=Reflect.apply(original,this,args);const scope=scopes.find(s=>s.db===this.transaction.db.name&&s.store===this.name);if(scope&&!state.initializing.has(scope.id)){for(const key of state.fingerprints.keys()){if(key.startsWith(scope.id+':'))state.fingerprints.delete(key);}this.transaction.addEventListener('complete',()=>schedule(scope.id,()=>syncMedia(scope)),{once:true});}return result;}});}
   window.addEventListener('storage',event=>{if(event.key&&ownKey(event.key))schedule('preferences',()=>call({action:'settings.write',values:preferences()}).then(()=>{}));});
 }
+export async function flushStartupVideoPersistence():Promise<void> {
+  const key='startup',timer=state.timers.get(key);if(timer)clearTimeout(timer);state.timers.delete(key);
+  const previous=state.queues.get(key)??Promise.resolve();
+  const task=previous.catch(()=>{}).then(()=>syncMedia(scopes[0]!));state.queues.set(key,task);
+  await task;
+  await call({action:'settings.write',values:preferences()});
+}
+
 export function reconnectRendererStorage(request:Request){
   // All storage operations share one lane, leaving the existing 120/s gate room
   // for interactive UI traffic. Never retry a write after an ambiguous result.

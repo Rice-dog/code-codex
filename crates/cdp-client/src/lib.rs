@@ -706,6 +706,7 @@ pub struct SupervisorProgressSnapshot {
     pub bootstrap_failures: u64,
     pub layout_probe_attempts: u64,
     pub layout_probe_matches: u64,
+    pub last_layout_diagnostic: Option<Value>,
     pub last_ready_state: &'static str,
     pub last_phase: &'static str,
     pub events: Vec<String>,
@@ -1490,6 +1491,19 @@ where
                 return Err(CdpError::IncompatibleRenderer);
             }
             break true;
+        }
+        if let Some(progress) = &progress {
+            if progress.snapshot().layout_probe_attempts % 40 == 1 {
+                let expression = include_str!("renderer-layout-diagnostic.js").replace("__PREDICATE__", RENDERER_LAYOUT_PROBE);
+                let diagnostic_id = next_id; next_id += 1;
+                if send_command_before_deadline(&mut socket, diagnostic_id, "Runtime.evaluate", json!({"expression":expression,"returnByValue":true}), cold_startup_deadline).await.is_ok() {
+                    if let Ok(diagnostic) = wait_for_command_before_deadline(&mut socket, diagnostic_id, &mut setup_events, cold_startup_deadline).await {
+                        if let Some(value) = diagnostic.pointer("/result/value") {
+                            progress.update(|state| state.last_layout_diagnostic = Some(layout_observation(value)));
+                        }
+                    }
+                }
+            }
         }
         if final_probe_requested {
             return Err(CdpError::IncompatibleRenderer);
@@ -2348,6 +2362,25 @@ fn parse_cdp_message(text: &str) -> Result<Value, CdpError> {
             ),
         )
     })
+}
+
+fn layout_observation(value: &Value) -> Value {
+    let mut result = serde_json::Map::new();
+    for name in ["diagnosticVersion","topFrame","appOrigin","accepted","mainCount","totalMainCount","inactiveMainCount","activePageCount","sidebarTriggerCount","nativeFeaturePage","nativeLoginPage","legacyShellMatch","workspaceRowPresent","rowMainCount","mainContentClip","directRailCount","workspaceCount","railBeforeWorkspace","workspaceContainsMain"] {
+        if let Some(v) = value.get(name).filter(|v| v.is_boolean() || v.is_u64()) { result.insert(name.to_owned(),v.clone()); }
+    }
+    // Never copy titles, URLs, page text, arbitrary strings or raw ancestor shapes.
+    Value::Object(result)
+}
+
+#[cfg(test)]
+mod layout_observation_tests {
+    use super::*;
+    #[test]
+    fn observation_preserves_shape_counts_but_not_page_content() {
+        let v=layout_observation(&json!({"accepted":false,"mainCount":0,"sidebarTriggerCount":1,"title":"PRIVATE","url":"PRIVATE","rowChildren":["PRIVATE"],"mainContentClip":"PRIVATE"}));
+        assert_eq!(v,json!({"accepted":false,"mainCount":0,"sidebarTriggerCount":1}));
+    }
 }
 
 fn renderer_probe_matches(result: &Value) -> bool {

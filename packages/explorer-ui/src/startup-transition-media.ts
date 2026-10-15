@@ -83,11 +83,12 @@ function inspectVideo(file: File): Promise<{duration:number;thumbnail?:Blob}> {
   });
 }
 
-export async function saveStartupVideo(file: File): Promise<StartupVideo> {
+export async function saveStartupVideo(file: File, stableId?: string): Promise<StartupVideo> {
+  if(stableId !== undefined && !/^[a-f0-9]{32}$/.test(stableId)) throw new Error("Invalid startup example identity");
   if (!file.type.startsWith("video/") || file.size === 0) throw new Error("Choose a playable video file");
   if (file.size > MAX_VIDEO_BYTES) throw new Error("Choose a video smaller than 128 MB");
   const inspected = await inspectVideo(file);
-  const record: StartupVideo = { id: crypto.randomUUID().replaceAll("-",""), blob: file, name: file.name, ...inspected, size: file.size, type: file.type,createdAt:Date.now() };
+  const record: StartupVideo = { id: stableId ?? crypto.randomUUID().replaceAll("-",""), blob: file, name: file.name, ...inspected, size: file.size, type: file.type,createdAt:Date.now() };
   const database = await openDatabase();
   try {
     await new Promise<void>((resolve, reject) => {

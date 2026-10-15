@@ -1,0 +1,4 @@
+[
+  {"id":"the-intelligence-age","name":"The Intelligence Age.mp4","asset":"The-Intelligence-Age.mp4","releaseTag":"startup-examples-v1","size":8748334,"sha256":"52b3b511796a483f100f87eb45802f9fa0d1454530458c7e48933d628a58c478","type":"video/mp4","source":"OpenAI official promotional video; original clip supplied by the project maintainer"},
+  {"id":"introducing-gpt-5","name":"Introducing GPT-5.mp4","asset":"Introducing-GPT-5.mp4","releaseTag":"startup-examples-v1","size":6858397,"sha256":"33947619dcc6cc7c1ff79ceb984a679df8487a18811fa4908a1d841764a47e6a","type":"video/mp4","source":"OpenAI official promotional video; original clip supplied by the project maintainer"}
+]
