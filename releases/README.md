@@ -1,8 +1,69 @@
-## 本地维护 v0.4.48 / Local maintenance v0.4.48
+## v0.4.48 — 启动监督修复、安装目录与动画示例
 
-修复包helper阻塞退出监测与迟到启动误报，正常exit0按原handle结束监督；真实非零/安全/协议/存活资格错误仍报告。顶部Code-Codex菜单增加打开安装目录。视频库标题旁添加灰色下载示例按钮、原位置进度和内容去重；The Intelligence Age/Introducing GPT-5保留原字节，固定选源/profile不变。Startup1.1.18，其余23包pin v0.3.96。示例独立托管startup-examples-v1，应用48尚未GitHub发布。485 Rust（4忽略）、15维护UI/29基础/25默认/7 early、原生真实公开样例GET通过；本轮未完整官方冷启动、独立MSI安装或远端用户机器复现。
+## 简体中文
 
-Fix blocking package-helper exit observation and delayed false startup errors, ending supervision on verified normal exit; genuine nonzero/security/protocol/live qualification failures remain errors. The menu opens the installation root. A subdued library button downloads original The Intelligence Age/Introducing GPT-5 examples with inline progress and content deduplication, preserving selection/profiles. Startup1.1.18; the other 23 packages stay on v0.3.96. Samples are independently hosted as startup-examples-v1; app48 is not published. 485 Rust tests (4 ignored), 15 maintenance UI/29 basic/25 defaults/7 early checks and real native public-sample GET passed. Full official cold launch, independent MSI installation and remote-user reproduction were not performed.
+本版修复已定位的迟到启动误报，增加打开安装目录和启动动画示例下载，保留基础实时播放与现有视频素材。
+
+### 更新内容
+
+- **启动监督修复**：修复辅助程序等待控制输入时阻塞进程退出检查的问题。已核验的原进程正常退出后结束监督，保留此前记录；真实非零退出、身份/协议错误和仍存活的连接故障继续报告。补充最后一次布局观察，避免最终连接错误掩盖先前检查过程。
+- **打开安装目录**：顶部 Code-Codex 菜单新增“打开安装目录”，打开实际安装根，支持自定义位置。
+- **下载动画示例**：视频素材库标题旁新增低调灰色“下载示例”按钮，下载 The Intelligence Age 与 Introducing GPT-5。按钮原位置显示下载、校验和导入进度；按完整内容去重，两份已存在时提示已下载，部分失败后重试仅补齐缺项。
+
+### 升级说明
+
+- 推荐运行本版 EXE，沿用已有安装目录。文件树内更新保持 Installing → Finish，首次安装保留完整向导。
+- Startup 插件更新至 **1.1.18**；其余 23 个插件及默认媒体继续复用 v0.3.96。
+- 原视频库、当前选源和逐视频基础参数保留。仍直接实时播放所选原视频，没有恢复高级模式或预合成缓存。示例只在主动点击时下载，不增加安装包内视频体积。
+- 如当前窗口仍显示旧界面，通过 Code-Codex 重新启动官方应用以加载新版核心和播放器。
+
+### 验证与兼容
+
+- Windows x64：生产构建/类型检查通过；485 项 Rust 测试通过、4 项忽略；真实 PS5.1 退出监测及独立执行的原生公开示例下载通过。
+- 15 项维护界面、29 项基础、25 项默认/迁移及7项新文档检查通过；浏览器 fixture 使用生产代码和原视频，原生 RPC 部分为模拟。
+- 正式 EXE 本机升级、五组件校验、原37文件保持、当前宿主核心/播放器及实际目录打开、示例不重复导入通过。安装完成协议已确认，未取得可见 Finish 截图。
+- 完整官方冷启动、独立 MSI 安装、远端用户机器的进程交接尚未实测。偶发动画就绪等待过长不属于本版已修复范围。
+
+### 下载与来源
+
+推荐 `CodeCodex-0.4.48-x64-setup.exe`；另提供 MSI、ZIP、独立卸载器、Startup 插件 JS、插件目录和 `SHA256SUMS.txt`。校验文件仅列本 Release 实际提供的六个下载文件。
+
+两个示例为维护者提供的 OpenAI 官方宣传片原始素材，独立托管于[示例资源 Release](https://github.com/Rice-dog/code-codex/releases/tag/startup-examples-v1)，来源见其中 SOURCES.md。第三方视频不属于本项目 MIT 原创内容，Code-Codex 与 OpenAI 无关联。
+
+## English
+
+This release fixes an identified delayed startup-error popup and adds installation-folder opening and optional startup-animation examples, retaining basic realtime playback and existing media.
+
+### Changes
+
+- **Startup supervision**: fix control-input reading blocking process-exit observation. End supervision when the verified original process exits normally while preserving diagnostic history. Genuine nonzero exits, identity/protocol errors and failures with a live process remain visible. Retain the latest bounded layout observation rather than only the final connection error.
+- **Open Installation Folder**: the Code-Codex menu opens the actual installation root, including custom locations.
+- **Download examples**: a subdued library-header button downloads The Intelligence Age and Introducing GPT-5. Download, verification and import progress replace the button in place. Full-content deduplication reports already-downloaded items; retries add only missing examples.
+
+### Upgrade
+
+- Use the EXE and retain the existing installation directory. In-app updating remains Installing → Finish; first installation keeps the complete wizard.
+- Startup plugin is **1.1.18**; the other 23 plugins and default media stay pinned to v0.3.96.
+- Original videos, selection and per-video basic settings remain intact. Selected originals still play in realtime; advanced editing and precomposition caches are not restored. Samples download only on request and are excluded from the installer.
+- If an open window still shows the old UI, restart the official application through Code-Codex to load the new core and player.
+
+### Validation and compatibility
+
+- Windows x64 production build/type checks passed; 485 Rust tests passed, 4 ignored. Native PS5.1 exit monitoring and a separately invoked real native public-sample download passed.
+- 15 maintenance UI, 29 basic, 25 defaults/migration and 7 new-document checks passed. Browser fixtures use production code and original videos with simulated native RPC.
+- Formal EXE upgrade, five component hashes, 37 original files, the live core/player, actual folder opening and duplicate-free sample handling verified. The Finish protocol was acknowledged; no visible Finish screenshot was captured.
+- Full official cold launch, independent MSI installation and remote-user process handoff remain untested. Occasional excessive animation readiness waiting is outside this fix.
+
+### Downloads and credits
+
+Recommended: `CodeCodex-0.4.48-x64-setup.exe`. MSI, ZIP, standalone uninstaller, Startup JS, plugin catalog and `SHA256SUMS.txt` are also provided. Checksums list the six downloadable files in this release.
+
+The original OpenAI promotional clips were supplied by the maintainer and are independently hosted in the [sample-media release](https://github.com/Rice-dog/code-codex/releases/tag/startup-examples-v1); see its SOURCES.md. Third-party footage is not original project content under MIT. Code-Codex is not affiliated with OpenAI.
+
+[Full changelog](https://github.com/Rice-dog/code-codex/compare/v0.4.47...v0.4.48)
+
+
+发布 / Publication: [GitHub Latest v0.4.48](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.48), [PR #57](https://github.com/Rice-dog/code-codex/pull/57), main `2194b03`. 七个附件公开下载大小、SHA-256与API digest已核验；包内README保留构建时快照。 / All seven public attachments verified for size, SHA-256 and API digest; bundled READMEs retain their build-time snapshot.
 
 ## v0.4.47 — 基础实时启动动画与固定视频选择
 

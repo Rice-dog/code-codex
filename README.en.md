@@ -31,28 +31,26 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Local candidate **v0.4.48 / Startup 1.1.18** fixes delayed startup errors caused by blocking package-helper input and distinguishes normal exit from real failures. The Code-Codex menu opens the installation folder. A subdued video-library button downloads The Intelligence Age and Introducing GPT-5 with progress and content deduplication, preserving the selected video and preferences. Examples are optional downloads outside the installer. Production build, type checks, 485 Rust tests and basic/sample UI regressions passed; this application version is not publicly released.
-
-Public version **v0.4.47** retains the basic startup panel and original video library, plays originals in realtime and always uses the selected item. Add through a plus card and remove through a hover delete cross. Advanced options, two-track editing and Ctrl+S precomposition are removed; original videos and basic preferences remain, with controlled retirement of derived caches. Startup and installation diagnostics include specific operations and underlying causes. Startup plugin is 1.1.17; the other 23 plugins and default media remain pinned to v0.3.96. Published as [GitHub Release v0.4.47](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.47). Occasional excessive readiness waiting remains unresolved; full official cold launch and direct upgrade from the previous public release were not retested.
+Public version **v0.4.48 / Startup 1.1.18** fixes delayed startup-error popups caused by blocking package-helper input, recording normal exit separately from genuine failures. The Code-Codex menu adds Open Installation Folder. A subdued library-header Download examples button downloads The Intelligence Age and Introducing GPT-5 with inline progress and content deduplication, preserving selection and settings. Samples are optional downloads outside the installer. The basic panel, plus-card import/hover deletion and realtime playback of the selected original remain unchanged; no advanced editing or precomposition cache. The other 23 plugins and default media remain pinned to v0.3.96. Published as [GitHub Release v0.4.48](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.48). 485 native tests passed, 4 ignored; full official cold launch, independent MSI installation and remote-user handoff remain untested. Occasional excessive animation readiness waiting is not resolved.
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
 
 ## Install Option 1: Download EXE
 
-Download the installer from [GitHub Release v0.4.47](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.47). [`releases`](releases/) retains the corresponding build assets:
+Download the installer from [GitHub Release v0.4.48](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.48). [`releases`](releases/) retains the corresponding build assets:
 
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.4.47-x64-setup.exe`
-- Alternative: `CodeCodex-0.4.47-x64.msi`
-- Portable package: `CodeCodex-0.4.47-x64.zip`
+- Recommended: `CodeCodex-0.4.48-x64-setup.exe`
+- Alternative: `CodeCodex-0.4.48-x64.msi`
+- Portable package: `CodeCodex-0.4.48-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.4.47-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.4.48-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -302,7 +300,7 @@ workflows are not included in this public source package.
 
 ## Centralized storage
 
-The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.47-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.48-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
 
 Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
 
