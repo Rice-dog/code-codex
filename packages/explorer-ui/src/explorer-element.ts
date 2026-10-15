@@ -138,7 +138,7 @@ import { PIXEL_SCULPT_DEFAULTS, normalizePixelSculptSettings, readPixelSculptBac
 import { ActiveThreadTracker } from "./active-thread";
 import { SurfaceOpacityPlugin, surfaceOpacityCardMarkup, surfaceOpacityPanelMarkup, SURFACE_OPACITY_TREE_CSS } from "./surface-opacity";
 import { BLINKING_SQUARES_DEFAULTS, type BlinkingSquaresSettings } from "./blinking-squares-settings";
-import { DEFAULT_STARTUP_TRANSITION_SETTINGS, readStartupTransitionSettings, writeStartupTransitionSettings, startupDefaultClip, settingsForStartupVideo, startupVideoProfile, type StartupTransitionSettings } from "./startup-transition-plugin";
+import { DEFAULT_STARTUP_TRANSITION_SETTINGS, readStartupTransitionSettings, writeStartupTransitionSettings, startupDefaultClip, settingsForStartupVideo, startupVideoProfile, startupTransitionModule, type StartupTransitionSettings } from "./startup-transition-plugin";
 import { STARTUP_BACKGROUNDS, mountStartupBackground } from './startup-background';
 import { loadStartupVideo, removeStartupVideo, saveStartupVideo, listStartupVideos, attachStartupCinema, type StartupVideo } from "./startup-transition-facade";
 import { observePluginControls } from "./runtime-information";
@@ -5691,6 +5691,7 @@ export class CodeCodexElement extends HTMLElement {
   #blinkingSquaresInitialization: Promise<void> | undefined;
   #blinkingSquaresEventsBound = false;
   #startupTransitionEventsBound = false;
+  #startupTransitionPackageAvailable: boolean | undefined;
   #startupTransitionNativeSync: Promise<void> = Promise.resolve();
   #startupTransitionPending = false;
   #startupVideo: StartupVideo | null = null;
@@ -14029,6 +14030,22 @@ this.#showActionNotice(String(error),"error");}}
   }
 
   #renderStartupTransition(): void {
+    const available = Boolean(startupTransitionModule());
+    if (available !== this.#startupTransitionPackageAvailable) {
+      this.#startupTransitionPackageAvailable = available;
+      runtimeEvent('startup-animation', 'settings renderer', available ? 'available' : 'skipped', {
+        packageId: 'codex-startup-transition',
+        reason: available ? 'player module registered' : 'optional player module not loaded',
+        coreInitializationContinues: true,
+        networkRequested: false,
+      });
+    }
+    // A fresh installation has no optional player. Rendering the market must
+    // not enter its timeline/media facade or abort core task/tree initialization.
+    if (!available) {
+      this.#backgroundPackageMarket?.queueRender();
+      return;
+    }
     const settings = readStartupTransitionSettings();
     const panel = this.#required<HTMLElement>("#cle-startupTransition-settings");
     const backgroundMode = settings.source === 'background';
@@ -14246,10 +14263,13 @@ this.#showActionNotice(String(error),"error");}}
     bar.hidden=!progress;
     if(progress){
       const english=this.#shadow.querySelector<HTMLElement>('#cle-startupTransition-settings')?.dataset.language==='en';
-      const labels=english?{checking:'Checking',downloading:'Downloading',verifying:'Verifying',importing:'Saving',complete:'Done'}:{checking:'检查',downloading:'下载',verifying:'校验',importing:'保存',complete:'完成'};
-      bar.setAttribute('aria-valuenow',String(progress.percent));
+      const labels=english?{checking:'Checking',connecting:'Connecting',downloading:'Downloading',verifying:'Verifying',importing:'Saving',complete:'Done'}:{checking:'检查',connecting:'连接中',downloading:'下载',verifying:'校验',importing:'保存',complete:'完成'};
+      const waiting=progress.phase==='checking'||progress.phase==='connecting';
+      if(waiting)bar.removeAttribute('aria-valuenow');else bar.setAttribute('aria-valuenow',String(progress.percent));
+      bar.setAttribute('aria-valuetext',labels[progress.phase]);
       this.#required<HTMLElement>('.startup-examples-progress-fill').style.width=progress.percent+'%';
-      this.#required<HTMLElement>('.startup-examples-progress-label').textContent=`${labels[progress.phase]} ${progress.percent}%`;
+      this.#required<HTMLElement>('.startup-examples-progress-label').textContent=waiting?`${labels[progress.phase]}…`:`${labels[progress.phase]} ${progress.percent}%`;
+      bar.title=`${labels[progress.phase]} · ${progress.index}/${progress.total}`;
     }
   }
 
@@ -14498,6 +14518,12 @@ this.#showActionNotice(String(error),"error");}}
     });
     trigger.addEventListener("click", () => {
       if (panel.matches(":popover-open")) { this.#closeStartupTransition(); return; }
+      // Normal clicks are loaded/replayed by the market's capture handler.
+      // Keep stale/programmatic actions from opening an unavailable player.
+      if (!startupTransitionModule()) {
+        this.#showActionNotice('Download Codex Startup Transition in Preview Market before opening its settings', 'error');
+        return;
+      }
       for (const other of this.#shadow.querySelectorAll<HTMLElement>(".particle-settings-panel")) {
         if (other !== panel && other.matches(":popover-open")) other.hidePopover();
       }

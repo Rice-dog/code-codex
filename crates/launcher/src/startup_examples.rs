@@ -14,6 +14,8 @@ use std::{
 };
 
 const CATALOG: &str = include_str!("../../../resources/startup-examples/catalog.json");
+const RESPONSE_WAIT: Duration = Duration::from_secs(20);
+const BODY_IDLE_WAIT: Duration = Duration::from_secs(20);
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Sample {
@@ -247,32 +249,101 @@ async fn download_at_root(s: &Sample, root: &Path) -> Result<(Vec<u8>, bool), Br
         crate::runtime_log::record("startup-examples","HTTP redirect",if allowed{"followed"}else{"rejected"},json!({"operationId":request_operation,"status":a.status().as_u16(),"toHost":a.url().host_str(),"redirectCount":a.previous().len(),"trusted":trusted(a.url())}));
         if allowed{a.follow()}else{a.stop()}
     })).build().map_err(|e|err("EXAMPLE_NETWORK",crate::network_diagnostics::error_message(&e)))?;
-    progress(&s.id, "downloading", 0, None, None)?;
-    let response = trace.send(client.get(&endpoint)).await.map_err(|e| {
-        err(
-            "EXAMPLE_NETWORK",
-            crate::network_diagnostics::error_message(&e),
-        )
-    })?;
-    if !response.status().is_success() || !trusted(response.url()) {
+    progress(&s.id, "connecting", 0, None, None)?;
+    let response = response_headers(s, client.get(&endpoint), &mut trace, RESPONSE_WAIT).await?;
+    if let Err(error) = check_http_status(s, response.status()) {
+        trace.operation.finish("failed", json!({"id":s.id,"asset":s.asset,"status":response.status().as_u16(),"code":error.code,"phase":"response headers","receivedBytes":0}));
+        return Err(error);
+    }
+    if !trusted(response.url()) {
         return Err(err(
-            "EXAMPLE_HTTP",
-            format!(
-                "Example {} HTTP {} or untrusted redirect",
-                s.id,
-                response.status()
-            ),
+            "EXAMPLE_REDIRECT",
+            format!("Example {} response used an untrusted redirect", s.id),
         ));
     }
+    progress(&s.id, "downloading", 0, None, None)?;
     let bytes = receive(s, response, &root, &mut trace).await?;
     trace.operation.finish("passed",json!({"id":s.id,"receivedBytes":bytes.len(),"integrityVerified":true,"cacheCommitted":true}));
     Ok((bytes, false))
 }
+fn check_http_status(s: &Sample, status: reqwest::StatusCode) -> Result<(), BridgeError> {
+    if status.is_success() {
+        return Ok(());
+    }
+    let code = if status == reqwest::StatusCode::NOT_FOUND {
+        "EXAMPLE_NOT_FOUND"
+    } else {
+        "EXAMPLE_HTTP"
+    };
+    Err(err(
+        code,
+        format!(
+            "Example {}: HTTP {}; asset={} release={}. {}",
+            s.id,
+            status.as_u16(),
+            s.asset,
+            s.release_tag,
+            if status == reqwest::StatusCode::NOT_FOUND {
+                "The published example asset was not found."
+            } else {
+                "The server refused or could not serve the example request."
+            }
+        ),
+    ))
+}
+fn wait_timeout(
+    s: &Sample,
+    trace: &mut crate::network_diagnostics::HttpTrace,
+    phase: &str,
+    wait: Duration,
+    received: usize,
+) -> BridgeError {
+    let code = if phase == "response headers" {
+        "EXAMPLE_CONNECT_TIMEOUT"
+    } else {
+        "EXAMPLE_BODY_TIMEOUT"
+    };
+    trace.operation.finish("failed", json!({"id":s.id,"asset":s.asset,"code":code,"phase":phase,"timeoutMs":wait.as_millis(),"receivedBytes":received,"rootCauseNotInferred":true}));
+    err(
+        code,
+        format!(
+            "Example {}: timed out waiting for {phase}; timeoutMs={}; receivedBytes={received}; asset={}. Check access to GitHub and its release asset host, then retry. This observation does not identify the DNS, proxy, TCP or TLS cause.",
+            s.id,
+            wait.as_millis(),
+            s.asset
+        ),
+    )
+}
+async fn response_headers(
+    s: &Sample,
+    request: reqwest::RequestBuilder,
+    trace: &mut crate::network_diagnostics::HttpTrace,
+    wait: Duration,
+) -> Result<reqwest::Response, BridgeError> {
+    match tokio::time::timeout(wait, trace.send(request)).await {
+        Ok(result) => result.map_err(|e| {
+            err(
+                "EXAMPLE_NETWORK",
+                crate::network_diagnostics::error_message(&e),
+            )
+        }),
+        Err(_) => Err(wait_timeout(s, trace, "response headers", wait, 0)),
+    }
+}
 async fn receive(
+    s: &Sample,
+    response: reqwest::Response,
+    root: &Path,
+    trace: &mut crate::network_diagnostics::HttpTrace,
+) -> Result<Vec<u8>, BridgeError> {
+    receive_with_idle_timeout(s, response, root, trace, BODY_IDLE_WAIT).await
+}
+async fn receive_with_idle_timeout(
     s: &Sample,
     mut response: reqwest::Response,
     root: &Path,
     trace: &mut crate::network_diagnostics::HttpTrace,
+    idle_wait: Duration,
 ) -> Result<Vec<u8>, BridgeError> {
     if response
         .content_length()
@@ -285,13 +356,20 @@ async fn receive(
     }
     let mut bytes = Vec::with_capacity(s.size);
     let mut transfer = crate::network_diagnostics::TransferProgress::new();
-    while let Some(chunk) = response.chunk().await.map_err(|e| {
-        trace.fail("body stream", &e, bytes.len() as u64);
-        err(
-            "EXAMPLE_NETWORK",
-            crate::network_diagnostics::error_message(&e),
-        )
-    })? {
+    loop {
+        let part = tokio::time::timeout(idle_wait, response.chunk())
+            .await
+            .map_err(|_| wait_timeout(s, trace, "next body chunk", idle_wait, bytes.len()))?;
+        let Some(chunk) = part.map_err(|e| {
+            trace.fail("body stream", &e, bytes.len() as u64);
+            err(
+                "EXAMPLE_NETWORK",
+                crate::network_diagnostics::error_message(&e),
+            )
+        })?
+        else {
+            break;
+        };
         if bytes.len().saturating_add(chunk.len()) > s.size {
             return Err(err(
                 "EXAMPLE_INTEGRITY",
@@ -402,6 +480,105 @@ mod tests {
             read_cached(root.path(), &s).unwrap_err().code,
             "EXAMPLE_STORAGE"
         );
+    }
+    #[test]
+    fn missing_asset_and_server_refusal_are_distinct() {
+        let s = small_sample(b"example");
+        let missing = check_http_status(&s, reqwest::StatusCode::NOT_FOUND).unwrap_err();
+        assert_eq!(missing.code, "EXAMPLE_NOT_FOUND");
+        assert!(missing.message.contains(&s.asset) && missing.message.contains(&s.release_tag));
+        for status in [403, 429, 503] {
+            let error =
+                check_http_status(&s, reqwest::StatusCode::from_u16(status).unwrap()).unwrap_err();
+            assert_eq!(error.code, "EXAMPLE_HTTP");
+            assert!(error.message.contains(&status.to_string()));
+        }
+    }
+    #[tokio::test]
+    async fn stalled_response_headers_fail_with_a_bounded_specific_error() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut connection, _) = listener.accept().await.unwrap();
+            let mut request = [0; 8192];
+            let _ = connection.read(&mut request).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        });
+        let s = small_sample(b"example");
+        let endpoint = format!("http://{address}");
+        let mut trace = crate::network_diagnostics::HttpTrace::start(
+            "startup-examples",
+            &endpoint,
+            1000,
+            3000,
+            json!({"fixture":true}),
+        );
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let error = response_headers(
+            &s,
+            client.get(endpoint),
+            &mut trace,
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "EXAMPLE_CONNECT_TIMEOUT");
+        assert!(
+            error.message.contains("response headers") && error.message.contains("receivedBytes=0")
+        );
+        server.abort();
+    }
+    #[tokio::test]
+    async fn stalled_body_reports_received_bytes_and_preserves_previous_cache() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let bytes = b"original example";
+        let s = small_sample(bytes);
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join(format!("{}.mp4", s.sha256));
+        fs::write(&target, bytes).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut connection, _) = listener.accept().await.unwrap();
+            let mut request = [0; 8192];
+            let _ = connection.read(&mut request).await;
+            connection
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\nConnection: close\r\n\r\nori")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        });
+        let endpoint = format!("http://{address}");
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(&endpoint)
+            .send()
+            .await
+            .unwrap();
+        let mut trace = crate::network_diagnostics::HttpTrace::start(
+            "startup-examples",
+            &endpoint,
+            1000,
+            3000,
+            json!({"fixture":true}),
+        );
+        let error = receive_with_idle_timeout(
+            &s,
+            response,
+            root.path(),
+            &mut trace,
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "EXAMPLE_BODY_TIMEOUT");
+        assert!(error.message.contains("receivedBytes=3"));
+        assert_eq!(fs::read(target).unwrap(), bytes);
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+        server.abort();
     }
     async fn response(bytes: Vec<u8>, length: usize) -> reqwest::Response {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};

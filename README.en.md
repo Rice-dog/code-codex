@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.48-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.51-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -30,6 +30,8 @@ editing, navigation, and file operations.
 ![Code-Codex file tree in Codex](docs/screenshots/file-tree-conversation.png)
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
+
+Local candidate **v0.4.51** retains Windows10 compatibility and the empty-package-cache file-tree fix. Example downloads distinguish connecting, transfer and verification, with bounded header/body-idle waits and specific errors. The installation-folder menu is always English. Both original videos are already public in startup-examples-v1 and passed current real-download verification. Startup1.1.18 stays pinned to public v0.4.48; this candidate is not publicly released.
 
 Public version **v0.4.48 / Startup 1.1.18** fixes delayed startup-error popups caused by blocking package-helper input, recording normal exit separately from genuine failures. The Code-Codex menu adds Open Installation Folder. A subdued library-header Download examples button downloads The Intelligence Age and Introducing GPT-5 with inline progress and content deduplication, preserving selection and settings. Samples are optional downloads outside the installer. The basic panel, plus-card import/hover deletion and realtime playback of the selected original remain unchanged; no advanced editing or precomposition cache. The other 23 plugins and default media remain pinned to v0.3.96. Published as [GitHub Release v0.4.48](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.48). 485 native tests passed, 4 ignored; full official cold launch, independent MSI installation and remote-user handoff remain untested. Occasional excessive animation readiness waiting is not resolved.
 
@@ -93,7 +95,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.48
+./scripts/package.ps1 -Version 0.4.51
 ```
 
 The generated packages are written to `releases/`.

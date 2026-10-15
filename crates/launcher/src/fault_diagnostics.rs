@@ -190,7 +190,7 @@ pub(crate) fn enrich(source: &str, action: &str, outcome: &str, mut details: Val
         ),
         _ if code.starts_with("CC-START-MAIN") => (
             "main-inspector",
-            "Inspect the main-process inspector operation, port, timeout and pre-cleanup process state. Renderer CDP availability is a separate observation; do not infer network or security-software causation from this failure alone.",
+            "Inspect official inspector capability, actual debug-switch summary, native IPv4/IPv6 listener owners, original-process state and the qualified-renderer fallback decision. MAIN008-015 distinguish exit, missing arguments, foreign owner, unreachable listener, absent listener, unavailable evidence, local access denial and renderer verification failure. TCP failure alone does not prove firewall or security-software causation.",
         ),
         _ if code.starts_with("CC-START-APP") => (
             "app-server-communication",

@@ -89,8 +89,10 @@ if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(pluginReleaseVer
 const pluginCatalog = await buildBackgroundPackages(root, options, pluginReleaseVersion);
 pluginCatalog.push(...await buildUtilityPackages(root,options,pluginReleaseVersion));
 const releaseOverrides=uiManifest.codeCodex?.pluginReleaseOverrides??{};
+const pinnedCatalog=JSON.parse(await readFile(resolve(root,'../../releases/plugins/catalog.json'),'utf8'));
 for(const [id,version] of Object.entries(releaseOverrides)) {
-  if(id!=='codex-startup-transition' || version!==uiManifest.version)throw new Error('Only the changed Startup package may override its release with the current core version');
+  const publishedTag=pinnedCatalog.find(p=>p.id===id)?.releaseTag;
+  if(id!=='codex-startup-transition' || (version!==uiManifest.version && `v${version}`!==publishedTag))throw new Error('Startup release must be the current core or its unchanged published tag');
 }
 pluginCatalog.push(await buildStartupPackage(root,options,releaseOverrides['codex-startup-transition']??pluginReleaseVersion));
 pluginCatalog.push(...await buildFilePreviewPackages(root,options,pluginReleaseVersion));

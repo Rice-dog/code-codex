@@ -392,7 +392,7 @@ pub(crate) fn query(
 }
 
 #[cfg(windows)]
-fn query_with_timeout(
+pub(crate) fn query_with_timeout(
     operation: &str,
     body: &str,
     environment: &[(&str, &std::ffi::OsStr)],

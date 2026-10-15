@@ -1,3 +1,9 @@
+## 本地候选 v0.4.51 / Local candidate v0.4.51
+
+示例素材已在独立startup-examples-v1公开，两份原视频本轮真实GET及SHA校验通过，无需重复上传。下载等待服务器响应时改为“连接中…”，收到字节后才显示实际下载百分比；响应头等待及每次传输停顿各20秒上限，保留120秒整请求上限，细分连接等待/数据停顿/404素材不存在及其它HTTP错误并记录阶段与字节。安装目录菜单统一为Open Installation Folder。保留Win10兼容和空可选插件缓存文件树修复，原视频库、实时播放与Startup1.1.18/pin48保持。本候选尚未公开发布；尚未复现截图用户本身的网络环境，不能仅凭0%判定底层网络原因。
+
+Both original example videos are already public in the separate startup-examples-v1 release and passed current real GET/SHA verification; no duplicate upload is needed. The control shows Connecting while awaiting a response and actual percentages after receiving bytes. Header waits and each body-idle wait are bounded at20 seconds, alongside the existing120-second request limit. Diagnostics distinguish header wait, stalled transfer, missing assets (404) and other HTTP errors, with phase and byte counts. The installation-folder menu always reads Open Installation Folder. Windows10 compatibility and the empty-optional-cache file-tree fix are retained; the original library, realtime playback and Startup1.1.18/pin48 remain unchanged. This candidate is not public. The screenshot user's network has not been reproduced, so0% alone does not establish its underlying cause.
+
 ## v0.4.48 — 启动监督修复、安装目录与动画示例
 
 ## 简体中文

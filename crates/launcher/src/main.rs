@@ -15,6 +15,7 @@ mod runtime_log;
 mod startup_diagnostics;
 mod startup_examples;
 mod support_checks;
+mod win10_compat;
 
 use std::path::PathBuf;
 use std::process::{ExitCode, Stdio};
@@ -233,9 +234,10 @@ fn enrich_startup_diagnostic(error: &AppError) -> StartupDiagnostic {
 }
 
 async fn complete_startup_failure_probe() {
-    let (port, verified, previous) = match startup_trace().lock() {
+    let (port, main_port, verified, previous) = match startup_trace().lock() {
         Ok(trace) => (
             trace.renderer_port,
+            trace.inspector_port,
             trace.listener_verified,
             trace.precleanup_probe.clone(),
         ),
@@ -252,6 +254,7 @@ async fn complete_startup_failure_probe() {
     )
     .await;
     let mut observations = previous.into_iter().collect::<Vec<_>>();
+    if let Some(main_port)=main_port { observations.push(main_listener_evidence(main_port).await); }
     observations.push(match tcp {
         Ok(Ok(stream)) => {
             drop(stream);
@@ -641,6 +644,14 @@ impl AppError {
                     "main inspector command response" | "main inspector command reply timeout" => {
                         "CC-START-MAIN-006"
                     }
+                    "main inspector activation process exited" => "CC-START-MAIN-008",
+                    "main inspector arguments not honored" => "CC-START-MAIN-009",
+                    "main inspector foreign listener" => "CC-START-MAIN-010",
+                    "main inspector listener unreachable" => "CC-START-MAIN-011",
+                    "main inspector listener absent" => "CC-START-MAIN-012",
+                    "main inspector evidence unavailable" => "CC-START-MAIN-013",
+                    "main inspector TCP access denied" => "CC-START-MAIN-014",
+                    "main inspector renderer verification failed" => "CC-START-MAIN-015",
                     _ => "CC-START-MAIN-007",
                 };
                 StartupDiagnostic::new(
@@ -648,7 +659,7 @@ impl AppError {
                     "Preparing the Windows 10 window compatibility patch",
                     &format!("Windows 10 main-process failure: {operation}"),
                     details.clone(),
-                    "Compare the inspector operation/port and process observations below. This failure precedes renderer qualification; firewall, process exit and rejected launch arguments require separate evidence.",
+                    "Inspect the recorded inspector capability, actual debug-switch summary, IPv4/IPv6 listener owners, original process state and renderer fallback decision. Missing listeners, rejected arguments, local access denial and unreachable listeners are distinct observations; security-software causation requires separate evidence. Unsafe or unproven fallback is not performed.",
                 )
             }
             Self::Resolver(ResolverError::Context { .. })
@@ -1328,7 +1339,17 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     let port = reservation.port()?;
     let endpoint = CdpEndpoint::loopback(port);
     record_startup_event("port reservation", "renderer port reserved");
-    let main_inspector_reservation = if needs_windows_10_surface_patch() {
+    let windows_10 = needs_windows_10_surface_patch();
+    let request_main_inspector = if windows_10 {
+        let image = installation.executable.clone();
+        let capability = tokio::task::spawn_blocking(move || win10_compat::inspect_capability(&image)).await;
+        let request = capability.as_ref().map_or(true, |c| c.should_request_inspector());
+        process_diagnostics::observe("Windows10 compatibility", "official inspector capability", if request { "patch requested" } else { "opaque fallback" },
+            json!({"officialVersion":installation.version,"capability":capability.as_ref().ok(),"workerFailed":capability.is_err(),"surfacePatchApplied":false,"requestMainInspector":request,"officialImageModified":false}));
+        record_startup_event("Windows10 compatibility", if request { "main inspector capability enabled or unknown; requesting surface patch" } else { "native runtime or disabled inspector; continuing without Electron surface patch or inspect-brk" });
+        request
+    } else { false };
+    let main_inspector_reservation = if request_main_inspector {
         Some(PortReservation::reserve()?)
     } else {
         None
@@ -1340,6 +1361,9 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     let main_inspector_endpoint = main_inspector_port.map(CdpEndpoint::loopback);
     record_startup_event("launch configuration", "debugging arguments prepared");
     let launch_arguments = build_launch_arguments(port, main_inspector_port, &args.codex_args);
+    if windows_10 {
+        process_diagnostics::observe("Windows10 compatibility", "requested debug switches", "prepared", json!({"rendererPort":port,"mainInspectorPort":main_inspector_port,"inspectBreakRequested":request_main_inspector,"opaqueSurface":!request_main_inspector,"officialVersion":installation.version,"argumentsOmitted":true}));
+    }
     reservation.release();
     if let Some(reservation) = main_inspector_reservation {
         reservation.release();
@@ -1469,10 +1493,9 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     let result = async {
         if let Some(main_inspector_endpoint) = main_inspector_endpoint {
             record_startup_event("main inspector", "waiting for Windows 10 surface patch");
-            initialize_electron_main_process(main_inspector_endpoint, launched_pid, launched_after)
-                .await?;
-            record_startup_event("main inspector", "surface patch initialized");
-            tracing::info!(event = "electron_main_transparency_initialized");
+            let patched = initialize_electron_main_process(main_inspector_endpoint, endpoint, launched_pid, launched_after).await?;
+            record_startup_event("main inspector", if patched { "surface patch initialized" } else { "verified native UI ready; continuing with opaque surface fallback" });
+            tracing::info!(event = "electron_main_transparency_result", surface_patch_applied = patched);
         }
         record_startup_event("CDP version", "waiting for renderer debugging endpoint");
         wait_for_launched_endpoint(endpoint, launched_pid, Duration::from_secs(30)).await?;
@@ -2068,6 +2091,7 @@ async fn live_launch_snapshot(
         Err(_) => "TCP: timed out after 700 ms".to_owned(),
     });
     if let Some(inspector_port) = inspector_port {
+        lines.push(main_listener_evidence(inspector_port).await);
         let inspector = tokio::time::timeout(
             Duration::from_millis(700),
             TcpStream::connect(("127.0.0.1", inspector_port)),
@@ -2630,11 +2654,14 @@ struct ElectronMainPatchResult {
 
 async fn initialize_electron_main_process(
     endpoint: CdpEndpoint,
+    renderer: CdpEndpoint,
     launched_pid: u32,
     launched_after: SystemTime,
-) -> Result<(), AppError> {
-    let result: Result<(), AppError> = async {
-        wait_for_tcp_listener(endpoint, MAIN_INSPECTOR_STARTUP_TIMEOUT).await?;
+) -> Result<bool, AppError> {
+    let result: Result<bool, AppError> = async {
+        if !wait_for_win10_inspector(endpoint, renderer, launched_pid, launched_after, MAIN_INSPECTOR_STARTUP_TIMEOUT).await? {
+            return Ok(false);
+        }
         verify_owned_listener(endpoint, launched_pid, launched_after).await?;
 
         let target =
@@ -2719,10 +2746,11 @@ async fn initialize_electron_main_process(
             constructor_hook_count = patch.constructor_hook_count
         );
         wait_for_tcp_listener_closed(endpoint, MAIN_INSPECTOR_SHUTDOWN_TIMEOUT).await?;
-        Ok(())
+        Ok(true)
     }
     .await;
     result.map_err(|error| {
+        if matches!(error, AppError::MainInspector { .. }) { return error; }
         let operation = match &error {
             AppError::Cdp(CdpError::Context { operation, .. }) => *operation,
             AppError::ProcessGuard(_) => "verifying main inspector listener owner",
@@ -2825,6 +2853,167 @@ async fn verify_owned_listener(
     Ok(())
 }
 
+async fn main_listener_evidence(port:u16)->String {
+    let result=tokio::task::spawn_blocking(move||win10_compat::listeners(port)).await;
+    let value=match result {Ok(Ok(rows))=>json!({"port":port,"ipv4AndIpv6Complete":true,"listeners":rows}),other=>json!({"port":port,"ipv4AndIpv6Complete":false,"reason":format!("{other:?}")})};
+    process_diagnostics::observe("main inspector","supplementary native listeners","observed",value.clone());
+    format!("Main inspector native listener evidence: {value}")
+}
+
+async fn win10_renderer_ready(renderer: CdpEndpoint, pid: u32, launched_after: SystemTime) -> Result<bool, AppError> {
+    // A TCP/version response alone can be produced before a usable app exists.
+    // Only the normal trusted URL + existing structural qualification proves
+    // the native UI has progressed beyond the initial inspector break.
+    verify_owned_listener(renderer, pid, launched_after).await.map_err(|e|AppError::MainInspector {
+        operation:"main inspector renderer verification failed", details:format!("rendererPort={}; originalPid={pid}; cause={e}",renderer.port())
+    })?;
+    let discovery = TargetDiscovery::new()?;
+    let version = match discovery.version(renderer).await { Ok(v) => v, Err(_) => return Ok(false) };
+    if !version.is_supported() { return Ok(false); }
+    let targets = match discovery.targets(renderer).await { Ok(v) => v, Err(_) => return Ok(false) };
+    for target in targets.into_iter().filter(|t|t.target_type=="page" && t.url=="app://-/index.html").take(4) {
+        match discovery.renderer_layout_diagnostics(renderer,&target).await {
+            Ok(value) => {
+                let summary=win10_compat::layout_summary(&value);
+                process_diagnostics::observe("Windows10 compatibility","read-only renderer readiness","observed",summary.clone());
+                if summary["accepted"]==true && summary["topFrame"]==true && summary["appOrigin"]==true && matches!(summary["readyState"].as_str(),Some("interactive"|"complete")) {
+                    verify_owned_listener(renderer,pid,launched_after).await.map_err(|e|AppError::MainInspector {operation:"main inspector renderer verification failed",details:format!("renderer ownership recheck failed: port={}; cause={e}",renderer.port())})?;
+                    return Ok(true);
+                }
+            }
+            Err(e) => process_diagnostics::observe("Windows10 compatibility","read-only renderer readiness","unavailable",json!({"reason":e.to_string(),"pageDataRetained":false})),
+        }
+    }
+    Ok(false)
+}
+
+async fn wait_for_win10_inspector(endpoint: CdpEndpoint, renderer: CdpEndpoint, pid: u32, launched_after: SystemTime, timeout: Duration) -> Result<bool, AppError> {
+    let started=Instant::now();
+    let mut attempts=0u32; let mut refused=0u32; let mut timed_out=0u32; let mut denied=0u32;
+    let mut last="no connection attempted".to_owned();
+    let mut next_checkpoint=Duration::ZERO;
+    let mut args=None;
+    let main_port=endpoint.port(); let renderer_port=renderer.port();
+    // This auxiliary CIM query must not delay TCP readiness or add its retry
+    // budget to the inspector's 30-second wait.
+    let mut argument_task=Some(tokio::task::spawn_blocking(move||win10_compat::arguments(pid,main_port,renderer_port)));
+    let mut checkpoint=0;
+    loop {
+        let elapsed=started.elapsed();
+        if elapsed>=next_checkpoint || elapsed>=timeout {
+            let port=endpoint.port();
+            let evidence=tokio::task::spawn_blocking(move || (win10_compat::listeners(port),process_diagnostics::native_process(pid))).await;
+            let (table,process)=evidence.unwrap_or_else(|e|(Err(format!("native observation worker failed: {e}")),json!({"state":"unknown"})));
+            if argument_task.as_ref().is_some_and(|task|task.is_finished()) {
+                match argument_task.take().expect("finished argument task").await {
+                    Ok(Ok(summary))=>{process_diagnostics::observe("main inspector","actual debug switches","observed",json!(&summary));args=Some(summary);}
+                    other=>{process_diagnostics::observe("main inspector","actual debug switches","unavailable",json!({"reason":format!("{other:?}"),"fullCommandLineRetained":false}));}
+                }
+            }
+            let running=process["state"]=="running";
+            let exited=process["state"]=="exited";
+            let foreign=table.as_ref().is_ok_and(|rows|rows.iter().any(|r|r.pid!=pid));
+            let operation=if foreign { "main inspector foreign listener" } else if !running && !exited { "main inspector evidence unavailable" } else { win10_compat::classify(pid,running,&table,args.as_ref()) };
+            let observations=json!({"port":port,"rendererPort":renderer.port(),"originalPid":pid,"elapsedMs":started.elapsed().as_millis(),"tcpWaitBudgetMs":timeout.as_millis(),"readinessProbeBudgetMs":8000,"attempts":attempts,"connectionRefused":refused,"attemptTimeouts":timed_out,"accessDenied":denied,"lastConnection":last,"listenerSnapshot":table.as_ref().ok(),"listenerQueryError":table.as_ref().err(),"process":process,"actualSwitches":args,"actualSwitchSummaryStatus":if args.is_some(){"observed"}else if argument_task.is_some(){"pending"}else{"unavailable"},"observedClassification":operation,"rootCause":"not inferred from TCP outcome"});
+            process_diagnostics::observe("main inspector","listener checkpoint","observed",observations.clone());
+            let fatal=exited || foreign;
+            if fatal {
+                return Err(AppError::MainInspector {operation,details:observations.to_string()});
+            }
+            if started.elapsed()>=Duration::from_secs(2) && running && table.as_ref().is_ok_and(Vec::is_empty) {
+                let ready=tokio::time::timeout(Duration::from_secs(8),win10_renderer_ready(renderer,pid,launched_after)).await;
+                match ready {
+                    Ok(Err(e)) => return Err(e),
+                    Ok(Ok(true)) => {
+                        let final_evidence=tokio::task::spawn_blocking(move || (win10_compat::listeners(port),process_diagnostics::native_process(pid))).await;
+                        if let Ok((final_table,final_process))=final_evidence {
+                            if win10_compat::may_fallback(final_process["state"]=="running",&final_table,true) {
+                                record_startup_event("Windows10 compatibility","main inspector absent; authorized renderer UI ready; opaque fallback accepted");
+                                process_diagnostics::observe("Windows10 compatibility","surface fallback","accepted",json!({"mainPort":port,"rendererPort":renderer.port(),"originalPid":pid,"surfacePatchApplied":false,"nativeUiQualified":true,"mainListenerAbsentInBothFamilies":true,"ownershipVerifiedTwice":true,"opaqueSurface":true,"elapsedMs":started.elapsed().as_millis()}));
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                process_diagnostics::observe("Windows10 compatibility","surface fallback","not proven",json!({"mainPort":port,"rendererPort":renderer.port(),"reason":"qualified native renderer readiness and final listener/process recheck were not all established","surfacePatchApplied":false}));
+            }
+            if started.elapsed()>=timeout {
+                let operation=if denied>0 && table.as_ref().is_ok_and(Vec::is_empty) { "main inspector TCP access denied" } else { operation };
+                record_startup_event("main inspector TCP listener",operation);
+                return Err(AppError::MainInspector {operation,details:format!("Role: Windows10 main inspector; timeoutMs={}; elapsedMs={}; observations={observations}; fallback=not established",timeout.as_millis(),started.elapsed().as_millis())});
+            }
+            checkpoint+=1;
+            next_checkpoint=match checkpoint {1=>Duration::from_secs(2),2=>Duration::from_secs(5),3=>Duration::from_secs(15),_=>timeout};
+        }
+        attempts=attempts.saturating_add(1);
+        let budget=timeout.saturating_sub(started.elapsed()).min(Duration::from_millis(500));
+        if budget.is_zero() {continue;}
+        match tokio::time::timeout(budget,TcpStream::connect(("127.0.0.1",endpoint.port()))).await {
+            Ok(Ok(_))=>return Ok(true),
+            Ok(Err(e))=>{
+                if e.kind()==std::io::ErrorKind::ConnectionRefused {refused+=1;}
+                if e.kind()==std::io::ErrorKind::PermissionDenied {denied+=1;}
+                last=format!("ioKind={:?}; osCode={:?}; cause={e}",e.kind(),e.raw_os_error());
+            }
+            Err(_)=>{timed_out+=1;last=format!("attempt timeout; attemptBudgetMs={}",budget.as_millis());}
+        }
+        tokio::time::sleep(Duration::from_millis(100).min(timeout.saturating_sub(started.elapsed()))).await;
+    }
+}
+
+#[cfg(test)]
+mod win10_compat_integration_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt,AsyncWriteExt};
+    async fn renderer_fixture(qualified:bool)->(CdpEndpoint,tokio::task::JoinHandle<()>) {
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();let port=listener.local_addr().unwrap().port();
+        let task=tokio::spawn(async move {loop{
+            let (mut stream,_)=listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut peek=[0;4096];let n=match tokio::time::timeout(Duration::from_secs(3),stream.peek(&mut peek)).await {Ok(Ok(n)) if n>0=>n,_=>return};
+                let request=String::from_utf8_lossy(&peek[..n]);
+                if request.contains("/fixture") {
+                    let mut ws=tokio_tungstenite::accept_async(stream).await.unwrap();
+                    if let Some(Ok(Message::Text(text)))=ws.next().await {
+                        let request:Value=serde_json::from_str(&text).unwrap();assert_eq!(request["method"],"Runtime.evaluate");
+                        ws.send(Message::Text(json!({"id":request["id"],"result":{"result":{"value":{"diagnosticVersion":4,"accepted":qualified,"topFrame":true,"appOrigin":true,"readyState":"complete"}}}}).to_string().into())).await.unwrap();
+                    }
+                } else {
+                    let version=request.starts_with("GET /json/version");let mut buffer=[0;4096];let _=stream.read(&mut buffer).await;
+                    let body=if version {json!({"Browser":"Fixture","Protocol-Version":"1.3"})} else {json!([{"id":"fixture","type":"page","title":"Codex","url":"app://-/index.html","webSocketDebuggerUrl":format!("ws://127.0.0.1:{port}/fixture")}])}.to_string();
+                    stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+                }
+            });
+        }});
+        (CdpEndpoint::loopback(port),task)
+    }
+    #[tokio::test]
+    async fn win10_fallback_uses_verified_ready_renderer_but_not_tcp_alone() {
+        let (renderer,server)=renderer_fixture(true).await;
+        let reservation=PortReservation::reserve().unwrap();let main=reservation.port().unwrap();reservation.release();
+        let result=wait_for_win10_inspector(CdpEndpoint::loopback(main),renderer,std::process::id(),SystemTime::UNIX_EPOCH,Duration::from_secs(8)).await;
+        server.abort();assert!(matches!(result,Ok(false)),"{result:?}");
+        let (renderer,server)=renderer_fixture(false).await;
+        let result=wait_for_win10_inspector(CdpEndpoint::loopback(main),renderer,std::process::id(),SystemTime::UNIX_EPOCH,Duration::from_millis(2200)).await;
+        server.abort();assert!(result.is_err(),"unqualified UI must not allow fallback");
+    }
+    #[tokio::test]
+    async fn win10_foreign_main_listener_is_rejected_and_has_precise_support_code() {
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();let endpoint=CdpEndpoint::loopback(listener.local_addr().unwrap().port());
+        let error=wait_for_win10_inspector(endpoint,endpoint,u32::MAX,SystemTime::UNIX_EPOCH,Duration::from_secs(1)).await.unwrap_err();
+        assert_eq!(error.startup_diagnostic().code,"CC-START-MAIN-010");
+    }
+    #[test]
+    fn new_inspector_classifications_have_distinct_codes() {
+        for (operation,code) in [("main inspector activation process exited","008"),("main inspector arguments not honored","009"),("main inspector foreign listener","010"),("main inspector listener unreachable","011"),("main inspector listener absent","012"),("main inspector evidence unavailable","013"),("main inspector TCP access denied","014"),("main inspector renderer verification failed","015")] {
+            let diagnostic=AppError::MainInspector{operation,details:"observed test condition".into()}.startup_diagnostic();
+            assert_eq!(diagnostic.code,format!("CC-START-MAIN-{code}"));assert_eq!(diagnostic.reason,"observed test condition");
+        }
+    }
+}
+
+#[cfg(test)]
 async fn wait_for_tcp_listener(endpoint: CdpEndpoint, timeout: Duration) -> Result<(), CdpError> {
     let started = Instant::now();
     let mut attempts = 0u32;

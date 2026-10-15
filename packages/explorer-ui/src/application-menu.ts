@@ -165,7 +165,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   installationItem.type = "button";
   installationItem.setAttribute("role", "menuitem");
   installationItem.tabIndex = -1;
-  installationItem.textContent = document.documentElement.lang.toLowerCase().startsWith("zh") ? "打开安装目录" : "Open Installation Folder";
+  installationItem.textContent = "Open Installation Folder";
   const repositoryItem = document.createElement("a");
   repositoryItem.href = REPOSITORY_URL;
   repositoryItem.target = "_blank";
