@@ -1,0 +1,200 @@
+{
+  "schema": 1,
+  "faultSchema": 2,
+  "transport": "capability-authenticated document epoch",
+  "automaticReplay": "never; writes require reconciliation and a new explicit action",
+  "methods": [
+    {
+      "name": "explorer.storage.request",
+      "effect": "mode-dependent"
+    },
+    {
+      "name": "explorer.runtime.check",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.startup.examples.status",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.startup.examples.download",
+      "effect": "download"
+    },
+    {
+      "name": "explorer.startup.examples.chunk",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.installation.open",
+      "effect": "external-ui"
+    },
+    {
+      "name": "explorer.runtime.list",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.runtime.read",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.runtime.append",
+      "effect": "diagnostic-write"
+    },
+    {
+      "name": "explorer.context",
+      "effect": "session-state"
+    },
+    {
+      "name": "explorer.context.clear",
+      "effect": "session-state"
+    },
+    {
+      "name": "explorer.list",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.git.history",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.git.commit",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.git.diff",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.preview",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.preview.save",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.media.info",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.media.chunk",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.model.resource.info",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.model.resource.chunk",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.entry.create",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.rename",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.move",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.copy",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.delete",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.reveal",
+      "effect": "external-ui"
+    },
+    {
+      "name": "explorer.entry.import.begin",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.import.directory",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.import.file.begin",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.import.chunk",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.import.file.finish",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.import.commit",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.entry.import.abort",
+      "effect": "workspace-write"
+    },
+    {
+      "name": "explorer.watch.start",
+      "effect": "session-state"
+    },
+    {
+      "name": "explorer.watch.stop",
+      "effect": "session-state"
+    },
+    {
+      "name": "explorer.settings.get",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.language.get",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.language.set",
+      "effect": "preference-write"
+    },
+    {
+      "name": "explorer.settings.set",
+      "effect": "preference-write"
+    },
+    {
+      "name": "explorer.plugins.status",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.plugins.install",
+      "effect": "download"
+    },
+    {
+      "name": "explorer.plugins.cancel",
+      "effect": "session-state"
+    },
+    {
+      "name": "explorer.plugins.load",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.update.startup",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.update.check",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.update.install",
+      "effect": "installation"
+    },
+    {
+      "name": "explorer.window.transparency.set",
+      "effect": "session-state"
+    }
+  ]
+}

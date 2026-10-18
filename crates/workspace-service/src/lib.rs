@@ -13,6 +13,7 @@
 //! and opened through retained no-follow capabilities rooted at the workspace.
 
 pub mod application_paths;
+pub mod ui_language;
 mod error;
 mod listing;
 mod mutation;

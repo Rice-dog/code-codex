@@ -5,7 +5,7 @@ import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {launchFixture,delay} from './browser-fixture.mjs';
-const root=resolve(import.meta.dirname,'..'),out=join(root,'artifacts/storage-upgrade-v0.4.10');mkdirSync(out,{recursive:true});
+const root=resolve(import.meta.dirname,'..'),out=process.env.CODE_CODEX_TEST_OUTPUT_ROOT??join(root,'artifacts/storage-upgrade-v0.4.10');mkdirSync(out,{recursive:true});
 const code=buildSync({entryPoints:[join(root,'packages/explorer-ui/src/renderer-storage.ts')],bundle:true,write:false,format:'iife',globalName:'StorageFixture'}).outputFiles[0].text;
 let preferences={},media=new Map(),uploads=new Map(),largest=0,writes=0;const checks=[],requestTimes=[];
 const verify=(condition,name)=>{assert.ok(condition,name);checks.push(name);};
@@ -51,6 +51,8 @@ try{
  media.delete('startup:selected');
  await browser.evaluate(`(()=>{const s=window[Symbol.for('code-codex:native-storage:v1')];s.persistenceSchema=1;s.initialized=true;s.ready=Promise.resolve();s.fingerprints.clear();return StorageFixture.initializeRendererStorage()})()`);await delay(1800);
  verify(media.get('startup:selected')?.blobs.blob.size===150000,'Hot upgrade reconciles incomplete legacy-schema backup');
+ await browser.evaluate(`(async()=>{const db=await new Promise((ok,bad)=>{const r=indexedDB.open('code-codex-custom-background',1);r.onupgradeneeded=()=>r.result.createObjectStore('media',{keyPath:'id'});r.onsuccess=()=>ok(r.result);r.onerror=()=>bad(r.error)});await new Promise((ok,bad)=>{const tx=db.transaction('media','readwrite');tx.objectStore('media').put({id:'custom-image',name:'local.png',kind:'image',parameters:{x:23,opacity:70},blob:new Blob([new Uint8Array(1234).fill(9)],{type:'image/png'})});tx.oncomplete=ok;tx.onerror=()=>bad(tx.error)});db.close()})()`);await delay(1400);
+ verify(media.get('custom-background:custom-image')?.record.parameters.x===23&&media.get('custom-background:custom-image')?.blobs.blob.size===1234,'Custom Background media and independent parameters persist through the native scope');
  const previousWrites=writes;
  // An active browser edit wins over an older native snapshot during reinitialization.
  preferences['code-codex:fixture']='older-native';
@@ -63,6 +65,7 @@ try{
  verify(await browser.evaluate(`localStorage.getItem('code-codex:fixture')`)==='first','Native preferences restored after cache clear');
  const restored=await browser.evaluate(`(async()=>{const db=await openFixtureDB();const r=await new Promise((resolve,reject)=>{const r=db.transaction('video').objectStore('video').get('selected');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});db.close();return {size:r.blob.size,first:new Uint8Array(await r.blob.arrayBuffer())[0]}})()`);
  verify(restored.size===150000&&restored.first===8,'User video restored before plugin mount');
+ verify(await browser.evaluate(`(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('code-codex-custom-background',1);r.onsuccess=()=>ok(r.result)});const value=await new Promise(ok=>{const r=db.transaction('media').objectStore('media').get('custom-image');r.onsuccess=()=>ok(r.result)});db.close();return value.parameters.x===23&&value.blob.size===1234})()`),'Custom Background source and parameters restore after clearing browser caches');
  await delay(900);verify(writes===previousWrites,'Unchanged restored video is not uploaded again');
  await browser.evaluate(`(async()=>{const db=await openFixtureDB();await new Promise((resolve,reject)=>{const tx=db.transaction('video','readwrite');tx.objectStore('video').delete('selected');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close()})()`);await delay(1400);
  verify(!media.has('startup:selected'),'Deleting user media removes native index');

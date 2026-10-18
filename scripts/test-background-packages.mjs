@@ -1,3 +1,4 @@
+import {assertCatalogMatchesDeclarations} from './plugin-catalog-contract.mjs';
 import {pluginAssetPath,verifiedPluginSources} from './plugin-package-files.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
@@ -11,7 +12,7 @@ const version=JSON.parse(readFileSync(resolve(ui,'package.json'),'utf8')).versio
 const tag='code-codex-v'+version.replaceAll('.','-');
 const directory=resolve(ui,'dist/plugins');
 for(const p of catalog){for(const asset of [p,...p.resources]){const b=readFileSync(pluginAssetPath(directory,p,asset));assert.equal(b.length,asset.size);assert.equal(createHash('sha256').update(b).digest('hex'),asset.sha256);assert.ok(asset.size<=4*1024*1024);}}
-assert.equal(catalog.length,24);assert.deepEqual(Object.fromEntries(['appearance','file-preview','developer-tools'].map(category=>[category,catalog.filter(p=>p.category===category).length])),{appearance:13,'file-preview':10,'developer-tools':1});assert.ok(readFileSync(resolve(ui,'dist/startup-early.js')).length<40*1024);
+assertCatalogMatchesDeclarations(catalog,root);assert.ok(readFileSync(resolve(ui,'dist/startup-early.js')).length<40*1024);
 const packageSources=Object.fromEntries(catalog.map(p=>[p.id,verifiedPluginSources(directory,p)]));
 const setup=`window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));window.calls=[];window.packages=${JSON.stringify(catalog)};window.packageSources=${JSON.stringify(packageSources)};window.packageJobs={};window.installed=new Set(JSON.parse(localStorage.getItem('fixture-packages')||'[]'));window.__CODE_CODEX_BOOTSTRAP__={token:'fixture',codexVersion:'26.930.7945.0',supported:true};window.__codeCodex={request:async({method,params})=>{
 calls.push({method,params});
@@ -35,7 +36,8 @@ const wait=async(expression,label)=>{for(let i=0;i<250;i++){if(await e(expressio
 const check=async(name,expression)=>{const actual=await e(expression);report.checks.push({name,actual});assert.ok(actual,name);};
 await wait(`document.querySelector('${tag}')?.dataset.state==='ready'`,'tree ready');await e(`document.querySelector('textarea').value='Native draft';document.querySelector('${tag}').openPreviewMarket()`);
 await wait(`[...${s}.querySelectorAll('.preview-extension-action')].every(button=>button.textContent==='Download')`,'all cold catalog actions settled');
-await check('all 24 cards start with Download',`${s}.querySelectorAll('.preview-extension').length===24&&[...${s}.querySelectorAll('.preview-extension-action')].every(button=>button.textContent==='Download')`);
+await check('every declared plugin has a cold Download card',`${s}.querySelectorAll('.preview-extension').length===${catalog.length}&&[...${s}.querySelectorAll('.preview-extension-action')].every(button=>button.textContent==='Download')`);
+assert.deepEqual(await e(`[...${s}.querySelectorAll('.preview-extension h4')].map(node=>node.textContent.trim()).sort()`),catalog.map(p=>p.name).sort(),'Market titles cover the declared catalog without missing or duplicate cards');
 const glow=`${s}.querySelector('[data-appearance-plugin="code-codex.glow-horizon-background"]')`;
 await wait(`${glow}.querySelector('.preview-extension-action').textContent==='Download'`,'cold package Download');
 await check('cold settings disabled',`${glow}.querySelector('.particle-settings-trigger').disabled`);

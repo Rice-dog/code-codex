@@ -5,7 +5,7 @@ import { renderAsync as renderDocxAsync } from "docx-preview";
 import JSZip from "jszip";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
-import type { CodeCodexMainPreviewElement as PreviewHost } from "../main-preview";
+import { type CodeCodexMainPreviewElement as PreviewHost } from "../app/main-preview-element";
 import type { OfficeDocumentKind, OfficeDomBudget, DocxPaginationClock, DocxBlockSplitResult, XlsxWorksheetMeta, ParsedXlsxWorksheet, XlsxSharedStrings, XlsxCellStyle, XlsxPreviewCell, XlsxStyleTable, XlsxRange, MainPreviewMediaView, OfficePreviewJob } from './contracts';
 
 

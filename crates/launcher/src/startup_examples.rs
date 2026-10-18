@@ -248,10 +248,10 @@ async fn download_at_root(s: &Sample, root: &Path) -> Result<(Vec<u8>, bool), Br
         let allowed=a.previous().len()<=5&&trusted(a.url());
         crate::runtime_log::record("startup-examples","HTTP redirect",if allowed{"followed"}else{"rejected"},json!({"operationId":request_operation,"status":a.status().as_u16(),"toHost":a.url().host_str(),"redirectCount":a.previous().len(),"trusted":trusted(a.url())}));
         if allowed{a.follow()}else{a.stop()}
-    })).build().map_err(|e|err("EXAMPLE_NETWORK",crate::network_diagnostics::error_message(&e)))?;
+    })).build().map_err(|e|{trace.fail("client build",&e,0);crate::network_diagnostics::transport_error("EXAMPLE","client build",&s.id,&e)})?;
     progress(&s.id, "connecting", 0, None, None)?;
     let response = response_headers(s, client.get(&endpoint), &mut trace, RESPONSE_WAIT).await?;
-    if let Err(error) = check_http_status(s, response.status()) {
+    if let Err(error) = check_http_response(s, &response) {
         trace.operation.finish("failed", json!({"id":s.id,"asset":s.asset,"status":response.status().as_u16(),"code":error.code,"phase":"response headers","receivedBytes":0}));
         return Err(error);
     }
@@ -266,53 +266,14 @@ async fn download_at_root(s: &Sample, root: &Path) -> Result<(Vec<u8>, bool), Br
     trace.operation.finish("passed",json!({"id":s.id,"receivedBytes":bytes.len(),"integrityVerified":true,"cacheCommitted":true}));
     Ok((bytes, false))
 }
-fn check_http_status(s: &Sample, status: reqwest::StatusCode) -> Result<(), BridgeError> {
-    if status.is_success() {
-        return Ok(());
-    }
-    let code = if status == reqwest::StatusCode::NOT_FOUND {
-        "EXAMPLE_NOT_FOUND"
-    } else {
-        "EXAMPLE_HTTP"
-    };
-    Err(err(
-        code,
-        format!(
-            "Example {}: HTTP {}; asset={} release={}. {}",
-            s.id,
-            status.as_u16(),
-            s.asset,
-            s.release_tag,
-            if status == reqwest::StatusCode::NOT_FOUND {
-                "The published example asset was not found."
-            } else {
-                "The server refused or could not serve the example request."
-            }
-        ),
-    ))
+fn check_http_response(s: &Sample, response: &reqwest::Response) -> Result<(), BridgeError> {
+    if response.status().is_success() { return Ok(()); }
+    Err(crate::network_diagnostics::http_error("EXAMPLE",&format!("example={} asset={} release={}",s.id,s.asset,s.release_tag),response))
 }
-fn wait_timeout(
-    s: &Sample,
-    trace: &mut crate::network_diagnostics::HttpTrace,
-    phase: &str,
-    wait: Duration,
-    received: usize,
-) -> BridgeError {
-    let code = if phase == "response headers" {
-        "EXAMPLE_CONNECT_TIMEOUT"
-    } else {
-        "EXAMPLE_BODY_TIMEOUT"
-    };
-    trace.operation.finish("failed", json!({"id":s.id,"asset":s.asset,"code":code,"phase":phase,"timeoutMs":wait.as_millis(),"receivedBytes":received,"rootCauseNotInferred":true}));
-    err(
-        code,
-        format!(
-            "Example {}: timed out waiting for {phase}; timeoutMs={}; receivedBytes={received}; asset={}. Check access to GitHub and its release asset host, then retry. This observation does not identify the DNS, proxy, TCP or TLS cause.",
-            s.id,
-            wait.as_millis(),
-            s.asset
-        ),
-    )
+fn wait_timeout(s: &Sample, trace: &mut crate::network_diagnostics::HttpTrace, phase: &str, wait: Duration, received: usize) -> BridgeError {
+    let error = crate::network_diagnostics::timeout_error("EXAMPLE",phase,&format!("example={} asset={}",s.id,s.asset),wait.as_millis(),Some(received));
+    trace.operation.finish("failed",json!({"id":s.id,"asset":s.asset,"code":error.code,"phase":phase,"timeoutMs":wait.as_millis(),"receivedBytes":received,"rootCauseNotInferred":true}));
+    error
 }
 async fn response_headers(
     s: &Sample,
@@ -322,10 +283,7 @@ async fn response_headers(
 ) -> Result<reqwest::Response, BridgeError> {
     match tokio::time::timeout(wait, trace.send(request)).await {
         Ok(result) => result.map_err(|e| {
-            err(
-                "EXAMPLE_NETWORK",
-                crate::network_diagnostics::error_message(&e),
-            )
+            crate::network_diagnostics::transport_error("EXAMPLE","send",&s.id,&e)
         }),
         Err(_) => Err(wait_timeout(s, trace, "response headers", wait, 0)),
     }
@@ -362,10 +320,7 @@ async fn receive_with_idle_timeout(
             .map_err(|_| wait_timeout(s, trace, "next body chunk", idle_wait, bytes.len()))?;
         let Some(chunk) = part.map_err(|e| {
             trace.fail("body stream", &e, bytes.len() as u64);
-            err(
-                "EXAMPLE_NETWORK",
-                crate::network_diagnostics::error_message(&e),
-            )
+            crate::network_diagnostics::transport_error("EXAMPLE","body stream",&format!("example={} receivedBytes={}",s.id,bytes.len()),&e)
         })?
         else {
             break;
@@ -481,17 +436,24 @@ mod tests {
             "EXAMPLE_STORAGE"
         );
     }
-    #[test]
-    fn missing_asset_and_server_refusal_are_distinct() {
+    #[tokio::test]
+    async fn missing_asset_and_server_refusal_are_distinct() {
         let s = small_sample(b"example");
-        let missing = check_http_status(&s, reqwest::StatusCode::NOT_FOUND).unwrap_err();
-        assert_eq!(missing.code, "EXAMPLE_NOT_FOUND");
-        assert!(missing.message.contains(&s.asset) && missing.message.contains(&s.release_tag));
-        for status in [403, 429, 503] {
-            let error =
-                check_http_status(&s, reqwest::StatusCode::from_u16(status).unwrap()).unwrap_err();
-            assert_eq!(error.code, "EXAMPLE_HTTP");
+        for (status, code) in [(404,"EXAMPLE_NET_HTTP_NOT_FOUND"),(403,"EXAMPLE_NET_HTTP_FORBIDDEN"),(429,"EXAMPLE_NET_HTTP_RATE_LIMIT"),(503,"EXAMPLE_NET_HTTP_SERVER")] {
+            let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint=format!("http://{}",listener.local_addr().unwrap());
+            let server=tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt,AsyncWriteExt};
+                let (mut socket,_)=listener.accept().await.unwrap();
+                let mut buf=[0;4096]; let _=socket.read(&mut buf).await;
+                socket.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            });
+            let r=reqwest::Client::builder().no_proxy().build().unwrap().get(endpoint).send().await.unwrap();
+            let error=check_http_response(&s,&r).unwrap_err();
+            assert_eq!(error.code,code);
+            assert!(error.message.contains(&s.asset) && error.message.contains(&s.release_tag));
             assert!(error.message.contains(&status.to_string()));
+            server.await.unwrap();
         }
     }
     #[tokio::test]
@@ -523,7 +485,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(error.code, "EXAMPLE_CONNECT_TIMEOUT");
+        assert_eq!(error.code, "EXAMPLE_NET_TIMEOUT_HEADERS");
         assert!(
             error.message.contains("response headers") && error.message.contains("receivedBytes=0")
         );
@@ -574,7 +536,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(error.code, "EXAMPLE_BODY_TIMEOUT");
+        assert_eq!(error.code, "EXAMPLE_NET_TIMEOUT_BODY");
         assert!(error.message.contains("receivedBytes=3"));
         assert_eq!(fs::read(target).unwrap(), bytes);
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
@@ -648,7 +610,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .code,
-            "EXAMPLE_NETWORK"
+            "EXAMPLE_NET_BODY_INTERRUPTED"
         );
         assert!(read_cached(root.path(), &s).unwrap().is_none());
         trace.operation.finish("passed", json!({"fixture":true}));

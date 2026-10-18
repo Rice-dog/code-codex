@@ -1,7 +1,7 @@
 import { ACESFilmicToneMapping, AnimationMixer, Box3, BufferGeometry, Cache, DirectionalLight, GridHelper, Group, HemisphereLight, LoadingManager, PerspectiveCamera, Scene, SRGBColorSpace, Texture, TextureLoader, Vector3, WebGLRenderer, type Material, type Object3D } from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { CodeCodexMainPreviewElement as PreviewHost } from "../main-preview";
+import { type CodeCodexMainPreviewElement as PreviewHost } from "../app/main-preview-element";
 import type { ModelPreviewSourceInspection, MainPreviewModelView, ModelPreviewJob } from './contracts';
 export const GLTF_JSON_PREVIEW_MIME = "model/gltf+json";
 

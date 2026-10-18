@@ -1,3 +1,4 @@
+import {assertCatalogMatchesDeclarations} from './plugin-catalog-contract.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createServer} from 'node:http';
@@ -8,7 +9,7 @@ import {launchFixture,delay} from './browser-fixture.mjs';
 import {pluginAssetPath,verifiedPluginSources} from './plugin-package-files.mjs';
 const root=resolve(import.meta.dirname,'..'),ui=resolve(root,'packages/explorer-ui');
 const catalog=JSON.parse(readFileSync(resolve(ui,'dist/plugins/catalog.json'),'utf8'));
-assert.equal(catalog.length,24);assert.equal(catalog.filter(p=>p.category==='appearance').length,13);assert.equal(catalog.filter(p=>p.category==='file-preview').length,10);assert.equal(catalog.filter(p=>p.category==='developer-tools').length,1);
+assertCatalogMatchesDeclarations(catalog,root);assert.equal(catalog.filter(p=>p.category==='file-preview').length,10);assert.equal(catalog.filter(p=>p.category==='developer-tools').length,1);
 const gitMeta=JSON.parse(readFileSync(resolve(ui,'dist/plugins/developer-tools/git-history/git-history.metafile.json'),'utf8'));
 assert.ok(Object.keys(gitMeta.inputs).every(path=>!path.endsWith('/bridge.ts')&&!path.endsWith('/runtime-information.ts')),'downloaded Git does not bundle host bootstrap consumers');
 const gitBootstrap={codexVersion:'fixture-preserved'},gitWindow={__CODE_CODEX_BOOTSTRAP__:gitBootstrap};
@@ -37,16 +38,16 @@ const html=`<!doctype html><html data-theme="dark"><meta charset="utf-8"><link r
 function sources(p){return verifiedPluginSources(resolve(ui,'dist/plugins'),p);}
 for(const p of catalog)for(const a of [...p.resources??[],p])assert.equal(createHash('sha256').update(readFileSync(pluginAssetPath(resolve(ui,'dist/plugins'),p,a))).digest('hex'),a.sha256);
 const server=createServer((req,res)=>{if(req.url==='/app-initial-startup-source.js'){res.setHeader('Content-Type','text/javascript');res.end(`export const adapter={appActions:{runInPrimaryWindow:async({action})=>({mode:action.mode??'dark'})},clientCoordination:{invalidateQueryCache:async()=>({})}};`);return;}if(req.url==='/explorer.js'){res.setHeader('Content-Type','text/javascript');res.end(readFileSync(resolve(ui,'dist/explorer.js')));return;}if(req.url?.startsWith('/sources/')){const p=catalog.find(p=>'/sources/'+p.id===req.url);if(p){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(sources(p)));return;}}res.setHeader('Content-Type','text/html;charset=utf-8');res.end(html);});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;const report={version,mode:'production UI / all24 native-store mock / saved prefs',checks:[],failures:[]};
+await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;const report={version,mode:'production UI / all declared native-store mock / saved prefs',checks:[],failures:[]};
 try{browser=await launchFixture(`http://127.0.0.1:${server.address().port}/`);const e=browser.evaluate,s=`document.querySelector('${tag}').shadowRoot`;
 const wait=async(x,label)=>{for(let i=0;i<250;i++){try{if(await e(x))return;}catch{}await delay(40);}throw Error(label);};const check=async(name,x)=>{const actual=await e(x);report.checks.push({name,actual});assert.ok(actual,name);};
 const card=id=>{const p=catalog.find(p=>p.id===id);const key=id==='surface-opacity'?'surface-opacity':id==='transparent-background'?'transparent-background':id==='codex-startup-transition'?'startup-transition':`${id==='mountain'?'layered-mountain':id}-background`;return p.category==='file-preview'?`${s}.querySelector('[data-preview-extension="code-codex.${id}"]')`:id==='git-history'?`${s}.querySelector('.git-history-extension')`:`${s}.querySelector('[data-appearance-plugin="code-codex.${key}"]')`;};const button=id=>`${card(id)}.querySelector('.preview-extension-action')`;
-await wait(`document.querySelector('${tag}')?.dataset.state==='ready'`,'tree ready');await e(`document.querySelector('textarea').value='Native draft';document.querySelector('${tag}').openPreviewMarket()`);await wait(catalog.map(p=>`${button(p.id)}?.textContent==='Download'`).join('&&'),'all24 cold Download');
+await wait(`document.querySelector('${tag}')?.dataset.state==='ready'`,'tree ready');await e(`document.querySelector('textarea').value='Native draft';document.querySelector('${tag}').openPreviewMarket()`);await wait(catalog.map(p=>`${button(p.id)}?.textContent==='Download'`).join('&&'),'all declared cold Download');
 await e(`document.querySelector('${tag}').reconnectNative({...window.__CODE_CODEX_BOOTSTRAP__,token:'fixture-reconnected'});true`);
 await wait(`document.querySelector('${tag}').dataset.state==='ready'&&${button('notebook-preview')}.textContent==='Download'`,'reconnect restores download handler');
-await check('native reconnect restores all24 package controls',catalog.map(p=>`${button(p.id)}.textContent==='Download'`).join('&&'));
+await check('native reconnect restores all declared package controls',catalog.map(p=>`${button(p.id)}.textContent==='Download'`).join('&&'));
 await e(`document.querySelector('${tag}').openPreviewMarket();true`);
-await check('all24 freshcache Download regardless saved enabled preferences',catalog.map(p=>`${button(p.id)}.textContent==='Download'`).join('&&'));await check('no automatic downloads',`calls.every(c=>c.method!=='explorer.plugins.install')`);
+await check('all declared freshcache Download regardless saved enabled preferences',catalog.map(p=>`${button(p.id)}.textContent==='Download'`).join('&&'));await check('no automatic downloads',`calls.every(c=>c.method!=='explorer.plugins.install')`);
 // Render every category at the market's normal narrow width, including direct
 // action buttons and appearance action groups. Check actual browser geometry.
 for(const category of ['appearance','file-preview','developer-tools']){
@@ -73,7 +74,7 @@ await check('purple Download differs from blue Enable',`getComputedStyle(${butto
 const prefsBefore=await e(`Object.fromEntries(Object.keys(${JSON.stringify(seed)}).map(k=>[k,localStorage.getItem(k)]))`);
 await e(`${button('glow-horizon')}.click()`);await check('download pending supports cancel',`${button('glow-horizon')}.textContent==='Cancel'`);await e(`${button('glow-horizon')}.click()`);await wait(`${button('glow-horizon')}.textContent==='Download'`,'cancel returns Download');await check('cancel does not install',`!installed.has('glow-horizon')`);
 for(const p of catalog){if(p.id!=='notebook-preview'){await e(`${button(p.id)}.click()`);await wait(`${button(p.id)}.textContent==='Enable'`,`download ${p.id} returns Enable`);}await check(`${p.id} download ready without reload`,`${card(p.id)}.dataset.packageInstalled==='true'&&${button(p.id)}.getAttribute('aria-pressed')==='false'&&!${card(p.id)}.querySelector('.preview-extension-download')&&${button(p.id)}.closest('.preview-extension-copy')===null`);}
-const prefsAfter=await e(`Object.fromEntries(Object.keys(${JSON.stringify(seed)}).map(k=>[k,localStorage.getItem(k)]))`);assert.deepEqual(prefsAfter,prefsBefore);report.checks.push({name:'all24 Download preserved settings before Enable',actual:true});
+const prefsAfter=await e(`Object.fromEntries(Object.keys(${JSON.stringify(seed)}).map(k=>[k,localStorage.getItem(k)]))`);assert.deepEqual(prefsAfter,prefsBefore);report.checks.push({name:'all declared Download preserved settings before Enable',actual:true});
 await check('downloads do not load/autoenable modules',`(window[Symbol.for('code-codex:plugin-modules:v1')]?.size??0)===0&&window[Symbol.for('code-codex:background-modules:v1')].size===1&&window[Symbol.for('code-codex:background-modules:v1')].get('glow-horizon').fixtureStale===true`);
 await e(`${button('markdown-preview')}.click()`);await wait(`${button('markdown-preview')}.textContent==='Disable'`,'saved preview Enable applies rather than disables');await check('saved preview preference remains enabled',`JSON.parse(localStorage.getItem('code-codex:previewers:v1')).includes('code-codex.markdown-preview')`);await e(`${button('markdown-preview')}.click()`);await wait(`${button('markdown-preview')}.textContent==='Enable'`,'preview Disable');await e(`${button('markdown-preview')}.click()`);await wait(`${button('markdown-preview')}.textContent==='Disable'`,'cached preview Enable');
 await check('saved enabled untouched Office remains Enable until verified load',`${button('office-preview')}.textContent==='Enable'&&${button('office-preview')}.dataset.enabled==='false'`);
@@ -86,8 +87,8 @@ await e(`${button('transparent-background')}.click()`);await wait(`document.docu
 await e(`${button('surface-opacity')}.click()`);await delay(150);await check('Surface still requires active background after hot download',`!document.documentElement.hasAttribute('data-code-codex-ui-mask-active')&&JSON.parse(localStorage.getItem('code-codex.surface-opacity.v1')).enabled===false`);
 await check('native draft retained',`document.querySelector('textarea').value==='Native draft'`);await check('module caching avoids second load',`calls.filter(c=>c.method==='explorer.plugins.load'&&c.params.id==='markdown-preview').length===1`);
 const savedAfterActions=await e(`Object.fromEntries(Object.keys(${JSON.stringify(seed)}).map(k=>[k,localStorage.getItem(k)]))`);
-await e(`location.reload();true`);await delay(300);await wait(`document.querySelector('${tag}')?.dataset.state==='ready'`,'warm reload tree ready');await e(`document.querySelector('${tag}').openPreviewMarket()`);await wait(catalog.map(p=>`${card(p.id)}?.dataset.packageInstalled==='true'`).join('&&'),'warm all24 cache retained');
-await check('reload reuses all24 local packages without installs',`calls.every(c=>c.method!=='explorer.plugins.install')`);
+await e(`location.reload();true`);await delay(300);await wait(`document.querySelector('${tag}')?.dataset.state==='ready'`,'warm reload tree ready');await e(`document.querySelector('${tag}').openPreviewMarket()`);await wait(catalog.map(p=>`${card(p.id)}?.dataset.packageInstalled==='true'`).join('&&'),'warm all declared cache retained');
+await check('reload reuses all declared local packages without installs',`calls.every(c=>c.method!=='explorer.plugins.install')`);
 assert.deepEqual(await e(`Object.fromEntries(Object.keys(${JSON.stringify(seed)}).map(k=>[k,localStorage.getItem(k)]))`),savedAfterActions);report.checks.push({name:'warm reload preserves post-action parameter/preferences',actual:true});
 await e(`window.gitDelay=500;${button('git-history')}.click()`);await wait(`!${s}.querySelector('.git-history-panel').hidden`,'warm Git loading panel');await e(`${s}.querySelector('.git-history-close').click()`);await delay(650);await check('late Git reply does not reopen closed panel',`${s}.querySelector('.git-history-panel').hidden&&!${s}.querySelector('.git-history-list').querySelector('.git-history-commit')`);
 report.errors=await e('errors');assert.deepEqual(report.errors,[]);report.calls=await e(`calls.map(c=>({method:c.method,id:c.params?.id}))`);

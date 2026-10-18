@@ -1,4 +1,4 @@
-import type { CodeCodexMainPreviewElement as PreviewHost } from "../main-preview";
+import { type CodeCodexMainPreviewElement as PreviewHost } from "../app/main-preview-element";
 import type { DiagramSourceKind, DrawioPageSource, DrawioCellGeometry, DrawioVertex, DrawioEdge, DiagramPoint, DiagramSvgBudget, PlantActivityStatement, PlantActivityModel, PlantLayoutNode, PlantLayoutEdge, PlantBlockLayout, MainPreviewTextView, DiagramPreviewJob } from './contracts';
 const MAX_DRAWIO_INFLATED_BYTES = 2 * 1024 * 1024;
 

@@ -15,6 +15,18 @@ export async function launchFixture(url){
   await new Promise((r,j)=>{socket.addEventListener('open',r,{once:true});socket.addEventListener('error',j,{once:true});});
   socket.addEventListener('message',e=>{const v=JSON.parse(e.data);if(v.id&&pending.has(v.id)){const p=pending.get(v.id);pending.delete(v.id);clearTimeout(p.timer);v.error?p.reject(Error(JSON.stringify(v.error))):p.resolve(v.result);}});
   const command=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;const timer=setTimeout(()=>{pending.delete(id);reject(Error(`Timeout ${method}`));},25_000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}));});
+  // DevTools can advertise a target while its initial about:blank document is
+  // still being replaced. Never install fixture globals into that old document.
+  const expected = new URL(url).href;
+  let loaded = false;
+  for (let attempt=0; attempt<200; attempt++) {
+    try {
+      const state=await command('Runtime.evaluate',{expression:`location.href===${JSON.stringify(expected)}&&document.readyState==='complete'`,returnByValue:true});
+      if(state.result.value===true){loaded=true;break;}
+    } catch { /* Initial execution context replacement is observable, not readiness. */ }
+    await delay(50);
+  }
+  if(!loaded){await command('Browser.close').catch(()=>{});socket.close();if(process.exitCode===null)process.kill();throw Error('Fixture navigation did not finish: '+expected);}
   return {pid:process.pid,command,async evaluate(expression){const r=await command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;},async close(){
     await command('Browser.close').catch(()=>{});socket.close();
     if(process.exitCode===null)process.kill();

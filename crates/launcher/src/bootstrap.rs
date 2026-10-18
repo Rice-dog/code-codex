@@ -52,6 +52,7 @@ struct BootstrapMetadata<'a> {
     manual_workspace: bool,
     startup_splash_active: bool,
     centralized_storage: bool,
+    language: workspace_service::ui_language::Preference,
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +153,7 @@ pub fn build_bootstrap(
         compatible,
         manual_workspace,
         startup_splash_active,
+        language: crate::gui_support::localization::preference(),
         centralized_storage: workspace_service::application_paths::install_root()
             .ok()
             .flatten()

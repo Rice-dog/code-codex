@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.52",
+    [string]$Version,
     [string]$BinaryPath,
     [string]$GuiBinaryPath,
     [string]$ShimBinaryPath,
@@ -16,6 +16,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($Version)) { $Version = (Get-Content -LiteralPath (Join-Path $RepoRoot 'packages/explorer-ui/package.json') -Raw | ConvertFrom-Json).version }
 $WixVersion = "5.0.2"
 . (Join-Path $PSScriptRoot "msbuild-tools.ps1")
 
@@ -167,6 +168,7 @@ try {
     [IO.File]::WriteAllText($storageLayoutPath,'{"schema":1,"product":"Code-Codex","layout":"centralized"}',[Text.UTF8Encoding]::new($false))
     $commandLineComponentGuid = Get-DeterministicComponentGuid "CodeCodex|CommandLinePayload|$Version"
     $runtimeLauncherComponentGuid = Get-DeterministicComponentGuid "CodeCodex|RuntimeLauncherPayload|$Version"
+    $rootLauncherComponentGuid = Get-DeterministicComponentGuid "CodeCodex|RootLauncherPayload|$Version"
     [IO.File]::WriteAllText($currentVersionPath, $Version + "`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($installTypePath, "msi`n", [Text.UTF8Encoding]::new($false))
 
@@ -214,6 +216,7 @@ try {
         "-d", "StorageLayoutPath=$storageLayoutPath",
         "-d", "CommandLineComponentGuid=$commandLineComponentGuid",
         "-d", "RuntimeLauncherComponentGuid=$runtimeLauncherComponentGuid",
+        "-d", "RootLauncherComponentGuid=$rootLauncherComponentGuid",
         "-d", "ReadmePath=$readmePath",
         "-d", "LicensePath=$licensePath",
         "-d", "ThirdPartyLicensesPath=$ThirdPartyLicensesPath",

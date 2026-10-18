@@ -24,21 +24,38 @@ export function backgroundModule(id: string): BackgroundModule {
   if (!module || module.api !== 1) throw new Error(`Background ${id} is not loaded. Download it in Preview Market first.`);
   return module;
 }
+/** Startup preview reads existing media. Loading its code never seeds a library. */
+export async function ensureStartupBackgroundPackage(id: string): Promise<void> {
+  const info=BACKGROUND_PACKAGES.find(p=>p.id===id);
+  if(!info)throw new Error(`Background ${id} is unavailable.`);
+  await ensurePluginPackage(id);
+  const module=backgroundModule(id);
+  if(module.version!==info.version||typeof module.startup!=='function')throw new Error(`Background ${id} does not provide a compatible startup renderer.`);
+}
 type Request = <T>(method: string, params?: Record<string, unknown>, timeoutMs?: number) => Promise<T>;
 const loads = new Map<string, Promise<void>>();
-export function connectBackgroundPackages(next: Request | undefined): void { connectPluginPackages(next); }
+let connection: Request | undefined;
+let generation = 0;
+export function connectBackgroundPackages(next: Request | undefined): void {
+  if(connection!==next){connection=next;generation++;loads.clear();}
+  connectPluginPackages(next);
+}
 export async function ensureBackgroundPackage(id: string): Promise<void> {
   const info = BACKGROUND_PACKAGES.find(p => p.id === id);
   if (loads.has(id)) return loads.get(id);
   if (!info) throw new Error(`Background ${id} is unavailable. Download it in Preview Market first.`);
+  const owner=generation;
+  const requireCurrent=()=>{if(owner!==generation)throw new DOMException('Background package connection was replaced.','AbortError');};
   const task = (async () => {
     runtimeEvent('background-package', 'load', 'started', { id, version: info.version });
     await ensurePluginPackage(id);
+    requireCurrent();
     const module = backgroundModule(id);
     if (module.version !== info.version) throw new Error(`Background ${id} registered an incompatible version.`);
     await module.prepareDefaults?.();
+    requireCurrent();
     runtimeEvent('background-package', 'load', 'passed', { id, version: info.version });
-  })().finally(() => { loads.delete(id); });
+  })().finally(() => { if(loads.get(id)===task)loads.delete(id); });
   loads.set(id, task);
   return task;
 }

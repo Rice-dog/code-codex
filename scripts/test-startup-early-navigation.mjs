@@ -1,3 +1,4 @@
+import {installedBackgroundFixture} from './background-package-fixture.mjs';
 import {buildSync} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {spawn} from 'node:child_process';
@@ -5,7 +6,7 @@ import {createServer} from 'node:http';
 import assert from 'node:assert/strict';
 // Only replace the app:// origin gate for this isolated HTTP fixture; player is unchanged.
 const entry=readFileSync('packages/explorer-ui/src/startup-transition-early.ts','utf8').replace(/const valid = [\s\S]*?;\r?\nconst state/, 'const valid = window === window.top;\nconst state');
-const source=buildSync({stdin:{contents:entry,resolveDir:'packages/explorer-ui/src',loader:'ts'},bundle:true,write:false,format:'iife',define:{__CODE_CODEX_STARTUP_TRANSITION_CSS__:JSON.stringify(readFileSync('packages/explorer-ui/src/startup-transition.css','utf8'))}}).outputFiles[0].text;
+const source=installedBackgroundFixture(process.cwd(),['codex-startup-transition','glow-horizon','black-hole','heavenly-cloud','aurora-ionosphere','milky-way','mountain','cloud-train','blinking-squares'])+buildSync({stdin:{contents:entry,resolveDir:'packages/explorer-ui/src',loader:'ts'},bundle:true,write:false,format:'iife',define:{__CODE_CODEX_STARTUP_TRANSITION_CSS__:JSON.stringify(readFileSync('packages/explorer-ui/src/startup-transition.css','utf8'))}}).outputFiles[0].text;
 const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><head><meta charset="utf-8"></head><body><main class="main-surface"></main><div id="loading">Loading</div></body></html>');});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const url=`http://127.0.0.1:${server.address().port}/index.html`;
 const child=spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--window-size=640,480','--no-sandbox','--disable-gpu','--enable-unsafe-swiftshader','--autoplay-policy=no-user-gesture-required','--remote-debugging-port=0','--user-data-dir='+process.cwd()+'/artifacts/early-navigation-'+Date.now(),'about:blank'],{stdio:['ignore','ignore','pipe'],windowsHide:true});
@@ -17,9 +18,10 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 try {
  const targets=await command('Target.getTargets');({sessionId:session}=await command('Target.attachToTarget',{targetId:targets.targetInfos.find(t=>t.type==='page').targetId,flatten:true}));await command('Page.enable',{},session);await command('Page.navigate',{url},session);await wait(300);
  await evaluate(`(async()=>{const c=document.createElement('canvas');c.width=160;c.height=90;const x=c.getContext('2d');x.fillStyle='red';x.fillRect(0,0,160,90);const stream=c.captureStream(20),r=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'}),chunks=[];r.ondataavailable=e=>chunks.push(e.data);const done=new Promise(ok=>r.onstop=ok);r.start();const timer=setInterval(()=>{x.fillStyle='blue';x.fillRect(0,0,160,90)},40);await new Promise(ok=>setTimeout(ok,2100));r.stop();await done;clearInterval(timer);stream.getTracks().forEach(t=>t.stop());const blob=new Blob(chunks,{type:'video/webm'});await new Promise((ok,bad)=>{const q=indexedDB.open('code-codex-startup-transition',1);q.onupgradeneeded=()=>q.result.createObjectStore('video',{keyPath:'id'});q.onerror=()=>bad(q.error);q.onsuccess=()=>{const db=q.result,tx=db.transaction('video','readwrite');tx.objectStore('video').put({id:'selected',blob,name:'fixture.webm',duration:2,size:blob.size,type:blob.type});tx.oncomplete=()=>{db.close();ok()};}});localStorage.setItem('code-codex:startup-transition:v1',JSON.stringify({enabled:true,clipStart:0,clipEnd:2,minimumVisiblePercent:0,fadePercent:20,playbackRate:1}));})()`);
- await command('Page.addScriptToEvaluateOnNewDocument',{source},session);
+ await command('Page.addScriptToEvaluateOnNewDocument',{source:"window.fixtureEarlyErrors=[];addEventListener('error',e=>fixtureEarlyErrors.push(e.message));addEventListener('unhandledrejection',e=>fixtureEarlyErrors.push(String(e.reason)));\n"+source},session);
  await command('Page.navigate',{url},session);await wait(1000);
  const loading=await evaluate(`({status:window.__CODE_CODEX_EARLY_STARTUP_STATUS__,hosts:document.querySelectorAll('body>.code-codex-startup-host').length,events:window[Symbol.for('code-codex:runtime-events:v1')].events})`);
+ if(!loading.status)throw Error('Early fixture did not enter: '+JSON.stringify(await evaluate('window.fixtureEarlyErrors')));
  assert.equal(loading.status.stage,'playing');assert.equal(loading.hosts,1);assert.ok(loading.events.some(e=>e.action==='first painted frame'));
  await evaluate(source);assert.equal(await evaluate(`document.querySelectorAll('body>.code-codex-startup-host').length`),1);
  await evaluate(`document.body.insertAdjacentHTML('beforeend','<nav data-app-navigation-rail></nav>')`);await wait(1200);

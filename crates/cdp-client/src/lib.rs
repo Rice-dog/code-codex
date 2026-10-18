@@ -4,12 +4,7 @@
 //! targets, `Runtime.addBinding`, script injection, and outbound evaluation.
 //! It is not a general-purpose remote debugging client.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::error::Error as _;
-use std::fmt;
-use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
 type DiagnosticObserver = fn(&str, &str, &str, Value);
@@ -50,22 +45,7 @@ fn observe_rejection(phase: &str, details: Value) {
     observer("cdp-security", phase, "rejected", details);
 }
 
-use async_trait::async_trait;
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use constant_time_eq::constant_time_eq;
-use futures_util::{SinkExt, StreamExt};
-use rand::RngCore;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use thiserror::Error;
-use tokio::sync::{Mutex, Notify, Semaphore, broadcast, mpsc, oneshot};
-use tokio::task::{JoinHandle, JoinSet};
-use tokio_tungstenite::connect_async_with_config;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_util::sync::CancellationToken;
-use url::Url;
 
 pub const PRIMARY_BINDING_NAME: &str = "__codeCodex";
 pub const PRIMARY_RECEIVER_NAME: &str = "__codeCodexReceive";
@@ -91,2449 +71,22 @@ const NAVIGATION_QUALIFICATION_INTERVAL: Duration = Duration::from_millis(250);
 const RECENTLY_QUALIFIED_TARGET_TTL: Duration = Duration::from_secs(30);
 const CANDIDATE_APPROVAL_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone, Error)]
-pub enum CdpError {
-    #[error("{operation}: {error}; {detail}")]
-    Context {
-        operation: &'static str,
-        detail: String,
-        #[source]
-        error: Box<CdpError>,
-    },
-    #[error("the CDP endpoint is unavailable")]
-    EndpointUnavailable,
-    #[error("the CDP endpoint returned invalid data")]
-    InvalidEndpoint,
-    #[error("the CDP protocol version is not supported")]
-    UnsupportedProtocol,
-    #[error("no compatible Codex renderer target was found")]
-    NoCompatibleTarget,
-    #[error("more than one Codex renderer target matched the supported layout")]
-    AmbiguousRenderer,
-    #[error("the CDP endpoint exposed too many renderer targets")]
-    TooManyTargets,
-    #[error("the target does not contain the supported Codex renderer layout")]
-    IncompatibleRenderer,
-    #[error("the renderer WebSocket endpoint was rejected")]
-    InvalidWebSocketEndpoint,
-    #[error("the CDP listener identity changed or could not be verified")]
-    EndpointIdentityMismatch,
-    #[error("the renderer WebSocket connection failed")]
-    WebSocket,
-    #[error("the CDP session returned invalid protocol data")]
-    Protocol,
-}
-
-impl CdpError {
-    pub fn context(self, operation: &'static str, detail: impl std::fmt::Display) -> Self {
-        Self::Context {
-            operation,
-            detail: detail.to_string().chars().take(2048).collect(),
-            error: Box::new(self),
-        }
-    }
-    pub fn kind(&self) -> &Self {
-        match self {
-            Self::Context { error, .. } => error.kind(),
-            other => other,
-        }
-    }
-}
-
-/// Random per-launch bearer capability. Debug formatting never reveals it.
-#[derive(Clone, PartialEq, Eq)]
-pub struct CapabilityToken(Arc<str>);
-
-impl CapabilityToken {
-    #[must_use]
-    pub fn generate() -> Self {
-        let mut bytes = [0_u8; 32];
-        rand::rngs::OsRng.fill_bytes(&mut bytes);
-        Self(Arc::from(URL_SAFE_NO_PAD.encode(bytes)))
-    }
-
-    /// Intended only for constructing the trusted injected bootstrap.
-    #[must_use]
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-
-    fn matches(&self, candidate: &str) -> bool {
-        constant_time_eq(self.0.as_bytes(), candidate.as_bytes())
-    }
-}
-
-impl fmt::Debug for CapabilityToken {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("CapabilityToken([REDACTED])")
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CdpEndpoint {
-    port: u16,
-}
-
-impl CdpEndpoint {
-    #[must_use]
-    pub const fn loopback(port: u16) -> Self {
-        Self { port }
-    }
-
-    #[must_use]
-    pub const fn port(self) -> u16 {
-        self.port
-    }
-
-    fn http_url(self, path: &str) -> String {
-        format!("http://127.0.0.1:{}{path}", self.port)
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct BrowserVersion {
-    #[serde(default, rename = "Browser", alias = "browser")]
-    pub browser: String,
-    #[serde(
-        default,
-        rename = "Protocol-Version",
-        alias = "protocolVersion",
-        alias = "protocol_version"
-    )]
-    pub protocol_version: String,
-    #[serde(default, rename = "webSocketDebuggerUrl")]
-    pub web_socket_debugger_url: Option<String>,
-}
-
-impl BrowserVersion {
-    #[must_use]
-    pub fn is_supported(&self) -> bool {
-        self.protocol_version == "1.3"
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CdpTarget {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub target_type: String,
-    #[serde(default)]
-    pub title: String,
-    #[serde(default)]
-    pub url: String,
-    #[serde(rename = "webSocketDebuggerUrl")]
-    pub web_socket_debugger_url: String,
-}
-
-#[derive(Clone)]
-pub struct TargetDiscovery {
-    client: reqwest::Client,
-}
-
-impl TargetDiscovery {
-    pub fn new() -> Result<Self, CdpError> {
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(3))
-            .build()
-            .map_err(|_| CdpError::InvalidEndpoint)?;
-        Ok(Self { client })
-    }
-
-    pub async fn version(&self, endpoint: CdpEndpoint) -> Result<BrowserVersion, CdpError> {
-        self.get_json(endpoint.http_url("/json/version")).await
-    }
-
-    /// Include the local HTTP/OS cause for a startup report without exposing
-    /// any response body or weakening the normal fail-closed CDP API.
-    pub async fn version_detailed(&self, endpoint: CdpEndpoint) -> Result<BrowserVersion, String> {
-        self.get_json_detailed(endpoint.http_url("/json/version"))
-            .await
-            .map_err(|(_, detail)| detail)
-    }
-
-    pub async fn targets(&self, endpoint: CdpEndpoint) -> Result<Vec<CdpTarget>, CdpError> {
-        self.get_json(endpoint.http_url("/json/list")).await
-    }
-
-    pub async fn targets_detailed(&self, endpoint: CdpEndpoint) -> Result<Vec<CdpTarget>, String> {
-        self.get_json_detailed(endpoint.http_url("/json/list"))
-            .await
-            .map_err(|(_, detail)| detail)
-    }
-
-    /// Read-only, bounded diagnostics for a target on the verified launch port.
-    /// The expression returns only counts and booleans, never page text or URLs.
-    pub async fn renderer_layout_diagnostics(
-        &self,
-        endpoint: CdpEndpoint,
-        target: &CdpTarget,
-    ) -> Result<Value, CdpError> {
-        let websocket_url =
-            Url::parse(&target.web_socket_debugger_url).map_err(|_| CdpError::InvalidEndpoint)?;
-        if websocket_url.scheme() != "ws"
-            || websocket_url.host_str() != Some("127.0.0.1")
-            || websocket_url.port() != Some(endpoint.port())
-        {
-            return Err(CdpError::InvalidEndpoint);
-        }
-        const DIAGNOSTIC_PROBE: &str = include_str!("renderer-layout-diagnostic.js");
-        let expression = DIAGNOSTIC_PROBE.replace("__PREDICATE__", RENDERER_LAYOUT_PROBE);
-        let probe = async {
-            let config = WebSocketConfig::default()
-                .max_message_size(Some(64 * 1024))
-                .max_frame_size(Some(64 * 1024));
-            let (mut socket, _) =
-                connect_async_with_config(&target.web_socket_debugger_url, Some(config), false)
-                    .await
-                    .map_err(|error| {
-                        CdpError::WebSocket.context("WebSocket connection or receive", error)
-                    })?;
-            send_command(
-                &mut socket,
-                1,
-                "Runtime.evaluate",
-                json!({
-                    "expression": expression,
-                    "returnByValue": true
-                }),
-            )
-            .await?;
-            for _ in 0..32 {
-                let message = socket
-                    .next()
-                    .await
-                    .ok_or(CdpError::WebSocket)?
-                    .map_err(|error| {
-                        CdpError::WebSocket.context("WebSocket connection or receive", error)
-                    })?;
-                let Message::Text(text) = message else {
-                    continue;
-                };
-                let response = parse_cdp_message(text.as_ref())?;
-                if response.get("id").and_then(Value::as_u64) != Some(1) {
-                    continue;
-                }
-                if response.get("error").is_some() {
-                    return Err(CdpError::Protocol);
-                }
-                return response
-                    .pointer("/result/result/value")
-                    .filter(|value| value.is_object())
-                    .cloned()
-                    .ok_or(CdpError::Protocol);
-            }
-            Err(CdpError::Protocol)
-        };
-        tokio::time::timeout(Duration::from_secs(3), probe)
-            .await
-            .map_err(|_| CdpError::WebSocket)?
-    }
-
-    async fn get_json<T>(&self, url: String) -> Result<T, CdpError>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        self.get_json_detailed(url)
-            .await
-            .map_err(|(error, detail)| error.context("CDP HTTP discovery", detail))
-    }
-
-    async fn get_json_detailed<T>(&self, url: String) -> Result<T, (CdpError, String)>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        let mut response = self.client.get(url).send().await.map_err(|error| {
-            let mut detail = error.to_string();
-            let mut source = error.source();
-            for _ in 0..4 {
-                let Some(cause) = source else { break };
-                detail.push_str("; caused by: ");
-                detail.push_str(&cause.to_string());
-                source = cause.source();
-            }
-            detail = detail.chars().take(1024).collect();
-            (CdpError::EndpointUnavailable, detail)
-        })?;
-        if !response.status().is_success() {
-            return Err((
-                CdpError::EndpointUnavailable,
-                format!(
-                    "HTTP {} returned status {}",
-                    response.url().path(),
-                    response.status()
-                ),
-            ));
-        }
-        if response
-            .content_length()
-            .is_some_and(|length| length > MAX_DISCOVERY_RESPONSE_BYTES as u64)
-        {
-            return Err((
-                CdpError::InvalidEndpoint,
-                "CDP response exceeded the size limit".to_owned(),
-            ));
-        }
-        let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|error| {
-            (
-                CdpError::InvalidEndpoint,
-                format!("CDP response body failed: {error}"),
-            )
-        })? {
-            if body.len().saturating_add(chunk.len()) > MAX_DISCOVERY_RESPONSE_BYTES {
-                return Err((
-                    CdpError::InvalidEndpoint,
-                    "CDP response exceeded the size limit".to_owned(),
-                ));
-            }
-            body.extend_from_slice(&chunk);
-        }
-        serde_json::from_slice(&body).map_err(|error| {
-            (
-                CdpError::InvalidEndpoint,
-                format!("CDP response was not valid JSON: {error}"),
-            )
-        })
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TargetFilter {
-    pub allow_any_page: bool,
-}
-
-impl TargetFilter {
-    #[must_use]
-    pub fn accepts(&self, target: &CdpTarget) -> bool {
-        if target.target_type != "page" || target.web_socket_debugger_url.is_empty() {
-            return false;
-        }
-        self.allow_any_page
-            || target.url == "app://-/index.html"
-            || (target.url.starts_with("app://-/") && target.title.contains("Codex"))
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BindingRequest {
-    pub id: String,
-    pub token: String,
-    pub method: String,
-    #[serde(default)]
-    pub params: Value,
-    #[serde(skip)]
-    pub lifecycle_epoch: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BridgeError {
-    pub code: String,
-    pub message: String,
-}
-
-impl BridgeError {
-    #[must_use]
-    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            message: message.into(),
-        }
-    }
-
-    #[must_use]
-    pub fn invalid_request() -> Self {
-        Self::new("INVALID_REQUEST", "The native request is invalid.")
-    }
-}
-
-#[async_trait]
-pub trait BridgeHandler: Send + Sync + 'static {
-    async fn handle(&self, request: BindingRequest) -> Result<Value, BridgeError>;
-
-    fn lifecycle_epoch(&self) -> u64 {
-        0
-    }
-
-    fn invalidate_lifecycle(&self) {}
-}
-
-#[async_trait]
-pub trait EndpointVerifier: Send + Sync + 'static {
-    async fn verify(&self, endpoint: CdpEndpoint) -> Result<(), CdpError>;
-}
-
-#[derive(Debug, Clone)]
-pub struct BridgeNotification {
-    pub payload: Value,
-    pub lifecycle_epoch: u64,
-}
-
-struct OutboundMessage {
-    trusted_script: Option<Vec<String>>,
-    payload: Value,
-    document_epoch: u64,
-}
-
 // Only the native first-party package loader can provide executable source.
 // Never return those bytes through the renderer's ordinary response channel.
-fn take_verified_plugin_source(method: &str, response: &mut Value) -> Option<Vec<String>> {
-    if method != "explorer.plugins.load" || response["ok"] != true {
-        return None;
-    }
-    let value = response
-        .get_mut("result")?
-        .as_object_mut()?
-        .remove("verifiedSource")?;
-    if let Some(source) = value.as_str() {
-        return Some(vec![source.to_owned()]);
-    }
-    value
-        .as_array()?
-        .iter()
-        .map(|source| source.as_str().map(str::to_owned))
-        .collect()
-}
-
-fn outbound_expressions(
-    outbound: &OutboundMessage,
-    receiver_name: &str,
-) -> Result<Vec<String>, CdpError> {
-    let Some(sources) = &outbound.trusted_script else {
-        return Ok(vec![outbound_expression(outbound, receiver_name)?]);
-    };
-    if sources.is_empty()
-        || sources.len() > 33
-        || sources.iter().any(|s| s.len() > 4 * 1024 * 1024)
-        || sources.iter().map(String::len).sum::<usize>() > 32 * 1024 * 1024
-    {
-        return Err(CdpError::Protocol);
-    }
-    let mut expressions = Vec::new();
-    for (index, source) in sources.iter().take(sources.len() - 1).enumerate() {
-        let reset = if index == 0 {
-            "delete window[key];"
-        } else {
-            ""
-        };
-        expressions.push(format!("(()=>{{const key=Symbol.for('code-codex:plugin-load-error:v1');{reset}try{{\n{source}\n}}catch(error){{window[key]=String(error).slice(0,500);}}}})()"));
-    }
-    expressions.push(outbound_expression(outbound, receiver_name)?);
-    Ok(expressions)
-}
-
-fn outbound_expression(
-    outbound: &OutboundMessage,
-    receiver_name: &str,
-) -> Result<String, CdpError> {
-    let success = delivery_expression(&outbound.payload, receiver_name)?;
-    let Some(sources) = &outbound.trusted_script else {
-        return Ok(success);
-    };
-    let source = sources.last().ok_or(CdpError::Protocol)?;
-    if source.len() > 4 * 1024 * 1024 {
-        return Err(CdpError::Protocol);
-    }
-    let id = serde_json::to_string(&outbound.payload["id"]).map_err(|_| CdpError::Protocol)?;
-    let receiver = serde_json::to_string(receiver_name).map_err(|_| CdpError::Protocol)?;
-    Ok(format!(
-        "(()=>{{const key=Symbol.for('code-codex:plugin-load-error:v1');try{{if(window[key])throw new Error(window[key]);\n{source}\n{success}}}catch(error){{const receive=window[{receiver}];if(typeof receive==='function')receive({{id:{id},ok:false,error:{{code:'PLUGIN_EXECUTION',message:String(error)}}}});}}finally{{delete window[key];}}}})()"
-    ))
-}
-
-#[derive(Debug)]
-struct GateState {
-    recent_requests: VecDeque<Instant>,
-    recent_ids: VecDeque<String>,
-    seen_ids: HashSet<String>,
-}
-
-struct SecureGate {
-    token: CapabilityToken,
-    state: Mutex<GateState>,
-}
-
-impl SecureGate {
-    fn new(token: CapabilityToken) -> Self {
-        Self {
-            token,
-            state: Mutex::new(GateState {
-                recent_requests: VecDeque::new(),
-                recent_ids: VecDeque::new(),
-                seen_ids: HashSet::new(),
-            }),
-        }
-    }
-
-    async fn authorize(&self, payload: &str) -> Result<BindingRequest, BridgeError> {
-        if payload.len() > MAX_BINDING_PAYLOAD_BYTES {
-            return Err(BridgeError::invalid_request());
-        }
-        // Charge every bounded ingress attempt before parsing or checking the
-        // bearer token. Otherwise an attacker can send unlimited wrong-token
-        // requests without ever entering the rate window.
-        let now = Instant::now();
-        let mut state = self.state.lock().await;
-        while state
-            .recent_requests
-            .front()
-            .is_some_and(|instant| now.duration_since(*instant) >= Duration::from_secs(1))
-        {
-            state.recent_requests.pop_front();
-        }
-        if state.recent_requests.len() >= MAX_REQUESTS_PER_SECOND {
-            return Err(BridgeError::new(
-                "RATE_LIMITED",
-                "Too many native requests.",
-            ));
-        }
-        state.recent_requests.push_back(now);
-        drop(state);
-
-        let request: BindingRequest =
-            serde_json::from_str(payload).map_err(|_| BridgeError::invalid_request())?;
-        if !valid_request_id(&request.id) {
-            return Err(BridgeError::new("INVALID_REQUEST", "The native request ID format is invalid."));
-        }
-        if !valid_method(&request.method) {
-            return Err(BridgeError::new("INVALID_REQUEST", "The native request method must use lowercase ASCII letters or dots."));
-        }
-        if !self.token.matches(&request.token) {
-            return Err(BridgeError::new(
-                "UNAUTHORIZED",
-                "The native capability is invalid.",
-            ));
-        }
-
-        let mut state = self.state.lock().await;
-        if state.seen_ids.contains(&request.id) {
-            return Err(BridgeError::new(
-                "INVALID_REQUEST",
-                "The request ID was already used.",
-            ));
-        }
-        state.seen_ids.insert(request.id.clone());
-        state.recent_ids.push_back(request.id.clone());
-        if state.recent_ids.len() > REPLAY_WINDOW {
-            if let Some(expired) = state.recent_ids.pop_front() {
-                state.seen_ids.remove(&expired);
-            }
-        }
-        Ok(request)
-    }
-
-    async fn reset_for_new_document(&self) {
-        let mut state = self.state.lock().await;
-        state.recent_requests.clear();
-        state.recent_ids.clear();
-        state.seen_ids.clear();
-    }
-}
-
-fn valid_request_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 128
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
-}
-
-fn valid_method(method: &str) -> bool {
-    !method.is_empty()
-        && method.len() <= 128
-        && method
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte == b'.')
-}
-
-#[derive(Clone)]
-pub struct InjectionConfig {
-    pub binding_name: String,
-    pub receiver_name: String,
-    pub bootstrap_source: Arc<str>,
-    /// The source installed for later navigations, which must not replay the
-    /// initial native-to-renderer startup handoff.
-    pub navigation_bootstrap_source: Option<Arc<str>>,
-    pub capability_token: CapabilityToken,
-    /// Signals that the verified renderer evaluated the bootstrap source.
-    pub startup_handoff: Option<Arc<AtomicBool>>,
-}
-
-impl InjectionConfig {
-    #[must_use]
-    pub fn new(bootstrap_source: impl Into<Arc<str>>, token: CapabilityToken) -> Self {
-        Self {
-            binding_name: PRIMARY_BINDING_NAME.to_owned(),
-            receiver_name: PRIMARY_RECEIVER_NAME.to_owned(),
-            bootstrap_source: bootstrap_source.into(),
-            navigation_bootstrap_source: None,
-            capability_token: token,
-            startup_handoff: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SupervisorOptions {
-    pub endpoint: CdpEndpoint,
-    pub target_filter: TargetFilter,
-    pub poll_interval: Duration,
-    pub startup_timeout: Duration,
-    pub idle_timeout: Duration,
-    pub idle_policy: IdlePolicy,
-    pub progress: Option<Arc<SupervisorProgress>>,
-}
-
-#[derive(Debug)]
-pub struct SupervisorProgress {
-    state: StdMutex<SupervisorProgressSnapshot>,
-    started: Instant,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SupervisorProgressSnapshot {
-    pub list_attempts: u64,
-    pub list_successes: u64,
-    pub last_target_count: usize,
-    pub last_filter_match_count: usize,
-    pub sessions_started: u64,
-    pub sessions_ended: u64,
-    pub layout_rejections: u64,
-    pub last_list_error: Option<String>,
-    pub last_session_error: Option<String>,
-    pub bootstrap_attempts: u64,
-    pub bootstrap_responses: u64,
-    pub bootstrap_failures: u64,
-    pub layout_probe_attempts: u64,
-    pub layout_probe_matches: u64,
-    pub last_layout_diagnostic: Option<Value>,
-    pub last_ready_state: &'static str,
-    pub last_phase: &'static str,
-    pub events: Vec<String>,
-    pub dropped_events: u64,
-}
-
-impl Default for SupervisorProgress {
-    fn default() -> Self {
-        Self {
-            state: StdMutex::new(SupervisorProgressSnapshot::default()),
-            started: Instant::now(),
-        }
-    }
-}
-
-impl SupervisorProgress {
-    #[must_use]
-    pub fn snapshot(&self) -> SupervisorProgressSnapshot {
-        self.state.lock().map_or_else(
-            |_| SupervisorProgressSnapshot::default(),
-            |state| state.clone(),
-        )
-    }
-
-    fn update(&self, action: impl FnOnce(&mut SupervisorProgressSnapshot)) {
-        if let Ok(mut state) = self.state.lock() {
-            action(&mut state)
-        }
-    }
-
-    fn record(&self, phase: &'static str) {
-        if let Ok(mut state) = self.state.lock() {
-            state.last_phase = phase;
-            if state.events.len() == 32 {
-                state.events.remove(0);
-                state.dropped_events = state.dropped_events.saturating_add(1);
-            }
-            state.events.push(format!(
-                "+{} ms | {phase}",
-                self.started.elapsed().as_millis()
-            ));
-        }
-    }
-
-    fn record_target_counts(&self, total: usize, matches: usize) {
-        if let Ok(mut state) = self.state.lock() {
-            if (state.last_target_count, state.last_filter_match_count) != (total, matches) {
-                if state.events.len() == 32 {
-                    state.events.remove(0);
-                    state.dropped_events = state.dropped_events.saturating_add(1);
-                }
-                state.events.push(format!(
-                    "+{} ms | target set changed | total={total}, filter_matches={matches}",
-                    self.started.elapsed().as_millis()
-                ));
-            }
-        }
-    }
-
-    fn record_ready_state(&self, result: &Value) {
-        let state = match result
-            .get("result")
-            .and_then(|value| value.get("value"))
-            .and_then(Value::as_str)
-        {
-            Some("loading") => "loading",
-            Some("interactive") => "interactive",
-            Some("complete") => "complete",
-            _ => "unknown",
-        };
-        if self.snapshot().last_ready_state != state {
-            self.record(match state {
-                "loading" => "candidate_document_loading",
-                "interactive" => "candidate_document_interactive",
-                "complete" => "candidate_document_complete",
-                _ => "candidate_document_state_unknown",
-            });
-            self.update(|snapshot| snapshot.last_ready_state = state);
-        }
-    }
-}
-
-/// Controls what happens after a previously-qualified renderer disappears.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IdlePolicy {
-    /// Return after `idle_timeout`; useful when attaching to an external process.
-    ExitAfterTimeout,
-    /// Continue polling until explicit cancellation; used for an owned Codex job.
-    RecoverUntilCancelled,
-}
-
-impl SupervisorOptions {
-    #[must_use]
-    pub fn for_endpoint(endpoint: CdpEndpoint) -> Self {
-        Self {
-            endpoint,
-            target_filter: TargetFilter::default(),
-            poll_interval: Duration::from_millis(500),
-            startup_timeout: Duration::from_secs(30),
-            idle_timeout: Duration::from_secs(5),
-            idle_policy: IdlePolicy::ExitAfterTimeout,
-            progress: None,
-        }
-    }
-}
-
-pub struct CdpSupervisor<H> {
-    discovery: TargetDiscovery,
-    options: SupervisorOptions,
-    injection: InjectionConfig,
-    handler: Arc<H>,
-    endpoint_verifier: Arc<dyn EndpointVerifier>,
-    notifications: broadcast::Sender<BridgeNotification>,
-}
-
-impl<H> CdpSupervisor<H>
-where
-    H: BridgeHandler,
-{
-    pub fn new(
-        options: SupervisorOptions,
-        injection: InjectionConfig,
-        handler: Arc<H>,
-        endpoint_verifier: Arc<dyn EndpointVerifier>,
-    ) -> Result<Self, CdpError> {
-        let (notifications, _) = broadcast::channel(256);
-        Ok(Self {
-            discovery: TargetDiscovery::new()?,
-            options,
-            injection,
-            handler,
-            endpoint_verifier,
-            notifications,
-        })
-    }
-
-    #[must_use]
-    pub fn notification_sender(&self) -> broadcast::Sender<BridgeNotification> {
-        self.notifications.clone()
-    }
-
-    pub async fn run(self, cancellation: CancellationToken) -> Result<(), CdpError> {
-        let started = Instant::now();
-        let startup_deadline = started
-            .checked_add(self.options.startup_timeout)
-            .ok_or(CdpError::Protocol)?;
-        let mut qualified_target_seen = false;
-        let mut next_session_generation = 1_u64;
-        let mut idle_since = None;
-        let mut sessions: HashMap<String, TargetSession> = HashMap::new();
-        let mut qualified_targets = HashSet::new();
-        let mut recently_qualified_targets: HashMap<String, Instant> = HashMap::new();
-        let mut pending_candidates = HashMap::new();
-        let mut rejected_targets: HashMap<String, Instant> = HashMap::new();
-        let (session_status_sender, mut session_status_receiver) =
-            mpsc::unbounded_channel::<SessionStatus>();
-
-        loop {
-            if cancellation.is_cancelled() {
-                break;
-            }
-            while let Ok(status) = session_status_receiver.try_recv() {
-                apply_session_status(
-                    status,
-                    &mut sessions,
-                    &mut qualified_targets,
-                    &mut recently_qualified_targets,
-                    &mut pending_candidates,
-                    &mut rejected_targets,
-                );
-            }
-            if let Some(progress) = &self.options.progress {
-                progress
-                    .update(|state| state.list_attempts = state.list_attempts.saturating_add(1));
-            }
-            let targets = match self.discovery.targets(self.options.endpoint).await {
-                Ok(targets) => {
-                    if let Some(progress) = &self.options.progress {
-                        let matches = targets
-                            .iter()
-                            .filter(|target| self.options.target_filter.accepts(target))
-                            .count();
-                        if progress.snapshot().last_list_error.is_some() {
-                            progress.record("target_list_recovered");
-                        }
-                        progress.record_target_counts(targets.len(), matches);
-                        progress.update(|state| {
-                            state.list_successes = state.list_successes.saturating_add(1);
-                            state.last_target_count = targets.len();
-                            state.last_filter_match_count = matches;
-                            state.last_list_error = None;
-                        });
-                    }
-                    targets
-                }
-                Err(error)
-                    if !qualified_target_seen
-                        && started.elapsed() < self.options.startup_timeout =>
-                {
-                    if let Some(progress) = &self.options.progress {
-                        if progress.snapshot().last_list_error.is_none() {
-                            progress.record("target_list_unavailable");
-                        }
-                        progress.update(|state| state.last_list_error = Some(error.to_string()));
-                    }
-                    tracing::debug!(event = "cdp_waiting", code = ?error);
-                    sleep_or_cancel(self.options.poll_interval, &cancellation).await;
-                    continue;
-                }
-                Err(error) if qualified_target_seen => {
-                    if let Some(progress) = &self.options.progress {
-                        if progress.snapshot().last_list_error.is_none() {
-                            progress.record("target_list_unavailable");
-                        }
-                        progress.update(|state| state.last_list_error = Some(error.to_string()));
-                    }
-                    tracing::debug!(event = "cdp_temporarily_unavailable", code = ?error);
-                    Vec::new()
-                }
-                Err(error) => {
-                    if let Some(progress) = &self.options.progress {
-                        if progress.snapshot().last_list_error.is_none() {
-                            progress.record("target_list_unavailable");
-                        }
-                        progress.update(|state| state.last_list_error = Some(error.to_string()));
-                    }
-                    return Err(error);
-                }
-            };
-            let discovered_target_count = targets.len();
-            if validate_target_budget(discovered_target_count, 0).is_err() {
-                self.handler.invalidate_lifecycle();
-                stop_all_sessions(&mut sessions);
-                return Err(CdpError::TooManyTargets);
-            }
-            let present_targets: HashSet<_> =
-                targets.iter().map(|target| target.id.clone()).collect();
-            rejected_targets.retain(|target_id, rejected_at| {
-                present_targets.contains(target_id)
-                    && rejected_at.elapsed() < Duration::from_secs(10)
-            });
-            prune_recently_qualified_targets(&mut recently_qualified_targets);
-            let compatible: Vec<_> = targets
-                .into_iter()
-                .filter(|target| self.options.target_filter.accepts(target))
-                .filter(|target| !rejected_targets.contains_key(&target.id))
-                .collect();
-            if validate_target_budget(discovered_target_count, compatible.len()).is_err() {
-                self.handler.invalidate_lifecycle();
-                stop_all_sessions(&mut sessions);
-                return Err(CdpError::TooManyTargets);
-            }
-            let compatible_targets: HashSet<_> =
-                compatible.iter().map(|target| target.id.clone()).collect();
-            let disappeared_qualified_targets: Vec<_> = qualified_targets
-                .difference(&compatible_targets)
-                .cloned()
-                .collect();
-            for target_id in disappeared_qualified_targets {
-                remember_recently_qualified_target(&mut recently_qualified_targets, target_id);
-            }
-            if stop_stale_sessions(&mut sessions, &mut qualified_targets, &compatible_targets) {
-                self.handler.invalidate_lifecycle();
-            }
-
-            for target in compatible {
-                if sessions.contains_key(&target.id) {
-                    continue;
-                }
-                let injection = self.injection.clone();
-                let handler = self.handler.clone();
-                let session_handler = handler.clone();
-                let endpoint_verifier = self.endpoint_verifier.clone();
-                let notifications = self.notifications.subscribe();
-                let endpoint = self.options.endpoint;
-                let session_cancellation = cancellation.child_token();
-                let stored_cancellation = session_cancellation.clone();
-                let lease_held = Arc::new(AtomicBool::new(false));
-                let stored_lease = lease_held.clone();
-                let qualification_nudge = Arc::new(Notify::new());
-                let stored_qualification_nudge = qualification_nudge.clone();
-                let target_id = target.id.clone();
-                let session_key = target_id.clone();
-                let session_generation = next_session_generation;
-                let Some(next_generation) = next_session_generation.checked_add(1) else {
-                    self.handler.invalidate_lifecycle();
-                    stop_all_sessions(&mut sessions);
-                    return Err(CdpError::Protocol);
-                };
-                next_session_generation = next_generation;
-                let initial_settle_timeout =
-                    recently_qualified_target_grace(&mut recently_qualified_targets, &target_id);
-                let cold_startup_deadline =
-                    cold_startup_deadline(startup_deadline, qualified_target_seen);
-                let canonical_startup_grace =
-                    canonical_renderer_startup_grace(&target, qualified_target_seen);
-                let status_sender = session_status_sender.clone();
-                let progress = self.options.progress.clone();
-                let task = tokio::spawn(async move {
-                    if let Some(progress) = &progress {
-                        progress.update(|state| {
-                            state.sessions_started = state.sessions_started.saturating_add(1)
-                        });
-                        progress.record("candidate_session_started");
-                    }
-                    let result = run_target_session(
-                        endpoint,
-                        target,
-                        injection,
-                        handler,
-                        endpoint_verifier,
-                        notifications,
-                        session_cancellation,
-                        initial_settle_timeout,
-                        cold_startup_deadline,
-                        canonical_startup_grace,
-                        qualification_nudge,
-                        session_generation,
-                        status_sender.clone(),
-                        lease_held.clone(),
-                        progress.clone(),
-                    )
-                    .await;
-                    if lease_held.load(AtomicOrdering::Acquire) {
-                        session_handler.invalidate_lifecycle();
-                    }
-                    let incompatible = matches!(result, Err(CdpError::IncompatibleRenderer));
-                    if let Some(progress) = &progress {
-                        progress.update(|state| {
-                            state.sessions_ended = state.sessions_ended.saturating_add(1);
-                            if incompatible {
-                                state.layout_rejections = state.layout_rejections.saturating_add(1)
-                            }
-                            state.last_session_error =
-                                result.as_ref().err().map(ToString::to_string);
-                        });
-                        progress.record(if incompatible {
-                            "layout_rejected"
-                        } else {
-                            "session_ended"
-                        });
-                    }
-                    if let Err(error) = &result {
-                        tracing::debug!(event = "cdp_session_ended", target_id = %target_id, code = ?error);
-                    }
-                    let _ = status_sender.send(SessionStatus::Ended {
-                        target_id,
-                        session_generation,
-                        incompatible,
-                    });
-                });
-                sessions.insert(
-                    session_key,
-                    TargetSession {
-                        session_generation,
-                        cancellation: stored_cancellation,
-                        lease_held: stored_lease,
-                        qualification_nudge: stored_qualification_nudge,
-                        task,
-                    },
-                );
-            }
-            retain_live_candidates_and_nudge(
-                &sessions,
-                &qualified_targets,
-                &mut pending_candidates,
-                &compatible_targets,
-            );
-            if candidate_cohort_is_ambiguous(&qualified_targets, &pending_candidates) {
-                for (_, approval) in pending_candidates.drain() {
-                    let _ = approval.send(Err(CdpError::AmbiguousRenderer));
-                }
-                self.handler.invalidate_lifecycle();
-                stop_all_sessions(&mut sessions);
-                return Err(CdpError::AmbiguousRenderer);
-            }
-            if candidate_cohort_ready(&sessions, &qualified_targets, &pending_candidates) {
-                let target_id = pending_candidates
-                    .keys()
-                    .next()
-                    .cloned()
-                    .ok_or(CdpError::Protocol)?;
-                let approval = pending_candidates
-                    .remove(&target_id)
-                    .ok_or(CdpError::Protocol)?;
-                grant_renderer_lease(&mut qualified_targets, target_id, approval)?;
-                qualified_target_seen = true;
-                idle_since = None;
-            }
-            if qualified_targets.is_empty() {
-                if !sessions.is_empty() {
-                    idle_since = None;
-                } else if qualified_target_seen {
-                    if self.options.idle_policy == IdlePolicy::ExitAfterTimeout {
-                        let since = idle_since.get_or_insert_with(Instant::now);
-                        if idle_policy_stops_supervisor(
-                            self.options.idle_policy,
-                            since.elapsed(),
-                            self.options.idle_timeout,
-                        ) {
-                            break;
-                        }
-                    } else {
-                        idle_since = None;
-                    }
-                } else if started.elapsed() >= self.options.startup_timeout {
-                    return Err(CdpError::NoCompatibleTarget);
-                }
-            }
-            sleep_or_cancel(self.options.poll_interval, &cancellation).await;
-        }
-
-        cancellation.cancel();
-        self.handler.invalidate_lifecycle();
-        stop_all_sessions(&mut sessions);
-        Ok(())
-    }
-}
-
-fn idle_policy_stops_supervisor(policy: IdlePolicy, idle_for: Duration, timeout: Duration) -> bool {
-    policy == IdlePolicy::ExitAfterTimeout && idle_for >= timeout
-}
-
-struct TargetSession {
-    session_generation: u64,
-    cancellation: CancellationToken,
-    lease_held: Arc<AtomicBool>,
-    qualification_nudge: Arc<Notify>,
-    task: JoinHandle<()>,
-}
-
-fn apply_session_status(
-    status: SessionStatus,
-    sessions: &mut HashMap<String, TargetSession>,
-    qualified_targets: &mut HashSet<String>,
-    recently_qualified_targets: &mut HashMap<String, Instant>,
-    pending_candidates: &mut HashMap<String, oneshot::Sender<Result<(), CdpError>>>,
-    rejected_targets: &mut HashMap<String, Instant>,
-) {
-    match status {
-        SessionStatus::Candidate {
-            target_id,
-            session_generation,
-            approval,
-        } => {
-            if sessions
-                .get(&target_id)
-                .is_some_and(|session| session.session_generation == session_generation)
-            {
-                pending_candidates.insert(target_id, approval);
-            }
-        }
-        SessionStatus::Ended {
-            target_id,
-            session_generation,
-            incompatible,
-        } => {
-            if !sessions
-                .get(&target_id)
-                .is_some_and(|session| session.session_generation == session_generation)
-            {
-                return;
-            }
-            sessions.remove(&target_id);
-            pending_candidates.remove(&target_id);
-            if qualified_targets.remove(&target_id) {
-                remember_recently_qualified_target(recently_qualified_targets, target_id.clone());
-            }
-            if incompatible {
-                rejected_targets.insert(target_id, Instant::now());
-            }
-        }
-    }
-}
-
-impl TargetSession {
-    fn stop(self) -> bool {
-        self.cancellation.cancel();
-        self.task.abort();
-        self.lease_held.load(AtomicOrdering::Acquire)
-    }
-}
-
-fn stop_all_sessions(sessions: &mut HashMap<String, TargetSession>) {
-    for (_, session) in sessions.drain() {
-        let _ = session.stop();
-    }
-}
-
-fn stop_stale_sessions(
-    sessions: &mut HashMap<String, TargetSession>,
-    qualified_targets: &mut HashSet<String>,
-    matching_targets: &HashSet<String>,
-) -> bool {
-    let stale: Vec<_> = sessions
-        .keys()
-        .filter(|target_id| !matching_targets.contains(*target_id))
-        .cloned()
-        .collect();
-    let mut stopped_leased = false;
-    for target_id in &stale {
-        if let Some(session) = sessions.remove(target_id) {
-            stopped_leased |= session.stop();
-        }
-        qualified_targets.remove(target_id);
-    }
-    qualified_targets.retain(|target_id| matching_targets.contains(target_id));
-    stopped_leased
-}
-
-fn remember_recently_qualified_target(targets: &mut HashMap<String, Instant>, target_id: String) {
-    prune_recently_qualified_targets(targets);
-    if !targets.contains_key(&target_id) && targets.len() >= MAX_RECENTLY_QUALIFIED_TARGETS {
-        let oldest = targets
-            .iter()
-            .min_by_key(|(_, qualified_at)| **qualified_at)
-            .map(|(target_id, _)| target_id.clone());
-        if let Some(oldest) = oldest {
-            targets.remove(&oldest);
-        }
-    }
-    targets.insert(target_id, Instant::now());
-}
-
-fn prune_recently_qualified_targets(targets: &mut HashMap<String, Instant>) {
-    targets.retain(|_, qualified_at| qualified_at.elapsed() < RECENTLY_QUALIFIED_TARGET_TTL);
-}
-
-fn recently_qualified_target_grace(
-    targets: &mut HashMap<String, Instant>,
-    target_id: &str,
-) -> Duration {
-    prune_recently_qualified_targets(targets);
-    if targets.contains_key(target_id) {
-        INITIAL_RENDERER_QUALIFICATION_TIMEOUT
-    } else {
-        Duration::ZERO
-    }
-}
-
-fn cold_startup_deadline(
-    startup_deadline: Instant,
-    qualified_target_seen: bool,
-) -> Option<Instant> {
-    (!qualified_target_seen).then_some(startup_deadline)
-}
-
-fn canonical_renderer_startup_grace(target: &CdpTarget, qualified_target_seen: bool) -> bool {
-    !qualified_target_seen && target.url == "app://-/index.html"
-}
-
-fn nudge_unresolved_qualifications(
-    sessions: &HashMap<String, TargetSession>,
-    qualified: &HashSet<String>,
-    pending: &HashMap<String, oneshot::Sender<Result<(), CdpError>>>,
-) {
-    for (target_id, session) in sessions {
-        if !qualified.contains(target_id) && !pending.contains_key(target_id) {
-            session.qualification_nudge.notify_one();
-        }
-    }
-}
-
-fn retain_live_candidates_and_nudge(
-    sessions: &HashMap<String, TargetSession>,
-    qualified: &HashSet<String>,
-    pending: &mut HashMap<String, oneshot::Sender<Result<(), CdpError>>>,
-    compatible_targets: &HashSet<String>,
-) {
-    pending.retain(|target_id, _| compatible_targets.contains(target_id));
-    if !pending.is_empty() {
-        nudge_unresolved_qualifications(sessions, qualified, pending);
-    }
-}
-
-fn register_qualified_target(
-    qualified_targets: &mut HashSet<String>,
-    target_id: String,
-) -> Result<(), CdpError> {
-    qualified_targets.insert(target_id);
-    if qualified_targets.len() > 1 {
-        Err(CdpError::AmbiguousRenderer)
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_target_budget(discovered: usize, compatible: usize) -> Result<(), CdpError> {
-    if discovered > MAX_DISCOVERED_TARGETS || compatible > MAX_COMPATIBLE_TARGETS {
-        Err(CdpError::TooManyTargets)
-    } else {
-        Ok(())
-    }
-}
-
-fn remember_rejected_context(contexts: &mut HashSet<u64>, context_id: u64) {
-    if contexts.len() < MAX_REJECTED_EXECUTION_CONTEXTS {
-        contexts.insert(context_id);
-    }
-}
-
-fn candidate_cohort_is_ambiguous(
-    qualified: &HashSet<String>,
-    pending: &HashMap<String, oneshot::Sender<Result<(), CdpError>>>,
-) -> bool {
-    pending.len() > 1 || (!pending.is_empty() && !qualified.is_empty())
-}
-
-fn candidate_cohort_ready(
-    sessions: &HashMap<String, TargetSession>,
-    qualified: &HashSet<String>,
-    pending: &HashMap<String, oneshot::Sender<Result<(), CdpError>>>,
-) -> bool {
-    pending.len() == 1
-        && sessions
-            .keys()
-            .all(|target_id| qualified.contains(target_id) || pending.contains_key(target_id))
-}
-
-fn grant_renderer_lease(
-    qualified_targets: &mut HashSet<String>,
-    target_id: String,
-    approval: oneshot::Sender<Result<(), CdpError>>,
-) -> Result<(), CdpError> {
-    if let Err(error) = register_qualified_target(qualified_targets, target_id.clone()) {
-        let _ = approval.send(Err(CdpError::AmbiguousRenderer));
-        return Err(error);
-    }
-    if approval.send(Ok(())).is_err() {
-        qualified_targets.remove(&target_id);
-        return Err(CdpError::Protocol);
-    }
-    Ok(())
-}
-
-enum SessionStatus {
-    Candidate {
-        target_id: String,
-        session_generation: u64,
-        approval: oneshot::Sender<Result<(), CdpError>>,
-    },
-    Ended {
-        target_id: String,
-        session_generation: u64,
-        incompatible: bool,
-    },
-}
-
-async fn sleep_or_cancel(duration: Duration, cancellation: &CancellationToken) {
-    tokio::select! {
-        () = cancellation.cancelled() => {}
-        () = tokio::time::sleep(duration) => {}
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn run_target_session<H>(
-    endpoint: CdpEndpoint,
-    target: CdpTarget,
-    injection: InjectionConfig,
-    handler: Arc<H>,
-    endpoint_verifier: Arc<dyn EndpointVerifier>,
-    mut notifications: broadcast::Receiver<BridgeNotification>,
-    cancellation: CancellationToken,
-    initial_settle_timeout: Duration,
-    cold_startup_deadline: Option<Instant>,
-    canonical_startup_grace: bool,
-    qualification_nudge: Arc<Notify>,
-    session_generation: u64,
-    status_sender: mpsc::UnboundedSender<SessionStatus>,
-    lease_held: Arc<AtomicBool>,
-    progress: Option<Arc<SupervisorProgress>>,
-) -> Result<(), CdpError>
-where
-    H: BridgeHandler,
-{
-    validate_websocket_url(endpoint, &target.web_socket_debugger_url)?;
-    let websocket_config = WebSocketConfig::default()
-        .max_message_size(Some(MAX_CDP_MESSAGE_BYTES))
-        .max_frame_size(Some(MAX_CDP_MESSAGE_BYTES));
-    let connection = connect_async_with_config(
-        &target.web_socket_debugger_url,
-        Some(websocket_config),
-        false,
-    );
-    let connection = match cold_startup_deadline {
-        Some(deadline) => {
-            tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), connection)
-                .await
-                .map_err(|_| CdpError::IncompatibleRenderer)?
-        }
-        None => connection.await,
-    };
-    let (mut socket, _) = connection
-        .map_err(|error| CdpError::WebSocket.context("renderer WebSocket handshake", error))?;
-    match cold_startup_deadline {
-        Some(deadline) => tokio::time::timeout_at(
-            tokio::time::Instant::from_std(deadline),
-            endpoint_verifier.verify(endpoint),
-        )
-        .await
-        .map_err(|_| CdpError::IncompatibleRenderer)??,
-        None => endpoint_verifier.verify(endpoint).await?,
-    }
-
-    let mut setup_events = VecDeque::new();
-    let mut next_id = 1_u64;
-    send_command_before_deadline(
-        &mut socket,
-        next_id,
-        "Runtime.enable",
-        json!({}),
-        cold_startup_deadline,
-    )
-    .await?;
-    let _ = wait_for_command_before_deadline(
-        &mut socket,
-        next_id,
-        &mut setup_events,
-        cold_startup_deadline,
-    )
-    .await?;
-    next_id += 1;
-    send_command_before_deadline(
-        &mut socket,
-        next_id,
-        "Page.enable",
-        json!({}),
-        cold_startup_deadline,
-    )
-    .await?;
-    let _ = wait_for_command_before_deadline(
-        &mut socket,
-        next_id,
-        &mut setup_events,
-        cold_startup_deadline,
-    )
-    .await?;
-    next_id += 1;
-    // A replacement renderer target can be discoverable before Chromium has
-    // finished creating its document. Treat that state as transient instead
-    // of caching the main target as an incompatible auxiliary renderer.
-    let qualification_started = Instant::now();
-    let cold_startup_timeout = cold_startup_deadline
-        .map(|deadline| deadline.saturating_duration_since(qualification_started));
-    let mut observed_loading_document = false;
-    let mut final_probe_requested = false;
-    let renderer_matches = loop {
-        if cold_startup_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            return Err(CdpError::IncompatibleRenderer);
-        }
-        send_command_before_deadline(
-            &mut socket,
-            next_id,
-            "Runtime.evaluate",
-            json!({
-                "expression": RENDERER_LAYOUT_PROBE,
-                "returnByValue": true
-            }),
-            cold_startup_deadline,
-        )
-        .await?;
-        let probe = wait_for_command_before_deadline(
-            &mut socket,
-            next_id,
-            &mut setup_events,
-            cold_startup_deadline,
-        )
-        .await?;
-        next_id += 1;
-        let layout_matches = renderer_probe_matches(&probe);
-        if let Some(progress) = &progress {
-            progress.update(|state| {
-                state.layout_probe_attempts = state.layout_probe_attempts.saturating_add(1);
-                if layout_matches {
-                    state.layout_probe_matches = state.layout_probe_matches.saturating_add(1);
-                }
-            });
-        }
-        if layout_matches {
-            if cold_startup_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                return Err(CdpError::IncompatibleRenderer);
-            }
-            break true;
-        }
-        if let Some(progress) = &progress {
-            if progress.snapshot().layout_probe_attempts % 40 == 1 {
-                let expression = include_str!("renderer-layout-diagnostic.js").replace("__PREDICATE__", RENDERER_LAYOUT_PROBE);
-                let diagnostic_id = next_id; next_id += 1;
-                if send_command_before_deadline(&mut socket, diagnostic_id, "Runtime.evaluate", json!({"expression":expression,"returnByValue":true}), cold_startup_deadline).await.is_ok() {
-                    if let Ok(diagnostic) = wait_for_command_before_deadline(&mut socket, diagnostic_id, &mut setup_events, cold_startup_deadline).await {
-                        if let Some(value) = diagnostic.pointer("/result/value") {
-                            progress.update(|state| state.last_layout_diagnostic = Some(layout_observation(value)));
-                        }
-                    }
-                }
-            }
-        }
-        if final_probe_requested {
-            return Err(CdpError::IncompatibleRenderer);
-        }
-        send_command_before_deadline(
-            &mut socket,
-            next_id,
-            "Runtime.evaluate",
-            json!({
-                "expression": DOCUMENT_READY_STATE_PROBE,
-                "returnByValue": true
-            }),
-            cold_startup_deadline,
-        )
-        .await?;
-        let ready_state = wait_for_command_before_deadline(
-            &mut socket,
-            next_id,
-            &mut setup_events,
-            cold_startup_deadline,
-        )
-        .await?;
-        next_id += 1;
-        if let Some(progress) = &progress {
-            progress.record_ready_state(&ready_state);
-        }
-        observed_loading_document |= renderer_document_is_loading(&ready_state);
-        let retry_timeout = initial_qualification_retry_timeout(
-            observed_loading_document,
-            initial_settle_timeout,
-            canonical_startup_grace,
-            cold_startup_timeout,
-        );
-        if retry_timeout.is_zero() {
-            break false;
-        }
-        if qualification_started.elapsed() >= retry_timeout {
-            return Err(CdpError::IncompatibleRenderer);
-        }
-        let poll_interval = cold_startup_deadline.map_or(
-            INITIAL_RENDERER_QUALIFICATION_POLL_INTERVAL,
-            |deadline| {
-                INITIAL_RENDERER_QUALIFICATION_POLL_INTERVAL
-                    .min(deadline.saturating_duration_since(Instant::now()))
-            },
-        );
-        if poll_interval.is_zero() {
-            return Err(CdpError::IncompatibleRenderer);
-        }
-        tokio::select! {
-            () = cancellation.cancelled() => return Ok(()),
-            () = qualification_nudge.notified() => final_probe_requested = true,
-            () = tokio::time::sleep(poll_interval) => {}
-        }
-    };
-    if !renderer_matches {
-        return Err(CdpError::IncompatibleRenderer);
-    }
-    if let Some(progress) = &progress {
-        progress.record("layout_qualified");
-    }
-    setup_events.clear();
-
-    // DOM qualification only creates a candidate. The supervisor grants a
-    // single renderer lease before this session receives a binding or token.
-    let (approval_sender, approval_receiver) = oneshot::channel();
-    status_sender
-        .send(SessionStatus::Candidate {
-            target_id: target.id.clone(),
-            session_generation,
-            approval: approval_sender,
-        })
-        .map_err(|_| CdpError::Protocol)?;
-    let approval = tokio::select! {
-        () = cancellation.cancelled() => return Ok(()),
-        approval = wait_for_candidate_approval(
-            approval_receiver,
-            cold_startup_deadline,
-            CANDIDATE_APPROVAL_TIMEOUT,
-        ) => approval?
-    };
-    approval?;
-    lease_held.store(true, AtomicOrdering::Release);
-    if let Some(progress) = &progress {
-        progress.record("renderer_lease_granted");
-    }
-
-    // Re-probe after awaiting the lease. Any navigation observed during the
-    // wait invalidates the candidate before token-bearing source is installed.
-    send_command(
-        &mut socket,
-        next_id,
-        "Runtime.evaluate",
-        json!({
-            "expression": RENDERER_LAYOUT_PROBE,
-            "returnByValue": true
-        }),
-    )
-    .await?;
-    let probe = wait_for_command(&mut socket, next_id, &mut setup_events).await?;
-    if !renderer_probe_matches(&probe) || setup_contains_top_navigation(&setup_events)? {
-        return Err(CdpError::IncompatibleRenderer);
-    }
-    next_id += 1;
-    setup_events.clear();
-    send_command(
-        &mut socket,
-        next_id,
-        "Runtime.addBinding",
-        json!({ "name": injection.binding_name }),
-    )
-    .await?;
-    let _ = wait_for_command(&mut socket, next_id, &mut setup_events).await?;
-    if let Some(progress) = &progress {
-        progress.record("native_binding_installed");
-    }
-    next_id += 1;
-    send_command(
-        &mut socket,
-        next_id,
-        "Page.addScriptToEvaluateOnNewDocument",
-        json!({ "source": injection.navigation_bootstrap_source.as_deref().unwrap_or(injection.bootstrap_source.as_ref()) }),
-    )
-    .await?;
-    let _ = wait_for_command(&mut socket, next_id, &mut setup_events).await?;
-    if let Some(progress) = &progress {
-        progress.record("navigation_bootstrap_registered");
-    }
-    if setup_contains_top_navigation(&setup_events)? {
-        return Err(CdpError::IncompatibleRenderer);
-    }
-    next_id += 1;
-
-    let (mut writer, mut reader) = socket.split();
-    let initial_bootstrap_eval_id = next_id;
-    if let Some(progress) = &progress {
-        progress
-            .update(|state| state.bootstrap_attempts = state.bootstrap_attempts.saturating_add(1));
-        progress.record("bootstrap_evaluation_started");
-    }
-    send_command(
-        &mut writer,
-        next_id,
-        "Runtime.evaluate",
-        json!({
-            "expression": injection.bootstrap_source.as_ref(),
-            "awaitPromise": true,
-            "returnByValue": true
-        }),
-    )
-    .await?;
-    next_id += 1;
-
-    let gate = Arc::new(SecureGate::new(injection.capability_token));
-    let dispatch_slots = Arc::new(Semaphore::new(MAX_IN_FLIGHT_REQUESTS));
-    let mut handler_tasks = JoinSet::new();
-    let (outbound_sender, mut outbound_receiver) = mpsc::channel::<OutboundMessage>(256);
-    let mut document_epoch = 0_u64;
-    let mut document_qualified = true;
-    let mut pending_requests = VecDeque::new();
-    let mut trusted_execution_context = None;
-    let mut execution_context_probe = None;
-    let mut rejected_execution_contexts = HashSet::new();
-    let mut top_frame_id: Option<String> = None;
-    let mut qualification_probe = None;
-    let mut top_document_loaded = true;
-    let mut navigation_in_progress = false;
-    let mut navigation_awaiting_frame = false;
-    let mut navigation_started_at = None;
-    let mut last_qualification = Instant::now();
-    let mut qualification_tick = tokio::time::interval(Duration::from_millis(250));
-    qualification_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    qualification_tick.tick().await;
-    loop {
-        tokio::select! {
-            () = cancellation.cancelled() => break,
-            completed = handler_tasks.join_next(), if !handler_tasks.is_empty() => {
-                let _ = completed;
-            }
-            _ = qualification_tick.tick() => {
-                if execution_context_probe
-                    .as_ref()
-                    .is_some_and(|(_, _, _, started): &(u64, u64, String, Instant)| {
-                        started.elapsed() >= Duration::from_secs(3)
-                    })
-                {
-                    if let Some((_, context_id, _, _)) = execution_context_probe.take() {
-                        remember_rejected_context(&mut rejected_execution_contexts, context_id);
-                    }
-                }
-                if qualification_probe
-                    .as_ref()
-                    .is_some_and(|(_, started): &(u64, Instant)| {
-                        started.elapsed() >= Duration::from_secs(3)
-                    })
-                {
-                    return Err(CdpError::Protocol);
-                }
-                if top_document_loaded
-                    && qualification_probe.is_none()
-                    && last_qualification.elapsed()
-                        >= if navigation_in_progress {
-                            NAVIGATION_QUALIFICATION_INTERVAL
-                        } else {
-                            STEADY_STATE_QUALIFICATION_INTERVAL
-                        }
-                {
-                    send_command(
-                        &mut writer,
-                        next_id,
-                        "Runtime.evaluate",
-                        json!({
-                            "expression": RENDERER_LAYOUT_PROBE,
-                            "returnByValue": true
-                        }),
-                    ).await?;
-                    qualification_probe = Some((next_id, Instant::now()));
-                    next_id += 1;
-                }
-            }
-            outbound = outbound_receiver.recv() => {
-                let Some(outbound) = outbound else { break; };
-                if !document_qualified
-                    || trusted_execution_context.is_none()
-                    || outbound.document_epoch != document_epoch
-                {
-                    continue;
-                }
-                for expression in outbound_expressions(&outbound, &injection.receiver_name)? {
-                send_command(
-                    &mut writer,
-                    next_id,
-                    "Runtime.evaluate",
-                    json!({ "expression": expression, "awaitPromise": false, "contextId":trusted_execution_context }),
-                ).await?;
-                next_id += 1;
-                }
-            }
-            notification = notifications.recv() => match notification {
-                Ok(notification) => {
-                    if !document_qualified
-                        || trusted_execution_context.is_none()
-                        || notification.lifecycle_epoch != handler.lifecycle_epoch()
-                    {
-                        continue;
-                    }
-                    let expression = delivery_expression(&notification.payload, &injection.receiver_name)?;
-                    send_command(
-                        &mut writer,
-                        next_id,
-                        "Runtime.evaluate",
-                        json!({ "expression": expression, "awaitPromise": false }),
-                    ).await?;
-                    next_id += 1;
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    if !document_qualified || trusted_execution_context.is_none() {
-                        continue;
-                    }
-                    let resync = json!({ "method": "explorer.resync", "params": {} });
-                    let expression = delivery_expression(&resync, &injection.receiver_name)?;
-                    send_command(
-                        &mut writer,
-                        next_id,
-                        "Runtime.evaluate",
-                        json!({ "expression": expression, "awaitPromise": false }),
-                    ).await?;
-                    next_id += 1;
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
-            },
-            incoming = reader.next() => {
-                let Some(incoming) = incoming else { break; };
-                let incoming = incoming.map_err(|error| CdpError::WebSocket.context("WebSocket connection or receive", error))?;
-                match incoming {
-                    Message::Text(text) => {
-                        let message = parse_cdp_message(text.as_ref())?;
-                        if message.get("id").and_then(Value::as_u64) == Some(initial_bootstrap_eval_id) {
-                            let succeeded = bootstrap_evaluation_succeeded(&message, initial_bootstrap_eval_id);
-                            if let Some(progress) = &progress {
-                                progress.update(|state| {
-                                    state.bootstrap_responses = state.bootstrap_responses.saturating_add(1);
-                                    if !succeeded {
-                                        state.bootstrap_failures = state.bootstrap_failures.saturating_add(1);
-                                    }
-                                });
-                                progress.record(if succeeded { "bootstrap_evaluation_succeeded" } else { "bootstrap_evaluation_failed" });
-                            }
-                            if let Some(handoff) = &injection.startup_handoff {
-                                if !succeeded {
-                                    tracing::warn!(event = "startup_visual_handoff_failed");
-                                }
-                                handoff.store(true, AtomicOrdering::Release);
-                            }
-                            continue;
-                        }
-                        let execution_context_probe_id =
-                            execution_context_probe.as_ref().map(|(id, _, _, _)| *id);
-                        if execution_context_probe_id.is_some()
-                            && message.get("id").and_then(Value::as_u64)
-                                == execution_context_probe_id
-                        {
-                            let (_, context_id, payload, _) =
-                                execution_context_probe.take().ok_or(CdpError::Protocol)?;
-                            if message
-                                .get("result")
-                                .is_some_and(renderer_probe_matches)
-                            {
-                                trusted_execution_context = Some(context_id);
-                                rejected_execution_contexts.remove(&context_id);
-                                last_qualification = Instant::now();
-                                authorize_binding_request(
-                                    &payload,
-                                    gate.as_ref(),
-                                    document_qualified,
-                                    &mut pending_requests,
-                                    handler.clone(),
-                                    outbound_sender.clone(),
-                                    dispatch_slots.clone(),
-                                    &mut handler_tasks,
-                                    document_epoch,
-                                ).await?;
-                            } else {
-                                remember_rejected_context(
-                                    &mut rejected_execution_contexts,
-                                    context_id,
-                                );
-                            }
-                            continue;
-                        }
-                        let qualification_probe_id =
-                            qualification_probe.as_ref().map(|(id, _)| *id);
-                        if qualification_probe_id.is_some()
-                            && message.get("id").and_then(Value::as_u64)
-                                == qualification_probe_id
-                        {
-                            qualification_probe = None;
-                            let probe = message.get("result").ok_or(CdpError::Protocol)?;
-                            if !renderer_probe_matches(probe) {
-                                if navigation_in_progress
-                                    && navigation_started_at.is_some_and(|started: Instant| {
-                                        started.elapsed()
-                                            < TRUSTED_NAVIGATION_QUALIFICATION_TIMEOUT
-                                    })
-                                {
-                                    // React can mount the verified shell selectors after
-                                    // readyState reaches complete. Keep native dispatch
-                                    // blocked and retry only inside this navigation window.
-                                    last_qualification = Instant::now();
-                                    continue;
-                                }
-                                return Err(CdpError::IncompatibleRenderer);
-                            }
-                            last_qualification = Instant::now();
-                            if !document_qualified {
-                                document_qualified = true;
-                                navigation_in_progress = false;
-                                navigation_awaiting_frame = false;
-                                navigation_started_at = None;
-                                while let Some(request) = pending_requests.pop_front() {
-                                    dispatch_request(
-                                        request,
-                                        handler.clone(),
-                                        outbound_sender.clone(),
-                                        dispatch_slots.clone(),
-                                        &mut handler_tasks,
-                                        document_epoch,
-                                    )?;
-                                }
-                                let resync = json!({ "method": "explorer.resync", "params": {} });
-                                let expression = delivery_expression(&resync, &injection.receiver_name)?;
-                                send_command(
-                                    &mut writer,
-                                    next_id,
-                                    "Runtime.evaluate",
-                                    json!({ "expression": expression, "awaitPromise": false }),
-                                ).await?;
-                                next_id += 1;
-                            }
-                            continue;
-                        }
-                        if top_frame_started_loading(&message, top_frame_id.as_deref()) {
-                            if !navigation_in_progress {
-                                handler.invalidate_lifecycle();
-                                handler_tasks.abort_all();
-                                document_epoch = document_epoch.wrapping_add(1);
-                                pending_requests.clear();
-                                gate.reset_for_new_document().await;
-                                navigation_started_at = Some(Instant::now());
-                            }
-                            navigation_in_progress = true;
-                            navigation_awaiting_frame = true;
-                            document_qualified = false;
-                            trusted_execution_context = None;
-                            execution_context_probe = None;
-                            rejected_execution_contexts.clear();
-                            top_document_loaded = false;
-                            qualification_probe = None;
-                            last_qualification = Instant::now();
-                            continue;
-                        }
-                        if let Some(url) = top_frame_navigation_url(&message)? {
-                            if !is_trusted_app_url(url) {
-                                return Err(CdpError::IncompatibleRenderer);
-                            }
-                            let navigated_frame_id = message
-                                .get("params")
-                                .and_then(|params| params.get("frame"))
-                                .and_then(|frame| frame.get("id"))
-                                .and_then(Value::as_str)
-                                .ok_or(CdpError::Protocol)?;
-                            let starts_distinct_navigation = !navigation_in_progress
-                                || (!navigation_awaiting_frame
-                                    && top_frame_id
-                                        .as_deref()
-                                        .is_some_and(|current| current != navigated_frame_id));
-                            if starts_distinct_navigation {
-                                handler.invalidate_lifecycle();
-                                handler_tasks.abort_all();
-                                document_epoch = document_epoch.wrapping_add(1);
-                                trusted_execution_context = None;
-                                execution_context_probe = None;
-                                rejected_execution_contexts.clear();
-                                pending_requests.clear();
-                                gate.reset_for_new_document().await;
-                                navigation_started_at = Some(Instant::now());
-                            }
-                            navigation_in_progress = true;
-                            navigation_awaiting_frame = false;
-                            document_qualified = false;
-                            top_frame_id = Some(navigated_frame_id.to_owned());
-                            top_document_loaded = false;
-                            qualification_probe = None;
-                            last_qualification = Instant::now();
-                            continue;
-                        }
-                        if message.get("method").and_then(Value::as_str) == Some("Page.loadEventFired") {
-                            top_document_loaded = true;
-                            continue;
-                        }
-                        if message.get("method").and_then(Value::as_str)
-                            == Some("Runtime.executionContextsCleared")
-                        {
-                            if !navigation_in_progress {
-                                handler.invalidate_lifecycle();
-                                handler_tasks.abort_all();
-                                document_epoch = document_epoch.wrapping_add(1);
-                                navigation_started_at = Some(Instant::now());
-                            }
-                            navigation_in_progress = true;
-                            navigation_awaiting_frame = true;
-                            trusted_execution_context = None;
-                            execution_context_probe = None;
-                            rejected_execution_contexts.clear();
-                            document_qualified = false;
-                            top_document_loaded = false;
-                            qualification_probe = None;
-                            last_qualification = Instant::now();
-                            pending_requests.clear();
-                            gate.reset_for_new_document().await;
-                            continue;
-                        }
-                        if message.get("method").and_then(Value::as_str)
-                            == Some("Runtime.executionContextCreated")
-                        {
-                            let context = message
-                                .get("params")
-                                .and_then(|params| params.get("context"));
-                            let context_id = context
-                                .and_then(|context| context.get("id"))
-                                .and_then(Value::as_u64);
-                            let auxiliary = context.and_then(|context| context.get("auxData"));
-                            let is_default = auxiliary
-                                .and_then(|data| data.get("isDefault"))
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false);
-                            let frame_matches = auxiliary
-                                .and_then(|data| data.get("frameId"))
-                                .and_then(Value::as_str)
-                                .zip(top_frame_id.as_deref())
-                                .is_some_and(|(frame, top)| frame == top);
-                            if is_default && frame_matches {
-                                trusted_execution_context = context_id;
-                                if let Some(context_id) = context_id {
-                                    rejected_execution_contexts.remove(&context_id);
-                                }
-                            }
-                            continue;
-                        }
-                        if message.get("method").and_then(Value::as_str)
-                            == Some("Runtime.executionContextDestroyed")
-                        {
-                            let destroyed = message
-                                .get("params")
-                                .and_then(|params| params.get("executionContextId"))
-                                .and_then(Value::as_u64);
-                            if let Some(destroyed) = destroyed {
-                                rejected_execution_contexts.remove(&destroyed);
-                            }
-                            if destroyed == trusted_execution_context {
-                                if !navigation_in_progress {
-                                    handler.invalidate_lifecycle();
-                                    handler_tasks.abort_all();
-                                    document_epoch = document_epoch.wrapping_add(1);
-                                    navigation_started_at = Some(Instant::now());
-                                }
-                                navigation_in_progress = true;
-                                navigation_awaiting_frame = true;
-                                trusted_execution_context = None;
-                                document_qualified = false;
-                                top_document_loaded = false;
-                                qualification_probe = None;
-                                last_qualification = Instant::now();
-                                pending_requests.clear();
-                                gate.reset_for_new_document().await;
-                            }
-                            if execution_context_probe
-                                .as_ref()
-                                .is_some_and(|(_, context_id, _, _)| Some(*context_id) == destroyed)
-                            {
-                                execution_context_probe = None;
-                            }
-                            continue;
-                        }
-                        if let Some(context_id) =
-                            binding_execution_context(&message, &injection.binding_name)
-                        {
-                            if rejected_execution_contexts.contains(&context_id) {
-                                continue;
-                            }
-                            if let Some(trusted) = trusted_execution_context {
-                                if context_id != trusted {
-                                    continue;
-                                }
-                                if let Some(payload) =
-                                    bounded_binding_payload(&message, &injection.binding_name)
-                                {
-                                    authorize_binding_request(
-                                        payload,
-                                        gate.as_ref(),
-                                        document_qualified,
-                                        &mut pending_requests,
-                                        handler.clone(),
-                                        outbound_sender.clone(),
-                                        dispatch_slots.clone(),
-                                        &mut handler_tasks,
-                                        document_epoch,
-                                    ).await?;
-                                }
-                            } else if execution_context_probe.is_none() {
-                                let Some(payload) =
-                                    bounded_binding_payload(&message, &injection.binding_name)
-                                else {
-                                    continue;
-                                };
-                                send_command(
-                                    &mut writer,
-                                    next_id,
-                                    "Runtime.evaluate",
-                                    json!({
-                                        "expression": RENDERER_LAYOUT_PROBE,
-                                        "contextId": context_id,
-                                        "returnByValue": true
-                                    }),
-                                ).await?;
-                                execution_context_probe =
-                                    Some((next_id, context_id, payload.to_owned(), Instant::now()));
-                                next_id += 1;
-                            }
-                        }
-                    }
-                    Message::Ping(payload) => writer.send(Message::Pong(payload)).await.map_err(|_| CdpError::WebSocket)?,
-                    Message::Close(_) => break,
-                    _ => {}
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn dispatch_request<H>(
-    mut request: BindingRequest,
-    handler: Arc<H>,
-    outbound_sender: mpsc::Sender<OutboundMessage>,
-    dispatch_slots: Arc<Semaphore>,
-    handler_tasks: &mut JoinSet<()>,
-    document_epoch: u64,
-) -> Result<(), CdpError>
-where
-    H: BridgeHandler,
-{
-    request.lifecycle_epoch = handler.lifecycle_epoch();
-    match dispatch_slots.try_acquire_owned() {
-        Ok(permit) => {
-            handler_tasks.spawn(async move {
-                let _permit = permit;
-                let id = request.id.clone();
-                let method = request.method.clone();
-                let mut response = match handler.handle(request).await {
-                    Ok(result) => json!({ "id": id, "ok": true, "result": result }),
-                    Err(error) => json!({ "id": id, "ok": false, "error": error }),
-                };
-                let trusted_script = take_verified_plugin_source(&method, &mut response);
-                let _ = outbound_sender
-                    .send(OutboundMessage {
-                        trusted_script,
-                        payload: response,
-                        document_epoch,
-                    })
-                    .await;
-            });
-        }
-        Err(_) => {
-            let response = json!({
-                "id": request.id,
-                "ok": false,
-                "error": BridgeError::new("RATE_LIMITED", "Too many native requests.")
-            });
-            outbound_sender
-                .try_send(OutboundMessage {
-                    trusted_script: None,
-                    payload: response,
-                    document_epoch,
-                })
-                .map_err(|_| CdpError::Protocol)?;
-        }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn authorize_binding_request<H>(
-    payload: &str,
-    gate: &SecureGate,
-    document_qualified: bool,
-    pending_requests: &mut VecDeque<BindingRequest>,
-    handler: Arc<H>,
-    outbound_sender: mpsc::Sender<OutboundMessage>,
-    dispatch_slots: Arc<Semaphore>,
-    handler_tasks: &mut JoinSet<()>,
-    document_epoch: u64,
-) -> Result<(), CdpError>
-where
-    H: BridgeHandler,
-{
-    let request = match gate.authorize(payload).await {
-        Ok(request) => request,
-        Err(error) => {
-            // Local metadata only. Never echo IDs to unauthenticated callers.
-            observe_rejection(
-                "binding authorization",
-                json!({"code":error.code,"reason":error.message,"payloadBytes":payload.len(),"documentQualified":document_qualified,"payloadOmitted":true}),
-            );
-            return Ok(());
-        }
-    };
-    if document_qualified {
-        dispatch_request(
-            request,
-            handler,
-            outbound_sender,
-            dispatch_slots,
-            handler_tasks,
-            document_epoch,
-        )
-    } else {
-        if pending_requests.len() < MAX_IN_FLIGHT_REQUESTS {
-            pending_requests.push_back(request);
-        } else {
-            observe_rejection(
-                "pending request capacity",
-                json!({"code":"REQUEST_CAPACITY","limit":MAX_IN_FLIGHT_REQUESTS,"documentQualified":false}),
-            );
-        }
-        Ok(())
-    }
-}
-
-fn validate_websocket_url(endpoint: CdpEndpoint, raw_url: &str) -> Result<(), CdpError> {
-    let url = Url::parse(raw_url).map_err(|_| CdpError::InvalidWebSocketEndpoint)?;
-    let loopback = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1"));
-    if url.scheme() != "ws" || !loopback || url.port_or_known_default() != Some(endpoint.port()) {
-        return Err(CdpError::InvalidWebSocketEndpoint);
-    }
-    Ok(())
-}
-
-async fn wait_for_candidate_approval(
-    approval_receiver: oneshot::Receiver<Result<(), CdpError>>,
-    cold_startup_deadline: Option<Instant>,
-    recovery_timeout: Duration,
-) -> Result<Result<(), CdpError>, CdpError> {
-    match cold_startup_deadline {
-        Some(deadline) => {
-            let approval = tokio::time::timeout_at(
-                tokio::time::Instant::from_std(deadline),
-                approval_receiver,
-            )
-            .await
-            .map_err(|_| CdpError::IncompatibleRenderer)?
-            .map_err(|_| CdpError::Protocol)?;
-            if Instant::now() >= deadline {
-                return Err(CdpError::IncompatibleRenderer);
-            }
-            Ok(approval)
-        }
-        None => tokio::time::timeout(recovery_timeout, approval_receiver)
-            .await
-            .map_err(|_| CdpError::Protocol)?
-            .map_err(|_| CdpError::Protocol),
-    }
-}
-
-async fn send_command<S>(
-    writer: &mut S,
-    id: u64,
-    method: &str,
-    params: Value,
-) -> Result<(), CdpError>
-where
-    S: futures_util::Sink<Message> + Unpin,
-    S::Error: std::fmt::Display,
-{
-    let encoded = serde_json::to_string(&json!({
-        "id": id,
-        "method": method,
-        "params": params
-    }))
-    .map_err(|_| CdpError::Protocol)?;
-    writer
-        .send(Message::Text(encoded.into()))
-        .await
-        .map_err(|error| {
-            CdpError::WebSocket.context(
-                "sending renderer command",
-                format!("method={method}; commandId={id}; cause={error}"),
-            )
-        })
-}
-
-async fn send_command_before_deadline<S>(
-    writer: &mut S,
-    id: u64,
-    method: &str,
-    params: Value,
-    deadline: Option<Instant>,
-) -> Result<(), CdpError>
-where
-    S: futures_util::Sink<Message> + Unpin,
-    S::Error: std::fmt::Display,
-{
-    match deadline {
-        Some(deadline) => tokio::time::timeout_at(
-            tokio::time::Instant::from_std(deadline),
-            send_command(writer, id, method, params),
-        )
-        .await
-        .map_err(|_| CdpError::IncompatibleRenderer)?,
-        None => send_command(writer, id, method, params).await,
-    }
-}
-
-async fn wait_for_command<S>(
-    socket: &mut S,
-    expected_id: u64,
-    setup_events: &mut VecDeque<Value>,
-) -> Result<Value, CdpError>
-where
-    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            let incoming = socket.next().await.ok_or_else(|| {
-                CdpError::WebSocket.context(
-                    "waiting for command reply",
-                    format!("stream ended; commandId={expected_id}"),
-                )
-            })?;
-            let incoming = incoming.map_err(|error| {
-                CdpError::WebSocket.context("WebSocket connection or receive", error)
-            })?;
-            let Message::Text(text) = incoming else {
-                continue;
-            };
-            let message = parse_cdp_message(text.as_ref())?;
-            if message.get("id").and_then(Value::as_u64) != Some(expected_id) {
-                retain_setup_lifecycle_event(setup_events, &message)?;
-                continue;
-            }
-            if message.get("error").is_some() {
-                return Err(CdpError::Protocol.context(
-                    "command reply rejected",
-                    format!(
-                        "commandId={expected_id}; remoteCode={:?}; remote message/body omitted",
-                        message.pointer("/error/code").and_then(Value::as_i64)
-                    ),
-                ));
-            }
-            return message.get("result").cloned().ok_or_else(|| {
-                CdpError::Protocol.context(
-                    "command reply validation",
-                    format!("commandId={expected_id}; missing result"),
-                )
-            });
-        }
-    })
-    .await
-    .map_err(|error| {
-        CdpError::WebSocket.context(
-            "waiting for renderer command reply",
-            format!("commandId={expected_id}; timeoutMs=3000; cause={error}"),
-        )
-    })?
-}
-
-async fn wait_for_command_before_deadline<S>(
-    socket: &mut S,
-    expected_id: u64,
-    setup_events: &mut VecDeque<Value>,
-    deadline: Option<Instant>,
-) -> Result<Value, CdpError>
-where
-    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    match deadline {
-        Some(deadline) => tokio::time::timeout_at(
-            tokio::time::Instant::from_std(deadline),
-            wait_for_command(socket, expected_id, setup_events),
-        )
-        .await
-        .map_err(|_| CdpError::IncompatibleRenderer)?,
-        None => wait_for_command(socket, expected_id, setup_events).await,
-    }
-}
-
-fn parse_cdp_message(text: &str) -> Result<Value, CdpError> {
-    if text.len() > MAX_CDP_MESSAGE_BYTES {
-        return Err(CdpError::Protocol.context(
-            "validating renderer protocol frame",
-            format!(
-                "observedBytes={}; maxBytes={MAX_CDP_MESSAGE_BYTES}",
-                text.len()
-            ),
-        ));
-    }
-    serde_json::from_str(text).map_err(|error| {
-        CdpError::Protocol.context(
-            "parsing renderer protocol JSON",
-            format!(
-                "observedBytes={}; line={}; column={}; category={:?}",
-                text.len(),
-                error.line(),
-                error.column(),
-                error.classify()
-            ),
-        )
-    })
-}
-
-fn layout_observation(value: &Value) -> Value {
-    let mut result = serde_json::Map::new();
-    for name in ["diagnosticVersion","topFrame","appOrigin","accepted","mainCount","totalMainCount","inactiveMainCount","activePageCount","sidebarTriggerCount","nativeFeaturePage","nativeLoginPage","legacyShellMatch","workspaceRowPresent","rowMainCount","mainContentClip","directRailCount","workspaceCount","railBeforeWorkspace","workspaceContainsMain"] {
-        if let Some(v) = value.get(name).filter(|v| v.is_boolean() || v.is_u64()) { result.insert(name.to_owned(),v.clone()); }
-    }
-    // Never copy titles, URLs, page text, arbitrary strings or raw ancestor shapes.
-    Value::Object(result)
-}
 
 #[cfg(test)]
 mod layout_observation_tests {
     use super::*;
     #[test]
     fn observation_preserves_shape_counts_but_not_page_content() {
-        let v=layout_observation(&json!({"accepted":false,"mainCount":0,"sidebarTriggerCount":1,"title":"PRIVATE","url":"PRIVATE","rowChildren":["PRIVATE"],"mainContentClip":"PRIVATE"}));
-        assert_eq!(v,json!({"accepted":false,"mainCount":0,"sidebarTriggerCount":1}));
-    }
-}
-
-fn renderer_probe_matches(result: &Value) -> bool {
-    result
-        .get("result")
-        .and_then(|remote_object| remote_object.get("value"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn renderer_document_is_loading(result: &Value) -> bool {
-    result
-        .get("result")
-        .and_then(|remote_object| remote_object.get("value"))
-        .and_then(Value::as_str)
-        == Some("loading")
-}
-
-fn initial_qualification_retry_timeout(
-    observed_loading_document: bool,
-    recently_qualified_grace: Duration,
-    canonical_startup_grace: bool,
-    cold_startup_timeout: Option<Duration>,
-) -> Duration {
-    let loading_grace = if observed_loading_document {
-        INITIAL_RENDERER_QUALIFICATION_TIMEOUT
-    } else {
-        Duration::ZERO
-    };
-    let relative_grace = recently_qualified_grace.max(loading_grace);
-    match cold_startup_timeout {
-        Some(remaining) if canonical_startup_grace => remaining,
-        Some(remaining) => relative_grace.min(remaining),
-        None => relative_grace,
-    }
-}
-
-fn top_frame_started_loading(message: &Value, top_frame_id: Option<&str>) -> bool {
-    message.get("method").and_then(Value::as_str) == Some("Page.frameStartedLoading")
-        && message
-            .get("params")
-            .and_then(|params| params.get("frameId"))
-            .and_then(Value::as_str)
-            .zip(top_frame_id)
-            .is_some_and(|(loading, top)| loading == top)
-}
-
-fn top_frame_navigation_url(message: &Value) -> Result<Option<&str>, CdpError> {
-    if message.get("method").and_then(Value::as_str) != Some("Page.frameNavigated") {
-        return Ok(None);
-    }
-    let frame = message
-        .get("params")
-        .and_then(|params| params.get("frame"))
-        .ok_or(CdpError::Protocol)?;
-    if frame
-        .get("parentId")
-        .is_some_and(|parent| !parent.is_null())
-    {
-        return Ok(None);
-    }
-    frame
-        .get("url")
-        .and_then(Value::as_str)
-        .map(Some)
-        .ok_or(CdpError::Protocol)
-}
-
-fn setup_contains_top_navigation(events: &VecDeque<Value>) -> Result<bool, CdpError> {
-    for event in events {
-        if top_frame_navigation_url(event)?.is_some() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn retain_setup_lifecycle_event(
-    events: &mut VecDeque<Value>,
-    message: &Value,
-) -> Result<(), CdpError> {
-    let Some(url) = top_frame_navigation_url(message)? else {
-        return Ok(());
-    };
-    if url.len() > 2_048 {
-        return Err(CdpError::Protocol);
-    }
-    // Setup only needs to know that a top navigation happened. Retaining a
-    // normalized marker prevents arbitrary console/context events from
-    // accumulating hundreds of megabytes before qualification completes.
-    events.clear();
-    events.push_back(json!({
-        "method": "Page.frameNavigated",
-        "params": { "frame": { "id": "top", "url": url } }
-    }));
-    Ok(())
-}
-
-fn is_trusted_app_url(raw_url: &str) -> bool {
-    Url::parse(raw_url).is_ok_and(|url| url.scheme() == "app" && url.host_str() == Some("-"))
-}
-
-fn binding_execution_context(message: &Value, binding_name: &str) -> Option<u64> {
-    if message.get("method")?.as_str()? != "Runtime.bindingCalled" {
-        return None;
-    }
-    let params = message.get("params")?;
-    if params.get("name")?.as_str()? != binding_name {
-        return None;
-    }
-    params.get("executionContextId")?.as_u64()
-}
-
-fn bounded_binding_payload<'a>(message: &'a Value, binding_name: &str) -> Option<&'a str> {
-    binding_execution_context(message, binding_name)?;
-    let params = message.get("params")?;
-    let payload = params.get("payload").and_then(Value::as_str)?;
-    if payload.len() > MAX_BINDING_PAYLOAD_BYTES {
-        observe_rejection(
-            "binding payload limit",
-            json!({"code":"INVALID_REQUEST","payloadBytes":payload.len(),"limit":MAX_BINDING_PAYLOAD_BYTES,"payloadOmitted":true}),
+        let v = layout_observation(
+            &json!({"accepted":false,"mainCount":0,"sidebarTriggerCount":1,"title":"PRIVATE","url":"PRIVATE","rowChildren":["PRIVATE"],"mainContentClip":"PRIVATE"}),
         );
-        return None;
+        assert_eq!(
+            v,
+            json!({"accepted":false,"mainCount":0,"sidebarTriggerCount":1})
+        );
     }
-    Some(payload)
-}
-
-fn delivery_expression(message: &Value, receiver_name: &str) -> Result<String, CdpError> {
-    if receiver_name.is_empty()
-        || receiver_name.len() > 96
-        || !receiver_name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-    {
-        return Err(CdpError::Protocol);
-    }
-    let serialized = serde_json::to_string(message).map_err(|_| CdpError::Protocol)?;
-    let quoted = serde_json::to_string(&serialized).map_err(|_| CdpError::Protocol)?;
-    let receiver = serde_json::to_string(receiver_name).map_err(|_| CdpError::Protocol)?;
-    Ok(format!(
-        "(()=>{{const m=JSON.parse({quoted});const r=window[{receiver}];if(typeof r==='function'){{r(m);}}else{{window.dispatchEvent(new CustomEvent('code-codex:message',{{detail:m}}));}}}})()"
-    ))
-}
-
-fn bootstrap_evaluation_succeeded(message: &Value, expected_id: u64) -> bool {
-    message.get("id").and_then(Value::as_u64) == Some(expected_id)
-        && message.get("error").is_none()
-        && message
-            .get("result")
-            .is_some_and(|result| result.get("exceptionDetails").is_none())
 }
 
 #[cfg(test)]
@@ -2857,12 +410,40 @@ mod tests {
     // ObjectBridge fixtures bypass this production CDP authorization boundary.
     fn startup_example_renderer_methods() -> Vec<&'static str> {
         let source = include_str!("../../../packages/explorer-ui/src/startup-video-examples.ts");
-        let mut methods: Vec<_> = source.split(['\'', '"'])
-            .filter(|part| part.starts_with("explorer.")).collect();
+        let mut methods: Vec<_> = source
+            .split(['\'', '"'])
+            .filter(|part| part.starts_with("explorer."))
+            .collect();
         methods.sort_unstable();
         methods.dedup();
         assert_eq!(methods.len(), 3);
         methods
+    }
+
+    #[tokio::test]
+    async fn language_renderer_methods_cross_real_authorization_and_replay_guards() {
+        let source = include_str!("../../../packages/explorer-ui/src/core/localization/runtime.ts");
+        let backend = include_str!("../../launcher/src/bridge/router.rs");
+        let token = CapabilityToken::generate();
+        let gate = SecureGate::new(token.clone());
+        for (index, method) in ["explorer.language.get", "explorer.language.set"]
+            .iter()
+            .enumerate()
+        {
+            assert!(source.contains(method));
+            assert!(backend.contains(&format!("\"{method}\" =>")));
+            let mut payload = json!({"id":format!("language-{index}"),"token":"invalid","method":method,"params":{}});
+            assert_eq!(
+                gate.authorize(&payload.to_string()).await.unwrap_err().code,
+                "UNAUTHORIZED"
+            );
+            payload["token"] = json!(token.expose());
+            gate.authorize(&payload.to_string()).await.unwrap();
+            assert_eq!(
+                gate.authorize(&payload.to_string()).await.unwrap_err().code,
+                "INVALID_REQUEST"
+            );
+        }
     }
 
     #[tokio::test]
@@ -2873,12 +454,28 @@ mod tests {
         let mut tasks = JoinSet::new();
         let slots = Arc::new(Semaphore::new(MAX_IN_FLIGHT_REQUESTS));
         let mut pending = VecDeque::new();
-        let backend = include_str!("../../launcher/src/bridge.rs");
+        let backend = include_str!("../../launcher/src/bridge/router.rs");
         for (index, method) in startup_example_renderer_methods().into_iter().enumerate() {
-            assert!(backend.contains(&format!("\"{method}\" =>")), "missing native dispatch: {method}");
+            assert!(
+                backend.contains(&format!("\"{method}\" =>")),
+                "missing native dispatch: {method}"
+            );
             let payload = json!({"id":format!("sample-{index}"),"token":token.expose(),"method":method,"params":{"id":"the-intelligence-age"}}).to_string();
-            authorize_binding_request(&payload, &gate, true, &mut pending, Arc::new(EchoHandler), sender.clone(), slots.clone(), &mut tasks, 7).await.unwrap();
-            let message = tokio::time::timeout(Duration::from_millis(500), receiver.recv()).await
+            authorize_binding_request(
+                &payload,
+                &gate,
+                true,
+                &mut pending,
+                Arc::new(EchoHandler),
+                sender.clone(),
+                slots.clone(),
+                &mut tasks,
+                7,
+            )
+            .await
+            .unwrap();
+            let message = tokio::time::timeout(Duration::from_millis(500), receiver.recv())
+                .await
                 .unwrap_or_else(|_| panic!("renderer method rejected before dispatch: {method}"))
                 .expect("authenticated response");
             assert_eq!(message.document_epoch, 7);
@@ -2896,10 +493,16 @@ mod tests {
         let gate = SecureGate::new(token.clone());
         for (index, method) in startup_example_renderer_methods().into_iter().enumerate() {
             let mut payload = json!({"id":format!("protected-example-{index}"),"token":"incorrect","method":method,"params":{}});
-            assert_eq!(gate.authorize(&payload.to_string()).await.unwrap_err().code, "UNAUTHORIZED");
+            assert_eq!(
+                gate.authorize(&payload.to_string()).await.unwrap_err().code,
+                "UNAUTHORIZED"
+            );
             payload["token"] = json!(token.expose());
             gate.authorize(&payload.to_string()).await.unwrap();
-            assert_eq!(gate.authorize(&payload.to_string()).await.unwrap_err().code, "INVALID_REQUEST");
+            assert_eq!(
+                gate.authorize(&payload.to_string()).await.unwrap_err().code,
+                "INVALID_REQUEST"
+            );
         }
         let legacy = json!({"id":"legacy-example","token":token.expose(),"method":"explorer.startupExamples.download","params":{}});
         let error = gate.authorize(&legacy.to_string()).await.unwrap_err();
@@ -2912,18 +515,32 @@ mod tests {
         fn inspect(directory: &std::path::Path, checked: &mut usize) {
             for entry in std::fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
-                if path.is_dir() { inspect(&path, checked); continue; }
-                if path.extension().is_none_or(|extension| extension != "ts") { continue; }
+                if path.is_dir() {
+                    inspect(&path, checked);
+                    continue;
+                }
+                if path.extension().is_none_or(|extension| extension != "ts") {
+                    continue;
+                }
                 let source = std::fs::read_to_string(&path).unwrap();
                 for method in source.split(['\'', '"']) {
-                    if method.starts_with("explorer.") && method.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) {
-                        assert!(valid_method(method), "invalid RPC literal in {}: {method}", path.display());
+                    if method.starts_with("explorer.")
+                        && method
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+                    {
+                        assert!(
+                            valid_method(method),
+                            "invalid RPC literal in {}: {method}",
+                            path.display()
+                        );
                         *checked += 1;
                     }
                 }
             }
         }
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/explorer-ui/src");
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/explorer-ui/src");
         let mut checked = 0;
         inspect(&root, &mut checked);
         assert!(checked > 50);
@@ -3768,6 +1385,253 @@ mod tests {
             transient_gap,
             timeout,
         ));
+    }
+
+    async fn initial_context_burst_case(mode: &'static str) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let token = CapabilityToken::generate();
+        let server_token = token.clone();
+        let ids = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = ids.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let mut sent = false;
+            let mut replies = HashSet::new();
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let command: Value = serde_json::from_str(text.as_ref()).unwrap();
+                let expression = command["params"]["expression"].as_str().unwrap_or_default();
+                let context_probe =
+                    expression == RENDERER_LAYOUT_PROBE && command["params"]["contextId"] == 1;
+                if context_probe {
+                    assert!(
+                        observed.lock().unwrap().is_empty(),
+                        "No dispatch before qualification"
+                    );
+                    if mode == "navigation" {
+                        socket
+                            .send(Message::Text(
+                                json!({"method":"Runtime.executionContextsCleared","params":{}})
+                                    .to_string()
+                                    .into(),
+                            ))
+                            .await
+                            .unwrap();
+                    }
+                }
+                let result = if expression == RENDERER_LAYOUT_PROBE {
+                    json!({"result":{"type":"boolean","value": !context_probe || mode != "rejected"}})
+                } else if command["method"] == "Page.addScriptToEvaluateOnNewDocument" {
+                    json!({"identifier":"burst-script"})
+                } else {
+                    json!({})
+                };
+                socket
+                    .send(Message::Text(
+                        json!({"id":command["id"],"result":result})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                if context_probe && mode != "accepted" {
+                    break;
+                }
+                if expression == "window.__burstFixture=true;" && !sent {
+                    sent = true;
+                    // Deliver the complete burst before reading/responding to the
+                    // qualification command. Old code retained only request0.
+                    for index in 0..9 {
+                        let request = json!({"id":format!("burst-{index}"),"token":if index==7 {"invalid"}else{server_token.expose()},"method":"explorer.context","params":{}});
+                        socket.send(Message::Text(json!({"method":"Runtime.bindingCalled","params":{"name":PRIMARY_BINDING_NAME,"executionContextId":if index==8 {2}else{1},"payload":request.to_string()}}).to_string().into())).await.unwrap();
+                    }
+                } else if expression.contains(PRIMARY_RECEIVER_NAME)
+                    && expression.contains("burst-")
+                {
+                    let index = (0..9)
+                        .find(|index| expression.contains(&format!("burst-{index}")))
+                        .unwrap();
+                    assert!(replies.insert(index), "No duplicate deliveries");
+                    assert!(
+                        index < 7,
+                        "Wrong-token and foreign-context IDs must never be echoed"
+                    );
+                    if replies.len() == 7 {
+                        break;
+                    }
+                }
+            }
+            let _ = socket.close(None).await;
+        });
+        let target = CdpTarget {
+            id: "burst-main".into(),
+            target_type: "page".into(),
+            title: "Codex".into(),
+            url: "app://-/index.html".into(),
+            web_socket_debugger_url: format!("ws://127.0.0.1:{port}/devtools/page/burst-main"),
+        };
+        let (_sender, notifications) = broadcast::channel(4);
+        let (status_sender, mut status_receiver) = mpsc::unbounded_channel();
+        let cancellation = CancellationToken::new();
+        let session = tokio::spawn(run_target_session(
+            CdpEndpoint::loopback(port),
+            target,
+            InjectionConfig::new("window.__burstFixture=true;", token),
+            Arc::new(RecordingHandler { ids: ids.clone() }),
+            Arc::new(AllowEndpointVerifier),
+            notifications,
+            cancellation.clone(),
+            Duration::ZERO,
+            None,
+            false,
+            Arc::new(Notify::new()),
+            1,
+            status_sender,
+            Arc::new(AtomicBool::new(false)),
+            None,
+        ));
+        approve_candidate(&mut status_receiver).await;
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("All initial requests must finish without renderer timeouts")
+            .unwrap();
+        cancellation.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(2), session)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut actual = ids.lock().unwrap().clone();
+        actual.sort();
+        let expected: Vec<String> = if mode == "accepted" {
+            (0..7).map(|index| format!("burst-{index}")).collect()
+        } else {
+            Vec::new()
+        };
+        assert_eq!(
+            actual, expected,
+            "Each authorized request once; wrong tokens, other frames and invalidated batches never dispatch"
+        );
+    }
+
+    #[tokio::test]
+    async fn initial_context_probe_preserves_concurrent_ingress_and_checks_every_token() {
+        initial_context_burst_case("accepted").await;
+    }
+    #[tokio::test]
+    async fn rejected_context_discards_the_entire_unprocessed_burst() {
+        initial_context_burst_case("rejected").await;
+    }
+    #[tokio::test]
+    async fn navigation_discards_pending_context_ingress_before_a_late_probe_reply() {
+        initial_context_burst_case("navigation").await;
+    }
+
+    #[tokio::test]
+    async fn retained_activation_recovers_rpc_after_login_gap_longer_than_five_seconds() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let token = CapabilityToken::generate();
+        let server_token = token.clone();
+        let visible = Arc::new(AtomicBool::new(true));
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let server_visible = visible.clone();
+        let server_delivered = delivered.clone();
+        let server = tokio::spawn(async move {
+            let mut connections = JoinSet::new();
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let visible = server_visible.clone();
+                let delivered = server_delivered.clone();
+                let token = server_token.clone();
+                connections.spawn(async move {
+                    let mut prefix = [0u8;2048];
+                    let count = stream.peek(&mut prefix).await.unwrap();
+                    if String::from_utf8_lossy(&prefix[..count]).starts_with("GET /json/list") {
+                        let body = if visible.load(AtomicOrdering::Acquire) {
+                            json!([{"id":"login-main","type":"page","title":"Codex","url":"app://-/index.html","webSocketDebuggerUrl":format!("ws://127.0.0.1:{port}/devtools/page/login-main")}]).to_string()
+                        } else { "[]".into() };
+                        let _ = stream.read(&mut prefix).await;
+                        stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+                        return;
+                    }
+                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    let mut sent = false;
+                    while let Some(Ok(Message::Text(text))) = socket.next().await {
+                        let command:Value = serde_json::from_str(text.as_ref()).unwrap();
+                        let expression = command["params"]["expression"].as_str().unwrap_or_default();
+                        let result = if expression == RENDERER_LAYOUT_PROBE {
+                            json!({"result":{"type":"boolean","value":true}})
+                        } else if command["method"] == "Page.addScriptToEvaluateOnNewDocument" {
+                            json!({"identifier":"login-script"})
+                        } else { json!({}) };
+                        socket.send(Message::Text(json!({"id":command["id"],"result":result}).to_string().into())).await.unwrap();
+                        if expression == "window.__loginFixture=true;" && !sent {
+                            sent = true;
+                            let serial = delivered.load(AtomicOrdering::Acquire)+1;
+                            let request = json!({"id":format!("login-rpc-{serial}"),"token":token.expose(),"method":"explorer.context","params":{}});
+                            socket.send(Message::Text(json!({"method":"Runtime.bindingCalled","params":{"name":PRIMARY_BINDING_NAME,"executionContextId":1,"payload":request.to_string()}}).to_string().into())).await.unwrap();
+                        } else if expression.contains("__codeCodexReceive") {
+                            let prior = delivered.fetch_add(1,AtomicOrdering::AcqRel);
+                            assert!(expression.contains(&format!("login-rpc-{}",prior+1)),"fresh request must receive its own reply");
+                            if prior == 0 {
+                                visible.store(false,AtomicOrdering::Release);
+                                let visible = visible.clone();
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(Duration::from_millis(6200)).await;
+                                    visible.store(true,AtomicOrdering::Release);
+                                });
+                                let _ = socket.close(None).await;
+                            }
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        let mut options = SupervisorOptions::for_endpoint(CdpEndpoint::loopback(port));
+        options.poll_interval = Duration::from_millis(30);
+        options.idle_policy = IdlePolicy::RecoverUntilCancelled;
+        let progress = Arc::new(SupervisorProgress::default());
+        options.progress = Some(progress.clone());
+        let supervisor = CdpSupervisor::new(
+            options,
+            InjectionConfig::new("window.__loginFixture=true;", token),
+            Arc::new(EchoHandler),
+            Arc::new(AllowEndpointVerifier),
+        )
+        .unwrap();
+        let cancellation = CancellationToken::new();
+        let running = tokio::spawn(supervisor.run(cancellation.clone()));
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while delivered.load(AtomicOrdering::Acquire) < 1 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("first RPC");
+        tokio::time::sleep(Duration::from_millis(5500)).await;
+        assert!(
+            !running.is_finished(),
+            "activation must survive the former five-second idle exit"
+        );
+        assert!(progress.snapshot().recovery_waiting);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while delivered.load(AtomicOrdering::Acquire) < 2 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("new account RPC after requalification");
+        assert_eq!(progress.snapshot().recovery_resumes, 1);
+        assert!(progress.snapshot().last_recovery_wait_ms >= 6000);
+        cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(2), running)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        server.abort();
     }
 
     #[test]
@@ -4805,3 +2669,93 @@ mod tests {
         assert_eq!(server.await.expect("mock renderer task"), 3);
     }
 }
+
+#[cfg(test)]
+#[allow(unused_imports)]
+mod test_imports {
+    pub(super) use async_trait::async_trait;
+    pub(super) use base64::Engine as _;
+    pub(super) use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    pub(super) use constant_time_eq::constant_time_eq;
+    pub(super) use futures_util::{SinkExt, StreamExt};
+    pub(super) use rand::RngCore;
+    pub(super) use serde::{Deserialize, Serialize};
+    pub(super) use serde_json::{Value, json};
+    pub(super) use std::collections::{HashMap, HashSet, VecDeque};
+    pub(super) use std::error::Error as _;
+    pub(super) use std::fmt;
+    pub(super) use std::sync::Arc;
+    pub(super) use std::sync::Mutex as StdMutex;
+    pub(super) use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+    pub(super) use std::time::{Duration, Instant};
+    pub(super) use thiserror::Error;
+    pub(super) use tokio::sync::{Mutex, Notify, Semaphore, broadcast, mpsc, oneshot};
+    pub(super) use tokio::task::{JoinHandle, JoinSet};
+    pub(super) use tokio_tungstenite::connect_async_with_config;
+    pub(super) use tokio_tungstenite::tungstenite::Message;
+    pub(super) use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+    pub(super) use tokio_util::sync::CancellationToken;
+    pub(super) use url::Url;
+}
+#[cfg(test)]
+#[allow(unused_imports)]
+use test_imports::*;
+
+// Domain modules keep the original public and wire contracts.
+#[path = "contracts.rs"]
+mod contracts;
+use contracts::OutboundMessage;
+pub use contracts::{
+    BindingRequest, BridgeError, BridgeHandler, BridgeNotification, CapabilityToken, CdpError,
+    CdpTarget, EndpointVerifier, InjectionConfig, TargetFilter,
+};
+#[path = "transport/endpoint.rs"]
+mod transport_endpoint;
+pub use transport_endpoint::{BrowserVersion, CdpEndpoint, TargetDiscovery};
+
+#[path = "session/delivery.rs"]
+mod session_delivery;
+
+use session_delivery::{outbound_expression, outbound_expressions, take_verified_plugin_source};
+#[path = "session/gate.rs"]
+mod session_gate;
+
+use session_gate::{
+    GateState, SecureGate, authorize_binding_request, bounded_binding_payload, dispatch_request,
+    valid_method, valid_request_id,
+};
+#[path = "supervisor/scheduler.rs"]
+mod supervisor_scheduler;
+pub use supervisor_scheduler::{
+    CdpSupervisor, IdlePolicy, SupervisorOptions, SupervisorProgress, SupervisorProgressSnapshot,
+};
+use supervisor_scheduler::{
+    SessionStatus, TargetSession, apply_session_status, candidate_cohort_is_ambiguous,
+    candidate_cohort_ready, canonical_renderer_startup_grace, cold_startup_deadline,
+    grant_renderer_lease, idle_policy_stops_supervisor, nudge_unresolved_qualifications,
+    prune_recently_qualified_targets, recently_qualified_target_grace, register_qualified_target,
+    remember_recently_qualified_target, remember_rejected_context,
+    retain_live_candidates_and_nudge, stop_all_sessions, stop_stale_sessions,
+    validate_target_budget, wait_for_candidate_approval,
+};
+#[path = "session/runner.rs"]
+mod session_runner;
+
+use session_runner::{run_target_session, sleep_or_cancel};
+#[path = "qualification/document.rs"]
+mod qualification_document;
+
+use qualification_document::{
+    binding_execution_context, bootstrap_evaluation_succeeded, delivery_expression,
+    initial_qualification_retry_timeout, is_trusted_app_url, layout_observation,
+    renderer_document_is_loading, renderer_probe_matches, retain_setup_lifecycle_event,
+    setup_contains_top_navigation, top_frame_navigation_url, top_frame_started_loading,
+    validate_websocket_url,
+};
+#[path = "transport/commands.rs"]
+mod transport_commands;
+
+use transport_commands::{
+    parse_cdp_message, send_command, send_command_before_deadline, wait_for_command,
+    wait_for_command_before_deadline,
+};

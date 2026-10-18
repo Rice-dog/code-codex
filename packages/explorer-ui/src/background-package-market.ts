@@ -1,22 +1,27 @@
-import { ExplorerBridge } from './bridge';
+import {translate,t} from './i18n';
+import type { WorkspaceBridge } from './contracts/bridge';
 import { PLUGIN_PACKAGES, isPluginPackageLoaded } from './plugin-runtime';
 import { ensurePluginPackage } from './plugin-load-diagnostics';
 import { runtimeEvent } from "./runtime-events";
 import { beginRuntimeOperation, runtimeErrorDetails } from "./runtime-operations";
+import { ResourceScope } from './core/lifecycle/resource-scope';
 
 interface PackageState { id: string; installed: boolean; phase?: string; downloaded?: number; total?: number; error?: string; }
 const cardIds: Record<string, string> = { mountain:'layered-mountain', 'particle-image':'particle-image' };
+let nextLoadingOwner=0;
 export class BackgroundPackageMarket {
   #states = new Map<string, PackageState>();
   #disposed = false;
   #timer?: ReturnType<typeof setTimeout>;
   #busy = new Set<string>();
   #loading = new Set<string>();
+  #loadingOwner=String(++nextLoadingOwner);
   #replayed = new WeakSet<Event>();
   #renderQueued = false;
   #statusFailed = false;
-  constructor(private root: ShadowRoot, private bridge: ExplorerBridge, private notice: (message:string)=>void,private prepare?:(id:string,intent:'enable'|'settings')=>void) {
-    root.addEventListener('click', this.#click, true);
+  #scope = new ResourceScope(error => runtimeEvent('plugin-market','cleanup','failed',runtimeErrorDetails(error)));
+  constructor(private root: ShadowRoot, private bridge: WorkspaceBridge, private notice: (message:string)=>void,private prepare?:(id:string,intent:'enable'|'settings')=>void|Promise<void>) {
+    this.#scope.listen(root,'click', this.#click, true);
     void this.#refresh();
   }
   #card(id:string): HTMLElement | null {
@@ -37,20 +42,22 @@ export class BackgroundPackageMarket {
     if(!state||this.#disposed||this.#loading.has(info.id)){
       event.stopImmediatePropagation();event.preventDefault();return;
     }
-    if(isPluginPackageLoaded(info.id)&&(button.getAttribute('aria-pressed')==='true' || button.dataset.enabled==='true' || button.getAttribute('aria-expanded')==='true'))return;
+    // Verified modules delegate both enable and stop directly to their runtime.
+    if(isPluginPackageLoaded(info.id))return;
     event.stopImmediatePropagation();event.preventDefault();
     if(state.installed&&!this.#busy.has(info.id)){
       this.#loading.add(info.id);this.render();
-      void ensurePluginPackage(info.id).then(()=>{
+      void ensurePluginPackage(info.id).then(async()=>{
         if(this.#disposed||!button.isConnected)return;
-        this.#loading.delete(info.id);button.disabled=false;this.render();
+        this.#releaseLoading(info.id);this.render();
         if(intent==='enable'){button.setAttribute('aria-pressed','false');button.dataset.enabled='false';button.textContent='Enable';}
-        this.prepare?.(info.id,intent);
+        await this.prepare?.(info.id,intent);
+        if(this.#disposed||!button.isConnected)return;
         const replay=new MouseEvent('click',{bubbles:true,composed:true,cancelable:true});
         this.#replayed.add(replay);button.dispatchEvent(replay);
-      },error=>{if(!this.#disposed)this.notice(error instanceof Error?error.message:String(error));}).finally(()=>{
-        const ownedLoading=this.#loading.delete(info.id);
-        if(!this.#disposed){if(ownedLoading&&button.isConnected)button.disabled=false;this.render();}
+      }).catch(error=>{if(!this.#disposed)this.notice(error instanceof Error?error.message:String(error));}).finally(()=>{
+        this.#releaseLoading(info.id);
+        if(!this.#disposed)this.render();
       });
       return;
     }
@@ -60,6 +67,14 @@ export class BackgroundPackageMarket {
     }
     void this.#install(info.id);
   };
+  #releaseLoading(id:string):void {
+    this.#loading.delete(id);
+    const button=this.#card(id)?.querySelector<HTMLButtonElement>('button.preview-extension-action');
+    if(button?.dataset.packageLoadingOwner!==this.#loadingOwner)return;
+    delete button.dataset.packageLoadingOwner;
+    const active=button.getAttribute('aria-pressed')==='true'||button.dataset.enabled==='true';
+    button.textContent=translate(active?'Disable':'Enable');button.disabled=false;
+  }
   async #install(id:string):Promise<void> {
     const info=PLUGIN_PACKAGES.find(p=>p.id===id)!;
     if(this.#disposed||this.#busy.has(id))return;
@@ -97,13 +112,16 @@ export class BackgroundPackageMarket {
     this.#timer=setTimeout(()=>void this.#refresh(),this.#busy.size?600:5000);
   }
   render():void {
+    if(this.#disposed)return;
     for(const info of PLUGIN_PACKAGES) {
       const card=this.#card(info.id),button=card?.querySelector<HTMLButtonElement>('button.preview-extension-action');
       if(!card||!button)continue;
       const state=this.#states.get(info.id),busy=this.#busy.has(info.id);
-      const installed=!!state?.installed;
+      // An unanswered status poll must not overwrite a verified running runtime.
+      const installed=state?state.installed:isPluginPackageLoaded(info.id);
       card.dataset.packageInstalled=String(installed);
       card.dataset.packagePending=String(!installed||busy);
+      const wasDownload=button.dataset.packageAction==='download';
       button.dataset.packageAction=!installed||busy?'download':'enable';
       const status=card.querySelector<HTMLElement>('.preview-extension-status');
       if(status)status.hidden=!installed||busy;
@@ -128,18 +146,20 @@ export class BackgroundPackageMarket {
         const label=download.querySelector<HTMLElement>('span')!;
         const progress=download.querySelector('progress')!;
         progress.hidden=!busy;
-        progress.setAttribute('aria-label',`Download ${info.name}`);
+        progress.setAttribute('aria-label',t('Download {name}',{name:info.name}));
         const packageBytes=info.size+(info.resources??[]).reduce((sum,asset)=>sum+asset.size,0);
         const percent=state?.total?Math.min(100,Math.max(0,Math.floor((state.downloaded??0)/state.total*100))):null;
         if(busy){
           if(percent===null)progress.removeAttribute('value');else progress.value=percent;
-          const phase=state?.phase==='verifying'?'Verifying':'Downloading';
+          const phase=translate(state?.phase==='verifying'?'Verifying':'Downloading');
           label.textContent=`${phase}${percent===null?'…':` · ${percent}%`}`;
-        } else label.textContent=`${(packageBytes/1024).toFixed(0)} KB · ${state?.error?'Download failed':state?'Not installed':'Checking…'}`;
+        } else label.textContent=`${(packageBytes/1024).toFixed(0)} KB · ${translate(state?.error?'Download failed':state?'Not installed':'Checking…')}`;
         download.title=state?.error??'';
       }
       const active=button.getAttribute('aria-pressed')==='true'||button.dataset.enabled==='true';
-      if(this.#loading.has(info.id)){button.textContent='Loading…';button.disabled=true;continue;}
+      if(this.#loading.has(info.id)){button.dataset.packageLoadingOwner=this.#loadingOwner;button.textContent=translate('Loading…');button.disabled=true;continue;}
+      const releasedLoading=button.dataset.packageLoadingOwner!==undefined;
+      if(releasedLoading){delete button.dataset.packageLoadingOwner;button.disabled=false;}
       if(!installed||busy) {
         button.textContent=busy?'Cancel':state?'Download':'Checking…';
         // Checking is guarded by the capture handler, not a disabled lease:
@@ -147,7 +167,7 @@ export class BackgroundPackageMarket {
         // Preserve any legitimate runtime busy state while status is unknown.
         if(state)button.disabled=false;
         button.dataset.enabled='false';button.setAttribute('aria-pressed','false');
-        button.setAttribute('aria-label',`${busy?'Cancel download of':'Download'} ${info.name}`);
+        button.setAttribute('aria-label',t(busy?'Cancel download of {name}':'Download {name}',{name:info.name}));
       } else if(!isPluginPackageLoaded(info.id)) {
         // A saved enabled preference is not proof of a loaded package. Keep
         // this card actionable while preserving the user's preference bytes.
@@ -155,20 +175,20 @@ export class BackgroundPackageMarket {
         button.setAttribute('aria-label',`Enable ${info.name}`);
         const status=card.querySelector<HTMLElement>('.preview-extension-status');
         if(status){status.textContent='Installed';status.dataset.enabled='false';}
-      } else if(button.textContent==='Download'||button.textContent==='Cancel'||button.textContent==='Checking…'||button.textContent==='Loading…') {
-        button.textContent=active?'Disable':'Enable';button.disabled=false;button.setAttribute('aria-label',`Enable ${info.name}`);
-        const status=card.querySelector<HTMLElement>('.preview-extension-status');if(status)status.textContent='Installed';
+      } else if(wasDownload||releasedLoading) {
+        button.textContent=translate(active?'Disable':'Enable');button.disabled=false;button.setAttribute('aria-label',t(active?'Disable {name}':'Enable {name}',{name:info.name}));
+        const status=card.querySelector<HTMLElement>('.preview-extension-status');if(status&&!active)status.textContent='Installed';
       }
       const settings=card.querySelector<HTMLButtonElement>('.particle-settings-trigger');
-      if(settings){settings.disabled=!installed||busy;settings.title=installed?'Configure plugin':'Download this plugin first';}
+      if(settings){settings.disabled=!installed||busy;settings.title=translate(installed?'Configure plugin':'Download this plugin first');}
     }
     const select=this.root.querySelector<HTMLSelectElement>('#cle-startupTransition-background');
-    if(select)for(const option of select.options){const info=PLUGIN_PACKAGES.find(p=>p.id===option.value);if(info){const available=!!this.#states.get(info.id)?.installed;option.disabled=!available;option.title=available?'':'Download this background in Preview Market first';}}
+    if(select)for(const option of select.options){const info=PLUGIN_PACKAGES.find(p=>p.id===option.value);if(info){const available=!!this.#states.get(info.id)?.installed;option.disabled=!available;option.title=available?'':translate('Download this background in Preview Market first');}}
   }
   queueRender():void {
     if(this.#disposed||this.#renderQueued)return;
     this.#renderQueued=true;
     queueMicrotask(()=>{this.#renderQueued=false;if(!this.#disposed)this.render();});
   }
-  dispose():void {this.#disposed=true;clearTimeout(this.#timer);this.root.removeEventListener('click',this.#click,true);}
+  dispose():void {this.#disposed=true;clearTimeout(this.#timer);this.#scope.dispose();for(const id of [...this.#loading])this.#releaseLoading(id);}
 }

@@ -1,7 +1,7 @@
 // @ts-expect-error This library subpath does not publish declarations.
 import { AnnotationMode, VerbosityLevel, getDocument } from "pdfjs-dist/build/pdf.mjs";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/pdf.d.ts";
-import type { CodeCodexMainPreviewElement as PreviewHost } from "../main-preview";
+import { type CodeCodexMainPreviewElement as PreviewHost } from "../app/main-preview-element";
 import type { MainPreviewMediaView, PdfPreviewJob } from './contracts';
 import 'pdfjs-dist/build/pdf.worker.mjs';
 const MAX_PDF_CANVAS_PIXELS = 16_777_216;

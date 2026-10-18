@@ -2,7 +2,7 @@ import { icons } from "./icons";
 
 const STORAGE_KEY = "code-codex.surface-opacity.v1";
 const ACTIVE_ATTRIBUTE = "data-code-codex-ui-mask-active";
-const BACKGROUND_ATTRIBUTES = ["data-code-codex-transparent-background", "data-code-codex-particle-image-background", "data-code-codex-glow-horizon-background"];
+const BACKGROUND_ATTRIBUTES = ["data-code-codex-transparent-background", "data-code-codex-particle-image-background", "data-code-codex-glow-horizon-background", "data-code-codex-custom-background"];
 export const MASK_REGIONS = [
   {key:"navigation", zh:"最左侧导航栏", en:"Navigation rail", value:66},
   {key:"sidebar", zh:"任务与项目选择栏", en:"Tasks and projects", value:66},
@@ -139,6 +139,19 @@ export const SURFACE_OPACITY_NATIVE_CSS = `
 html[data-code-codex-ui-mask-active] body nav[data-app-navigation-rail] { background-color:rgba(16,17,20,var(--code-codex-mask-navigation)) !important; }
 html[data-code-codex-ui-mask-active][data-code-codex-ui-mask-active] body :is(aside.app-shell-left-panel,aside[data-testid="app-shell-floating-left-panel"]) { background-color:rgba(16,17,20,var(--code-codex-mask-sidebar)) !important; }
 html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) { background-color:rgba(11,12,15,var(--code-codex-mask-conversation)) !important; }
+/* Conversation already has one continuous mask. Native scroll-edge helpers
+ * otherwise add an opaque theme surface/gradient over it, even at zero.
+ * Keep their geometry and hit testing, but let the conversation mask paint
+ * through them. Do not apply another alpha here: it would compound the mask.
+ * The bottom fade may live in an independent sticky scroll spacer rather than
+ * inside the footer. Target only decorative helpers in these observed slots,
+ * preserving cards and the composer. */
+html[data-code-codex-ui-mask-active] body main[data-app-shell-main-surface="default"] [class*="MainContentTopFade"],
+html[data-code-codex-ui-mask-active] body [data-pip-anchor-host="codex-main-thread"] .sticky.bottom-0 > .pointer-events-none[class*="_background_"][class*="_fade_"],
+html[data-code-codex-ui-mask-active] body [data-thread-scroll-footer="true"] > [class*="_background_"] {
+  background-color:transparent !important;
+  background-image:none !important;
+}
 /* Leave the tab band's backing transparent: its own mask must not stack
  * over the content mask. Preview content stays transparent inside main. */
 html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]):has(> [data-code-codex-owned]) {

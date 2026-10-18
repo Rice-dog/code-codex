@@ -1,3 +1,4 @@
+import {localizeOwnedUi,translate,languageDiagnostics,subscribeLanguage,t} from "./i18n";
 import { observeRendererHealth, checkRendererHealth } from "./runtime-health";
 import { runtimeEvent, takeRuntimeEvents, restoreRuntimeEvents } from "./runtime-events";
 import { runtimeErrorDetails, flushCaughtRuntimeErrors } from "./runtime-operations";
@@ -146,6 +147,7 @@ export async function openRuntimeInformation(): Promise<void> {
     :host{display:block;box-sizing:border-box;width:100%;height:100%;font:13px/1.5 system-ui;color:inherit;background:transparent}
     :host::backdrop{background:#0005}*{box-sizing:border-box}section{height:100%;display:flex;flex-direction:column}header{padding:18px 20px;border-bottom:1px solid #8883;display:flex;justify-content:space-between;align-items:center}h2{margin:0;font-size:18px}button,select,input{font:inherit;color:inherit;border:1px solid #8885;border-radius:7px;background:transparent;padding:7px 10px}button{cursor:pointer}button:hover{background:#8882}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #408cda;outline-offset:2px}.tools{display:flex;gap:8px;padding:12px 20px;flex-wrap:wrap}input{flex:1;min-width:140px}select{max-width:100%}.summary{padding:0 20px 12px;color:var(--text-secondary,#777)}.events{flex:1;overflow:auto;padding:0 20px 20px}.event{display:grid;grid-template-columns:85px 130px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #8882}.time{font:12px/1.5 ui-monospace,monospace;color:var(--text-secondary,#777)}.source{color:var(--text-secondary,#777);overflow-wrap:anywhere}strong{font-weight:600}.detail{margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace}.failed{color:#d45252}footer{padding:10px 20px;border-top:1px solid #8883;color:var(--text-secondary,#777)}@media(prefers-color-scheme:dark){:host{background:var(--surface-primary,#202020);color:var(--text-default,#eee)}}@media(max-width:600px){.event{grid-template-columns:72px 1fr}.source{grid-column:2}.body{grid-column:1/-1}}
     </style><section><header><h2>Runtime Information</h2><button class="close" aria-label="Close runtime information">✕</button></header><div class="tools"><select aria-label="Run"></select><input type="search" placeholder="Filter events" aria-label="Filter events"><button class="refresh">Refresh</button><button class="checks">Run Checks</button><button class="copy">Copy Details</button><button class="export">Export</button></div><div class="summary" role="status">Loading…</div><div class="events" tabindex="0" aria-label="Runtime events"></div><footer><button class="older">Load Older Events</button> Latest 10 runs · Maximum 5 MB per run · Oldest events are removed when the limit is reached.</footer></section>`;
+  const languageCleanup=localizeOwnedUi(shadow);
   document.body.append(host); host.showModal();
   const select = shadow.querySelector("select")!;
   const filter = shadow.querySelector("input")!;
@@ -169,7 +171,7 @@ export async function openRuntimeInformation(): Promise<void> {
       const time = document.createElement("span"); time.className="time"; time.textContent=`+${event.elapsedMs} ms`;
       const source = document.createElement("span"); source.className="source"; source.textContent=String(event.source);
       const body = document.createElement("div"); body.className="body";
-      const title = document.createElement("strong"); title.textContent=`${event.action} · ${event.outcome}`; if (event.outcome==="failed") title.className="failed";
+      const title = document.createElement("strong"); title.textContent=`${translate(String(event.action))} · ${translate(String(event.outcome))}`; if (event.outcome==="failed") title.className="failed";
       const details = document.createElement("div"); details.className="detail"; details.textContent=JSON.stringify(event.details,null,2);
       body.append(title,details); row.append(time,source,body); container.append(row);
     }
@@ -177,6 +179,8 @@ export async function openRuntimeInformation(): Promise<void> {
     older.hidden=matching.length<=visibleLimit;
     container.scrollTop=following ? container.scrollHeight : scrollTop;
   };
+  let summaryPresentation=()=>{};
+  const languageSubscription=subscribeLanguage(()=>{summaryPresentation();for(const option of select.options)if(option.dataset.runLabel)option.textContent=option.dataset.runLabel+(option.dataset.runCurrent==='true'?' · '+translate('Current run'):'');render();});
   const load = async ():Promise<boolean> => {
     const token = ++generation;
     try {
@@ -186,9 +190,13 @@ export async function openRuntimeInformation(): Promise<void> {
       if (token !== generation || !host.isConnected) return false;
       const lines=data.text.trim().split("\n").map(line=>redactRuntimeValue(JSON.parse(line)) as Record<string, unknown>); text=lines.map(line=>JSON.stringify(line)).join("\n")+"\n"; const metadata=lines.shift()!; events=lines as typeof events;
       const failures=events.filter(event=>event.outcome==='failed').length;
-      const faultTotal=typeof metadata.failureTotal==='number' ? ` · ${metadata.failureTotal} failure/cancellation events across the entire run` : "";
-      const interruptions=events.filter(event=>event.outcome==='cancelled'||event.outcome==='interrupted'||event.outcome==='discarded').length;
-      summary.textContent=`Version ${metadata.version} · ${events.length} retained events · ${failures} failure events${faultTotal} · ${interruptions} interrupted/cancelled/discarded events · ${metadata.droppedEvents} older events removed · ${(new TextEncoder().encode(text).length/1024/1024).toFixed(2)} MB${data.storageError ? ` · Storage error: ${data.storageError}` : ""}${connection.syncError ? ` · Renderer sync error: ${connection.syncError}` : ""}`;
+      summaryPresentation=()=>{
+        const faultTotal=typeof metadata.failureTotal==='number' ? ' · '+t('{count} failure/cancellation events across the entire run',{count:metadata.failureTotal}) : '';
+        const interruptions=events.filter(event=>event.outcome==='cancelled'||event.outcome==='interrupted'||event.outcome==='discarded').length;
+        const language=languageDiagnostics();
+        summary.textContent=t('Version {version} · {events} retained events · {failures} failure events',{version:String(metadata.version),events:events.length,failures})+faultTotal+' · '+t('{count} interrupted/cancelled/discarded events',{count:interruptions})+' · '+t('{count} older events removed',{count:String(metadata.droppedEvents)})+` · ${(new TextEncoder().encode(text).length/1024/1024).toFixed(2)} MB`+(data.storageError?' · '+t('Storage error: {reason}',{reason:data.storageError}):'')+(connection.syncError?' · '+t('Renderer sync error: {reason}',{reason:connection.syncError}):'')+' · '+translate('UI language')+`: ${language.preference.locale} / r${language.preference.revision} / `+translate(language.preference.revision?'Saved':'Session default');
+      };
+      summaryPresentation();
       render();
       return true;
     } catch(error) { if(token===generation){text='';events=[];container.replaceChildren();summary.textContent=error instanceof Error ? redactRuntimeText(error.message) : "Could not load runtime information.";}return false; }
@@ -199,13 +207,13 @@ export async function openRuntimeInformation(): Promise<void> {
       const listing = await connection.request<Listing>("explorer.runtime.list");
       currentRun=listing.currentRun;
       const selected=select.value;
-      select.replaceChildren(...listing.runs.map(run=>{const option=document.createElement("option"); option.value=run.id; const date=new Date(Number(run.id.split("-")[0])); option.textContent=`${date.toLocaleString()}${run.current ? " · Current run" : ""}`; return option;}));
+      select.replaceChildren(...listing.runs.map(run=>{const option=document.createElement("option"); option.value=run.id;option.dataset.runCurrent=String(run.current); const date=new Date(Number(run.id.split("-")[0])); option.dataset.runLabel=date.toLocaleString();option.textContent=`${date.toLocaleString()}${run.current ? " · "+translate("Current run") : ""}`; return option;}));
       select.value=listing.runs.some(run=>run.id===selected) ? selected : listing.currentRun;
       await load();
     } catch(error) { text="";events=[];select.replaceChildren();container.replaceChildren();summary.textContent=error instanceof Error ? redactRuntimeText(error.message) : "Could not list runtime logs."; }
   };
   shadow.querySelector(".close")!.addEventListener("click",()=>host.close());
-  host.addEventListener("close",()=>{host.remove();dialog=undefined;clearInterval(refreshTimer);});
+  host.addEventListener("close",()=>{languageCleanup();languageSubscription();host.remove();dialog=undefined;clearInterval(refreshTimer);});
   select.addEventListener("change",()=>{visibleLimit=500;void load();}); filter.addEventListener("input",()=>{visibleLimit=500;render();});
   older.addEventListener("click",()=>{const height=container.scrollHeight,top=container.scrollTop;visibleLimit+=500;render();container.scrollTop=top+container.scrollHeight-height;});
   shadow.querySelector(".refresh")!.addEventListener("click",()=>void refresh());
@@ -217,12 +225,12 @@ export async function openRuntimeInformation(): Promise<void> {
       if(!connection.request)throw new Error("The native logging connection is unavailable.");
       await checkRendererHealth();await flushRuntimeEvents();
       const result=await connection.request<{status:string}>("explorer.runtime.check");
-      if(await load())summary.textContent+=result.status==="completed" ? " · Checks recorded; inspect individual results and unavailable evidence." : ` · Check status: ${result.status}`;
+      if(await load())summary.textContent+=result.status==="completed" ? ' · '+translate('Checks recorded; inspect individual results and unavailable evidence.') : ' · '+t('Check status: {status}',{status:translate(result.status)});
     } catch(error){runtimeEvent("renderer-health","support checks","failed",runtimeErrorDetails(error));summary.textContent=error instanceof Error ? redactRuntimeText(error.message) : "Support checks failed.";}
     finally{checks.disabled=false;}
   });
-  shadow.querySelector(".copy")!.addEventListener("click",async()=>{try {if(!await load()){summary.textContent+=' · Copy cancelled: the selected log could not be refreshed.';return;} await navigator.clipboard.writeText(`Code-Codex runtime information\n${summary.textContent}\n${text}`);summary.textContent="Complete retained log copied.";} catch {summary.textContent="Clipboard unavailable. Use Export to save the complete log.";}});
-  shadow.querySelector(".export")!.addEventListener("click",async()=>{if(!await load()){summary.textContent+=' · Export cancelled: the selected log could not be refreshed.';return;}const url=URL.createObjectURL(new Blob([text],{type:"application/x-ndjson;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`CodeCodex-runtime-${select.value}.jsonl`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
-  const refreshTimer = setInterval(()=>{if (select.selectedOptions[0]?.textContent?.endsWith(" · Current run")) void load();},3000);
+  shadow.querySelector(".copy")!.addEventListener("click",async()=>{try {if(!await load()){summary.textContent+=' · '+translate('Copy cancelled: the selected log could not be refreshed.');return;} await navigator.clipboard.writeText(`${translate("Code-Codex runtime information")}\n${summary.textContent}\nLanguage: ${JSON.stringify(languageDiagnostics())}\n${text}`);summary.textContent="Complete retained log copied.";} catch {summary.textContent="Clipboard unavailable. Use Export to save the complete log.";}});
+  shadow.querySelector(".export")!.addEventListener("click",async()=>{if(!await load()){summary.textContent+=' · '+translate('Export cancelled: the selected log could not be refreshed.');return;}const url=URL.createObjectURL(new Blob([text],{type:"application/x-ndjson;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`CodeCodex-runtime-${select.value}.jsonl`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
+  const refreshTimer = setInterval(()=>{if (select.value===currentRun) void load();},3000);
   await refresh();
 }

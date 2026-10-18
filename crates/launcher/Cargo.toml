@@ -42,6 +42,7 @@ dunce.workspace = true
 futures-util.workspace = true
 process-wrap.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
 regex-automata = "0.4"
 semver.workspace = true
 serde.workspace = true
@@ -59,6 +60,7 @@ url.workspace = true
 workspace-service = { path = "../workspace-service" }
 
 [target.'cfg(windows)'.dependencies]
+reqwest = { workspace = true, features = ["rustls-tls-native-roots", "system-proxy"] }
 known-folders = "1.4.2"
 win32job = "2.0.3"
 windows-permissions = "0.2.4"
@@ -69,6 +71,9 @@ junction = "2.0.0"
 
 [build-dependencies]
 embed-resource = "3.0.11"
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 
 [lints.rust]
 unsafe_code = "allow"

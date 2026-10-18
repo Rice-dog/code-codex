@@ -180,19 +180,20 @@
     "name": "Particle Image Background",
     "category": "appearance",
     "api": 1,
-    "version": "1.0.2",
-    "releaseTag": "v0.3.96",
-    "size": 82516,
-    "sha256": "bc2cb48278012a1973e35513d799bd0477e8f9a0661e41375c683445875eb568",
-    "asset": "CodeCodex-background-particle-image-1.0.2.js",
-    "relativePath": "CodeCodex-background-particle-image-1.0.2.js",
+    "version": "1.0.3",
+    "releaseTag": "plugin-assets-2026-10-18",
+    "size": 82529,
+    "sha256": "a2ded8609f66fb4f188a8406a4fafe83b1c639963a114ebf5e004c590c00ab67",
+    "asset": "CodeCodex-background-particle-image-1.0.3.js",
+    "relativePath": "CodeCodex-background-particle-image-1.0.3.js",
     "resources": [
       {
         "asset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
         "relativePath": "media/CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
         "kind": "thumbnail",
         "size": 13626,
-        "sha256": "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70"
+        "sha256": "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70",
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-image-39894de0da1fa952.png",
@@ -212,14 +213,16 @@
           "zoom": 1.45,
           "createdAt": 1787152068482,
           "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png"
-        }
+        },
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
         "relativePath": "media/CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
         "kind": "thumbnail",
         "size": 18485,
-        "sha256": "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3"
+        "sha256": "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3",
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
@@ -239,14 +242,16 @@
           "zoom": 1.35,
           "createdAt": 1786900081772,
           "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png"
-        }
+        },
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
         "relativePath": "media/CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
         "kind": "thumbnail",
         "size": 12669,
-        "sha256": "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182"
+        "sha256": "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182",
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-image-89d064cef83721eb.png",
@@ -266,14 +271,16 @@
           "zoom": 1.35,
           "createdAt": 1787375782731,
           "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png"
-        }
+        },
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
         "relativePath": "media/CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
         "kind": "thumbnail",
         "size": 12801,
-        "sha256": "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda"
+        "sha256": "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda",
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
@@ -293,14 +300,16 @@
           "zoom": 1.25,
           "createdAt": 1787388899281,
           "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png"
-        }
+        },
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
         "relativePath": "media/CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
         "kind": "thumbnail",
         "size": 17458,
-        "sha256": "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f"
+        "sha256": "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f",
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
@@ -320,14 +329,16 @@
           "zoom": 1.35,
           "createdAt": 1786964882337,
           "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png"
-        }
+        },
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
         "relativePath": "media/CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
         "kind": "thumbnail",
         "size": 15641,
-        "sha256": "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845"
+        "sha256": "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845",
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
@@ -347,7 +358,8 @@
           "zoom": 1.25,
           "createdAt": 1787386269570,
           "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png"
-        }
+        },
+        "releaseTag": "v0.3.96"
       }
     ],
     "galleryVersion": 1,
@@ -365,12 +377,12 @@
     "name": "Pixel Sculpt Background",
     "category": "appearance",
     "api": 1,
-    "version": "1.0.2",
-    "releaseTag": "v0.3.96",
-    "size": 2412208,
-    "sha256": "61db19e65bc178b93a8eaae274f423d81d9ee36cb6ea0874344d276360f42543",
-    "asset": "CodeCodex-background-pixel-sculpt-1.0.2.js",
-    "relativePath": "CodeCodex-background-pixel-sculpt-1.0.2.js",
+    "version": "1.0.10",
+    "releaseTag": "plugin-assets-2026-10-18",
+    "size": 2412999,
+    "sha256": "576ce8fc720678c7ee94bae8d562075e4a725c8991b222f8c6c062201d913d89",
+    "asset": "CodeCodex-background-pixel-sculpt-1.0.10.js",
+    "relativePath": "CodeCodex-background-pixel-sculpt-1.0.10.js",
     "resources": [
       {
         "asset": "CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
@@ -388,7 +400,8 @@
           "positionX": 50,
           "positionY": 50,
           "zoom": 1
-        }
+        },
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
@@ -406,7 +419,8 @@
           "positionX": 50,
           "positionY": 50,
           "zoom": 1
-        }
+        },
+        "releaseTag": "v0.3.96"
       },
       {
         "asset": "CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
@@ -424,7 +438,8 @@
           "positionX": 50,
           "positionY": 50,
           "zoom": 1
-        }
+        },
+        "releaseTag": "v0.3.96"
       }
     ],
     "galleryVersion": 1,
@@ -438,16 +453,35 @@
     "notices": "THIRD_PARTY_NOTICES_EN.md"
   },
   {
+    "id": "custom-background",
+    "name": "Custom Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.9",
+    "releaseTag": "plugin-assets-2026-10-18",
+    "asset": "CodeCodex-background-custom-background-1.0.9.js",
+    "relativePath": "CodeCodex-background-custom-background-1.0.9.js",
+    "size": 29192,
+    "sha256": "46250603889b6dc143239d9aa943bfa7adcd79b0b32fceac9a57b79262083183",
+    "resources": [],
+    "capabilities": [
+      "background",
+      "local-media",
+      "settings"
+    ],
+    "source": "https://github.com/Rice-dog/code-codex"
+  },
+  {
     "id": "surface-opacity",
     "name": "UI Surface Opacity",
     "category": "appearance",
     "api": 1,
-    "version": "1.0.0",
-    "releaseTag": "v0.3.96",
-    "asset": "CodeCodex-plugin-surface-opacity-1.0.0.js",
-    "relativePath": "CodeCodex-plugin-surface-opacity-1.0.0.js",
-    "size": 11478,
-    "sha256": "cc75dfa941b72fd0bca2f927eb681b263b446e41f880e83c19977b1abf5dd8d2",
+    "version": "1.0.3",
+    "releaseTag": "plugin-assets-2026-10-18",
+    "asset": "CodeCodex-plugin-surface-opacity-1.0.3.js",
+    "relativePath": "CodeCodex-plugin-surface-opacity-1.0.3.js",
+    "size": 12484,
+    "sha256": "3c0fd562b05ab9af6451cf6e7de0d7d5f8095ce78761650a0a8c4392832c54ab",
     "resources": [],
     "capabilities": [
       "appearance"
@@ -493,12 +527,12 @@
     "name": "Codex Startup Transition",
     "category": "appearance",
     "api": 1,
-    "version": "1.1.18",
-    "releaseTag": "v0.4.48",
-    "asset": "CodeCodex-plugin-codex-startup-transition-1.1.18.js",
-    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.1.18.js",
-    "size": 37126,
-    "sha256": "ade7fba0a99e6ff6b813ed89e2213f6a4d7db8a4c42179abf1c7316641b156e5",
+    "version": "1.1.26",
+    "releaseTag": "plugin-assets-2026-10-18",
+    "asset": "CodeCodex-plugin-codex-startup-transition-1.1.26.js",
+    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.1.26.js",
+    "size": 38198,
+    "sha256": "0e9a4689d037e93fca94fcff6e981187a8bec80a9ddd511b459a52ca151e58e0",
     "resources": [],
     "capabilities": [
       "startup",
@@ -535,12 +569,12 @@
     "hostId": "code-codex.csv-preview",
     "category": "file-preview",
     "api": 1,
-    "version": "1.0.0",
-    "releaseTag": "v0.3.96",
-    "size": 21478,
-    "sha256": "f3169b098a3b3296bae081404f12bff123b14621a4bb70f29b87d9290aa67513",
-    "asset": "CodeCodex-plugin-csv-preview-1.0.0.js",
-    "relativePath": "CodeCodex-plugin-csv-preview-1.0.0.js",
+    "version": "1.0.1",
+    "releaseTag": "plugin-assets-2026-10-18",
+    "size": 21494,
+    "sha256": "a60714f6f335875fbac4ac2edae756c1503b7365f665a0dfb933cfe39b2f959b",
+    "asset": "CodeCodex-plugin-csv-preview-1.0.1.js",
+    "relativePath": "CodeCodex-plugin-csv-preview-1.0.1.js",
     "resources": [],
     "defaultImageCount": 0,
     "capabilities": [
@@ -555,12 +589,12 @@
     "hostId": "code-codex.diagram-preview",
     "category": "file-preview",
     "api": 1,
-    "version": "1.0.0",
-    "releaseTag": "v0.3.96",
-    "size": 47101,
-    "sha256": "00f5c4b5445d0b6d12404b1f34dbb55b00332a1998e2a5d978951b24266a6443",
-    "asset": "CodeCodex-plugin-diagram-preview-1.0.0.js",
-    "relativePath": "CodeCodex-plugin-diagram-preview-1.0.0.js",
+    "version": "1.0.1",
+    "releaseTag": "plugin-assets-2026-10-18",
+    "size": 47214,
+    "sha256": "742a9425c452ed1a78473df12fef980ccc438ad9e9f92dcb3bea203d7acb764e",
+    "asset": "CodeCodex-plugin-diagram-preview-1.0.1.js",
+    "relativePath": "CodeCodex-plugin-diagram-preview-1.0.1.js",
     "resources": [],
     "defaultImageCount": 0,
     "capabilities": [
@@ -615,12 +649,12 @@
     "hostId": "code-codex.pdf-preview",
     "category": "file-preview",
     "api": 1,
-    "version": "1.0.0",
-    "releaseTag": "v0.3.96",
+    "version": "1.0.1",
+    "releaseTag": "plugin-assets-2026-10-18",
     "size": 1445453,
-    "sha256": "1552de879e28c47492843d9bf37f1ab2216c7cc3d428bc588b27e40668745b84",
-    "asset": "CodeCodex-plugin-pdf-preview-1.0.0.js",
-    "relativePath": "CodeCodex-plugin-pdf-preview-1.0.0.js",
+    "sha256": "0097ddf35219738659f82327a6819481240231338180b4737acdefd1b9183bbd",
+    "asset": "CodeCodex-plugin-pdf-preview-1.0.1.js",
+    "relativePath": "CodeCodex-plugin-pdf-preview-1.0.1.js",
     "resources": [],
     "defaultImageCount": 0,
     "capabilities": [
@@ -692,12 +726,12 @@
     "hostId": "code-codex.notebook-preview",
     "category": "file-preview",
     "api": 1,
-    "version": "1.0.0",
-    "releaseTag": "v0.3.96",
+    "version": "1.0.1",
+    "releaseTag": "plugin-assets-2026-10-18",
     "size": 210257,
-    "sha256": "58c58eaf1247437677da66a399588b9ed3362ec7af6ff1190051a5bfe77fb179",
-    "asset": "CodeCodex-plugin-notebook-preview-1.0.0.js",
-    "relativePath": "CodeCodex-plugin-notebook-preview-1.0.0.js",
+    "sha256": "b6264078fae002f7a7210775296118dbf3ce618979b64892e9bdea4454a05599",
+    "asset": "CodeCodex-plugin-notebook-preview-1.0.1.js",
+    "relativePath": "CodeCodex-plugin-notebook-preview-1.0.1.js",
     "resources": [],
     "defaultImageCount": 0,
     "capabilities": [

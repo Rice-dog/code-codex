@@ -1,4 +1,4 @@
-import type { CodeCodexMainPreviewElement as PreviewHost } from "../main-preview";
+import { type CodeCodexMainPreviewElement as PreviewHost } from "../app/main-preview-element";
 import type { MainPreviewMediaView, MainPreviewModelView } from './contracts';
 export const IMAGE_PREVIEWER_ID = "code-codex.image-preview";
 

@@ -1,0 +1,7 @@
+{
+  "git.files.summary": "{count} 个更改的{fileLabel}",
+  "preview.csv.summary": "{rows} {rowLabel} · {columns} {columnLabel} · 逗号分隔",
+  "preview.drawio.summary": "Draw.io · {pages} 个{pageLabel} · 本地渲染",
+  "preview.model.summary": "{meshes} 个{meshLabel} · {resources} 个本地{resourceLabel}{animations}",
+  "preview.notebook.summary": "{kernel} · {language} · nbformat 4.{minor} · {cells} 个{cellLabel}"
+}

@@ -1,0 +1,38 @@
+[CmdletBinding()]
+param(
+    [string]$Version = "{{application-version}}",
+    [string]$InstallRoot,
+    [switch]$SelectDirectory,
+    [switch]$NoActivate,
+    [ValidateSet("zh-CN","en")]
+    [string]$UiLanguage
+)
+
+{{storage-contract}}
+
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$script:InstallStage = "Starting installation"
+$script:InstallOperation = "Preparing installer"
+$script:InstallTarget = ""
+$script:InstallAttempt = 0
+$SourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$SourceBinary = Join-Path $SourceRoot "code-codex.exe"
+$SourceRuntimeLauncher = Join-Path $SourceRoot "code-codex-launcher.exe"
+$SourceShim = Join-Path $SourceRoot "code-codex-shim.exe"
+$SourceShortcutTool = Join-Path $SourceRoot "code-codex-shortcut.exe"
+$SourceUninstallerExecutable = Join-Path $SourceRoot "code-codex-uninstall.exe"
+$SourceUninstaller = Join-Path $SourceRoot "Uninstall-CodeCodex.ps1"
+$SourceFinalizer = Join-Path $SourceRoot "Finalize-Uninstall.ps1"
+$SourceBrandIcon = Join-Path $SourceRoot "CodeCodex.Brand.png"
+$RegisteredRoot = Get-CodeCodexRegisteredRoot
+if ([string]::IsNullOrWhiteSpace($InstallRoot)) { $InstallRoot = $RegisteredRoot }
+$VersionsRoot = $null
+$VersionRoot = $null
+$StorageRegistryBefore = Get-ItemProperty 'HKCU:\Software\CodeCodex' -ErrorAction SilentlyContinue
+$StorageMarkerBefore = $null
+$script:StorageSnapshotTaken = $false
+
+$script:InstallTrace = [Collections.Generic.List[object]]::new()
+$script:InstallClock = [Diagnostics.Stopwatch]::StartNew()
+{{section:install/diagnostics}}{{section:install/file-operations}}{{section:install/report-retention}}{{section:install/execute}}

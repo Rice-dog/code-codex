@@ -1,4 +1,5 @@
-//! Stable, windowless launcher placed at the installation root.
+//! Windowless launcher placed at the installation root as CodeCodex-<version>.exe.
+//! Existing unversioned entry points remain compatible with the same pointer.
 //!
 //! The installer updates `current-version` only after a complete version has
 //! been installed. This process validates that pointer and starts the selected

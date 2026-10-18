@@ -4,7 +4,7 @@ import TurndownService from "turndown";
 // @ts-expect-error This library subpath does not publish declarations.
 import { gfm as turndownGfm } from "turndown-plugin-gfm";
 import { MAX_SYNTAX_SOURCE_UNITS, highlightSyntaxForPath } from "../syntax-highlight";
-import type { CodeCodexMainPreviewElement as PreviewHost } from "../main-preview";
+import { type CodeCodexMainPreviewElement as PreviewHost } from "../app/main-preview-element";
 import type { MainPreviewTextView, MainPreviewEmptyView, MainPreviewEditorState, MainPreviewDraftDetail } from './contracts';
 export const MAIN_PREVIEW_DRAFT_EVENT = "cle-main-preview-draft";
 

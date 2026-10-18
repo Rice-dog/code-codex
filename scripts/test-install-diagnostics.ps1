@@ -5,7 +5,7 @@ $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) { throw 'Installer script has syntax errors.' }
 
-foreach ($name in @('Trace-Install', 'Invoke-InstallFileOperation', 'Write-InstallDiagnostic')) {
+foreach ($name in @('Trace-Install', 'Invoke-InstallFileOperation', 'Write-InstallDiagnostic','Get-CodeCodexInstallFailureCode')) {
     $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Installer diagnostic function missing: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))

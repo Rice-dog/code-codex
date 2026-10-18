@@ -27,6 +27,8 @@ mod exit_codes;
 mod redaction;
 #[path = "../startup_diagnostics.rs"]
 mod startup_diagnostics;
+#[path = "../localization.rs"]
+mod localization;
 
 use startup_diagnostics::{StartupDiagnostic, parse_diagnostic};
 
@@ -72,7 +74,7 @@ $metadata = New-Object System.Windows.Forms.Label
 $metadata.Location = New-Object System.Drawing.Point(22, 72)
 $metadata.Size = New-Object System.Drawing.Size(573, 24)
 $metadata.ForeColor = [System.Drawing.Color]::DimGray
-$metadata.Text = ('Stage: {0}    Support code: {1}' -f $env:CLE_ERROR_STAGE, $env:CLE_ERROR_CODE)
+$metadata.Text = ('{0}: {1}    {2}: {3}' -f $env:CLE_ERROR_STAGE_LABEL, $env:CLE_ERROR_STAGE, $env:CLE_ERROR_CODE_LABEL, $env:CLE_ERROR_CODE)
 $form.Controls.Add($metadata)
 
 $reasonTitle = New-Object System.Windows.Forms.Label
@@ -113,7 +115,7 @@ $report.AutoEllipsis = $true
 $report.Text = if ([string]::IsNullOrWhiteSpace($env:CLE_ERROR_REPORT)) {
     'The diagnostic report could not be saved.'
 } else {
-    'Diagnostic report: ' + $env:CLE_ERROR_REPORT
+    $env:CLE_ERROR_REPORT_LABEL + ': ' + $env:CLE_ERROR_REPORT
 }
 $form.Controls.Add($report)
 
@@ -379,7 +381,7 @@ fn replace_report(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 fn write_live_state(path: &Path, diagnostic: &StartupDiagnostic, details: &str) -> io::Result<()> {
-    let state = serde_json::json!({"reason":live_dialog_reason(&diagnostic.reason),"guidance":diagnostic.guidance,"details":details});
+    let state = serde_json::json!({"reason":live_dialog_reason(&diagnostic.reason),"guidance":localization::text(&diagnostic.guidance),"details":details});
     replace_report(path, &serde_json::to_vec(&state)?)
 }
 
@@ -526,7 +528,7 @@ fn format_report(
     let exit_code = exit_code
         .map(|code| code.to_string())
         .unwrap_or_else(|| "unavailable".to_owned());
-    format!(
+    let raw=format!(
         "Code-Codex startup diagnostic\n\nCode-Codex version: {}\nSupport code: {}\nStage: {}\nSummary: {}\nReason: {}\nSuggested action: {}\nProcess exit code: {}\nGUI launcher process: {}\n\nPost-failure installation check (cdp.notRequested means this separate check was not given the launch's random port; the actual endpoint observations are in Reason above):\n{}\n",
         env!("CARGO_PKG_VERSION"),
         diagnostic.code,
@@ -537,7 +539,11 @@ fn format_report(
         exit_code,
         launcher_context,
         diagnosis.trim(),
-    )
+    );
+    format!("{}\n{}: {} / revision {}\n{}: {}\n{}: {}\n{}: {}\n\n{}:\n{}",
+        localization::text("Code-Codex startup diagnostic"),localization::text("UI language"),localization::locale().as_str(),localization::preference().revision,
+        localization::text("Stage"),localization::text(&diagnostic.stage),localization::text("Summary"),localization::text(&diagnostic.summary),
+        localization::text("Suggested action"),localization::text(&diagnostic.guidance),localization::text("Original diagnostic evidence"),raw)
 }
 
 fn persist_report(report: &str) -> io::Result<PathBuf> {
@@ -679,6 +685,7 @@ fn spawn_startup_error(
     else {
         return None;
     };
+    let dialog_script=localization::dialog_script(DIALOG_SCRIPT);
     let mut command = Command::new(powershell);
     command
         .args([
@@ -686,17 +693,20 @@ fn spawn_startup_error(
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            DIALOG_SCRIPT,
+            &dialog_script,
         ])
-        .env("CLE_ERROR_TITLE", ERROR_TITLE)
-        .env("CLE_ERROR_SUMMARY", &diagnostic.summary)
-        .env("CLE_ERROR_STAGE", &diagnostic.stage)
+        .env("CLE_ERROR_TITLE", localization::text(ERROR_TITLE))
+        .env("CLE_ERROR_SUMMARY", localization::text(&diagnostic.summary))
+        .env("CLE_ERROR_STAGE", localization::text(&diagnostic.stage))
         .env("CLE_ERROR_CODE", &diagnostic.code)
+        .env("CLE_ERROR_STAGE_LABEL",localization::text("Stage"))
+        .env("CLE_ERROR_CODE_LABEL",localization::text("Support code"))
+        .env("CLE_ERROR_REPORT_LABEL",localization::text("Diagnostic report"))
         .env(
             "CLE_ERROR_REASON",
             bounded_dialog_details(&diagnostic.reason),
         )
-        .env("CLE_ERROR_GUIDANCE", &diagnostic.guidance)
+        .env("CLE_ERROR_GUIDANCE", localization::text(&diagnostic.guidance))
         .env("CLE_ERROR_DETAILS", bounded_dialog_details(details))
         .env(
             "CLE_ERROR_REPORT",

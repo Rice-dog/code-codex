@@ -30,6 +30,9 @@ try{
   // Match native startup order: cached verified player, selected media/factory, early dispatcher.
   for(const source of playerSources)await browser.evaluate(source);
   for(const source of sources)await browser.evaluate(source);
+  // Simulate the user's earlier normal enable, which imports defaults once.
+  // Early startup itself must only read that prepared library.
+  await browser.evaluate(`window[Symbol.for('code-codex:background-modules:v1')].get(${JSON.stringify(id)}).prepareDefaults()`);
   await browser.evaluate(fixture);
   for(let i=0;i<250;i++){
    if(await browser.evaluate(`window.__CODE_CODEX_EARLY_STARTUP_STATUS__?.stage==='playing'`))break;

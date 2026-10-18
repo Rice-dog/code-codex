@@ -1,4 +1,4 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 . (Join-Path $repo 'installer\Storage-Layout.ps1')
 $sandbox=Join-Path $repo ('artifacts\storage-upgrade-v0.4.10\fixture-'+[Guid]::NewGuid().ToString('N'))
@@ -69,7 +69,7 @@ public static class StorageFixtureDirectoryLock {
     # Load only removal functions, never execute the real uninstaller or touch registration.
     $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'installer\Finalize-Uninstall.ps1'),[ref]$tokens,[ref]$errors)
     Verify ($errors.Count -eq 0) 'Production finalizer syntax valid'
-    foreach($name in @('Get-ExistingItem','Test-ReparsePoint','Remove-ReparsePoint','Assert-AllowedUninstallPath','Remove-SafeTree','Test-CodeCodexApplicationFiles','Remove-CodeCodexApplicationFiles')){
+    foreach($name in @('Get-ExistingItem','Test-ReparsePoint','Remove-ReparsePoint','Assert-AllowedUninstallPath','Remove-SafeTree','Get-CodeCodexVersionedRootLaunchers','Test-CodeCodexApplicationFiles','Test-CodeCodexRemovalComplete','Remove-CodeCodexEmptyRoot','Remove-CodeCodexApplicationFiles')){
         $fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
         . ([scriptblock]::Create($fn.Extent.Text))
     }

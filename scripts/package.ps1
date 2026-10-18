@@ -1,11 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.52",
-    [string]$WixPath
+    [string]$Version,
+    [string]$WixPath,
+    [switch]$Candidate
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($Version)) { $Version = (Get-Content -LiteralPath (Join-Path $RepoRoot 'packages/explorer-ui/package.json') -Raw | ConvertFrom-Json).version }
 & (Join-Path $PSScriptRoot 'assert-storage-contract.ps1')
 $Artifacts = Join-Path $RepoRoot "artifacts"
 $Stage = Join-Path $Artifacts "CodeCodex-$Version-x64"
@@ -30,6 +32,23 @@ if ($installScriptSource -notmatch '\[string\]\$Version\s*=\s*"([^"]+)"' -or $Ma
 }
 
 & (Join-Path $PSScriptRoot "build.ps1") -Configuration Release
+
+# A local file in releases/ is not proof that a user can download it. Check all
+# pinned tags before replacing release outputs. Candidate builds must be explicit.
+$publicationReport = Join-Path $Artifacts "plugin-publication-$Version.json"
+$publicationArgs = @(
+    (Join-Path $PSScriptRoot 'check-plugin-publication.mjs'),
+    '--catalog', (Join-Path $RepoRoot 'packages\explorer-ui\dist\plugins\catalog.json'),
+    '--version', $Version, '--report', $publicationReport
+)
+if ($Candidate) { $publicationArgs += '--candidate' }
+if ($Candidate) { $publicationArgs += @('--pending-manifest', (Join-Path $RepoRoot 'resources\plugin-distribution.lock.json')) }
+& node @publicationArgs
+if ($LASTEXITCODE -ne 0) { throw "Plugin publication verification failed; see $publicationReport. Release outputs were not replaced." }
+$publication = Get-Content -LiteralPath $publicationReport -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $publication.safeToDistribute) {
+    Write-Warning "CANDIDATE ONLY: $($publication.pending) plugin assets are not public. Do not distribute this installer until the strict publication check passes."
+}
 
 $StageFullPath = [IO.Path]::GetFullPath($Stage)
 if (-not $StageFullPath.StartsWith($ExpectedStageRoot, [StringComparison]::OrdinalIgnoreCase)) {

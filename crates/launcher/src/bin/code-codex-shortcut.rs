@@ -8,6 +8,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+#[path = "../localization.rs"]
+mod localization;
 
 #[cfg(windows)]
 use std::env;
@@ -239,6 +241,10 @@ struct InstallRollbackSnapshot {
     manifest: Option<EncodedSnapshotFile>,
     backup: Option<EncodedSnapshotFile>,
     icon: Option<EncodedSnapshotFile>,
+    #[serde(default)]
+    ui_language: Option<workspace_service::ui_language::Preference>,
+    #[serde(default)]
+    ui_language_written_revision: Option<u32>,
 }
 
 #[cfg(windows)]
@@ -301,6 +307,10 @@ trait ShortcutShell {
 }
 
 fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref()==Some("language") {
+        let result=language_command(&std::env::args().skip(2).collect::<Vec<_>>());
+        return match result {Ok(value)=>{println!("{value}");ExitCode::SUCCESS},Err(e)=>{eprintln!("{e}");ExitCode::FAILURE}};
+    }
     match execute() {
         Ok(report) => match serde_json::to_string_pretty(&report) {
             Ok(json) => {
@@ -315,6 +325,62 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("code-codex-shortcut: {error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+fn language_command(args:&[String])->Result<serde_json::Value,String>{
+    use workspace_service::ui_language::{LanguageStore,Locale,Source,Preference};
+    let mut root=None;let mut locale=None;let mut expected=None;
+    if args.len()%2!=0{return Err("CC-LANG-INVALID-001: language arguments must be pairs".into());}
+    for pair in args.chunks_exact(2){match pair[0].as_str(){
+        "--install-root" if root.is_none()=>root=Some(PathBuf::from(&pair[1])),
+        "--locale" if locale.is_none()=>locale=Some(match pair[1].as_str(){"zh-CN"=>Locale::Chinese,"en"=>Locale::English,_=>return Err("CC-LANG-INVALID-001: unsupported locale".into())}),
+        "--expected-revision" if expected.is_none()=>expected=Some(if pair[1]=="auto"{u32::MAX}else{pair[1].parse::<u32>().map_err(|_|"CC-LANG-INVALID-001: invalid revision")?}),
+        _=>return Err("CC-LANG-INVALID-001: unknown or duplicate argument".into()),
+    }}
+    if locale.is_none() && expected.is_some(){return Err("CC-LANG-INVALID-001: revision requires locale".into());}
+    let root=root.ok_or("CC-LANG-READ-001: installation root required")?;
+    let root=workspace_service::application_paths::validate_install_root(&root).map_err(|e|format!("CC-LANG-READ-001: {e}"))?;
+    let store=LanguageStore::new(root.join("data"));
+    if let Some(locale)=locale {
+        let current=match store.load(){
+            Ok(value)=>value,
+            Err(error)=>{
+                // A damaged preference must not prevent repairing the application.
+                // Preserve the file; explicit menu re-selection can repair it later.
+                eprintln!("{}; language unchanged, installation continues",error);
+                let mut fallback=serde_json::to_value(Preference::fallback(localization::system_locale())).map_err(|e|e.to_string())?;
+                fallback["issue"]=serde_json::json!({"code":error.code(),"reason":error.to_string(),"preserved":true});return Ok(fallback);
+            }
+        };
+        let requested=expected.ok_or("CC-LANG-INVALID-001: expected revision required")?;
+        let revision=if requested==u32::MAX{
+            let journal=root.join(INTEGRATION_DIRECTORY).join(INSTALL_ROLLBACK_NAME);
+            if journal.exists(){
+                let snapshot:InstallRollbackSnapshot=serde_json::from_slice(&read_file(&journal).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+                if snapshot.owner!=MANIFEST_OWNER || snapshot.install_root!=root {return Err("CC-LANG-INVALID-001: journal ownership mismatch".into());}
+                snapshot.ui_language.as_ref().map_or(0,|p|p.revision)
+            }else{current.as_ref().map_or(0,|p|p.revision)}
+        }else{requested};
+        let journal=root.join(INTEGRATION_DIRECTORY).join(INSTALL_ROLLBACK_NAME);
+        let mut journal_error=None;
+        let next=store.save(locale,revision,Source::Installer,||{
+            if !journal.exists(){return true;}
+            let update=(||->Result<(),IntegrationError>{
+                let mut snapshot:InstallRollbackSnapshot=serde_json::from_slice(&read_file(&journal)?)?;
+                if snapshot.owner!=MANIFEST_OWNER || snapshot.install_root!=root {return Err(IntegrationError::InvalidState("language journal ownership mismatch".into()));}
+                snapshot.ui_language=current.clone();
+                snapshot.ui_language_written_revision=Some(revision.checked_add(1).ok_or_else(||IntegrationError::InvalidState("language revision exhausted".into()))?);
+                write_json_atomic(&PlatformShortcutShell::new()?,&journal,&snapshot)
+            })();
+            if let Err(error)=update{journal_error=Some(error.to_string());false}else{true}
+        }).map_err(|e|journal_error.unwrap_or_else(||e.to_string()))?;
+        serde_json::to_value(next).map_err(|e|e.to_string())
+    }else{
+        match store.load(){
+            Ok(value)=>serde_json::to_value(value.unwrap_or_else(||Preference::fallback(localization::system_locale()))).map_err(|e|e.to_string()),
+            Err(error)=>{let mut fallback=serde_json::to_value(Preference::fallback(localization::system_locale())).map_err(|e|e.to_string())?;fallback["issue"]=serde_json::json!({"code":error.code(),"reason":error.to_string(),"preserved":true});Ok(fallback)}
         }
     }
 }
@@ -434,12 +500,13 @@ impl IntegrationPaths {
             None => resolve_start_menu().and_then(|path| canonical_safe_directory(&path).ok()),
         };
         let state_directory = install_root.join(INTEGRATION_DIRECTORY);
+        let launcher = preferred_root_launcher(&install_root)?;
 
         Ok(Self {
             shortcut: desktop.join(SHORTCUT_NAME),
             chatgpt_shortcut: desktop.join(CHATGPT_SHORTCUT_NAME),
             fallback_shortcut: desktop.join(FALLBACK_SHORTCUT_NAME),
-            launcher: install_root.join(LAUNCHER_NAME),
+            launcher,
             default_icon: install_root.join(DEFAULT_ICON_NAME),
             backup: state_directory.join(BACKUP_NAME),
             manifest: state_directory.join(MANIFEST_NAME),
@@ -770,6 +837,8 @@ fn prepare_install(
         manifest: manifest_file,
         backup,
         icon,
+        ui_language: workspace_service::ui_language::LanguageStore::new(paths.install_root.join("data")).load().unwrap_or_else(|error|{eprintln!("{error}; damaged language preference preserved");None}),
+        ui_language_written_revision:None,
     };
     write_json_atomic(shell, &paths.install_rollback, &snapshot)?;
 
@@ -816,6 +885,12 @@ fn rollback_install(
         manifest_bytes.as_deref(),
         backup_bytes.as_deref(),
     )?;
+    if let Some(revision)=snapshot.ui_language_written_revision {
+        match workspace_service::ui_language::LanguageStore::new(paths.install_root.join("data")).restore_install(snapshot.ui_language.clone(),revision) {
+            Ok(())=>{}, Err(workspace_service::ui_language::LanguageError::Conflict{..})=>eprintln!("CC-LANG-ROLLBACK-001: newer user preference preserved"),
+            Err(error)=>return Err(IntegrationError::InvalidState(format!("CC-LANG-ROLLBACK-001: {error}"))),
+        }
+    }
     let snapshot_shortcut = snapshot_shortcut_path(paths, &snapshot)?;
     if let Some(current_manifest) = read_manifest_optional(&paths.manifest)? {
         let current_shortcut = manifest_shortcut_path(paths, &current_manifest)?;
@@ -1169,6 +1244,7 @@ fn install_with_legacy_cleanup(
         };
 
         manifest.installed_version = version.to_owned();
+        manifest.launcher_path = paths.launcher.clone();
         manifest.icon_path = icon.clone();
         write_manifest(shell, &paths.manifest, &manifest)?;
 
@@ -1633,7 +1709,9 @@ fn validate_manifest(
         || manifest.owner_marker != OWNER_MARKER
         || !shortcut_is_managed
         || !paths_equal(&manifest.backup_path, &paths.backup)
-        || !paths_equal(&manifest.launcher_path, &paths.launcher)
+        || !(paths_equal(&manifest.launcher_path, &paths.install_root.join(LAUNCHER_NAME))
+            || (validate_version(&manifest.installed_version).is_ok()
+                && paths_equal(&manifest.launcher_path, &paths.install_root.join(format!("CodeCodex-{}.exe", manifest.installed_version)))))
         || !icon_is_stable
         || manifest.original_sha256.len() != 64
         || (manifest_uses_fallback_shortcut(paths, manifest)
@@ -2301,7 +2379,39 @@ fn is_adoptable_shortcut(
 fn is_owned(metadata: &ShortcutMetadata, paths: &IntegrationPaths) -> bool {
     metadata.description == OWNER_MARKER
         && !metadata.target.is_empty()
-        && paths_equal(Path::new(&metadata.target), &paths.launcher)
+        && is_root_launcher(Path::new(&metadata.target), &paths.install_root)
+}
+
+fn is_root_launcher(target: &Path, root: &Path) -> bool {
+    if !target.parent().is_some_and(|parent| paths_equal(parent, root)) { return false; }
+    let Some(name) = target.file_name().and_then(|name| name.to_str()) else { return false; };
+    if name.eq_ignore_ascii_case(LAUNCHER_NAME) { return true; }
+    let lower = name.to_ascii_lowercase();
+    lower.strip_prefix("codecodex-").and_then(|name| name.strip_suffix(".exe"))
+        .is_some_and(|version| validate_version(version).is_ok())
+}
+
+fn preferred_root_launcher(root: &Path) -> Result<PathBuf, IntegrationError> {
+    let pointer = root.join("current-version");
+    match fs::symlink_metadata(&pointer) {
+        Ok(_) => {
+            ensure_safe_regular_file(&pointer)?;
+            let bytes = read_file(&pointer)?;
+            if bytes.len() > 64 { return Err(IntegrationError::InvalidState("current-version is too large".into())); }
+            let text = std::str::from_utf8(&bytes).map_err(|_| IntegrationError::InvalidState("current-version is not UTF-8".into()))?;
+            let version = text.strip_suffix("\r\n").or_else(||text.strip_suffix('\n')).unwrap_or(text);
+            validate_version(version)?;
+            let launcher = root.join(format!("CodeCodex-{version}.exe"));
+            match fs::symlink_metadata(&launcher) {
+                Ok(_) => { ensure_safe_regular_file(&launcher)?; return Ok(launcher); }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                Err(source) => return Err(io_error(&launcher, source)),
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+        Err(source) => return Err(io_error(&pointer, source)),
+    }
+    Ok(root.join(LAUNCHER_NAME))
 }
 
 fn inspect_optional(
@@ -3189,6 +3299,65 @@ mod tests {
         }
     }
 
+    #[test]
+    fn versioned_root_launcher_migrates_old_owned_shortcut_and_restores_original() {
+        let f = fixture();
+        install(&FakeShell, &f.paths, "0.4.61", None).unwrap();
+        let root = &f.paths.install_root;
+        fs::write(root.join("current-version"), "0.4.62\n").unwrap();
+        fs::write(root.join("CodeCodex-0.4.62.exe"), b"new shim").unwrap();
+        let next = IntegrationPaths::resolve(root, Some(&f.paths.desktop), f.paths.start_menu.as_deref()).unwrap();
+        assert_eq!(next.launcher, root.join("CodeCodex-0.4.62.exe"));
+        prepare_install(&FakeShell, &next).unwrap();
+        install_with_legacy_cleanup(&FakeShell, &next, "0.4.62", None, false).unwrap();
+        let manifest = read_manifest_optional(&next.manifest).unwrap().unwrap();
+        assert_eq!(manifest.launcher_path, next.launcher);
+        assert!(is_owned(&FakeShell.inspect(&next.shortcut).unwrap(), &next));
+        commit_install(&FakeShell, &next).unwrap();
+        restore(&FakeShell, &next).unwrap();
+        assert_eq!(fs::read(&next.shortcut).unwrap(), f.original);
+    }
+
+    #[test]
+    fn root_launcher_ownership_requires_exact_root_canonical_version_and_owner() {
+        let f = fixture();
+        let root = &f.paths.install_root;
+        assert!(is_root_launcher(&root.join("CodeCodex-0.4.62.exe"), root));
+        assert!(is_root_launcher(&root.join(LAUNCHER_NAME), root));
+        for name in ["CodeCodex-00.4.62.exe", "CodeCodex-0.4.exe", "CodeCodex-x.exe", "other.exe"] {
+            assert!(!is_root_launcher(&root.join(name), root));
+        }
+        assert!(!is_root_launcher(&root.join("child/CodeCodex-0.4.62.exe"), root));
+        let mut metadata = official_metadata();
+        metadata.target = root.join("CodeCodex-0.4.62.exe").to_string_lossy().into_owned();
+        assert!(!is_owned(&metadata, &f.paths));
+        metadata.description = OWNER_MARKER.into();
+        assert!(is_owned(&metadata, &f.paths));
+        fs::write(root.join("current-version"), "../0.4.62").unwrap();
+        assert!(preferred_root_launcher(root).is_err());
+    }
+
+    #[test]
+    fn versioned_to_versioned_upgrade_can_rollback_shortcut_and_manifest() {
+        let f = fixture();
+        let root = &f.paths.install_root;
+        fs::write(root.join("current-version"), "0.4.62\n").unwrap();
+        fs::write(root.join("CodeCodex-0.4.62.exe"), b"shim62").unwrap();
+        let old = IntegrationPaths::resolve(root, Some(&f.paths.desktop), f.paths.start_menu.as_deref()).unwrap();
+        install(&FakeShell, &old, "0.4.62", None).unwrap();
+        let old_shortcut = fs::read(&old.shortcut).unwrap();
+        let old_manifest = fs::read(&old.manifest).unwrap();
+        prepare_install(&FakeShell, &old).unwrap();
+        fs::write(root.join("current-version"), "0.4.63\n").unwrap();
+        fs::write(root.join("CodeCodex-0.4.63.exe"), b"shim63").unwrap();
+        let next = IntegrationPaths::resolve(root, Some(&f.paths.desktop), f.paths.start_menu.as_deref()).unwrap();
+        install_with_legacy_cleanup(&FakeShell, &next, "0.4.63", None, false).unwrap();
+        assert_eq!(read_manifest_optional(&next.manifest).unwrap().unwrap().launcher_path, next.launcher);
+        rollback_install(&FakeShell, &next).unwrap();
+        assert_eq!(fs::read(&old.shortcut).unwrap(), old_shortcut);
+        assert_eq!(fs::read(&old.manifest).unwrap(), old_manifest);
+    }
+
     fn official_metadata() -> ShortcutMetadata {
         ShortcutMetadata {
             target: String::new(),
@@ -3751,6 +3920,25 @@ mod tests {
         assert_eq!(committed.state, IntegrationState::Managed);
         assert_eq!(committed.installed_version.as_deref(), Some("0.3.48"));
         assert!(!fixture.paths.install_rollback.exists());
+    }
+
+    #[test]
+    fn language_install_commit_joins_shortcut_journal_and_rolls_back() {
+        let fixture=fixture();let shell=FakeShell;
+        fs::write(fixture.paths.install_root.join("storage-layout.json"),br#"{"schema":1,"product":"Code-Codex","layout":"centralized"}"#).unwrap();
+        prepare_install(&shell,&fixture.paths).unwrap();
+        install_with_legacy_cleanup(&shell,&fixture.paths,"0.4.53",None,false).unwrap();
+        let root=fixture.paths.install_root.to_string_lossy().into_owned();
+        let get=vec!["--install-root".into(),root.clone()];
+        assert_eq!(language_command(&get).unwrap()["revision"],0);
+        let mut set=get.clone();set.extend(["--locale".into(),"zh-CN".into(),"--expected-revision".into(),"0".into()]);
+        assert_eq!(language_command(&set).unwrap()["revision"],1);
+        let snapshot=read_install_snapshot(&fixture.paths).unwrap();assert_eq!(snapshot.ui_language_written_revision,Some(1));
+        rollback_install(&shell,&fixture.paths).unwrap();assert_eq!(language_command(&get).unwrap()["revision"],0);
+        assert_eq!(fs::read(&fixture.paths.shortcut).unwrap(),fixture.original);
+        let path=fixture.paths.install_root.join("data/ui-language.json");fs::write(&path,b"damaged").unwrap();
+        assert_eq!(language_command(&get).unwrap()["issue"]["preserved"],true);
+        assert_eq!(language_command(&set).unwrap()["issue"]["preserved"],true);assert_eq!(fs::read(path).unwrap(),b"damaged");
     }
 
     #[test]

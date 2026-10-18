@@ -1,0 +1,19 @@
+{
+  "id": "custom-background",
+  "name": "Custom Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.9",
+  "releaseTag": "plugin-assets-2026-10-18",
+  "asset": "CodeCodex-background-custom-background-1.0.9.js",
+  "relativePath": "CodeCodex-background-custom-background-1.0.9.js",
+  "size": 29192,
+  "sha256": "46250603889b6dc143239d9aa943bfa7adcd79b0b32fceac9a57b79262083183",
+  "resources": [],
+  "capabilities": [
+    "background",
+    "local-media",
+    "settings"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex"
+}

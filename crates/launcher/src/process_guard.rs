@@ -17,6 +17,8 @@ use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
+pub(crate) const ACTIVATION_OBSERVATION_UNAVAILABLE: &str = "Windows activation succeeded but the returned PID could not be observed";
+
 #[cfg(windows)]
 use process_wrap::tokio::JobObject;
 #[cfg(windows)]
@@ -96,6 +98,31 @@ pub enum CodexProcessGuard {
     Child(CodexChildGuard),
     #[cfg(windows)]
     Package(Box<CodexPackageGuard>),
+    #[cfg(windows)]
+    Recovered(RecoveredProcess),
+}
+
+/// A verified successor is owned by its retained handle, never by package-wide
+/// termination or a PID which Windows could subsequently reuse.
+#[cfg(windows)]
+pub struct RecoveredProcess {
+    pid: u32,
+    handle: OwnedHandle,
+}
+
+#[cfg(windows)]
+impl RecoveredProcess {
+    fn stop(&self) {
+        if process_handle_exit_code(&self.handle).is_ok_and(|code| code.is_none()) {
+            let ok = unsafe { windows_sys::Win32::System::Threading::TerminateProcess(self.handle.as_raw_handle().cast(), 0) };
+            crate::process_diagnostics::observe("startup recovery", "successor cleanup", if ok != 0 {"requested"} else {"failed"}, serde_json::json!({"pid":self.pid,"retainedHandle":true,"packageWideTermination":false,"osCode":if ok==0 {io::Error::last_os_error().raw_os_error()} else {None}}));
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for RecoveredProcess {
+    fn drop(&mut self) { self.stop(); }
 }
 
 #[cfg(windows)]
@@ -349,7 +376,7 @@ impl CodexProcessGuard {
             if raw.is_null() {
                 let error = io::Error::last_os_error();
                 stop_unarmed_package_helper(helper, Some(control), stderr_reader).await;
-                return Err(error);
+                return Err(io::Error::new(error.kind(),format!("{ACTIVATION_OBSERVATION_UNAVAILABLE}: pid={}; osCode={:?}; kind={:?}",activation.process_id,error.raw_os_error(),error.kind())));
             }
             let activation_handle = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
             Ok(Self::Package(Box::new(CodexPackageGuard {
@@ -369,6 +396,8 @@ impl CodexProcessGuard {
             Self::Child(child) => child.pid(),
             #[cfg(windows)]
             Self::Package(package) => package.pid,
+            #[cfg(windows)]
+            Self::Recovered(process) => process.pid,
         }
     }
 
@@ -377,6 +406,8 @@ impl CodexProcessGuard {
     pub async fn arm_package_termination(&mut self) -> io::Result<()> {
         match self {
             Self::Child(_) => Ok(()),
+            #[cfg(windows)]
+            Self::Recovered(_) => Ok(()),
             #[cfg(windows)]
             Self::Package(package) => {
                 if package.armed {
@@ -400,6 +431,13 @@ impl CodexProcessGuard {
         match self {
             Self::Child(child) => child.wait_for_exit().await,
             #[cfg(windows)]
+            Self::Recovered(process) => {
+                while process_handle_exit_code(&process.handle)?.is_none() {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Ok(())
+            }
+            #[cfg(windows)]
             Self::Package(package) => {
                 let mut helper_exit_observed=false;
                 loop {
@@ -422,6 +460,8 @@ impl CodexProcessGuard {
             Self::Child(child) => Ok(child.child.try_wait()?.and_then(|s| s.code()).map(|c| c as u32)),
             #[cfg(windows)]
             Self::Package(package) => process_handle_exit_code(&package.activation_handle),
+            #[cfg(windows)]
+            Self::Recovered(process) => process_handle_exit_code(&process.handle),
         }
     }
 
@@ -430,7 +470,14 @@ impl CodexProcessGuard {
             Self::Child(child) => child.terminate().await,
             #[cfg(windows)]
             Self::Package(package) => package.terminate().await,
+            #[cfg(windows)]
+            Self::Recovered(process) => process.stop(),
         }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn from_verified_successor(pid: u32, handle: OwnedHandle) -> Self {
+        Self::Recovered(RecoveredProcess { pid, handle })
     }
 }
 
@@ -503,6 +550,52 @@ mod activation_wait_tests {
         tokio::time::timeout(Duration::from_secs(10),output.read_line(&mut line)).await.expect("open stdin must not block monitor").unwrap();assert_eq!(line.trim(),"monitor-live");
         line.clear();tokio::time::timeout(Duration::from_secs(3),output.read_line(&mut line)).await.unwrap().unwrap();assert_eq!(line.trim(),"monitor-finished");
         tokio::time::timeout(Duration::from_secs(3),helper.wait()).await.unwrap().unwrap();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod attached_lifetime_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn observer_waits_for_real_exit_without_terminating_or_following_pid() {
+        let powershell = trusted_powershell().expect("PowerShell");
+        let mut child = TokioCommand::new(&powershell)
+            .args(["-NoProfile","-NonInteractive","-Command","Start-Sleep -Seconds 2; exit 23"])
+            .creation_flags(0x0800_0000).spawn().expect("test child");
+        let pid = child.id().unwrap();
+        let handle = retain_native_identity(pid, UNIX_EPOCH, &powershell, None).expect("retain exact image");
+        let observer = AttachedProcess { pid, created_at: UNIX_EPOCH, handle };
+        assert!(observer.running().is_ok());
+        let code = tokio::time::timeout(Duration::from_secs(12),observer.wait_for_exit()).await.expect("bounded real wait").unwrap();
+        assert_eq!(code,23);
+        assert!(observer.running().is_err());
+        child.wait().await.unwrap();
+        drop(observer);
+
+        let mut child = TokioCommand::new(&powershell)
+            .args(["-NoProfile","-NonInteractive","-Command","Start-Sleep -Seconds 30"])
+            .creation_flags(0x0800_0000).kill_on_drop(true).spawn().expect("second child");
+        let pid = child.id().unwrap();
+        assert!(retain_native_identity(pid,UNIX_EPOCH,&powershell,Some(0)).is_err(),"changed generation rejected");
+        let handle = retain_native_identity(pid,UNIX_EPOCH,&powershell,None).unwrap();
+        drop(AttachedProcess{pid,created_at:UNIX_EPOCH,handle});
+        assert!(child.try_wait().unwrap().is_none(),"dropping observer must leave official process alive");
+        child.kill().await.unwrap();
+        child.wait().await.unwrap();
+    }
+
+    #[test]
+    fn observer_is_bound_to_verified_listener_and_generation() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let image = std::env::current_exe().unwrap();
+        let observer = AttachedProcess::for_listener(port,&image).expect("real verified listener");
+        assert_eq!(observer.pid(),std::process::id());
+        observer.verify_listener(port).unwrap();
+        drop(listener);
+        assert!(observer.verify_listener(port).is_err(),"closed/reassigned endpoint must not be trusted");
+        assert!(observer.running().is_ok());
     }
 }
 
@@ -1281,6 +1374,16 @@ pub(crate) fn verify_process_identity_native(
     launched_after: SystemTime,
     official_executable: &Path,
 ) -> Result<(), ProcessGuardError> {
+    retain_native_identity(pid, launched_after, official_executable, None).map(drop)
+}
+
+#[cfg(windows)]
+fn retain_native_identity(
+    pid: u32,
+    launched_after: SystemTime,
+    official_executable: &Path,
+    expected_creation_ms: Option<i64>,
+) -> Result<OwnedHandle, ProcessGuardError> {
     use windows_sys::Win32::{
         Foundation::FILETIME,
         System::Threading::{
@@ -1340,6 +1443,11 @@ pub(crate) fn verify_process_identity_native(
         )));
     }
     let created_ms = ticks.checked_sub(116444736000000000).map(|n| n / 10000);
+    if expected_creation_ms.is_some_and(|expected| u64::try_from(expected).ok() != created_ms) {
+        return Err(ProcessGuardError::Detailed(format!(
+            "attached process generation changed before handle retention: pid={pid}"
+        )));
+    }
     let launch_ms = launched_after
         .duration_since(UNIX_EPOCH)
         .ok()
@@ -1383,7 +1491,8 @@ pub(crate) fn verify_process_identity_native(
             "native identity mismatch: pid={pid}; created_after_launch={time_matches}; exact_image_match={image_matches}"
         )));
     }
-    ensure_running()
+    ensure_running()?;
+    Ok(handle)
 }
 
 fn verify_process_identity_inner(
@@ -1629,6 +1738,13 @@ fn verify_listener_executable_inner(
     port: u16,
     official_executable: &Path,
 ) -> Result<(), ProcessGuardError> {
+    verified_listener_snapshot(port, official_executable).map(drop)
+}
+
+fn verified_listener_snapshot(
+    port: u16,
+    official_executable: &Path,
+) -> Result<OwnershipSnapshot, ProcessGuardError> {
     #[cfg(not(windows))]
     {
         let _ = (port, official_executable);
@@ -1668,7 +1784,87 @@ fn verify_listener_executable_inner(
                 "{error}; {}",
                 snapshot_observation(&snapshot, port, None, Some(&official_executable))
             ))
-        })
+        })?;
+        Ok(snapshot)
+    }
+}
+
+/// Observes an existing official process without acquiring termination rights.
+/// A login/layout gap must not stop live activation, but quitting this exact
+/// process must. Keeping the handle also prevents following a recycled PID.
+pub(crate) struct AttachedProcess {
+    pid: u32,
+    created_at: SystemTime,
+    #[cfg(windows)]
+    handle: OwnedHandle,
+}
+
+impl AttachedProcess {
+    pub(crate) fn for_listener(port: u16, executable: &Path) -> Result<Self, ProcessGuardError> {
+        #[cfg(not(windows))]
+        { let _ = (port, executable); Err(ProcessGuardError::OwnershipUnknown) }
+        #[cfg(windows)]
+        {
+            let snapshot = verified_listener_snapshot(port, executable)?;
+            let official = dunce::canonicalize(executable).map_err(|e|
+                ProcessGuardError::OwnershipUnknown.context("attached image canonicalization", e))?;
+            let processes: HashMap<_, _> = snapshot.processes.iter().map(|p| (p.process_id,p)).collect();
+            let mut owners = HashSet::new();
+            for listener in &snapshot.listeners {
+                let mut current = *listener;
+                let mut visited = HashSet::new();
+                for _ in 0..64 {
+                    if !visited.insert(current) { break; }
+                    let Some(process) = processes.get(&current) else { break; };
+                    if process.executable_path.as_deref().is_some_and(|p|
+                        p.eq_ignore_ascii_case(&official.to_string_lossy())) {
+                        owners.insert(process.process_id); break;
+                    }
+                    current = process.parent_process_id;
+                }
+            }
+            if owners.len() != 1 { return Err(ProcessGuardError::OwnershipUnknown); }
+            let pid = *owners.iter().next().ok_or(ProcessGuardError::OwnershipUnknown)?;
+            let process = processes[&pid];
+            let handle = retain_native_identity(pid, UNIX_EPOCH, &official, Some(process.creation_unix_millis))?;
+            let millis = u64::try_from(process.creation_unix_millis).map_err(|_|ProcessGuardError::OwnershipUnknown)?;
+            let created_at = UNIX_EPOCH.checked_add(Duration::from_millis(millis)).ok_or(ProcessGuardError::OwnershipUnknown)?;
+            let observer = Self {pid,created_at,handle};
+            observer.verify_listener(port)?;
+            Ok(observer)
+        }
+    }
+
+    pub(crate) fn pid(&self) -> u32 { self.pid }
+
+    pub(crate) fn verify_listener(&self, port: u16) -> Result<(), ProcessGuardError> {
+        self.running()?;
+        verify_listener_owner(port, self.pid, self.created_at)?;
+        self.running()
+    }
+
+    fn running(&self) -> Result<(), ProcessGuardError> {
+        #[cfg(windows)]
+        match process_handle_exit_code(&self.handle) {
+            Ok(None) => Ok(()),
+            Ok(Some(code)) => Err(ProcessGuardError::Detailed(format!("attached official process exited: pid={}; exitCode={code}",self.pid))),
+            Err(e) => Err(ProcessGuardError::ProcessInspectionUnknown.context("attached process observation",e)),
+        }
+        #[cfg(not(windows))]
+        { Err(ProcessGuardError::ProcessInspectionUnknown) }
+    }
+
+    pub(crate) async fn wait_for_exit(&self) -> Result<u32, ProcessGuardError> {
+        #[cfg(windows)]
+        loop {
+            match process_handle_exit_code(&self.handle) {
+                Ok(Some(code)) => return Ok(code),
+                Ok(None) => tokio::time::sleep(Duration::from_millis(250)).await,
+                Err(e) => return Err(ProcessGuardError::ProcessInspectionUnknown.context("attached process wait",e)),
+            }
+        }
+        #[cfg(not(windows))]
+        { Err(ProcessGuardError::ProcessInspectionUnknown) }
     }
 }
 

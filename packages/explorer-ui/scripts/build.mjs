@@ -1,7 +1,7 @@
-import {buildStartupPackage} from './build-startup-package.mjs';
-import {buildUtilityPackages} from './utility-packages.mjs';
-import {buildFilePreviewPackages} from './file-preview-packages.mjs';
-import { buildBackgroundPackages } from './background-packages.mjs';
+import {prepareLockedPlugins} from './plugin-distribution.mjs';
+import {rebuildPlugins} from './rebuild-plugins.mjs';
+import {checkCatalogs} from '../../../scripts/check-i18n.mjs';
+checkCatalogs();
 import { build, context } from "esbuild";
 import { createHash } from "node:crypto";
 import { mkdir, copyFile, readFile, writeFile } from "node:fs/promises";
@@ -82,32 +82,10 @@ const options = {
   target: ["chrome120"],
 };
 
-// Core-only maintenance can keep unchanged plugin bytes on their published
-// release. Fail closed if a pinned release no longer describes those bytes.
-const pluginReleaseVersion = uiManifest.codeCodex?.pluginReleaseVersion ?? uiManifest.version;
-if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(pluginReleaseVersion)) throw new Error('Invalid plugin release version');
-const pluginCatalog = await buildBackgroundPackages(root, options, pluginReleaseVersion);
-pluginCatalog.push(...await buildUtilityPackages(root,options,pluginReleaseVersion));
-const releaseOverrides=uiManifest.codeCodex?.pluginReleaseOverrides??{};
-const pinnedCatalog=JSON.parse(await readFile(resolve(root,'../../releases/plugins/catalog.json'),'utf8'));
-for(const [id,version] of Object.entries(releaseOverrides)) {
-  const publishedTag=pinnedCatalog.find(p=>p.id===id)?.releaseTag;
-  if(id!=='codex-startup-transition' || (version!==uiManifest.version && `v${version}`!==publishedTag))throw new Error('Startup release must be the current core or its unchanged published tag');
-}
-pluginCatalog.push(await buildStartupPackage(root,options,releaseOverrides['codex-startup-transition']??pluginReleaseVersion));
-pluginCatalog.push(...await buildFilePreviewPackages(root,options,pluginReleaseVersion));
-if (pluginReleaseVersion !== uiManifest.version) {
-  const published = JSON.parse(await readFile(resolve(root, '../../releases/plugins/catalog.json'), 'utf8'));
-  for (const plugin of pluginCatalog) {
-    if(releaseOverrides[plugin.id]===uiManifest.version)continue;
-    const previous = published.find(p => p.id === plugin.id);
-    if (!previous || JSON.stringify(previous) !== JSON.stringify(plugin)) {
-      throw new Error(`Plugin ${plugin.id} changed: publish a new matching plugin release instead of retaining v${pluginReleaseVersion}`);
-    }
-  }
-  if (published.length !== pluginCatalog.length) throw new Error('Pinned plugin catalog count changed');
-}
-await writeFile(resolve(root,'dist/plugins/catalog.json'),JSON.stringify(pluginCatalog,null,2)+'\n');
+// Distribution identity is independent of the main application version.
+const requestedPlugins=process.argv.find(arg=>arg.startsWith('--rebuild-plugins='))?.split('=')[1];
+if(requestedPlugins)await rebuildPlugins(root,options,requestedPlugins);
+const pluginCatalog = await prepareLockedPlugins(root);
 options.define.__CODE_CODEX_PLUGIN_CATALOG__ = JSON.stringify(pluginCatalog);
 
 await build({
@@ -123,6 +101,12 @@ if (earlyBundleBytes >= earlyBundleLimit) {
 }
 
 // Only the tiny verified-cache startup dispatcher is embedded in the core.
+
+// Catalog names are proper names in both languages, at every entry point.
+const languageEn=JSON.parse(await readFile(resolve(root,'../../resources/i18n/en.json'),'utf8'));
+const languageZh=JSON.parse(await readFile(resolve(root,'../../resources/i18n/zh-CN.json'),'utf8'));
+const currentCatalog=JSON.parse(options.define.__CODE_CODEX_PLUGIN_CATALOG__);
+for(const plugin of currentCatalog)for(const [key,text]of Object.entries(languageEn))if(text===plugin.name&&languageZh[key]!==plugin.name)throw new Error(`Plugin name must remain English: ${plugin.name}`);
 
 // Define optional example data only for the core, after pinned plugins and early loader.
 // Object-valued defines can perturb minifier identifiers even in unrelated builds.

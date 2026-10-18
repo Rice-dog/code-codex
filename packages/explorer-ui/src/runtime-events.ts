@@ -27,6 +27,12 @@ export function takeRuntimeEvents(): RuntimeEvent[] {
     details: redactRuntimeValue(event.details) as Record<string, unknown>,
   }));
 }
+
+/** Inspect a terminal result without consuming the native diagnostic queue. */
+export function lastStartupFailureOrSkip(): RuntimeEvent | undefined {
+  return [...state.events].reverse().find(event => event.source === 'startup-animation'
+    && (event.outcome === 'failed' || (event.action === 'launch playback' && event.outcome === 'skipped')));
+}
 export function restoreRuntimeEvents(events: RuntimeEvent[]): void {
   state.events.unshift(...events);
   if (state.events.length > 1000) { const count = state.events.length - 1000; state.events.splice(0,count); state.dropped += count; }

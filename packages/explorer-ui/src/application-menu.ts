@@ -1,3 +1,6 @@
+import { getLocale, selectLanguage, subscribeLanguage, translate, t } from './i18n';
+import { icons } from './icons';
+
 interface ApplicationMenuActions {
   isExplorerVisible(): boolean;
   toggleExplorer(): void;
@@ -81,6 +84,27 @@ ${MENU_POPUP_SELECTOR} > [role="separator"] {
   height: .5px;
   margin: 8px 0;
   background: var(--color-border-strong, rgba(26, 28, 31, .117));
+}
+${MENU_POPUP_SELECTOR} > [data-code-codex-language-trigger] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+[data-code-codex-submenu-chevron] {
+  display: flex;
+  flex: 0 0 16px;
+  margin-inline-start: auto;
+  opacity: .55;
+}
+[data-code-codex-submenu-chevron] > svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 `;
 
@@ -166,6 +190,33 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   installationItem.setAttribute("role", "menuitem");
   installationItem.tabIndex = -1;
   installationItem.textContent = "Open Installation Folder";
+  const languageItem = document.createElement('button');
+  languageItem.type = 'button';languageItem.setAttribute('role','menuitem');languageItem.tabIndex=-1;
+  languageItem.setAttribute('aria-haspopup','menu');languageItem.setAttribute('aria-expanded','false');
+  languageItem.dataset.codeCodexLanguageTrigger='true';
+  const languageLabel=document.createElement('span');
+  const languageChevron=document.createElement('span');
+  languageChevron.dataset.codeCodexSubmenuChevron='true';
+  languageChevron.setAttribute('aria-hidden','true');
+  languageChevron.innerHTML=icons.chevron;
+  languageItem.append(languageLabel,languageChevron);
+  const languagePopup=document.createElement('div');
+  languagePopup.dataset.codeCodexApplicationMenuPopup='language';
+  languagePopup.id='code-codex-language-popup';languagePopup.setAttribute('role','menu');
+  languagePopup.setAttribute('aria-label','Language');languagePopup.hidden=true;languagePopup.style.width='160px';
+  languageItem.setAttribute('aria-controls',languagePopup.id);
+  const languageOptions=([['zh-CN','中文（简体）'],['en','English']] as const).map(([locale,label])=>{
+    const button=document.createElement('button');button.type='button';button.tabIndex=-1;
+    button.setAttribute('role','menuitemradio');button.dataset.locale=locale;
+    button.addEventListener('click',()=>{
+      if(button.disabled)return;
+      languageOptions.forEach(option=>option.disabled=true);
+      void selectLanguage(locale).then(()=>close(true)).catch(error=>{
+        window.alert(t('language.saveFailed')+'\n'+String(error));
+      }).finally(()=>{languageOptions.forEach(option=>option.disabled=false);updateText();});
+    },{signal});
+    button.dataset.languageLabel=label;languagePopup.append(button);return button;
+  });
   const repositoryItem = document.createElement("a");
   repositoryItem.href = REPOSITORY_URL;
   repositoryItem.target = "_blank";
@@ -175,29 +226,49 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   repositoryItem.textContent = "Open GitHub Repository";
   const separator = document.createElement("div");
   separator.setAttribute("role", "separator");
-  popup.append(treeItem, marketItem, runtimeItem, installationItem, separator, updateItem, repositoryItem);
+  popup.append(treeItem, marketItem, runtimeItem, installationItem, languageItem, separator, updateItem, repositoryItem);
 
   // Keep this sibling separate from Codex's React-owned Radix menubar. It
   // shares the visual row without joining Radix's private keyboard collection.
   mount.topBar.insertBefore(host, mount.menubar.nextSibling);
   document.body.append(popup);
+  document.body.append(languagePopup);
 
-  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, installationItem, updateItem, repositoryItem];
+  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, installationItem, languageItem, updateItem, repositoryItem];
+  const updateText=()=>{
+    treeItem.textContent=t(actions.isExplorerVisible()?'menu.hideTree':'menu.showTree');
+    for(const [item,key] of [[marketItem,'menu.market'],[runtimeItem,'menu.runtime'],[installationItem,'menu.installation'],[updateItem,'menu.updates'],[repositoryItem,'menu.repository']] as const)item.textContent=t(key);
+    languageLabel.textContent=t('menu.language');
+    languagePopup.setAttribute('aria-label',t('menu.language'));
+    for(const button of languageOptions){const checked=button.dataset.locale===getLocale();button.setAttribute('aria-checked',String(checked));button.textContent=(checked?'✓  ':'　 ')+button.dataset.languageLabel;}
+  };
+  const unsubscribe=subscribeLanguage(()=>{updateText();position();});
+  const closeSub=()=>{languagePopup.hidden=true;languageItem.setAttribute('aria-expanded','false');};
+  const positionSub=()=>{
+    if(languagePopup.hidden)return;
+    const rect=languageItem.getBoundingClientRect();
+    const right=popup.getBoundingClientRect().right;
+    languagePopup.style.left=`${Math.max(8,right+languagePopup.offsetWidth<=window.innerWidth-8?right:popup.getBoundingClientRect().left-languagePopup.offsetWidth)}px`;
+    languagePopup.style.top=`${Math.max(8,Math.min(rect.top,window.innerHeight-languagePopup.offsetHeight-8))}px`;
+  };
+  const openSub=(focus=false)=>{updateText();languagePopup.hidden=false;languageItem.setAttribute('aria-expanded','true');positionSub();if(focus)(languageOptions.find(option=>option.dataset.locale===getLocale())??languageOptions[0])?.focus();};
   const position = () => {
     if (popup.hidden) return;
     const rect = trigger.getBoundingClientRect();
     const left = Math.max(8, Math.min(Math.round(rect.left), window.innerWidth - popup.offsetWidth - 8));
     popup.style.left = `${left}px`;
     popup.style.top = `${Math.max(8, Math.min(Math.round(rect.bottom), window.innerHeight - popup.offsetHeight - 8))}px`;
+    positionSub();
   };
   const close = (returnFocus = false) => {
+    closeSub();
     if (popup.hidden) return;
     popup.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
     if (returnFocus && trigger.isConnected) trigger.focus();
   };
   const open = (focusFirst = false) => {
-    treeItem.textContent = actions.isExplorerVisible() ? "Hide File Tree" : "Show File Tree";
+    updateText();
     popup.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
     position();
@@ -215,6 +286,8 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     }
   }, { signal });
   popup.addEventListener("keydown", (event) => {
+    if(document.activeElement===languageItem&&['ArrowRight','Enter',' '].includes(event.key)){event.preventDefault();openSub(true);return;}
+    if(event.key==='Escape'&&!languagePopup.hidden){event.preventDefault();closeSub();languageItem.focus();return;}
     if (event.key === "Escape") {
       event.preventDefault();
       close(true);
@@ -228,6 +301,17 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
       items[next]?.focus();
     }
   }, { signal });
+  languageItem.addEventListener('pointerenter',()=>openSub(),{signal});
+  languageItem.addEventListener('click',()=>languagePopup.hidden?openSub():closeSub(),{signal});
+  for(const item of items)if(item!==languageItem)item.addEventListener('pointerenter',closeSub,{signal});
+  languagePopup.addEventListener('keydown',event=>{
+    if(['Escape','ArrowLeft'].includes(event.key)){event.preventDefault();closeSub();languageItem.focus();}
+    else if(event.key==='Tab'){close();}
+    else if(['ArrowUp','ArrowDown','Home','End'].includes(event.key)){
+      event.preventDefault();const index=languageOptions.indexOf(document.activeElement as HTMLButtonElement);
+      languageOptions[event.key==='Home'?0:event.key==='End'?1:(index+(event.key==='ArrowDown'?1:-1)+2)%2]?.focus();
+    }
+  },{signal});
   treeItem.addEventListener("click", () => { close(); actions.toggleExplorer(); }, { signal });
   marketItem.addEventListener("click", () => { close(); actions.openPreviewMarket(); }, { signal });
   runtimeItem.addEventListener("click", () => { close(); actions.openRuntimeInformation(); }, { signal });
@@ -236,7 +320,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   repositoryItem.addEventListener("click", () => close(), { signal });
   document.addEventListener("pointerdown", (event) => {
     const target = event.target;
-    if (target instanceof Node && !host.contains(target) && !popup.contains(target)) close();
+    if (target instanceof Node && !host.contains(target) && !popup.contains(target) && !languagePopup.contains(target)) close();
   }, { capture: true, signal });
   window.addEventListener("resize", position, { signal });
   window.addEventListener("scroll", position, { capture: true, signal });
@@ -245,6 +329,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     owner, mount, host, popup,
     dispose: () => {
       controller.abort();
+      unsubscribe();languagePopup.remove();
       host.remove();
       popup.remove();
     },

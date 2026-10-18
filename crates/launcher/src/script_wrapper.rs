@@ -30,6 +30,7 @@ pub(crate) fn run_sibling_script_captured(
     run_script_captured(&script, script_arguments).map(Some)
 }
 
+#[allow(dead_code)] // Setup uses sibling scripts; uninstall always stages its embedded pair.
 pub(crate) fn run_sibling_script_with_progress(
     script_name: &str,
     script_arguments: impl IntoIterator<Item = OsString>,
@@ -50,7 +51,7 @@ pub(crate) fn run_script(
     command.stdout(Stdio::null()).stderr(Stdio::null());
     command
         .status()
-        .map_err(|error| format!("Windows PowerShell could not be started: {error}"))
+        .map_err(|error| format!("CC-INSTALL-POWERSHELL-SPAWN-001: Windows PowerShell could not be started; ioKind={:?}; osCode={:?}; cause={error}",error.kind(),error.raw_os_error()))
 }
 
 #[allow(dead_code)]
@@ -60,7 +61,7 @@ pub(crate) fn run_script_captured(
 ) -> Result<Output, String> {
     build_script_command(script, script_arguments)?
         .output()
-        .map_err(|error| format!("Windows PowerShell could not be started: {error}"))
+        .map_err(|error| format!("CC-INSTALL-POWERSHELL-SPAWN-001: Windows PowerShell could not be started; ioKind={:?}; osCode={:?}; cause={error}",error.kind(),error.raw_os_error()))
 }
 
 pub(crate) fn run_script_with_progress(
@@ -76,7 +77,7 @@ pub(crate) fn run_script_with_progress(
     }
     command
         .output()
-        .map_err(|error| format!("Windows PowerShell could not be started: {error}"))
+        .map_err(|error| format!("CC-INSTALL-POWERSHELL-SPAWN-001: Windows PowerShell could not be started; ioKind={:?}; osCode={:?}; cause={error}",error.kind(),error.raw_os_error()))
 }
 
 fn build_script_command(
@@ -91,6 +92,7 @@ fn build_script_command(
     }
     let powershell = trusted_system32_powershell()?;
     let mut command = Command::new(powershell);
+    command.env("CLE_UI_LANGUAGE",crate::gui_support::localization::locale().as_str());
     command
         .args([
             "-NoLogo",

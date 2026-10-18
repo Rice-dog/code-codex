@@ -357,7 +357,7 @@ pub(crate) fn activation_failure_details(
         ));
     }
     native_observation("activation failure", Some(port), Some(pid));
-    summary.push_str("Recovery: no other PID adopted and no Codex restart attempted. Port response alone cannot establish a trusted handoff. OS exit status is not the PowerShell query exit code.\n");
+    summary.push_str("Observation only: this probe performs no attachment or restart. See preceding recovery decisions for any activation retry or successor adoption. Port response alone cannot establish a trusted handoff. OS exit status is not the PowerShell query exit code.\n");
     summary
 }
 
@@ -400,9 +400,35 @@ pub(crate) fn query_with_timeout(
     context: Value,
     timeout: Duration,
 ) -> Result<Vec<u8>, ProcessGuardError> {
+    query_attempts(operation, body, environment, stdout_limit, context, timeout, 2)
+}
+
+/// Recovery has its own total budget; do not nest an implicit second query.
+#[cfg(windows)]
+pub(crate) fn query_once_with_timeout(
+    operation: &str,
+    body: &str,
+    environment: &[(&str, &std::ffi::OsStr)],
+    stdout_limit: usize,
+    context: Value,
+    timeout: Duration,
+) -> Result<Vec<u8>, ProcessGuardError> {
+    query_attempts(operation, body, environment, stdout_limit, context, timeout, 1)
+}
+
+#[cfg(windows)]
+fn query_attempts(
+    operation: &str,
+    body: &str,
+    environment: &[(&str, &std::ffi::OsStr)],
+    stdout_limit: usize,
+    context: Value,
+    timeout: Duration,
+    max_attempts: u8,
+) -> Result<Vec<u8>, ProcessGuardError> {
     use std::os::windows::process::CommandExt;
     let mut first_failure = None;
-    for attempt in 1..=2 {
+    for attempt in 1..=max_attempts {
         observe(
             operation,
             "query",
@@ -525,7 +551,7 @@ pub(crate) fn query_with_timeout(
             )
         );
         first_failure.get_or_insert_with(|| failure.clone());
-        if attempt == 1 && retryable(&events, timed_out) && output.total <= stdout_limit {
+        if attempt < max_attempts && retryable(&events, timed_out) && output.total <= stdout_limit {
             observe(
                 operation,
                 "query retry",
@@ -982,7 +1008,8 @@ mod tests {
         assert!(details.contains("Sample 2"));
         assert!(details.contains("0x00000017"));
         assert!(details.contains("possible handoff"));
-        assert!(details.contains("no other PID adopted"));
+        assert!(details.contains("this probe performs no attachment or restart"));
+        assert!(details.contains("See preceding recovery decisions"));
         assert!(
             crate::process_guard::verify_process_identity_native(
                 pid,

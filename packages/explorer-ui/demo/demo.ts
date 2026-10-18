@@ -1,4 +1,5 @@
-import type { BridgeMessage, BridgeRequest, ObjectBridge, TreeNodeInput } from "../src/types";
+import "../src/core/localization/runtime";
+import { type BridgeMessage, type BridgeRequest, type ObjectBridge, type TreeNodeInput } from "../src/contracts/bridge";
 
 declare const __CODE_CODEX_VERSION__: string;
 

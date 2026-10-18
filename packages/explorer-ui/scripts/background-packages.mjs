@@ -1,3 +1,4 @@
+import {sourcePackage} from './plugin-source-definition.mjs';
 import { build } from 'esbuild';
 import { readFile, mkdir, writeFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -15,9 +16,8 @@ export const definitions = [
   ['particle-image','Particle Image Background','ParticleImageRenderer'],
   ['pixel-sculpt','Pixel Sculpt Background','PixelSculptRenderer'],
 ];
-export async function buildBackgroundPackages(root, options, hostVersion) {
-  const version = "1.0.0"; // Unchanged backgrounds retain their immutable cached package.
-  const dir = resolve(root, 'dist/plugins');
+export async function buildBackgroundPackages(root, options, outputRoot=resolve(root, 'dist/plugins')) {
+  const dir = outputRoot;
   await rm(dir, { recursive:true, force:true });
   await mkdir(dir, { recursive: true });
   const catalog = [];
@@ -26,7 +26,8 @@ export async function buildBackgroundPackages(root, options, hostVersion) {
   const banner = `/*! Code-Codex first-party background package.\nSource: https://github.com/Rice-dog/code-codex\n${notices.replaceAll("*/", "* /")}\n*/`;
   for (const [id, name, renderer] of definitions) {
     const images = mediaManifest.plugins[id] ?? [];
-    const packageVersion = images.length ? '1.0.2' : version;
+    const packageVersion = sourcePackage(id).version;
+    const releaseTag=sourcePackage(id).releaseTag;
     const pluginDir=resolve(dir,'appearance',id);
     await mkdir(resolve(pluginDir,'media'),{recursive:true});
     const resources = [];
@@ -69,13 +70,13 @@ export async function buildBackgroundPackages(root, options, hostVersion) {
     const needsCanvas = !['glow-horizon','blinking-squares','particle-image'].includes(id);
     const prepare = images.length ? `()=>prepareDefaultImageLibrary(${JSON.stringify(id)})` : '()=>Promise.resolve()';
     if (images.length) extra += `import {prepareDefaultImageLibrary} from './default-image-library';`;
-    let contents = `${imports}${extra}\nconst host=window;const key=Symbol.for('code-codex:background-modules:v1');const registry=host[key]??(host[key]=new Map());const prepareDefaults=${prepare};registry.set(${JSON.stringify(id)},{id:${JSON.stringify(id)},api:1,version:${JSON.stringify(packageVersion)},prepareDefaults,exports:{${renderer}${id === 'glow-horizon' ? ',populateGlowHorizonLayer' : ''}},startup(target,onError){let instance,disposed=false;const ready=prepareDefaults().then(()=>{if(disposed)throw new Error('Startup background preparation was canceled');${needsCanvas ? "const canvas=document.createElement('canvas');canvas.style.cssText='width:100%;height:100%;display:block';target.append(canvas);" : ''}instance=${startup};return instance.ready;});void ready.catch(()=>{});return {ready,dispose(){disposed=true;instance?.dispose();}};}});`;
-    if (!images.length) contents = `${imports}${extra}\nconst host=window;const key=Symbol.for('code-codex:background-modules:v1');const registry=host[key]??(host[key]=new Map());registry.set(${JSON.stringify(id)},{id:${JSON.stringify(id)},api:1,version:${JSON.stringify(version)},exports:{${renderer}${id === 'glow-horizon' ? ',populateGlowHorizonLayer' : ''}},startup(target,onError){${needsCanvas ? "const canvas=document.createElement('canvas');canvas.style.cssText='width:100%;height:100%;display:block';target.append(canvas);" : ''}return ${startup};}});`;
+    let contents = `${imports}${extra}\nconst host=window;const key=Symbol.for('code-codex:background-modules:v1');const registry=host[key]??(host[key]=new Map());const prepareDefaults=${prepare};registry.set(${JSON.stringify(id)},{id:${JSON.stringify(id)},api:1,version:${JSON.stringify(packageVersion)},prepareDefaults,exports:{${renderer}${id === 'glow-horizon' ? ',populateGlowHorizonLayer' : ''}},startup(target,onError){let instance,disposed=false;const ready=Promise.resolve().then(()=>{if(disposed)throw new Error('Startup background preparation was canceled');${needsCanvas ? "const canvas=document.createElement('canvas');canvas.style.cssText='width:100%;height:100%;display:block';target.append(canvas);" : ''}instance=${startup};return instance.ready;});void ready.catch(()=>{});return {ready,dispose(){disposed=true;instance?.dispose();}};}});`;
+    if (!images.length) contents = `${imports}${extra}\nconst host=window;const key=Symbol.for('code-codex:background-modules:v1');const registry=host[key]??(host[key]=new Map());registry.set(${JSON.stringify(id)},{id:${JSON.stringify(id)},api:1,version:${JSON.stringify(packageVersion)},exports:{${renderer}${id === 'glow-horizon' ? ',populateGlowHorizonLayer' : ''}},startup(target,onError){${needsCanvas ? "const canvas=document.createElement('canvas');canvas.style.cssText='width:100%;height:100%;display:block';target.append(canvas);" : ''}return ${startup};}});`;
     const asset = `CodeCodex-background-${id}-${packageVersion}.js`;
     await build({ ...options, banner:{js:banner}, sourcemap:false, metafile:true, stdin: { contents, resolveDir:resolve(root,'src'), sourcefile:`background-${id}.ts`, loader:'ts' }, format:'iife', minify:true, outfile:resolve(pluginDir,asset) }).then(async result => { await writeFile(resolve(pluginDir,`${id}.metafile.json`),JSON.stringify(result.metafile)); });
     const bytes = await readFile(resolve(pluginDir,asset));
     if (bytes.length > 4 * 1024 * 1024) throw new Error(`Background ${id} exceeds the 4 MiB bounded script channel`);
-    const descriptor = { id, name, category:"appearance", api:1, version:packageVersion, releaseTag:`v${hostVersion}`, size:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex'), asset, relativePath:asset, resources, galleryVersion:mediaManifest.version, defaultImageCount:images.length, capabilities:["background", "startup", "preview"], source:"https://github.com/Rice-dog/code-codex", notices:"THIRD_PARTY_NOTICES_EN.md" };
+    const descriptor = { id, name, category:"appearance", api:1, version:packageVersion, releaseTag, size:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex'), asset, relativePath:asset, resources, galleryVersion:mediaManifest.version, defaultImageCount:images.length, capabilities:["background", "startup", "preview"], source:"https://github.com/Rice-dog/code-codex", notices:"THIRD_PARTY_NOTICES_EN.md" };
     catalog.push(descriptor);
     await writeFile(resolve(pluginDir,'manifest.json'),JSON.stringify(descriptor,null,2)+'\n');
     await writeFile(resolve(pluginDir,'README.md'),`# ${name}\n\nAPI 1; package ${packageVersion}. Main script: ${asset}.\n\nThe media directory contains ${images.length} approved original PNG images and their thumbnails, independently pinned by manifest hashes. Downloads do not automatically enable a plugin. Startup uses the already verified cache with no network request.\n\nSource and visual provenance: https://github.com/Rice-dog/code-codex\n`);

@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {assertCatalogMatchesDeclarations,declaredPluginCategories} from './plugin-catalog-contract.mjs';
+const catalog=JSON.parse(readFileSync(new URL('../packages/explorer-ui/dist/plugins/catalog.json',import.meta.url),'utf8'));
+test('current compiled catalog matches independent builder IDs and categories',()=>{assertCatalogMatchesDeclarations(catalog);assert.equal(declaredPluginCategories().size,catalog.length);});
+test('missing, duplicate and undeclared packages are rejected for the specific reason',()=>{assert.throws(()=>assertCatalogMatchesDeclarations(catalog.slice(1)),/contain every current/);assert.throws(()=>assertCatalogMatchesDeclarations([...catalog,catalog[0]]),/Duplicate catalog ID/);assert.throws(()=>assertCatalogMatchesDeclarations([...catalog,{...catalog[0],id:'undeclared-fixture'}]),/Undeclared catalog ID/);});
+test('moving a plugin to a wrong category is rejected',()=>{const changed=structuredClone(catalog);changed[0].category='file-preview';assert.throws(()=>assertCatalogMatchesDeclarations(changed),/Category mismatch/);});

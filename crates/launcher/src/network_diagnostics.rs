@@ -1,5 +1,9 @@
-//! Observation only: does not change proxy selection, DNS, TLS or retry behavior.
+//! Bounded transport observations and safe-read recovery; strict TLS remains required.
+mod failure;
 use crate::runtime_log::Operation;
+pub(crate) use failure::{
+    diagnose, from_wire_code, http_diagnosis, http_error, timeout_error, transport_error,
+};
 use serde_json::{Value, json};
 use std::{
     error::Error,
@@ -8,13 +12,13 @@ use std::{
 
 pub(crate) fn error_details(error: &(dyn Error + 'static)) -> Value {
     let mut chain = vec![error.to_string()];
-    let mut source = error.source();
+    let mut source = failure::next_cause(error);
     while let Some(cause) = source {
         if chain.len() == 8 {
             break;
         }
         chain.push(cause.to_string());
-        source = cause.source();
+        source = failure::next_cause(cause);
     }
     let mut current = Some(error);
     let mut native = vec![];
@@ -23,29 +27,19 @@ pub(crate) fn error_details(error: &(dyn Error + 'static)) -> Value {
         if let Some(io) = cause.downcast_ref::<std::io::Error>() {
             native.push(json!({"kind":format!("{:?}",io.kind()),"osCode":io.raw_os_error()}));
         }
-        current = cause.source();
+        current = failure::next_cause(cause);
     }
     let request=error.downcast_ref::<reqwest::Error>().map(|request|json!({"timeout":request.is_timeout(),"connect":request.is_connect(),"body":request.is_body(),"decode":request.is_decode(),"redirect":request.is_redirect(),"status":request.status().map(|status|status.as_u16()),"phaseAttribution":"Library flags and native errors are observations; DNS/TCP/TLS origin is not inferred."}));
-    json!({"errorChain":chain,"chainTruncated":source.is_some(),"nativeErrors":native,"requestFlags":request})
+    let network = if error.is::<reqwest::Error>() || error.is::<rustls::Error>() {
+        diagnose(error, "unknown").value()
+    } else {
+        Value::Null
+    };
+    json!({"errorChain":chain,"chainTruncated":source.is_some(),"nativeErrors":native,"requestFlags":request,"networkDiagnosis":network})
 }
 
 fn transient_transport(error: &(dyn Error + 'static)) -> bool {
-    let mut current = Some(error);
-    for _ in 0..8 {
-        let Some(cause) = current else { break };
-        if let Some(error) = cause.downcast_ref::<std::io::Error>() {
-            return matches!(
-                error.kind(),
-                std::io::ErrorKind::ConnectionRefused
-                    | std::io::ErrorKind::ConnectionReset
-                    | std::io::ErrorKind::ConnectionAborted
-                    | std::io::ErrorKind::Interrupted
-                    | std::io::ErrorKind::NotConnected
-            );
-        }
-        current = cause.source();
-    }
-    false
+    diagnose(error, "send").transient()
 }
 
 pub(crate) fn error_message(error: &(dyn Error + 'static)) -> String {
@@ -64,7 +58,18 @@ pub(crate) fn error_message(error: &(dyn Error + 'static)) -> String {
 
 pub(crate) fn environment() -> Value {
     let present = |key: &str| std::env::var_os(key).is_some_and(|s| !s.is_empty());
-    let mut value = json!({"httpProxyEnvPresent":present("HTTP_PROXY") || present("http_proxy"),"httpsProxyEnvPresent":present("HTTPS_PROXY") || present("https_proxy"),"allProxyEnvPresent":present("ALL_PROXY") || present("all_proxy"),"noProxyEnvPresent":present("NO_PROXY") || present("no_proxy"),"systemProxyAutoRead":false,"tlsBackend":"rustls","networkLibrary":"reqwest 0.12","observationOnly":true});
+    let mut value = json!({"httpProxyEnvPresent":present("HTTP_PROXY") || present("http_proxy"),"httpsProxyEnvPresent":present("HTTPS_PROXY") || present("https_proxy"),"allProxyEnvPresent":present("ALL_PROXY") || present("all_proxy"),"noProxyEnvPresent":present("NO_PROXY") || present("no_proxy"),"systemProxyAutoRead":cfg!(windows),"tlsBackend":"rustls","networkLibrary":"reqwest 0.12","observationOnly":true});
+    value["trustRoots"] = json!(if cfg!(windows) {
+        "bundled-public-and-system-native"
+    } else {
+        "bundled-public"
+    });
+    value["certificateVerification"] = json!(true);
+    value["hostnameVerification"] = json!(true);
+    value["automaticCertificateImport"] = json!(false);
+    value["proxySelection"] =
+        json!("reqwest environment/system precedence; selected route is not exposed");
+    value["pacSupport"] = json!("Configured PAC is observed only; execution is not proven");
     value["windowsProxy"] = windows_proxy();
     value
 }
@@ -181,7 +186,7 @@ impl HttpTrace {
         }
         match result {
             Ok(response) => {
-                self.operation.event("HTTP headers","received",json!({"status":response.status().as_u16(),"finalHost":response.url().host_str(),"contentLength":response.content_length(),"contentType":response.headers().get("content-type").and_then(|v|v.to_str().ok()),"retryAfter":response.headers().get("retry-after").and_then(|v|v.to_str().ok()),"rateLimitRemaining":response.headers().get("x-ratelimit-remaining").and_then(|v|v.to_str().ok())}));
+                self.operation.event("HTTP headers","received",json!({"status":response.status().as_u16(),"finalHost":response.url().host_str(),"contentLength":response.content_length(),"contentType":response.headers().get("content-type").and_then(|v|v.to_str().ok()),"retryAfter":response.headers().get("retry-after").and_then(|v|v.to_str().ok()),"rateLimitRemaining":response.headers().get("x-ratelimit-remaining").and_then(|v|v.to_str().ok()),"rateLimitReset":response.headers().get("x-ratelimit-reset").and_then(|v|v.to_str().ok()),"networkDiagnosis":if response.status().is_success(){Value::Null}else{http_diagnosis(response.status().as_u16(),response.headers()).value()}}));
                 Ok(response)
             }
             Err(error) => {
@@ -251,6 +256,7 @@ impl HttpTrace {
     }
     pub(crate) fn fail(&mut self, phase: &str, error: &reqwest::Error, bytes: u64) {
         let mut details = error_details(error);
+        details["networkDiagnosis"] = diagnose(error, phase).value();
         details["phase"] = json!(phase);
         details["receivedBytes"] = json!(bytes);
         details["timeout"] = json!(error.is_timeout());
@@ -314,6 +320,21 @@ mod tests {
         let failure = events.iter().find(|e| e["outcome"] == "failed").unwrap();
         assert!(failure["details"]["errorChain"].as_array().unwrap().len() >= 2);
         assert_eq!(failure["details"]["connect"], true);
+        assert_eq!(
+            failure["details"]["networkDiagnosis"]["code"],
+            if error.is_timeout() {
+                "TIMEOUT_HEADERS"
+            } else {
+                "CONNECTION_REFUSED"
+            }
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e["action"] == "HTTP read retry")
+                .count(),
+            if error.is_timeout() { 0 } else { 1 }
+        );
         assert!(
             events
                 .iter()

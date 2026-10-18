@@ -6,7 +6,7 @@
     Version="$(var.ProductVersion)"
     UpgradeCode="{0437781B-3005-4322-A8C7-932CCE4914BA}"
     Language="1033"
-    Codepage="1252"
+    Codepage="936"
     Scope="perUser"
     Compressed="yes">
 
@@ -14,9 +14,90 @@
       Description="Live workspace explorer and bounded file editor for Codex Desktop"
       Manufacturer="Code-Codex contributors" />
 
+    <!-- ProductLanguage identifies the MSI database; application UI uses its own
+         strict preference. Codepage936 supports the Chinese/English dialog text. -->
+    <Property Id="CODECODEXUILANGUAGE" Secure="yes" />
+    <Property Id="CODECODEXUILANGUAGEREVISION" Secure="yes" />
+    <Property Id="CODECODEXUILANGUAGEINITIALIZED" Secure="yes" />
+    <Property Id="CCLANGYES" Value="Yes" />
+    <Property Id="CCLANGNO" Value="No" />
+    <Property Id="CCLANGIGNORE" Value="Ignore" />
+    <Property Id="CCLANGOK" Value="OK" />
+    <Property Id="CCLANGRETRY" Value="Retry" />
+    <Property Id="CCLANGCANCEL" Value="Cancel" />
+    <Property Id="CCLANGFINISH" Value="Finish" />
+    <Property Id="CCLANGFILEINUSE" Value="Close the applications below, then retry." />
+    <Property Id="CCLANGDOWNGRADE" Value="A newer version of Code-Codex is already installed." />
+    <Property Id="CCLANGCROSSFORMAT" Value="A standalone installation of Code-Codex is already present. Uninstall it through Windows Installed apps before installing the MSI." />
+    <Property Id="DefaultUIFont" Value="CodeCodexUIFont" />
+    <CustomAction Id="InitializeUiLanguage" BinaryRef="SettingsCleanupCustomActionBinary" DllEntry="InitializeUiLanguage" Execute="immediate" Return="check" />
+    <CustomAction Id="CommitUiLanguage" FileRef="ShortcutIntegrationExecutable"
+      ExeCommand="language --install-root &quot;[INSTALLFOLDER].&quot; --locale &quot;[CODECODEXUILANGUAGE]&quot; --expected-revision &quot;[CODECODEXUILANGUAGEREVISION]&quot;"
+      Execute="deferred" Impersonate="yes" Return="check" />
+    <UI>
+      <TextStyle Id="CodeCodexUIFont" FaceName="Segoe UI" Size="9" />
+      <Dialog Id="CodeCodexLanguageDialog" Width="370" Height="190" Title="Code-Codex">
+        <Control Id="HeadingEn" Type="Text" X="20" Y="18" Width="330" Height="26" Text="Code-Codex Setup" ShowCondition="CODECODEXUILANGUAGE = &quot;en&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;en&quot;" />
+        <Control Id="HeadingZh" Type="Text" X="20" Y="18" Width="330" Height="26" Text="Code-Codex 安装" ShowCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;" />
+        <Control Id="LanguageLabel" Type="Text" X="20" Y="62" Width="120" Height="18" Text="语言 / Language" />
+        <Control Id="LanguageChoice" Type="ComboBox" X="150" Y="57" Width="190" Height="60" Property="CODECODEXUILANGUAGE" ComboList="yes" Sorted="yes">
+          <ComboBox Property="CODECODEXUILANGUAGE"><ListItem Value="zh-CN" Text="中文（简体）" /><ListItem Value="en" Text="English" /></ComboBox>
+        </Control>
+        <Control Id="InstallEn" Type="PushButton" X="252" Y="145" Width="90" Height="25" Text="Install" DefaultCondition="CODECODEXUILANGUAGE = &quot;en&quot;" ShowCondition="CODECODEXUILANGUAGE = &quot;en&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;en&quot;"><Publish Event="DoAction" Value="InitializeUiLanguage" Order="1" /><Publish Order="2" Event="EndDialog" Value="Return" /></Control>
+        <Control Id="InstallZh" Type="PushButton" X="252" Y="145" Width="90" Height="25" Text="安装" DefaultCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" ShowCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;"><Publish Event="DoAction" Value="InitializeUiLanguage" Order="1" /><Publish Order="2" Event="EndDialog" Value="Return" /></Control>
+        <Control Id="CancelEn" Type="PushButton" X="150" Y="145" Width="90" Height="25" Text="Cancel" Cancel="yes" ShowCondition="CODECODEXUILANGUAGE = &quot;en&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;en&quot;"><Publish Event="DoAction" Value="InitializeUiLanguage" Order="1" /><Publish Order="2" Event="EndDialog" Value="Exit" /></Control>
+        <Control Id="CancelZh" Type="PushButton" X="150" Y="145" Width="90" Height="25" Text="取消" ShowCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;"><Publish Event="DoAction" Value="InitializeUiLanguage" Order="1" /><Publish Order="2" Event="EndDialog" Value="Exit" /></Control>
+      </Dialog>
+      <Property Id="ErrorDialog" Value="CodeCodexErrorDialog" />
+      <Dialog Id="CodeCodexErrorDialog" Width="370" Height="180" Title="Code-Codex" ErrorDialog="yes">
+        <Control Id="ErrorText" Type="Text" TabSkip="no" X="20" Y="20" Width="330" Height="100" NoPrefix="yes" Text="[ErrorText]" />
+        <Control Id="Y" Type="PushButton" X="250" Y="140" Width="90" Height="24" Text="[CCLANGYES]"><Publish Event="EndDialog" Value="ErrorYes" /></Control>
+        <Control Id="A" Type="PushButton" X="250" Y="140" Width="90" Height="24" Text="[CCLANGCANCEL]"><Publish Event="EndDialog" Value="ErrorAbort" /></Control>
+        <Control Id="C" Type="PushButton" X="250" Y="140" Width="90" Height="24" Text="[CCLANGCANCEL]"><Publish Event="EndDialog" Value="ErrorCancel" /></Control>
+        <Control Id="I" Type="PushButton" X="250" Y="140" Width="90" Height="24" Text="[CCLANGIGNORE]"><Publish Event="EndDialog" Value="ErrorIgnore" /></Control>
+        <Control Id="N" Type="PushButton" X="250" Y="140" Width="90" Height="24" Text="[CCLANGNO]"><Publish Event="EndDialog" Value="ErrorNo" /></Control>
+        <Control Id="O" Type="PushButton" X="250" Y="140" Width="90" Height="24" Text="[CCLANGOK]"><Publish Event="EndDialog" Value="ErrorOk" /></Control>
+        <Control Id="R" Type="PushButton" X="250" Y="140" Width="90" Height="24" Text="[CCLANGRETRY]"><Publish Event="EndDialog" Value="ErrorRetry" /></Control>
+      </Dialog>
+      <Dialog Id="FilesInUse" Width="370" Height="230" Title="Code-Codex" KeepModeless="yes">
+        <Control Id="Description" Type="Text" X="20" Y="15" Width="330" Height="38" Text="[CCLANGFILEINUSE]" />
+        <Control Id="List" Type="ListBox" X="20" Y="60" Width="330" Height="100" Property="FileInUseProcess" Sunken="yes" TabSkip="yes" />
+        <Control Id="Retry" Type="PushButton" X="260" Y="185" Width="90" Height="24" Text="[CCLANGRETRY]" Default="yes" Cancel="yes"><Publish Event="EndDialog" Value="Retry" /></Control>
+        <Control Id="Ignore" Type="PushButton" X="150" Y="185" Width="90" Height="24" Text="[CCLANGIGNORE]"><Publish Event="EndDialog" Value="Ignore" /></Control>
+        <Control Id="Exit" Type="PushButton" X="40" Y="185" Width="90" Height="24" Text="[CCLANGCANCEL]"><Publish Event="EndDialog" Value="Exit" /></Control>
+      </Dialog>
+      <Dialog Id="FatalError" Width="370" Height="160" Title="Code-Codex">
+        <Control Id="MessageEn" Type="Text" X="20" Y="25" Width="330" Height="60" Text="Installation failed. See the installer log for details." ShowCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" />
+        <Control Id="MessageZh" Type="Text" X="20" Y="25" Width="330" Height="60" Text="安装失败，请查看安装日志。" ShowCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;" />
+        <Control Id="Finish" Type="PushButton" X="250" Y="115" Width="90" Height="24" Text="[CCLANGFINISH]" Default="yes" Cancel="yes"><Publish Event="EndDialog" Value="Return" /></Control>
+      </Dialog>
+      <Dialog Id="UserExit" Width="370" Height="160" Title="Code-Codex">
+        <Control Id="MessageEn" Type="Text" X="20" Y="25" Width="330" Height="60" Text="Installation cancelled." ShowCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" />
+        <Control Id="MessageZh" Type="Text" X="20" Y="25" Width="330" Height="60" Text="安装已取消。" ShowCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;" />
+        <Control Id="Finish" Type="PushButton" X="250" Y="115" Width="90" Height="24" Text="[CCLANGFINISH]" Default="yes" Cancel="yes"><Publish Event="EndDialog" Value="Return" /></Control>
+      </Dialog>
+      <Dialog Id="ExitDialog" Width="370" Height="160" Title="Code-Codex">
+        <Control Id="MessageEn" Type="Text" X="20" Y="25" Width="330" Height="60" Text="Installation complete." ShowCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" />
+        <Control Id="MessageZh" Type="Text" X="20" Y="25" Width="330" Height="60" Text="安装完成。" ShowCondition="CODECODEXUILANGUAGE = &quot;zh-CN&quot;" HideCondition="CODECODEXUILANGUAGE &lt;&gt; &quot;zh-CN&quot;" />
+        <Control Id="Finish" Type="PushButton" X="250" Y="115" Width="90" Height="24" Text="[CCLANGFINISH]" Default="yes" Cancel="yes"><Publish Event="EndDialog" Value="Return" /></Control>
+      </Dialog>
+      <AdminUISequence>
+        <Show Dialog="FatalError" OnExit="error" />
+        <Show Dialog="UserExit" OnExit="cancel" />
+        <Show Dialog="ExitDialog" OnExit="success" />
+      </AdminUISequence>
+      <InstallUISequence>
+        <Show Dialog="FatalError" OnExit="error" />
+        <Show Dialog="UserExit" OnExit="cancel" />
+        <Show Dialog="ExitDialog" OnExit="success" />
+        <Custom Action="InitializeUiLanguage" After="AppSearch" />
+        <Show Dialog="CodeCodexLanguageDialog" After="CostFinalize" Condition="NOT Installed AND NOT (REMOVE = &quot;ALL&quot;)" />
+      </InstallUISequence>
+    </UI>
+
     <MajorUpgrade
       AllowSameVersionUpgrades="yes"
-      DowngradeErrorMessage="A newer version of Code-Codex is already installed."
+      DowngradeErrorMessage="[CCLANGDOWNGRADE]"
       Schedule="afterInstallFinalize" />
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="ProductIcon" SourceFile="$(var.UninstallBinaryPath)" />
@@ -94,6 +175,8 @@
       Return="asyncNoWait" />
 
     <InstallExecuteSequence>
+      <Custom Action="InitializeUiLanguage" After="AppSearch" />
+      <Custom Action="CommitUiLanguage" After="InstallCodexShortcut" Condition="NOT Installed AND NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom Action="InitializeCentralStorage" After="InstallFiles" Condition="NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom
         Action="BlockCrossFormatInstall"
@@ -113,7 +196,7 @@
         Condition="NOT Installed AND NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom
         Action="CommitCodexShortcutInstall"
-        After="InstallCodexShortcut"
+        After="CommitUiLanguage"
         Condition="NOT Installed AND NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom
         Action="ActivateRunningCodeCodex"
@@ -151,10 +234,11 @@
     </Property>
     <Launch
       Condition="Installed OR NOT PORTABLEINSTALLDETECTED"
-      Message="A standalone installation of Code-Codex is already present. Uninstall it through Windows Installed apps before installing the MSI." />
+      Message="[CCLANGCROSSFORMAT]" />
 
     <Feature Id="Complete" Title="Code-Codex" Level="1">
       <ComponentRef Id="ProductFiles" />
+      <ComponentRef Id="RootLauncherPayload" />
       <ComponentRef Id="StorageLayoutMarker" />
       <ComponentRef Id="CommandLinePayload" />
       <ComponentRef Id="RuntimeLauncherPayload" />
@@ -168,12 +252,21 @@
             <File Id="StorageLayoutFile" Source="$(var.StorageLayoutPath)" Name="storage-layout.json" />
             <RegistryValue Root="HKCU" Key="Software\CodeCodex\Storage" Name="Schema" Type="integer" Value="1" KeyPath="yes" />
           </Component>
-          <Component Id="ProductFiles" Guid="{F44B8D83-89A2-4BE9-AAD9-5C8EE69496D8}">
+          <Component Id="RootLauncherPayload" Guid="$(var.RootLauncherComponentGuid)">
             <File
               Id="RootLauncherExecutable"
               Source="$(var.ShimBinaryPath)"
-              Name="CodeCodex.exe"
+              Name="CodeCodex-$(var.ProductVersion).exe"
               Checksum="yes" />
+            <RegistryValue
+              Root="HKCU"
+              Key="Software\CodeCodex\Versions\$(var.ProductVersion)"
+              Name="RootLauncherPayload"
+              Type="integer"
+              Value="1"
+              KeyPath="yes" />
+          </Component>
+          <Component Id="ProductFiles" Guid="{F44B8D83-89A2-4BE9-AAD9-5C8EE69496D8}">
             <File
               Id="ShortcutIntegrationExecutable"
               Source="$(var.ShortcutBinaryPath)"
@@ -231,6 +324,10 @@
             <RemoveFile
               Id="RemoveLegacyRootCommandLine"
               Name="code-codex.exe"
+              On="uninstall" />
+            <RemoveFile
+              Id="RemoveLegacyRootLauncher"
+              Name="CodeCodex.exe"
               On="uninstall" />
             <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
             <RemoveFolder Id="RemoveLocalProgramsFolder" Directory="LocalProgramsFolder" On="uninstall" />

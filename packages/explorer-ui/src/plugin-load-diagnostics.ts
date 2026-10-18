@@ -1,6 +1,7 @@
 // Core-only instrumentation: published plugin bytecode and its immutable hashes stay unchanged.
 import { ensurePluginPackage as loadPlugin, PLUGIN_PACKAGES } from './plugin-runtime';
 import { ensureBackgroundPackage as loadBackground } from './background-plugin-runtime';
+import { ensureStartupBackgroundPackage as loadStartupBackground } from './background-plugin-runtime';
 import { beginRuntimeOperation, runtimeErrorDetails } from './runtime-operations';
 async function load(id:string, background:boolean):Promise<void> {
   const info=PLUGIN_PACKAGES.find(p=>p.id===id);
@@ -10,3 +11,8 @@ async function load(id:string, background:boolean):Promise<void> {
 }
 export const ensurePluginPackage=(id:string)=>load(id,false);
 export const ensureBackgroundPackage=(id:string)=>load(id,true);
+export async function ensureStartupBackgroundPackage(id:string):Promise<void> {
+  const operation=beginRuntimeOperation('plugin-load','prepare startup source',{id,defaultMediaPrepared:false});
+  try{await loadStartupBackground(id);operation.finish('passed',{moduleVerified:true,defaultMediaPrepared:false});}
+  catch(error){operation.finish('failed',runtimeErrorDetails(error));throw error;}
+}

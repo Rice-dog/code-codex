@@ -9,12 +9,12 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, Weak};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use thiserror::Error;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{Mutex, RwLock, broadcast, oneshot};
 
@@ -213,7 +213,7 @@ impl AppServerClient {
             .args(&command.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         if let Some(current_dir) = &command.current_dir {
             process.current_dir(current_dir);
         }
@@ -242,7 +242,30 @@ impl AppServerClient {
         let stdin = child.stdin().take().ok_or_else(|| {
             ResolverError::Spawn.context("acquiring App Server stdin", "child has no piped stdin")
         })?;
-        let client = Self::connect_io_inner(BufReader::new(stdout), stdin, guard).await?;
+        let stderr_task = child.stderr().take().map(|mut stderr| tokio::spawn(async move {
+            let mut bytes = [0_u8; 2048]; let mut total = 0_u64;
+            loop { match stderr.read(&mut bytes).await {
+                Ok(0) => break,
+                Ok(n) => { total=total.saturating_add(n as u64); },
+                Err(e) => { diagnostic("stderr drain","failed",json!({"code":"APP_STDERR_READ","ioKind":format!("{:?}",e.kind()),"osErrorCode":e.raw_os_error()}));break; }
+            }}
+            diagnostic("stderr drain","closed",json!({"bytesObserved":total,"contentOmitted":true,"interpretation":"stderr bytes alone do not establish a startup failure"}));
+        }));
+        let client = match Self::connect_io_inner(BufReader::new(stdout), stdin, guard).await {
+            Ok(client) => client,
+            Err(error) => {
+                let exit = child.try_wait();
+                diagnostic(
+                    "initialization child state",
+                    "failed",
+                    json!({"code":"APP_INITIALIZE_FAILED","exitCode":exit.as_ref().ok().and_then(|v|v.as_ref()).and_then(|v|v.code()),"stillRunning":matches!(exit,Ok(None)),"exitObservationError":exit.err().map(|e|e.to_string()),"reason":error.to_string()}),
+                );
+                if let Some(task) = stderr_task {
+                    task.abort();
+                }
+                return Err(error);
+            }
+        };
         *client.inner.child.lock().await = Some(child);
         Ok(client)
     }
@@ -479,157 +502,6 @@ impl AppServerClient {
     pub fn subscribe_notifications(&self) -> broadcast::Receiver<Value> {
         self.inner.notifications.subscribe()
     }
-}
-
-async fn read_loop<R>(
-    inner: Weak<Inner>,
-    mut reader: R,
-    _lifetime_guard: Arc<StdMutex<Option<Box<dyn Send + Sync>>>>,
-) where
-    R: AsyncBufRead + Unpin,
-{
-    let mut line = String::new();
-    let mut terminal = ResolverError::Io.context(
-        "reading App Server stdout",
-        "stream ended (EOF); child exit code not observed here",
-    );
-    loop {
-        line.clear();
-        let read = match reader.read_line(&mut line).await {
-            Ok(read) => read,
-            Err(error) => {
-                terminal = ResolverError::Io.context(
-                    "reading App Server stdout",
-                    format!(
-                        "ioKind={:?}; osCode={:?}; cause={error}",
-                        error.kind(),
-                        error.raw_os_error()
-                    ),
-                );
-                diagnostic(
-                    "transport read",
-                    "failed",
-                    json!({"ioKind":format!("{:?}",error.kind()),"osErrorCode":error.raw_os_error()}),
-                );
-                break;
-            }
-        };
-        if read == 0 {
-            diagnostic("transport read", "closed", json!({"reason":"EOF"}));
-            break;
-        }
-        if line.len() > MAX_MESSAGE_BYTES {
-            terminal = ResolverError::Protocol.context(
-                "reading App Server frame",
-                format!("observedBytes={}; maxBytes={MAX_MESSAGE_BYTES}", line.len()),
-            );
-            diagnostic(
-                "protocol frame",
-                "failed",
-                json!({"observedBytes":line.len(),"maxBytes":MAX_MESSAGE_BYTES}),
-            );
-            break;
-        }
-        let Ok(message) = serde_json::from_str::<Value>(&line) else {
-            diagnostic(
-                "protocol frame",
-                "rejected",
-                json!({"code":"APP_PROTOCOL","reason":"Invalid JSON","observedBytes":line.len(),"parseLocation":serde_json::from_str::<Value>(&line).err().map(|error|format!("line={}, column={}, category={:?}",error.line(),error.column(),error.classify()))}),
-            );
-            continue;
-        };
-        let Some(inner) = inner.upgrade() else {
-            break;
-        };
-        if let Some(id) = message.get("id").and_then(Value::as_u64) {
-            if let Some(sender) = inner.pending.lock().await.remove(&id) {
-                let result = if let Some(error) = message.get("error") {
-                    Err(ResolverError::Remote {
-                        code: error.get("code").and_then(Value::as_i64).unwrap_or(-1),
-                    })
-                } else {
-                    message
-                        .get("result")
-                        .cloned()
-                        .ok_or(ResolverError::Protocol)
-                };
-                let _ = sender.send(result);
-            }
-            continue;
-        }
-        if message.get("method").and_then(Value::as_str) == Some("thread/started") {
-            if let Some(workspace) = parse_started_notification(&message) {
-                inner
-                    .workspaces
-                    .write()
-                    .await
-                    .insert(workspace.thread_id, workspace.cwd);
-            }
-        }
-        let _ = inner.notifications.send(message);
-    }
-
-    if let Some(inner) = inner.upgrade() {
-        let mut pending = inner.pending.lock().await;
-        diagnostic(
-            "transport pending requests",
-            "released",
-            json!({"pendingCount":pending.len()}),
-        );
-        for (_, sender) in pending.drain() {
-            let _ = sender.send(Err(terminal.clone()));
-        }
-    }
-}
-
-fn parse_thread_workspace(
-    result: &Value,
-    field: &str,
-    expected_id: &str,
-) -> Result<ThreadWorkspace, ResolverError> {
-    let thread = result.get(field).ok_or(ResolverError::Protocol)?;
-    let id = thread
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or(ResolverError::Protocol)?;
-    if id != expected_id {
-        return Err(ResolverError::Protocol);
-    }
-    let cwd = thread
-        .get("cwd")
-        .and_then(Value::as_str)
-        .filter(|cwd| !cwd.is_empty())
-        .ok_or(ResolverError::NoWorkspace)?;
-    Ok(ThreadWorkspace {
-        thread_id: expected_id.to_owned(),
-        cwd: PathBuf::from(cwd),
-    })
-}
-
-fn parse_started_notification(message: &Value) -> Option<ThreadWorkspace> {
-    let thread = message.get("params")?.get("thread")?;
-    let thread_id = thread.get("id")?.as_str()?;
-    validate_thread_id(thread_id).ok()?;
-    let cwd = thread.get("cwd")?.as_str()?.trim();
-    if cwd.is_empty() {
-        return None;
-    }
-    Some(ThreadWorkspace {
-        thread_id: thread_id.to_owned(),
-        cwd: PathBuf::from(cwd),
-    })
-}
-
-fn validate_thread_id(thread_id: &str) -> Result<(), ResolverError> {
-    if thread_id.is_empty()
-        || thread_id.len() > 256
-        || !thread_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        return Err(ResolverError::InvalidThreadId);
-    }
-    Ok(())
 }
 
 pub fn executable_exists(path: &Path) -> bool {
@@ -941,3 +813,40 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(unused_imports)]
+mod test_imports {
+    #[cfg(windows)]
+    pub(super) use process_wrap::tokio::{CreationFlags, JobObject};
+    pub(super) use process_wrap::tokio::{KillOnDrop, TokioChildWrapper, TokioCommandWrap};
+    pub(super) use serde_json::{Value, json};
+    pub(super) use std::collections::HashMap;
+    pub(super) use std::ffi::OsString;
+    pub(super) use std::path::{Path, PathBuf};
+    pub(super) use std::process::Stdio;
+    pub(super) use std::sync::atomic::{AtomicU64, Ordering};
+    pub(super) use std::sync::{Arc, Mutex as StdMutex, Weak};
+    pub(super) use std::time::Duration;
+    pub(super) use thiserror::Error;
+    pub(super) use tokio::io::{
+        AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
+    };
+    pub(super) use tokio::process::Command;
+    pub(super) use tokio::sync::{Mutex, RwLock, broadcast, oneshot};
+    #[cfg(windows)]
+    pub(super) use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+}
+#[cfg(test)]
+#[allow(unused_imports)]
+use test_imports::*;
+
+// Domain modules keep the original public and wire contracts.
+#[path = "client.rs"]
+mod client;
+
+use client::read_loop;
+#[path = "workspace_context.rs"]
+mod workspace_context;
+
+use workspace_context::{parse_started_notification, parse_thread_workspace, validate_thread_id};

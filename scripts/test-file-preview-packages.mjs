@@ -1,3 +1,4 @@
+import {assertCatalogMatchesDeclarations} from './plugin-catalog-contract.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createServer} from 'node:http';
@@ -10,7 +11,7 @@ import {verifiedPluginSources} from './plugin-package-files.mjs';
 const root=resolve(import.meta.dirname,'..'),out=resolve(root,'artifacts/file-preview-packages');mkdirSync(out,{recursive:true});
 const ui=resolve(root,'packages/explorer-ui'),version=JSON.parse(readFileSync(resolve(ui,'package.json'),'utf8')).version;
 const allPackages=JSON.parse(readFileSync(resolve(ui,'dist/plugins/catalog.json'),'utf8'));
-assert.equal(allPackages.length,24,'The fixture must use the complete current production catalog');
+assertCatalogMatchesDeclarations(allPackages,root);
 const catalog=allPackages.filter(p=>p.category==='file-preview');
 assert.equal(catalog.length,10,'All ten previews must exist in the production catalog');
 for(const p of catalog){for(const a of [p,...(p.resources??[])]){const bytes=readFileSync(resolve(ui,'dist/plugins/file-preview',p.id,a.relativePath||a.asset));assert.equal(bytes.length,a.size);assert.equal(createHash('sha256').update(bytes).digest('hex'),a.sha256);}const meta=JSON.parse(readFileSync(resolve(ui,'dist/plugins/file-preview',p.id,`${p.id}.metafile.json`),'utf8'));const keys=Object.keys(meta.inputs).map(k=>k.replaceAll('\\','/'));if(p.id!=='pdf-preview')assert(!keys.some(k=>k.includes('pdfjs-dist')));if(p.id!=='office-preview')assert(!keys.some(k=>['docx-preview','@aiden0z','@extend-ai','react-dom','jszip'].some(n=>k.includes(n))));if(p.id!=='model-preview')assert(!keys.some(k=>k.includes('node_modules/three')));}

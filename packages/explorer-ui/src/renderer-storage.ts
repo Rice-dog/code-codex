@@ -5,10 +5,11 @@ type BlobDescriptor = {size:number;type:string;sha256:string;name?:string;lastMo
 type Saved = {id:string;record:Record<string,unknown>;blobs:Record<string,BlobDescriptor>};
 type Scope = {id:string;db:string;store:string};
 const scopes:Scope[]=[{id:'startup',db:'code-codex-startup-transition',store:'video'},
+  {id:'custom-background',db:'code-codex-custom-background',store:'media'},
   {id:'particle-image',db:'code-codex-particle-image-background',store:'images'},
   {id:'pixel-sculpt',db:'code-codex-pixel-sculpt',store:'images'}];
 const KEY=Symbol.for('code-codex:native-storage:v1');
-interface State {persistenceSchema?:number;dispatch?:Promise<void>;lastDispatch?:number;request?:Request;ready?:Promise<void>;initialized?:boolean;restoring:boolean;hooked:boolean;timers:Map<string,ReturnType<typeof setTimeout>>;queues:Map<string,Promise<void>>;fingerprints:Map<string,string>;initializing:Set<string>}
+interface State {hookSchema?:number;persistenceSchema?:number;dispatch?:Promise<void>;lastDispatch?:number;request?:Request;ready?:Promise<void>;initialized?:boolean;restoring:boolean;hooked:boolean;timers:Map<string,ReturnType<typeof setTimeout>>;queues:Map<string,Promise<void>>;fingerprints:Map<string,string>;initializing:Set<string>}
 const host=window as unknown as Record<symbol,State>;
 const state:State=host[KEY]??={restoring:false,hooked:false,timers:new Map(),queues:new Map(),fingerprints:new Map(),initializing:new Set()};
 function call<T>(params:Record<string,unknown>,timeout=30000):Promise<T>{
@@ -16,7 +17,7 @@ function call<T>(params:Record<string,unknown>,timeout=30000):Promise<T>{
   return state.request<T>('explorer.storage.request',params,timeout);
 }
 function observed(action:string,error:unknown){runtimeEvent('storage',action,'failed',{reason:String(error),officialProfileUnchanged:true});}
-function ownKey(key:string){return key.startsWith('code-codex:')&&!key.includes('lease')&&key.length<=128;}
+function ownKey(key:string){return key!=='code-codex:background-settings-language:v1'&&key.startsWith('code-codex:')&&!key.includes('lease')&&key.length<=128;}
 function preferences(){const values:Record<string,string>={};for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(key&&ownKey(key)){const value=localStorage.getItem(key);if(value!==null)values[key]=value;}}return values;}
 function schedule(key:string,task:()=>Promise<void>){
   const old=state.timers.get(key);if(old)clearTimeout(old);
@@ -80,7 +81,7 @@ async function syncMedia(scope:Scope,initial=false){
   }finally{db.close();}
 }
 function installHooks(){
-  if(state.hooked)return;state.hooked=true;
+  if(state.hooked&&state.hookSchema===3)return;state.hooked=true;state.hookSchema=3;
   for(const name of ['setItem','removeItem','clear'] as const){const original=Storage.prototype[name];Object.defineProperty(Storage.prototype,name,{configurable:true,writable:true,value:function(this:Storage,...args:unknown[]){const result=Reflect.apply(original,this,args);if(this===window.localStorage&&!state.restoring&&(name==='clear'||ownKey(String(args[0]))))schedule('preferences',()=>call({action:'settings.write',values:preferences()}).then(()=>{}));return result;}});}
   for(const name of ['put','add','delete','clear'] as const){const original=IDBObjectStore.prototype[name];Object.defineProperty(IDBObjectStore.prototype,name,{configurable:true,writable:true,value:function(this:IDBObjectStore,...args:unknown[]){const result=Reflect.apply(original,this,args);const scope=scopes.find(s=>s.db===this.transaction.db.name&&s.store===this.name);if(scope&&!state.initializing.has(scope.id)){for(const key of state.fingerprints.keys()){if(key.startsWith(scope.id+':'))state.fingerprints.delete(key);}this.transaction.addEventListener('complete',()=>schedule(scope.id,()=>syncMedia(scope)),{once:true});}return result;}});}
   window.addEventListener('storage',event=>{if(event.key&&ownKey(event.key))schedule('preferences',()=>call({action:'settings.write',values:preferences()}).then(()=>{}));});
@@ -109,7 +110,7 @@ export function reconnectRendererStorage(request:Request){
   };
 }
 export function initializeRendererStorage():Promise<void>{
-  if(state.ready&&state.initialized&&state.persistenceSchema===2)return state.ready;
+  if(state.ready&&state.initialized&&state.persistenceSchema===3)return state.ready;
   state.ready=(async()=>{
     installHooks();
     let saved:Record<string,string>={};
@@ -126,7 +127,7 @@ export function initializeRendererStorage():Promise<void>{
     const tasks=scopes.map(scope=>{state.initializing.add(scope.id);const task=syncMedia(scope,true).catch(e=>observed('media migration',e)).finally(()=>{state.initializing.delete(scope.id);schedule(scope.id,()=>syncMedia(scope));});state.queues.set(scope.id,task);return task;});
     // Mount active plugins only after their local user media is available.
     await Promise.all(tasks);
-    state.persistenceSchema=2;state.initialized=true;
+    state.persistenceSchema=3;state.initialized=true;
   })().catch(error=>{state.initialized=false;delete state.ready;observed('initialization',error);});
   return state.ready;
 }

@@ -85,13 +85,14 @@ struct RunLog {
     dirty: bool,
     storage_error: Option<String>,
     failure_total: u64,
+    failure_kinds: std::collections::BTreeMap<String, u64>,
     failure_counts: std::collections::BTreeMap<String, u64>,
     oversized_events: u64,
 }
 
 impl RunLog {
     fn document(&self) -> String {
-        let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES,"redactionPolicy":1,"faultSchema":2,"failureTotal":self.failure_total,"failureCounts":self.failure_counts,"oversizedEvents":self.oversized_events,"failureSummaryScope":"entire run including trimmed events; detailed events are retained only within limits"});
+        let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES,"redactionPolicy":1,"faultSchema":2,"failureTotal":self.failure_total,"failureCounts":self.failure_counts,"failureOutcomeKinds":self.failure_kinds,"failureCountMeaning":"outcome events, not unique root causes; cancellation and correlated propagation are reported separately","oversizedEvents":self.oversized_events,"failureSummaryScope":"entire run including trimmed events; detailed events are retained only within limits"});
         format!(
             "{}\n{}",
             header,
@@ -105,6 +106,10 @@ impl RunLog {
         ));
         if crate::fault_diagnostics::is_failure(outcome) {
             self.failure_total += 1;
+            *self
+                .failure_kinds
+                .entry(crate::fault_diagnostics::event_kind(outcome, &details).into())
+                .or_default() += 1;
             let group = format!(
                 "{}:{}",
                 details["fault"]["domain"].as_str().unwrap_or("other"),
@@ -281,6 +286,7 @@ pub fn begin(mode: &str) {
         dirty: true,
         storage_error: location_error,
         failure_total: 0,
+        failure_kinds: Default::default(),
         failure_counts: Default::default(),
         oversized_events: 0,
     };
@@ -471,10 +477,27 @@ mod tests {
             dirty: true,
             storage_error: None,
             failure_total: 0,
+            failure_kinds: Default::default(),
             failure_counts: Default::default(),
             oversized_events: 0,
         }
     }
+    #[test]
+    fn failure_accounting_separates_cancellation_and_correlated_propagation_after_trimming() {
+        let mut log = fixture(PathBuf::new());
+        log.push("native-bridge", "read", "failed", json!({"errorCode":"NOT_FOUND"}));
+        log.push("bridge", "read", "failed", json!({"propagatedFailure":true,"failureRef":"bridge-1-cle-2"}));
+        log.push("bridge", "read", "failed", json!({"errorCode":"CANCELLED"}));
+        for index in 0..3000 { log.push("test", "fill", "passed", json!({"n":index,"unicode":"中文".repeat(500)})); }
+        let document = log.document();
+        let header: Value = serde_json::from_str(document.lines().next().unwrap()).unwrap();
+        assert!(log.dropped > 0);
+        assert_eq!(header["failureTotal"], 3);
+        assert_eq!(header["failureOutcomeKinds"]["failure-observation"], 1);
+        assert_eq!(header["failureOutcomeKinds"]["propagation"], 1);
+        assert_eq!(header["failureOutcomeKinds"]["cancellation"], 1);
+    }
+
     #[test]
     fn trims_oldest_complete_events_under_five_mb() {
         let mut log = fixture(PathBuf::new());

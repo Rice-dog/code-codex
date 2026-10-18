@@ -1,82 +1,51 @@
 #[cfg(windows)]
 use std::ffi::OsString;
-use std::io;
 use std::io::Write as _;
 #[cfg(windows)]
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
-use std::path::{Component, Path, PathBuf};
+use std::os::windows::ffi::OsStringExt;
+use std::path::Path;
 #[cfg(windows)]
 use std::process::Command;
 use std::process::Stdio;
-#[cfg(windows)]
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
+use std::sync::{Arc, Mutex as StdMutex};
 #[cfg(windows)]
 use std::thread;
 use std::time::Duration;
 #[cfg(windows)]
 use std::time::Instant;
 
-use async_trait::async_trait;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use cdp_client::CapabilityToken;
 use cdp_client::{BindingRequest, BridgeError, BridgeHandler, BridgeNotification};
 use context_resolver::{AppServerClient, ResolverError};
-use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
-use semver::Version;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::Digest as _;
+use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
-use tokio::{io::AsyncReadExt, process::Command as TokioCommand};
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::{
-    CloseHandle, E_INVALIDARG, GetLastError, HWND, LPARAM, RECT, RPC_E_CHANGED_MODE, S_FALSE, S_OK,
-    SetLastError, WAIT_TIMEOUT,
-};
+use windows_sys::Win32::Foundation::{E_INVALIDARG, HWND, LPARAM, RECT, S_OK};
 #[cfg(all(windows, test))]
 use windows_sys::Win32::Graphics::Dwm::DWMSBT_MAINWINDOW;
 #[cfg(windows)]
 use windows_sys::Win32::Graphics::Dwm::{
-    DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
-    DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
-};
-#[cfg(windows)]
-use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
-#[cfg(windows)]
-use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
-#[cfg(windows)]
-use windows_sys::Win32::System::Threading::{
-    GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-    WaitForSingleObject,
-};
-#[cfg(windows)]
-use windows_sys::Win32::UI::Controls::MARGINS;
-#[cfg(windows)]
-use windows_sys::Win32::UI::Shell::{
-    ILFree, SHOpenFolderAndSelectItems, SHParseDisplayName, ShellExecuteW,
+    DWMSBT_NONE, DWMWCP_DONOTROUND, DwmExtendFrameIntoClientArea,
 };
 #[cfg(windows)]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GW_OWNER, GWL_EXSTYLE,
-    GetClassNameW, GetForegroundWindow, GetPropW, GetSystemMetrics, GetWindow, GetWindowLongPtrW,
-    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HWND_BOTTOM, HWND_NOTOPMOST,
-    HWND_TOPMOST, IsWindow, IsWindowVisible, RemovePropW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_SHOWWINDOW, SetForegroundWindow, SetPropW, SetWindowPos, ShowWindowAsync, WS_EX_APPWINDOW,
-    WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    ASFW_ANY, AllowSetForegroundWindow, EnumWindows, GetClassNameW, GetForegroundWindow,
+    GetWindowLongPtrW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HWND_BOTTOM,
+    HWND_NOTOPMOST, HWND_TOPMOST, IsWindowVisible, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_SHOWWINDOW, SetPropW, SetWindowPos, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 #[cfg(windows)]
 use windows_sys::core::BOOL;
 use workspace_service::{
-    CreateEntryKind, ErrorCode, ImportSession, ListOptions, ListPage, MAX_IMPORT_CHUNK_BYTES,
-    MAX_MEDIA_CHUNK_BYTES, MAX_PREVIEW_BYTES, MediaInfo, ModelResourceChunkRequest,
-    ModelResourceInfo, PreparedSettings, PreviewResult, Settings, SettingsPatch, SettingsStore,
-    WatchSubscription, WatchVisibility, WatchVisibilityHandle, Workspace, WorkspaceError,
-    WorkspaceWatcher,
+    CreateEntryKind, ErrorCode, ImportSession, MAX_IMPORT_CHUNK_BYTES, MAX_MEDIA_CHUNK_BYTES,
+    MAX_PREVIEW_BYTES, Settings, SettingsStore, WatchSubscription, WatchVisibility,
+    WatchVisibilityHandle, Workspace, WorkspaceError, WorkspaceWatcher,
 };
 
 const GITHUB_LATEST_RELEASE_ENDPOINT: &str =
@@ -93,21 +62,6 @@ const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);
 static UPDATE_INSTALLER_ACTIVE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-#[derive(Clone)]
-struct UpdateProgress {
-    sender: Option<broadcast::Sender<BridgeNotification>>,
-    epoch: u64,
-    version: String,
-}
-impl UpdateProgress {
-    fn publish(&self, phase: &str, details: Value) {
-        crate::runtime_log::record("update", phase, "progress", details.clone());
-        if let Some(sender) = &self.sender {
-            let _ = sender.send(BridgeNotification { lifecycle_epoch:self.epoch,
-                payload:json!({"method":"explorer.update.progress","params":{"latestVersion":self.version,"phase":phase,"details":details}}) });
-        }
-    }
-}
 const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(8);
 const DEFAULT_GIT_HISTORY_LIMIT: usize = 50;
 const MAX_GIT_HISTORY_LIMIT: usize = 100;
@@ -211,688 +165,6 @@ struct BridgeInner {
     update_install_lock: Mutex<()>,
 }
 
-struct UpdateChecker {
-    startup_result: Mutex<Option<Result<UpdateCheckResult, BridgeError>>>,
-    client: Option<reqwest::Client>,
-    download_client: Option<reqwest::Client>,
-    endpoint: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct GithubLatestRelease {
-    tag_name: String,
-    html_url: String,
-    #[serde(default)]
-    assets: Vec<GithubReleaseAsset>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct GithubReleaseAsset {
-    name: String,
-    browser_download_url: String,
-    size: u64,
-    digest: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-enum UpdateAvailability {
-    UpToDate,
-    UpdateAvailable,
-    Ahead,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateCheckResult {
-    current_version: String,
-    latest_version: String,
-    status: UpdateAvailability,
-    tag_name: String,
-    release_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct UpdateInstallParams {
-    latest_version: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateInstallResult {
-    latest_version: String,
-    launched: bool,
-    window_ready: bool,
-}
-
-impl UpdateChecker {
-    fn github() -> Self {
-        Self::new(GITHUB_LATEST_RELEASE_ENDPOINT)
-    }
-
-    fn new(endpoint: impl Into<String>) -> Self {
-        let client = reqwest::Client::builder()
-            .connect_timeout(UPDATE_CONNECT_TIMEOUT)
-            .timeout(UPDATE_REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .inspect_err(|e| {
-                crate::runtime_log::record(
-                    "update",
-                    "HTTP client",
-                    "failed",
-                    crate::network_diagnostics::error_details(e),
-                )
-            })
-            .ok();
-        let download_client = reqwest::Client::builder()
-            .connect_timeout(UPDATE_CONNECT_TIMEOUT)
-            .timeout(UPDATE_DOWNLOAD_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                let allowed=attempt.previous().len()<5 && trusted_update_download_host(attempt.url());
-                crate::runtime_log::record("update","HTTP redirect",if allowed{"followed"}else{"rejected"},json!({"fromHost":attempt.previous().last().and_then(|u|u.host_str()),"toHost":attempt.url().host_str(),"status":attempt.status().as_u16(),"redirectCount":attempt.previous().len()}));
-                if !allowed {
-                    attempt.stop()
-                } else {
-                    attempt.follow()
-                }
-            }))
-            .build()
-            .inspect_err(|e|crate::runtime_log::record("update","download client","failed",crate::network_diagnostics::error_details(e)))
-            .ok();
-        Self {
-            startup_result: Mutex::new(None),
-            client,
-            download_client,
-            endpoint: endpoint.into(),
-        }
-    }
-
-    // Cache both success and failure for this launcher run, across renderers and
-    // bridge reconnects. Explicit checks and installation always fetch afresh.
-    async fn check_startup(&self, current_version: &str) -> Result<UpdateCheckResult, BridgeError> {
-        let mut cached = self.startup_result.lock().await;
-        if let Some(result) = cached.as_ref() {
-            crate::runtime_log::record(
-                "update",
-                "startup check",
-                "cached",
-                json!({"networkRequested":false,"previousCheckSucceeded":result.is_ok()}),
-            );
-            return result.clone();
-        }
-        let result = self.check(current_version).await;
-        *cached = Some(result.clone());
-        result
-    }
-
-    async fn check(&self, current_version: &str) -> Result<UpdateCheckResult, BridgeError> {
-        classify_update(current_version, self.fetch_release(current_version).await?)
-    }
-
-    async fn fetch_release(
-        &self,
-        current_version: &str,
-    ) -> Result<GithubLatestRelease, BridgeError> {
-        let mut trace = crate::network_diagnostics::HttpTrace::start(
-            "update",
-            &self.endpoint,
-            5_000,
-            10_000,
-            json!({"purpose":"latest release","currentVersion":current_version}),
-        );
-        let result = self.fetch_release_inner(current_version, &mut trace).await;
-        match &result {
-            Ok(release)=>trace.operation.finish("passed",json!({"phase":"release parsed","releaseTag":release.tag_name,"assetCount":release.assets.len()})),
-            Err(e)=>trace.operation.finish("failed",json!({"code":e.code,"reason":e.message})),
-        }
-        result
-    }
-    async fn fetch_release_inner(
-        &self,
-        current_version: &str,
-        trace: &mut crate::network_diagnostics::HttpTrace,
-    ) -> Result<GithubLatestRelease, BridgeError> {
-        let client = self.client.as_ref().ok_or_else(update_unavailable_error)?;
-        let mut response = trace
-            .send(
-                client
-                    .get(&self.endpoint)
-                    .header(ACCEPT, GITHUB_API_ACCEPT)
-                    .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-                    .header(USER_AGENT, format!("Code-Codex/{current_version}")),
-            )
-            .await
-            .map_err(|e| update_transport_error(update_unavailable_error(), &e))?;
-
-        let status = response.status();
-        if status == reqwest::StatusCode::FORBIDDEN
-            || status == reqwest::StatusCode::TOO_MANY_REQUESTS
-        {
-            return Err(update_rate_limited_error());
-        }
-        if status == reqwest::StatusCode::NOT_FOUND {
-            return Err(BridgeError::new(
-                "UPDATE_NOT_PUBLISHED",
-                "No published Code-Codex release was found on GitHub.",
-            ));
-        }
-        if !status.is_success() {
-            return Err(operation_error(
-                update_unavailable_error(),
-                "reading latest release HTTP status",
-                format!("status={}", status.as_u16()),
-            ));
-        }
-        if !response_is_json(&response)
-            || response
-                .content_length()
-                .is_some_and(|length| length > MAX_UPDATE_RESPONSE_BYTES as u64)
-        {
-            return Err(update_invalid_response_error());
-        }
-
-        let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|e| {
-            trace.fail("release body", &e, body.len() as u64);
-            update_transport_error(update_unavailable_error(), &e)
-        })? {
-            if body.len().saturating_add(chunk.len()) > MAX_UPDATE_RESPONSE_BYTES {
-                return Err(update_invalid_response_error());
-            }
-            body.extend_from_slice(&chunk);
-        }
-        trace.operation.event(
-            "release body",
-            "received",
-            json!({"receivedBytes":body.len()}),
-        );
-        serde_json::from_slice(&body).map_err(|e| {
-            trace.operation.event(
-                "release JSON",
-                "failed",
-                crate::network_diagnostics::error_details(&e),
-            );
-            update_invalid_response_error()
-        })
-    }
-
-    async fn download_installer(
-        &self,
-        current_version: &str,
-        expected_latest_version: &str,
-        progress: &UpdateProgress,
-    ) -> Result<DownloadedUpdate, BridgeError> {
-        let mut operation = crate::runtime_log::Operation::start(
-            "update",
-            "prepare installer",
-            json!({"currentVersion":current_version,"requestedVersion":expected_latest_version}),
-        );
-        let result = self
-            .download_installer_inner(
-                current_version,
-                expected_latest_version,
-                &operation,
-                progress,
-            )
-            .await;
-        match &result {
-            Ok(_) => operation.finish("passed", json!({"integrityVerified":true})),
-            Err(e) => operation.finish("failed", json!({"code":e.code,"reason":e.message})),
-        }
-        result
-    }
-    async fn download_installer_inner(
-        &self,
-        current_version: &str,
-        expected_latest_version: &str,
-        operation: &crate::runtime_log::Operation,
-        progress: &UpdateProgress,
-    ) -> Result<DownloadedUpdate, BridgeError> {
-        progress.publish("checking release", json!({}));
-        let release = self.fetch_release(current_version).await?;
-        let update = classify_update(current_version, release.clone())?;
-        if update.status != UpdateAvailability::UpdateAvailable
-            || update.latest_version != expected_latest_version
-        {
-            return Err(update_no_longer_available_error());
-        }
-        let asset = select_update_asset(&release, &update.latest_version)?;
-        let expected_digest =
-            validate_update_asset(asset, &release.tag_name, &update.latest_version)?;
-        progress.publish(
-            "downloading",
-            json!({"expectedBytes":asset.size,"receivedBytes":0,"percent":0}),
-        );
-        operation.event("installer asset","selected",json!({"releaseTag":release.tag_name,"expectedBytes":asset.size,"expectedSha256":expected_digest}));
-        let download_client = self
-            .download_client
-            .as_ref()
-            .ok_or_else(update_download_error)?;
-        let mut trace = crate::network_diagnostics::HttpTrace::start(
-            "update",
-            &asset.browser_download_url,
-            5_000,
-            180_000,
-            json!({"purpose":"installer","expectedBytes":asset.size,"parentOperationId":operation.id()}),
-        );
-        let result=async {
-        let mut response = trace.send(download_client
-            .get(&asset.browser_download_url)
-            .header(ACCEPT, "application/octet-stream")
-            .header(USER_AGENT, format!("Code-Codex/{current_version}")))
-            .await
-            .map_err(|e|update_transport_error(update_download_error(),&e))?;
-        if !response.status().is_success()
-            || !trusted_update_download_host(response.url())
-            || response
-                .content_length()
-                .is_some_and(|length| length != asset.size || length > MAX_UPDATE_ASSET_BYTES)
-        {
-            return Err(operation_error(update_download_error(),"validating installer HTTP headers",format!("status={}; trustedFinalHost={}; contentLength={:?}; expectedBytes={}; maxBytes={MAX_UPDATE_ASSET_BYTES}",response.status().as_u16(),trusted_update_download_host(response.url()),response.content_length(),asset.size)));
-        }
-
-        let directory = tempfile::Builder::new()
-            .prefix("CodeCodex-Update-")
-            .tempdir_in(workspace_service::application_paths::temp_root().map_err(|error|operation_error(update_download_error(),"resolving update temporary root",error))?)
-            .map_err(|error|update_local_error("creating update temporary directory",&error))?;
-        let installer_path = directory.path().join(&asset.name);
-        let mut file =
-            std::fs::File::create(&installer_path).map_err(|error|update_local_error("creating downloaded installer file",&error))?;
-        let mut digest = sha2::Sha256::new();
-        let mut downloaded = 0_u64;
-        let mut last_percent = 0;
-        let mut transfer=crate::network_diagnostics::TransferProgress::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|e|{trace.fail("installer body",&e,downloaded);update_transport_error(update_download_error(),&e)})?
-        {
-            downloaded = downloaded.saturating_add(chunk.len() as u64);
-            if downloaded > asset.size || downloaded > MAX_UPDATE_ASSET_BYTES {
-                return Err(update_download_error());
-            }
-            file.write_all(&chunk)
-                .map_err(|error|update_local_error("writing downloaded installer chunk",&error))?;
-            sha2::Digest::update(&mut digest, &chunk);
-            transfer.observe(&trace.operation,downloaded,asset.size);
-            let percent = downloaded.saturating_mul(100) / asset.size.max(1);
-            if percent > last_percent {
-                last_percent = percent;
-                progress.publish("downloading", json!({"receivedBytes":downloaded,"expectedBytes":asset.size,"percent":percent.min(100)}));
-            }
-        }
-        progress.publish("verifying", json!({"receivedBytes":downloaded}));
-        file.sync_all().map_err(|error|update_local_error("flushing downloaded installer file",&error))?;
-        drop(file);
-        let observed_digest=format!("{:x}",sha2::Digest::finalize(digest));
-        operation.event("installer integrity","checked",json!({"expectedBytes":asset.size,"receivedBytes":downloaded,"expectedSha256":expected_digest,"observedSha256":observed_digest,"matches":downloaded==asset.size && observed_digest==expected_digest}));
-        if downloaded != asset.size
-            || observed_digest != expected_digest
-        {
-            return Err(operation_error(update_verification_error(),"verifying downloaded installer",format!("expectedBytes={}; receivedBytes={downloaded}; digestMatches={}",asset.size,observed_digest==expected_digest)));
-        }
-
-        Ok(DownloadedUpdate {
-            installer_path,
-            directory,
-            latest_version: update.latest_version,
-        })
-        }.await;
-        match &result {
-            Ok(_) => trace
-                .operation
-                .finish("passed", json!({"integrityVerified":true})),
-            Err(e) => trace
-                .operation
-                .finish("failed", json!({"code":e.code,"reason":e.message})),
-        }
-        result
-    }
-}
-
-fn operation_error(
-    mut base: BridgeError,
-    operation: &str,
-    detail: impl std::fmt::Display,
-) -> BridgeError {
-    base.message = format!(
-        "{} Operation: {}; details: {}",
-        base.message,
-        operation,
-        crate::runtime_log::redaction::text(&detail.to_string())
-    );
-    base
-}
-
-fn update_local_error(operation: &str, error: &std::io::Error) -> BridgeError {
-    operation_error(
-        BridgeError::new(
-            "UPDATE_LOCAL_IO",
-            "The update's local temporary file operation failed.",
-        ),
-        operation,
-        format!(
-            "ioKind={:?}; osCode={:?}; cause={error}",
-            error.kind(),
-            error.raw_os_error()
-        ),
-    )
-}
-
-fn update_transport_error(mut base: BridgeError, error: &reqwest::Error) -> BridgeError {
-    base.message = format!(
-        "{} Network cause: {}",
-        base.message,
-        crate::network_diagnostics::error_message(error)
-    );
-    base
-}
-
-struct DownloadedUpdate {
-    installer_path: std::path::PathBuf,
-    directory: tempfile::TempDir,
-    latest_version: String,
-}
-
-fn response_is_json(response: &reqwest::Response) -> bool {
-    response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json"))
-}
-
-fn classify_update(
-    current_version: &str,
-    release: GithubLatestRelease,
-) -> Result<UpdateCheckResult, BridgeError> {
-    let current = Version::parse(current_version).map_err(|error| {
-        operation_error(update_internal_error(), "parsing installed version", error)
-    })?;
-    if release.tag_name.len() > 80 {
-        return Err(update_invalid_response_error());
-    }
-    let latest_text = release
-        .tag_name
-        .strip_prefix('v')
-        .unwrap_or(&release.tag_name);
-    let latest = Version::parse(latest_text).map_err(|error| {
-        operation_error(
-            update_invalid_response_error(),
-            "parsing release version",
-            error,
-        )
-    })?;
-    if !latest.pre.is_empty() || !latest.build.is_empty() {
-        return Err(update_invalid_response_error());
-    }
-    validate_release_url(&release.html_url, &release.tag_name)?;
-
-    let status = match current.cmp(&latest) {
-        std::cmp::Ordering::Less => UpdateAvailability::UpdateAvailable,
-        std::cmp::Ordering::Equal => UpdateAvailability::UpToDate,
-        std::cmp::Ordering::Greater => UpdateAvailability::Ahead,
-    };
-    Ok(UpdateCheckResult {
-        current_version: current.to_string(),
-        latest_version: latest.to_string(),
-        status,
-        tag_name: release.tag_name,
-        release_url: release.html_url,
-    })
-}
-
-fn validate_release_url(release_url: &str, tag_name: &str) -> Result<(), BridgeError> {
-    if release_url.len() > 512 {
-        return Err(update_invalid_response_error());
-    }
-    let parsed = url::Url::parse(release_url).map_err(|_| update_invalid_response_error())?;
-    let expected_path = format!("/Rice-dog/code-codex/releases/tag/{tag_name}");
-    if parsed.scheme() != "https"
-        || parsed.host_str() != Some("github.com")
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.port().is_some()
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-        || parsed.path() != expected_path
-    {
-        return Err(update_invalid_response_error());
-    }
-    Ok(())
-}
-
-fn select_update_asset<'a>(
-    release: &'a GithubLatestRelease,
-    latest_version: &str,
-) -> Result<&'a GithubReleaseAsset, BridgeError> {
-    let expected_name = format!("CodeCodex-{latest_version}-x64-setup.exe");
-    let mut matches = release
-        .assets
-        .iter()
-        .filter(|asset| asset.name == expected_name);
-    let asset = matches.next().ok_or_else(update_asset_error)?;
-    if matches.next().is_some() {
-        return Err(update_asset_error());
-    }
-    Ok(asset)
-}
-
-fn validate_update_asset(
-    asset: &GithubReleaseAsset,
-    tag_name: &str,
-    latest_version: &str,
-) -> Result<String, BridgeError> {
-    let expected_name = format!("CodeCodex-{latest_version}-x64-setup.exe");
-    if asset.name != expected_name
-        || asset.size < MIN_UPDATE_ASSET_BYTES
-        || asset.size > MAX_UPDATE_ASSET_BYTES
-        || asset.browser_download_url.len() > 1_024
-    {
-        return Err(update_asset_error());
-    }
-    let parsed = url::Url::parse(&asset.browser_download_url).map_err(|_| update_asset_error())?;
-    let expected_path =
-        format!("/Rice-dog/code-codex/releases/download/{tag_name}/{expected_name}");
-    if parsed.scheme() != "https"
-        || parsed.host_str() != Some("github.com")
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.port().is_some()
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-        || parsed.path() != expected_path
-    {
-        return Err(update_asset_error());
-    }
-    let digest = asset
-        .digest
-        .as_deref()
-        .and_then(|digest| digest.strip_prefix("sha256:"))
-        .filter(|digest| digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(update_asset_error)?;
-    Ok(digest)
-}
-
-fn trusted_update_download_host(url: &url::Url) -> bool {
-    url.scheme() == "https"
-        && url.username().is_empty()
-        && url.password().is_none()
-        && url.port().is_none()
-        && matches!(
-            url.host_str(),
-            Some("github.com" | "release-assets.githubusercontent.com")
-        )
-}
-
-#[cfg(windows)]
-fn launch_downloaded_update(update: DownloadedUpdate) -> Result<UpdateInstallResult, BridgeError> {
-    if UPDATE_INSTALLER_ACTIVE.swap(true, Ordering::AcqRel) {
-        return Err(update_busy_error());
-    }
-    let ready_path = update.directory.path().join("window-ready");
-    let mut operation = crate::runtime_log::Operation::start(
-        "update",
-        "installer window handoff",
-        json!({"latestVersion":update.latest_version,"timeoutMs":15000}),
-    );
-    let mut child = Command::new(&update.installer_path)
-        .env("CLE_UPDATE_WINDOW_READY", &ready_path)
-        .spawn()
-        .map_err(|error| {
-            UPDATE_INSTALLER_ACTIVE.store(false, Ordering::Release);
-            operation.finish("failed",json!({"phase":"spawn","osCode":error.raw_os_error(),"kind":format!("{:?}",error.kind())}));
-            operation_error(update_launch_error(),"starting verified installer process",format!("ioKind={:?}; osCode={:?}",error.kind(),error.raw_os_error()))
-        })?;
-    operation.event("installer process", "started", json!({"pid":child.id()}));
-    let started = Instant::now();
-    let outcome =
-        await_installer_window(&mut child, &ready_path, Duration::from_secs(15), &operation);
-    let window_ready = outcome.as_ref().copied().unwrap_or(false);
-    let failure = outcome.err();
-    operation.finish(if window_ready {"passed"} else if failure.is_some() {"failed"} else {"timeout"}, json!({"windowReady":window_ready,"durationMs":started.elapsed().as_millis(),"installationComplete":false,"processNotTerminated":true}));
-    let retained_directory = update.directory.keep();
-    let installer_path = update.installer_path;
-    thread::spawn(move || {
-        let _ = child.wait();
-        UPDATE_INSTALLER_ACTIVE.store(false, Ordering::Release);
-        let _ = std::fs::remove_file(installer_path);
-        let _ = std::fs::remove_file(ready_path);
-        let _ = std::fs::remove_dir(retained_directory);
-    });
-    if let Some(error) = failure {
-        return Err(error);
-    }
-    Ok(UpdateInstallResult {
-        latest_version: update.latest_version,
-        launched: true,
-        window_ready,
-    })
-}
-
-#[cfg(windows)]
-fn await_installer_window(
-    child: &mut std::process::Child,
-    ready_path: &Path,
-    budget: Duration,
-    operation: &crate::runtime_log::Operation,
-) -> Result<bool, BridgeError> {
-    let started = Instant::now();
-    loop {
-        if std::fs::read_to_string(ready_path).is_ok_and(|s| s == "ready") {
-            return Ok(true);
-        }
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                operation.event(
-                    "installer process",
-                    "exited",
-                    json!({"exitCode":status.code()}),
-                );
-                return Err(BridgeError::new(
-                    "UPDATE_INSTALLER_EARLY_EXIT",
-                    "The installer exited before its window appeared. Check the installation diagnostic report.",
-                ));
-            }
-            Err(error) => {
-                operation.event(
-                    "installer process",
-                    "failed",
-                    json!({"osCode":error.raw_os_error(),"kind":format!("{:?}",error.kind())}),
-                );
-                return Err(update_local_error(
-                    "checking installer process state",
-                    &error,
-                ));
-            }
-            _ if started.elapsed() >= budget => return Ok(false),
-            _ => thread::sleep(Duration::from_millis(50)),
-        }
-    }
-}
-
-#[cfg(not(windows))]
-fn launch_downloaded_update(_update: DownloadedUpdate) -> Result<UpdateInstallResult, BridgeError> {
-    Err(BridgeError::new(
-        "UPDATE_INSTALL_UNSUPPORTED",
-        "Automatic Code-Codex updates are supported on Windows only.",
-    ))
-}
-
-fn update_unavailable_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_CHECK_UNAVAILABLE",
-        "GitHub could not be reached. Check your connection and try again.",
-    )
-}
-
-fn update_rate_limited_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_CHECK_RATE_LIMITED",
-        "GitHub temporarily limited update checks. Try again later.",
-    )
-}
-
-fn update_invalid_response_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_CHECK_INVALID_RESPONSE",
-        "GitHub returned an invalid update response. Try again later.",
-    )
-}
-
-fn update_internal_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_CHECK_FAILED",
-        "The installed Code-Codex version could not be checked.",
-    )
-}
-
-fn update_no_longer_available_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_NO_LONGER_AVAILABLE",
-        "The selected Code-Codex update is no longer the latest release.",
-    )
-}
-
-fn update_asset_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_ASSET_UNAVAILABLE",
-        "The latest release does not contain a verified Code-Codex setup program.",
-    )
-}
-
-fn update_download_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_DOWNLOAD_FAILED",
-        "The Code-Codex update could not be downloaded from GitHub.",
-    )
-}
-
-fn update_verification_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_VERIFY_FAILED",
-        "The downloaded Code-Codex update did not pass integrity verification.",
-    )
-}
-
-fn update_launch_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_LAUNCH_FAILED",
-        "The verified Code-Codex setup program could not be opened.",
-    )
-}
-
-fn update_busy_error() -> BridgeError {
-    BridgeError::new(
-        "UPDATE_INSTALL_BUSY",
-        "Another Code-Codex update is already being prepared.",
-    )
-}
-
 struct BridgeState {
     current: Option<ActiveContext>,
     import_session: Option<ActiveImportSession>,
@@ -914,1502 +186,6 @@ struct ActiveContext {
     workspace: Arc<Workspace>,
     lifecycle_epoch: u64,
     revision: u64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ContextResult {
-    thread_id: Option<String>,
-    project_name: String,
-    root_name: String,
-    // The absolute workspace root. Sent once so the renderer can build absolute
-    // paths (e.g. Copy Absolute Path) locally without a per-action round-trip.
-    root_path: String,
-    compatible: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ContextParams {
-    #[serde(default)]
-    thread_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ListParams {
-    #[serde(default)]
-    relative_path: String,
-    #[serde(default)]
-    cursor: Option<String>,
-    #[serde(default)]
-    limit: Option<usize>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitHistoryParams {
-    #[serde(default)]
-    skip: Option<usize>,
-    #[serde(default)]
-    limit: Option<usize>,
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct GitCommitSummary {
-    hash: String,
-    short_hash: String,
-    author: String,
-    authored_at: String,
-    subject: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GitHistoryResult {
-    branch: String,
-    detached: bool,
-    commits: Vec<GitCommitSummary>,
-    has_more: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitCommitParams {
-    hash: String,
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct GitChangedFile {
-    status: String,
-    path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    old_path: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GitCommitResult {
-    hash: String,
-    short_hash: String,
-    author: String,
-    author_email: String,
-    authored_at: String,
-    message: String,
-    files: Vec<GitChangedFile>,
-    files_truncated: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitDiffParams {
-    hash: String,
-    path: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GitDiffResult {
-    path: String,
-    content: String,
-    truncated: bool,
-}
-
-struct BoundedGitOutput {
-    bytes: Vec<u8>,
-    truncated: bool,
-}
-
-struct GitCommandOutput {
-    stdout: BoundedGitOutput,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PreviewParams {
-    relative_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PreviewSaveParams {
-    relative_path: String,
-    expected_version: String,
-    content_base64: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MediaInfoParams {
-    relative_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MediaChunkParams {
-    relative_path: String,
-    offset: u64,
-    length: usize,
-    expected_size_bytes: u64,
-    expected_version: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MediaChunkResult {
-    offset: u64,
-    data_base64: String,
-    eof: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ModelResourceInfoParams {
-    model_relative_path: String,
-    resource_uri: String,
-    expected_model_version: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ModelResourceChunkParams {
-    model_relative_path: String,
-    resource_uri: String,
-    expected_model_version: String,
-    offset: u64,
-    length: usize,
-    expected_size_bytes: u64,
-    expected_version: String,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum EntryCreateKind {
-    File,
-    Directory,
-}
-
-impl From<EntryCreateKind> for CreateEntryKind {
-    fn from(value: EntryCreateKind) -> Self {
-        match value {
-            EntryCreateKind::File => Self::File,
-            EntryCreateKind::Directory => Self::Directory,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EntryCreateParams {
-    parent_relative_path: String,
-    name: String,
-    kind: EntryCreateKind,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EntryRenameParams {
-    relative_path: String,
-    new_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EntryMoveParams {
-    relative_path: String,
-    destination_parent_relative_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BatchCopyParams {
-    source_paths: Vec<String>,
-    target_directory: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BatchMoveParams {
-    source_paths: Vec<String>,
-    target_directory: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EntryPathParams {
-    relative_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ImportBeginParams {
-    destination_parent_relative_path: String,
-    name: String,
-    kind: EntryCreateKind,
-    #[serde(default, deserialize_with = "deserialize_optional_import_size")]
-    size_bytes: Option<u64>,
-}
-
-fn deserialize_optional_import_size<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    u64::deserialize(deserializer).map(Some)
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ImportDirectoryParams {
-    session_id: String,
-    relative_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ImportFileBeginParams {
-    session_id: String,
-    relative_path: String,
-    size_bytes: u64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ImportChunkParams {
-    session_id: String,
-    offset: u64,
-    data_base64: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ImportSessionParams {
-    session_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SettingsWrapper {
-    settings: SettingsPatch,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WindowTransparencyParams {
-    enabled: bool,
-}
-
-const WINDOW_TRANSPARENCY_BACKGROUND: &str = "transparent";
-#[cfg(windows)]
-const WCA_ACCENT_POLICY: i32 = 19;
-#[cfg(windows)]
-const ACCENT_DISABLED: i32 = 0;
-#[cfg(windows)]
-const ACCENT_ENABLE_TRANSPARENT_GRADIENT: i32 = 2;
-#[cfg(windows)]
-const WINDOW_TRANSPARENCY_ACCENT_FLAGS: u32 = 2;
-#[cfg(windows)]
-const NO_EXTENDED_CLIENT_FRAME: MARGINS = MARGINS {
-    cxLeftWidth: 0,
-    cxRightWidth: 0,
-    cyTopHeight: 0,
-    cyBottomHeight: 0,
-};
-#[cfg(windows)]
-const FULL_EXTENDED_CLIENT_FRAME: MARGINS = MARGINS {
-    cxLeftWidth: -1,
-    cxRightWidth: -1,
-    cyTopHeight: -1,
-    cyBottomHeight: -1,
-};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WindowTransparencyError {
-    Unsupported,
-    Unavailable,
-    Native,
-    Cancelled,
-}
-
-struct WindowTransparencyController {
-    #[cfg(windows)]
-    state: StdMutex<WindowTransparencyState>,
-    #[cfg(windows)]
-    marker: WindowTransparencyMarker,
-}
-
-#[cfg(windows)]
-#[derive(Default)]
-struct WindowTransparencyState {
-    process: Option<BoundWindowProcess>,
-    active: Option<ActiveWindowTransparency>,
-}
-
-#[cfg(windows)]
-struct BoundWindowProcess {
-    pid: u32,
-    handle: isize,
-}
-
-#[cfg(windows)]
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct AccentPolicy {
-    state: i32,
-    flags: u32,
-    gradient_color: u32,
-    animation_id: u32,
-}
-
-#[cfg(windows)]
-#[repr(C)]
-struct WindowCompositionAttributeData {
-    attribute: i32,
-    data: *mut std::ffi::c_void,
-    size_of_data: usize,
-}
-
-#[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OriginalAccentPolicy {
-    Known(AccentPolicy),
-    Unknown,
-}
-
-#[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SystemBackdropSnapshot {
-    Unsupported,
-    Value(i32),
-}
-
-#[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WindowCornerPreferenceSnapshot {
-    Unsupported,
-    Value(i32),
-}
-
-#[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TransparencyClientFrame {
-    Full,
-    None,
-}
-
-#[cfg(windows)]
-struct WindowTransparencyMarker {
-    property_name: Vec<u16>,
-    cookie: usize,
-}
-
-#[cfg(windows)]
-#[derive(Debug, Clone, Copy)]
-struct ActiveWindowTransparency {
-    window: isize,
-    pid: u32,
-    thread_id: u32,
-    original_accent_policy: OriginalAccentPolicy,
-    original_system_backdrop: SystemBackdropSnapshot,
-    original_window_corner_preference: WindowCornerPreferenceSnapshot,
-}
-
-#[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct WindowRectangle {
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
-}
-
-#[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct WindowCandidate {
-    window: isize,
-    pid: u32,
-    thread_id: u32,
-    visible: bool,
-    unowned: bool,
-    chrome_widget: bool,
-    app_window: bool,
-    tool_window: bool,
-    no_redirection_bitmap: bool,
-    rectangle: WindowRectangle,
-}
-
-#[cfg(windows)]
-struct WindowEnumerationContext {
-    pid: u32,
-    virtual_screen: WindowRectangle,
-    candidates: Vec<WindowCandidate>,
-}
-
-impl WindowTransparencyController {
-    fn new() -> Self {
-        Self {
-            #[cfg(windows)]
-            state: StdMutex::new(WindowTransparencyState::default()),
-            #[cfg(windows)]
-            marker: WindowTransparencyMarker::new(),
-        }
-    }
-
-    fn bind_verified_process(&self, pid: u32) -> Result<(), WindowTransparencyError> {
-        #[cfg(not(windows))]
-        {
-            let _ = pid;
-            Err(WindowTransparencyError::Unsupported)
-        }
-        #[cfg(windows)]
-        {
-            if pid == 0 {
-                return Err(WindowTransparencyError::Unavailable);
-            }
-            let handle = unsafe {
-                OpenProcess(
-                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
-                    0,
-                    pid,
-                )
-            };
-            if handle.is_null() {
-                return Err(WindowTransparencyError::Unavailable);
-            }
-            let process = BoundWindowProcess {
-                pid,
-                handle: handle as isize,
-            };
-            if !process.is_live() {
-                return Err(WindowTransparencyError::Unavailable);
-            }
-
-            let mut state = lock_unpoisoned(&self.state);
-            if state
-                .process
-                .as_ref()
-                .is_some_and(|existing| existing.pid == pid && existing.is_live())
-            {
-                return Ok(());
-            }
-            Self::restore_locked(&mut state, &self.marker)?;
-            state.process = Some(process);
-            Ok(())
-        }
-    }
-
-    fn set_enabled(
-        &self,
-        enabled: bool,
-        lifecycle_epoch: &AtomicU64,
-        expected_epoch: u64,
-    ) -> Result<(), WindowTransparencyError> {
-        #[cfg(not(windows))]
-        {
-            let _ = (enabled, lifecycle_epoch, expected_epoch);
-            Err(WindowTransparencyError::Unsupported)
-        }
-        #[cfg(windows)]
-        {
-            let mut state = lock_unpoisoned(&self.state);
-            if lifecycle_epoch.load(Ordering::Acquire) != expected_epoch {
-                return Err(WindowTransparencyError::Cancelled);
-            }
-            if enabled {
-                Self::enable_locked(&mut state, &self.marker)
-            } else {
-                Self::restore_locked(&mut state, &self.marker)
-            }
-        }
-    }
-
-    fn restore(&self) -> Result<(), WindowTransparencyError> {
-        #[cfg(not(windows))]
-        {
-            Ok(())
-        }
-        #[cfg(windows)]
-        {
-            Self::restore_locked(&mut lock_unpoisoned(&self.state), &self.marker)
-        }
-    }
-
-    #[cfg(windows)]
-    fn enable_locked(
-        state: &mut WindowTransparencyState,
-        marker: &WindowTransparencyMarker,
-    ) -> Result<(), WindowTransparencyError> {
-        let process = state
-            .process
-            .as_ref()
-            .ok_or(WindowTransparencyError::Unsupported)?;
-        if !process.is_live() {
-            state.active = None;
-            return Err(WindowTransparencyError::Unavailable);
-        }
-        if let Some(active) = state.active.take() {
-            if active.still_belongs_to(process, marker) {
-                let mut refresh_changed_native_state = false;
-                if apply_window_transparency(
-                    active.window as HWND,
-                    active.original_system_backdrop,
-                    active.original_window_corner_preference,
-                    &mut refresh_changed_native_state,
-                    || active.still_belongs_to(process, marker),
-                )
-                .is_ok()
-                {
-                    state.active = Some(active);
-                    return Ok(());
-                }
-                let mut active = active;
-                if let Err(error) = restore_active_window(process, marker, &mut active) {
-                    state.active = Some(active);
-                    return Err(error);
-                }
-            }
-        }
-
-        let candidate = select_codex_window(process.pid)?;
-        if !candidate_still_belongs_to_process(&candidate, process) {
-            return Err(WindowTransparencyError::Unavailable);
-        }
-        claim_window_marker(candidate.window as HWND, marker)?;
-        if !candidate_still_belongs_to_process(&candidate, process)
-            || !window_has_marker(candidate.window as HWND, marker)
-        {
-            release_window_marker(candidate.window as HWND, marker);
-            return Err(WindowTransparencyError::Unavailable);
-        }
-        let original_ex_style = match read_extended_style(candidate.window as HWND) {
-            Ok(style) => style,
-            Err(error) => {
-                release_window_marker(candidate.window as HWND, marker);
-                return Err(error);
-            }
-        };
-        if let Err(error) = validate_transparency_window_style(original_ex_style) {
-            release_window_marker(candidate.window as HWND, marker);
-            return Err(error);
-        }
-        let original_system_backdrop = match read_window_system_backdrop(candidate.window as HWND) {
-            Ok(backdrop) => backdrop,
-            Err(error) => {
-                release_window_marker(candidate.window as HWND, marker);
-                return Err(error);
-            }
-        };
-        let original_window_corner_preference =
-            match read_window_corner_preference(candidate.window as HWND) {
-                Ok(preference) => preference,
-                Err(error) => {
-                    release_window_marker(candidate.window as HWND, marker);
-                    return Err(error);
-                }
-            };
-        let original_accent_policy = snapshot_window_accent_policy(candidate.window as HWND);
-        let mut active = ActiveWindowTransparency {
-            window: candidate.window,
-            pid: candidate.pid,
-            thread_id: candidate.thread_id,
-            original_accent_policy,
-            original_system_backdrop,
-            original_window_corner_preference,
-        };
-
-        if !active.still_belongs_to(process, marker) {
-            release_window_marker(candidate.window as HWND, marker);
-            return Err(WindowTransparencyError::Unavailable);
-        }
-        let mut native_state_changed = false;
-        let applied = apply_window_transparency(
-            candidate.window as HWND,
-            original_system_backdrop,
-            original_window_corner_preference,
-            &mut native_state_changed,
-            || active.still_belongs_to(process, marker),
-        );
-        if applied.is_ok() {
-            state.active = Some(active);
-            return Ok(());
-        }
-
-        if native_state_changed && restore_active_window(process, marker, &mut active).is_err() {
-            state.active = Some(active);
-        } else if !native_state_changed {
-            release_window_marker(candidate.window as HWND, marker);
-        }
-        applied
-    }
-
-    #[cfg(windows)]
-    fn restore_locked(
-        state: &mut WindowTransparencyState,
-        marker: &WindowTransparencyMarker,
-    ) -> Result<(), WindowTransparencyError> {
-        let Some(mut active) = state.active.take() else {
-            return Ok(());
-        };
-        let Some(process) = state.process.as_ref() else {
-            return Ok(());
-        };
-        if let Err(error) = restore_active_window(process, marker, &mut active) {
-            state.active = Some(active);
-            return Err(error);
-        }
-        Ok(())
-    }
-}
-
-impl Drop for WindowTransparencyController {
-    fn drop(&mut self) {
-        #[cfg(windows)]
-        {
-            let state = self
-                .state
-                .get_mut()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let _ = Self::restore_locked(state, &self.marker);
-        }
-    }
-}
-
-#[cfg(windows)]
-impl BoundWindowProcess {
-    fn is_live(&self) -> bool {
-        let handle = self.handle as *mut std::ffi::c_void;
-        !handle.is_null()
-            && unsafe { GetProcessId(handle) } == self.pid
-            && unsafe { WaitForSingleObject(handle, 0) } == WAIT_TIMEOUT
-    }
-}
-
-#[cfg(windows)]
-impl Drop for BoundWindowProcess {
-    fn drop(&mut self) {
-        let handle = self.handle as *mut std::ffi::c_void;
-        if !handle.is_null() {
-            unsafe {
-                let _ = CloseHandle(handle);
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-impl WindowTransparencyMarker {
-    fn new() -> Self {
-        let launcher_pid = std::process::id();
-        let nonce = CapabilityToken::generate();
-        let mut property_name = format!(
-            "CodeCodex.Transparency.Owner.{launcher_pid}.{}",
-            nonce.expose()
-        )
-        .encode_utf16()
-        .collect::<Vec<_>>();
-        property_name.push(0);
-        let cookie = nonce
-            .expose()
-            .bytes()
-            .take(std::mem::size_of::<usize>())
-            .fold(0_usize, |value, byte| {
-                value.rotate_left(7) ^ usize::from(byte)
-            })
-            .max(1);
-        Self {
-            property_name,
-            cookie,
-        }
-    }
-
-    fn property_name(&self) -> *const u16 {
-        self.property_name.as_ptr()
-    }
-
-    fn cookie(&self) -> *mut std::ffi::c_void {
-        self.cookie as *mut std::ffi::c_void
-    }
-}
-
-#[cfg(windows)]
-impl ActiveWindowTransparency {
-    fn still_belongs_to(
-        &self,
-        process: &BoundWindowProcess,
-        marker: &WindowTransparencyMarker,
-    ) -> bool {
-        process.pid == self.pid
-            && process.is_live()
-            && window_identity(self.window as HWND) == Some((self.pid, self.thread_id))
-            && window_class(self.window as HWND) == "Chrome_WidgetWin_1"
-            && window_has_marker(self.window as HWND, marker)
-    }
-}
-
-#[cfg(windows)]
-fn restore_active_window(
-    process: &BoundWindowProcess,
-    marker: &WindowTransparencyMarker,
-    active: &mut ActiveWindowTransparency,
-) -> Result<(), WindowTransparencyError> {
-    if !process.is_live() || unsafe { IsWindow(active.window as HWND) } == 0 {
-        return Ok(());
-    }
-    if !active.still_belongs_to(process, marker) {
-        // A destroyed/reused HWND must never be mutated, even if that means
-        // there is no longer a live window on which restoration is meaningful.
-        return Ok(());
-    }
-
-    let accent_result =
-        restore_window_accent_policy(active.window as HWND, active.original_accent_policy, || {
-            active.still_belongs_to(process, marker)
-        });
-    let backdrop_result = restore_window_system_backdrop(
-        active.window as HWND,
-        active.original_system_backdrop,
-        || active.still_belongs_to(process, marker),
-    );
-    let corner_result = restore_window_corner_preference(
-        active.window as HWND,
-        active.original_window_corner_preference,
-        || active.still_belongs_to(process, marker),
-    );
-    // Transparency temporarily removes Electron's full DWM client frame.
-    // Restore it with the native backdrop so Codex's unpainted shell regions
-    // do not fall back to black after the extension is disabled.
-    let frame_result = restore_extended_client_frame(active.window as HWND, || {
-        active.still_belongs_to(process, marker)
-    });
-    accent_result?;
-    backdrop_result?;
-    corner_result?;
-    frame_result?;
-    if active.still_belongs_to(process, marker) {
-        remove_window_marker(active.window as HWND, marker)?;
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn restore_window_system_backdrop<F>(
-    window: HWND,
-    original_system_backdrop: SystemBackdropSnapshot,
-    mut still_owned: F,
-) -> Result<(), WindowTransparencyError>
-where
-    F: FnMut() -> bool,
-{
-    let original_system_backdrop = match original_system_backdrop {
-        SystemBackdropSnapshot::Unsupported => return Ok(()),
-        SystemBackdropSnapshot::Value(backdrop) => backdrop,
-    };
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    write_window_system_backdrop(window, original_system_backdrop)?;
-    if still_owned() {
-        Ok(())
-    } else {
-        Err(WindowTransparencyError::Unavailable)
-    }
-}
-
-#[cfg(windows)]
-fn read_window_system_backdrop(
-    window: HWND,
-) -> Result<SystemBackdropSnapshot, WindowTransparencyError> {
-    let mut backdrop = 0_i32;
-    let result = unsafe {
-        DwmGetWindowAttribute(
-            window,
-            DWMWA_SYSTEMBACKDROP_TYPE as u32,
-            std::ptr::addr_of_mut!(backdrop).cast(),
-            std::mem::size_of::<i32>() as u32,
-        )
-    };
-    classify_system_backdrop_read(result, backdrop)
-}
-
-#[cfg(windows)]
-fn classify_system_backdrop_read(
-    result: i32,
-    backdrop: i32,
-) -> Result<SystemBackdropSnapshot, WindowTransparencyError> {
-    if result >= 0 {
-        Ok(SystemBackdropSnapshot::Value(backdrop))
-    } else if result == E_INVALIDARG {
-        // Windows 10 exposes DwmGetWindowAttribute but does not implement this
-        // Windows 11 attribute. Other failures are not capability signals.
-        Ok(SystemBackdropSnapshot::Unsupported)
-    } else {
-        Err(WindowTransparencyError::Native)
-    }
-}
-
-#[cfg(windows)]
-fn write_window_system_backdrop(
-    window: HWND,
-    backdrop: i32,
-) -> Result<(), WindowTransparencyError> {
-    let result = unsafe {
-        DwmSetWindowAttribute(
-            window,
-            DWMWA_SYSTEMBACKDROP_TYPE as u32,
-            std::ptr::addr_of!(backdrop).cast(),
-            std::mem::size_of::<i32>() as u32,
-        )
-    };
-    if result < 0 {
-        return Err(WindowTransparencyError::Native);
-    }
-    match read_window_system_backdrop(window)? {
-        SystemBackdropSnapshot::Value(current) if current == backdrop => Ok(()),
-        SystemBackdropSnapshot::Value(_) | SystemBackdropSnapshot::Unsupported => {
-            Err(WindowTransparencyError::Unavailable)
-        }
-    }
-}
-
-#[cfg(windows)]
-fn restore_window_corner_preference<F>(
-    window: HWND,
-    original_window_corner_preference: WindowCornerPreferenceSnapshot,
-    mut still_owned: F,
-) -> Result<(), WindowTransparencyError>
-where
-    F: FnMut() -> bool,
-{
-    let original_window_corner_preference = match original_window_corner_preference {
-        WindowCornerPreferenceSnapshot::Unsupported => return Ok(()),
-        WindowCornerPreferenceSnapshot::Value(preference) => preference,
-    };
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    write_window_corner_preference(window, original_window_corner_preference)?;
-    if still_owned() {
-        Ok(())
-    } else {
-        Err(WindowTransparencyError::Unavailable)
-    }
-}
-
-#[cfg(windows)]
-fn read_window_corner_preference(
-    window: HWND,
-) -> Result<WindowCornerPreferenceSnapshot, WindowTransparencyError> {
-    let mut preference = 0_i32;
-    let result = unsafe {
-        DwmGetWindowAttribute(
-            window,
-            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-            std::ptr::addr_of_mut!(preference).cast(),
-            std::mem::size_of::<i32>() as u32,
-        )
-    };
-    classify_window_corner_preference_read(result, preference)
-}
-
-#[cfg(windows)]
-fn classify_window_corner_preference_read(
-    result: i32,
-    preference: i32,
-) -> Result<WindowCornerPreferenceSnapshot, WindowTransparencyError> {
-    if result >= 0 {
-        Ok(WindowCornerPreferenceSnapshot::Value(preference))
-    } else if result == E_INVALIDARG {
-        // Rounded-corner preferences were introduced in Windows 11. Windows 10
-        // has no rounded compositor path to disable for restored windows.
-        Ok(WindowCornerPreferenceSnapshot::Unsupported)
-    } else {
-        Err(WindowTransparencyError::Native)
-    }
-}
-
-#[cfg(windows)]
-fn write_window_corner_preference(
-    window: HWND,
-    preference: i32,
-) -> Result<(), WindowTransparencyError> {
-    let result = unsafe {
-        DwmSetWindowAttribute(
-            window,
-            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-            std::ptr::addr_of!(preference).cast(),
-            std::mem::size_of::<i32>() as u32,
-        )
-    };
-    if result < 0 {
-        return Err(WindowTransparencyError::Native);
-    }
-    match read_window_corner_preference(window)? {
-        WindowCornerPreferenceSnapshot::Value(current) if current == preference => Ok(()),
-        WindowCornerPreferenceSnapshot::Value(_) | WindowCornerPreferenceSnapshot::Unsupported => {
-            Err(WindowTransparencyError::Unavailable)
-        }
-    }
-}
-
-#[cfg(windows)]
-fn clear_extended_client_frame<F>(
-    window: HWND,
-    still_owned: F,
-) -> Result<(), WindowTransparencyError>
-where
-    F: FnMut() -> bool,
-{
-    clear_extended_client_frame_with(window, still_owned, |window, margins| unsafe {
-        DwmExtendFrameIntoClientArea(window, margins)
-    })
-}
-
-#[cfg(windows)]
-fn transparency_client_frame(system_backdrop: SystemBackdropSnapshot) -> TransparencyClientFrame {
-    match system_backdrop {
-        SystemBackdropSnapshot::Unsupported => TransparencyClientFrame::Full,
-        SystemBackdropSnapshot::Value(_) => TransparencyClientFrame::None,
-    }
-}
-
-#[cfg(windows)]
-fn clear_extended_client_frame_with<F, E>(
-    window: HWND,
-    mut still_owned: F,
-    mut extend_frame: E,
-) -> Result<(), WindowTransparencyError>
-where
-    F: FnMut() -> bool,
-    E: FnMut(HWND, *const MARGINS) -> i32,
-{
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    let result = extend_frame(window, &NO_EXTENDED_CLIENT_FRAME);
-    if result < 0 {
-        return Err(WindowTransparencyError::Native);
-    }
-    if still_owned() {
-        Ok(())
-    } else {
-        Err(WindowTransparencyError::Unavailable)
-    }
-}
-
-#[cfg(windows)]
-fn restore_extended_client_frame<F>(
-    window: HWND,
-    mut still_owned: F,
-) -> Result<(), WindowTransparencyError>
-where
-    F: FnMut() -> bool,
-{
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    let result = unsafe { DwmExtendFrameIntoClientArea(window, &FULL_EXTENDED_CLIENT_FRAME) };
-    if result < 0 {
-        return Err(WindowTransparencyError::Native);
-    }
-    if still_owned() {
-        Ok(())
-    } else {
-        Err(WindowTransparencyError::Unavailable)
-    }
-}
-
-#[cfg(windows)]
-fn claim_window_marker(
-    window: HWND,
-    marker: &WindowTransparencyMarker,
-) -> Result<(), WindowTransparencyError> {
-    if !unsafe { GetPropW(window, marker.property_name()) }.is_null() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    let claimed = unsafe { SetPropW(window, marker.property_name(), marker.cookie()) } != 0;
-    if !claimed {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    if !window_has_marker(window, marker) {
-        cleanup_claimed_window_marker(window, marker);
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn window_has_marker(window: HWND, marker: &WindowTransparencyMarker) -> bool {
-    !window.is_null() && unsafe { IsWindow(window) } != 0 && raw_window_has_marker(window, marker)
-}
-
-#[cfg(windows)]
-fn raw_window_has_marker(window: HWND, marker: &WindowTransparencyMarker) -> bool {
-    !window.is_null() && unsafe { GetPropW(window, marker.property_name()) } == marker.cookie()
-}
-
-#[cfg(windows)]
-fn cleanup_claimed_window_marker(window: HWND, marker: &WindowTransparencyMarker) {
-    if raw_window_has_marker(window, marker) {
-        let _ = unsafe { RemovePropW(window, marker.property_name()) };
-    }
-}
-
-#[cfg(windows)]
-fn remove_window_marker(
-    window: HWND,
-    marker: &WindowTransparencyMarker,
-) -> Result<(), WindowTransparencyError> {
-    if !window_has_marker(window, marker) {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    let removed = unsafe { RemovePropW(window, marker.property_name()) };
-    if removed != marker.cookie() {
-        return Err(WindowTransparencyError::Native);
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn release_window_marker(window: HWND, marker: &WindowTransparencyMarker) {
-    if window_has_marker(window, marker) {
-        let _ = unsafe { RemovePropW(window, marker.property_name()) };
-    }
-}
-
-#[cfg(windows)]
-type SetWindowCompositionAttributeFn =
-    unsafe extern "system" fn(HWND, *mut WindowCompositionAttributeData) -> BOOL;
-
-#[cfg(windows)]
-type GetWindowCompositionAttributeFn =
-    unsafe extern "system" fn(HWND, *mut WindowCompositionAttributeData) -> BOOL;
-
-#[cfg(windows)]
-const TRANSPARENT_ACCENT_POLICY: AccentPolicy = AccentPolicy {
-    state: ACCENT_ENABLE_TRANSPARENT_GRADIENT,
-    flags: WINDOW_TRANSPARENCY_ACCENT_FLAGS,
-    gradient_color: 0,
-    animation_id: 0,
-};
-
-#[cfg(windows)]
-const DISABLED_ACCENT_POLICY: AccentPolicy = AccentPolicy {
-    state: ACCENT_DISABLED,
-    flags: 0,
-    gradient_color: 0,
-    animation_id: 0,
-};
-
-#[cfg(windows)]
-fn resolve_set_window_composition_attribute() -> Option<SetWindowCompositionAttributeFn> {
-    static FUNCTION: OnceLock<Option<SetWindowCompositionAttributeFn>> = OnceLock::new();
-    *FUNCTION.get_or_init(|| {
-        let module = unsafe { GetModuleHandleW(windows_sys::w!("user32.dll")) };
-        if module.is_null() {
-            return None;
-        }
-        let raw = unsafe { GetProcAddress(module, b"SetWindowCompositionAttribute\0".as_ptr()) }?;
-        // GetProcAddress erases the signature; this is the system ABI used by
-        // the compositor export on supported Windows builds.
-        Some(unsafe {
-            std::mem::transmute::<
-                unsafe extern "system" fn() -> isize,
-                SetWindowCompositionAttributeFn,
-            >(raw)
-        })
-    })
-}
-
-#[cfg(windows)]
-fn resolve_get_window_composition_attribute() -> Option<GetWindowCompositionAttributeFn> {
-    static FUNCTION: OnceLock<Option<GetWindowCompositionAttributeFn>> = OnceLock::new();
-    *FUNCTION.get_or_init(|| {
-        let module = unsafe { GetModuleHandleW(windows_sys::w!("user32.dll")) };
-        if module.is_null() {
-            return None;
-        }
-        let raw = unsafe { GetProcAddress(module, b"GetWindowCompositionAttribute\0".as_ptr()) }?;
-        Some(unsafe {
-            std::mem::transmute::<
-                unsafe extern "system" fn() -> isize,
-                GetWindowCompositionAttributeFn,
-            >(raw)
-        })
-    })
-}
-
-#[cfg(windows)]
-fn read_window_accent_policy(window: HWND) -> Option<AccentPolicy> {
-    let function = resolve_get_window_composition_attribute()?;
-    let mut policy = DISABLED_ACCENT_POLICY;
-    let mut data = WindowCompositionAttributeData {
-        attribute: WCA_ACCENT_POLICY,
-        data: std::ptr::addr_of_mut!(policy).cast(),
-        size_of_data: std::mem::size_of::<AccentPolicy>(),
-    };
-    (unsafe { function(window, std::ptr::addr_of_mut!(data)) } != 0).then_some(policy)
-}
-
-#[cfg(windows)]
-fn snapshot_window_accent_policy(window: HWND) -> OriginalAccentPolicy {
-    read_window_accent_policy(window)
-        .map(OriginalAccentPolicy::Known)
-        .unwrap_or(OriginalAccentPolicy::Unknown)
-}
-
-#[cfg(windows)]
-fn write_window_accent_policy(
-    window: HWND,
-    policy: AccentPolicy,
-) -> Result<(), WindowTransparencyError> {
-    let function =
-        resolve_set_window_composition_attribute().ok_or(WindowTransparencyError::Unsupported)?;
-    let mut policy = policy;
-    let mut data = WindowCompositionAttributeData {
-        attribute: WCA_ACCENT_POLICY,
-        data: std::ptr::addr_of_mut!(policy).cast(),
-        size_of_data: std::mem::size_of::<AccentPolicy>(),
-    };
-    if unsafe { function(window, std::ptr::addr_of_mut!(data)) } == 0 {
-        return Err(WindowTransparencyError::Native);
-    }
-    if read_window_accent_policy(window).is_some_and(|current| current != policy) {
-        Err(WindowTransparencyError::Unavailable)
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(windows)]
-fn validate_transparency_window_style(style: isize) -> Result<(), WindowTransparencyError> {
-    if has_extended_style(style, WS_EX_LAYERED)
-        || has_extended_style(style, WS_EX_TRANSPARENT)
-        || has_extended_style(style, WS_EX_NOREDIRECTIONBITMAP)
-    {
-        Err(WindowTransparencyError::Unavailable)
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(windows)]
-fn apply_window_transparency<F>(
-    window: HWND,
-    original_system_backdrop: SystemBackdropSnapshot,
-    original_window_corner_preference: WindowCornerPreferenceSnapshot,
-    native_state_changed: &mut bool,
-    mut still_owned: F,
-) -> Result<(), WindowTransparencyError>
-where
-    F: FnMut() -> bool,
-{
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    let original_style = read_extended_style(window)?;
-    validate_transparency_window_style(original_style)?;
-    if resolve_set_window_composition_attribute().is_none() {
-        return Err(WindowTransparencyError::Unsupported);
-    }
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    match original_system_backdrop {
-        SystemBackdropSnapshot::Unsupported => {}
-        SystemBackdropSnapshot::Value(_) => match read_window_system_backdrop(window)? {
-            SystemBackdropSnapshot::Value(DWMSBT_NONE) => {}
-            SystemBackdropSnapshot::Value(_) => {
-                *native_state_changed = true;
-                write_window_system_backdrop(window, DWMSBT_NONE)?;
-            }
-            SystemBackdropSnapshot::Unsupported => {
-                return Err(WindowTransparencyError::Unavailable);
-            }
-        },
-    }
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-
-    match original_window_corner_preference {
-        WindowCornerPreferenceSnapshot::Unsupported => {}
-        WindowCornerPreferenceSnapshot::Value(_) => match read_window_corner_preference(window)? {
-            WindowCornerPreferenceSnapshot::Value(DWMWCP_DONOTROUND) => {}
-            WindowCornerPreferenceSnapshot::Value(_) => {
-                *native_state_changed = true;
-                write_window_corner_preference(window, DWMWCP_DONOTROUND)?;
-            }
-            WindowCornerPreferenceSnapshot::Unsupported => {
-                return Err(WindowTransparencyError::Unavailable);
-            }
-        },
-    }
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-
-    *native_state_changed = true;
-    write_window_accent_policy(window, TRANSPARENT_ACCENT_POLICY)?;
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    match transparency_client_frame(original_system_backdrop) {
-        TransparencyClientFrame::Full => {
-            // Windows 10 has no system-backdrop surface. Its legacy DWM path
-            // needs glass extended through the client area so Chromium's
-            // transparent pixels can reach the desktop compositor.
-            restore_extended_client_frame(window, &mut still_owned)?;
-        }
-        TransparencyClientFrame::None => {
-            // Windows 11 already supplies a system-backdrop surface. Electron's
-            // full client frame flattens transparent pixels in restored windows,
-            // so remove only that frame while transparency is active.
-            clear_extended_client_frame(window, &mut still_owned)?;
-        }
-    }
-    let applied_style = read_extended_style(window)?;
-    if applied_style != original_style {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    validate_transparency_window_style(applied_style)?;
-    if matches!(original_system_backdrop, SystemBackdropSnapshot::Value(_)) {
-        match read_window_system_backdrop(window)? {
-            SystemBackdropSnapshot::Value(DWMSBT_NONE) => {}
-            SystemBackdropSnapshot::Value(_) | SystemBackdropSnapshot::Unsupported => {
-                return Err(WindowTransparencyError::Unavailable);
-            }
-        }
-    }
-    if matches!(
-        original_window_corner_preference,
-        WindowCornerPreferenceSnapshot::Value(_)
-    ) {
-        match read_window_corner_preference(window)? {
-            WindowCornerPreferenceSnapshot::Value(DWMWCP_DONOTROUND) => {}
-            WindowCornerPreferenceSnapshot::Value(_)
-            | WindowCornerPreferenceSnapshot::Unsupported => {
-                return Err(WindowTransparencyError::Unavailable);
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn restore_window_accent_policy<F>(
-    window: HWND,
-    original_accent_policy: OriginalAccentPolicy,
-    mut still_owned: F,
-) -> Result<(), WindowTransparencyError>
-where
-    F: FnMut() -> bool,
-{
-    if !still_owned() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    // GetWindowCompositionAttribute is undocumented and may not be exported.
-    // When it cannot snapshot the host state, ACCENT_DISABLED is the only
-    // deterministic non-transparent restoration policy.
-    let policy = match original_accent_policy {
-        OriginalAccentPolicy::Known(policy) => policy,
-        OriginalAccentPolicy::Unknown => DISABLED_ACCENT_POLICY,
-    };
-    write_window_accent_policy(window, policy)?;
-    if still_owned() {
-        Ok(())
-    } else {
-        Err(WindowTransparencyError::Unavailable)
-    }
-}
-
-#[cfg(windows)]
-fn read_extended_style(window: HWND) -> Result<isize, WindowTransparencyError> {
-    unsafe {
-        SetLastError(0);
-    }
-    let style = unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) };
-    if style == 0 && unsafe { GetLastError() } != 0 {
-        Err(WindowTransparencyError::Native)
-    } else {
-        Ok(style)
-    }
-}
-
-#[cfg(windows)]
-fn has_extended_style(style: isize, flag: u32) -> bool {
-    style & flag as isize != 0
-}
-
-#[cfg(windows)]
-fn window_identity(window: HWND) -> Option<(u32, u32)> {
-    if window.is_null() || unsafe { IsWindow(window) } == 0 {
-        return None;
-    }
-    let mut pid = 0;
-    let thread_id = unsafe { GetWindowThreadProcessId(window, &mut pid) };
-    (pid != 0 && thread_id != 0).then_some((pid, thread_id))
-}
-
-#[cfg(windows)]
-fn candidate_still_belongs_to_process(
-    candidate: &WindowCandidate,
-    process: &BoundWindowProcess,
-) -> bool {
-    process.is_live()
-        && window_identity(candidate.window as HWND) == Some((candidate.pid, candidate.thread_id))
-        && candidate.pid == process.pid
-        && window_class(candidate.window as HWND) == "Chrome_WidgetWin_1"
-}
-
-#[cfg(windows)]
-fn select_codex_window(pid: u32) -> Result<WindowCandidate, WindowTransparencyError> {
-    let virtual_screen = virtual_screen_rectangle()?;
-    let foreground = unsafe { GetForegroundWindow() };
-    if let Some(candidate) = inspect_window_candidate(foreground, virtual_screen) {
-        if candidate.qualifies(pid, virtual_screen) {
-            return Ok(candidate);
-        }
-    }
-
-    let mut context = WindowEnumerationContext {
-        pid,
-        virtual_screen,
-        candidates: Vec::new(),
-    };
-    let enumerated = unsafe {
-        EnumWindows(
-            Some(collect_codex_window_candidate),
-            &mut context as *mut WindowEnumerationContext as LPARAM,
-        )
-    } != 0;
-    if !enumerated {
-        return Err(WindowTransparencyError::Native);
-    }
-    select_unique_candidate(None, &context.candidates, pid, virtual_screen)
-}
-
-#[cfg(windows)]
-unsafe extern "system" fn collect_codex_window_candidate(window: HWND, parameter: LPARAM) -> BOOL {
-    let context = unsafe { &mut *(parameter as *mut WindowEnumerationContext) };
-    if let Some(candidate) = inspect_window_candidate(window, context.virtual_screen) {
-        if candidate.qualifies(context.pid, context.virtual_screen) {
-            context.candidates.push(candidate);
-        }
-    }
-    1
-}
-
-#[cfg(windows)]
-fn inspect_window_candidate(
-    window: HWND,
-    virtual_screen: WindowRectangle,
-) -> Option<WindowCandidate> {
-    let (pid, thread_id) = window_identity(window)?;
-    let mut rectangle = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-    };
-    if unsafe { GetWindowRect(window, &mut rectangle) } == 0 {
-        return None;
-    }
-    let ex_style = read_extended_style(window).ok()?;
-    Some(WindowCandidate {
-        window: window as isize,
-        pid,
-        thread_id,
-        visible: unsafe { IsWindowVisible(window) } != 0,
-        unowned: unsafe { GetWindow(window, GW_OWNER) }.is_null(),
-        chrome_widget: window_class(window) == "Chrome_WidgetWin_1",
-        app_window: has_extended_style(ex_style, WS_EX_APPWINDOW),
-        tool_window: has_extended_style(ex_style, WS_EX_TOOLWINDOW),
-        no_redirection_bitmap: has_extended_style(ex_style, WS_EX_NOREDIRECTIONBITMAP),
-        rectangle: WindowRectangle {
-            left: rectangle.left,
-            top: rectangle.top,
-            right: rectangle.right,
-            bottom: rectangle.bottom,
-        },
-    })
-    .filter(|candidate| rectangle_is_nontrivial(candidate.rectangle, virtual_screen))
-}
-
-#[cfg(windows)]
-impl WindowCandidate {
-    fn qualifies(&self, pid: u32, virtual_screen: WindowRectangle) -> bool {
-        self.pid == pid
-            && self.thread_id != 0
-            && self.visible
-            && self.unowned
-            && self.chrome_widget
-            && self.app_window
-            && !self.tool_window
-            && !self.no_redirection_bitmap
-            && rectangle_is_nontrivial(self.rectangle, virtual_screen)
-    }
-}
-
-#[cfg(windows)]
-fn select_unique_candidate(
-    foreground: Option<WindowCandidate>,
-    candidates: &[WindowCandidate],
-    pid: u32,
-    virtual_screen: WindowRectangle,
-) -> Result<WindowCandidate, WindowTransparencyError> {
-    if let Some(candidate) = foreground {
-        if candidate.qualifies(pid, virtual_screen) {
-            return Ok(candidate);
-        }
-    }
-    let mut matches = candidates
-        .iter()
-        .copied()
-        .filter(|candidate| candidate.qualifies(pid, virtual_screen));
-    let candidate = matches.next().ok_or(WindowTransparencyError::Unavailable)?;
-    if matches.next().is_some() {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    Ok(candidate)
-}
-
-#[cfg(windows)]
-fn virtual_screen_rectangle() -> Result<WindowRectangle, WindowTransparencyError> {
-    let left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
-    let top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
-    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
-    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
-    if width <= 0 || height <= 0 {
-        return Err(WindowTransparencyError::Unavailable);
-    }
-    Ok(WindowRectangle {
-        left,
-        top,
-        right: left.saturating_add(width),
-        bottom: top.saturating_add(height),
-    })
-}
-
-#[cfg(windows)]
-fn rectangle_is_nontrivial(rectangle: WindowRectangle, screen: WindowRectangle) -> bool {
-    const MINIMUM_WIDTH: i64 = 300;
-    const MINIMUM_HEIGHT: i64 = 180;
-    const MINIMUM_VISIBLE_WIDTH: i64 = 150;
-    const MINIMUM_VISIBLE_HEIGHT: i64 = 90;
-
-    let width = i64::from(rectangle.right) - i64::from(rectangle.left);
-    let height = i64::from(rectangle.bottom) - i64::from(rectangle.top);
-    let visible_width =
-        i64::from(rectangle.right.min(screen.right)) - i64::from(rectangle.left.max(screen.left));
-    let visible_height =
-        i64::from(rectangle.bottom.min(screen.bottom)) - i64::from(rectangle.top.max(screen.top));
-    width >= MINIMUM_WIDTH
-        && height >= MINIMUM_HEIGHT
-        && visible_width >= MINIMUM_VISIBLE_WIDTH
-        && visible_height >= MINIMUM_VISIBLE_HEIGHT
 }
 
 impl NativeBridge {
@@ -2465,74 +241,6 @@ impl NativeBridge {
 
     pub async fn set_notification_sender(&self, sender: broadcast::Sender<BridgeNotification>) {
         *self.inner.notification_sender.write().await = Some(sender);
-    }
-
-    async fn context(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.ensure_epoch(epoch)?;
-        let params: ContextParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "context",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let request_generation = self.begin_context_request(epoch)?;
-        let requested_thread = params
-            .thread_id
-            .as_deref()
-            .map(|thread| thread.strip_prefix("local:").unwrap_or(thread))
-            .map(str::to_owned);
-
-        if let Some(thread_id) = requested_thread {
-            if let Some(workspace) = self.inner.manual_workspace.clone() {
-                self.replace_context(Some(thread_id), workspace, epoch, request_generation)
-                    .await?;
-            } else {
-                let resolver = self.inner.resolver.as_ref().ok_or_else(no_context_error)?;
-                let resolved = resolver.resolve_thread(&thread_id).await;
-                self.ensure_context_request(epoch, request_generation)?;
-                let resolved = resolved.map_err(map_resolver_error)?;
-                let workspace = Workspace::open(resolved.cwd).map(Arc::new);
-                self.ensure_context_request(epoch, request_generation)?;
-                let workspace = workspace.map_err(map_workspace_error)?;
-                self.replace_context(Some(thread_id), workspace, epoch, request_generation)
-                    .await?;
-            }
-        } else if lock_unpoisoned(&self.inner.state)
-            .current
-            .as_ref()
-            .is_none_or(|context| context.lifecycle_epoch != epoch)
-        {
-            if let Some(workspace) = self.inner.manual_workspace.clone() {
-                self.replace_context(None, workspace, epoch, request_generation)
-                    .await?;
-            }
-        }
-
-        let context = self.active_context_for_request(epoch, request_generation)?;
-        let result = ContextResult {
-            thread_id: context.thread_id,
-            project_name: context.workspace.display_name().to_owned(),
-            root_name: context.workspace.display_name().to_owned(),
-            root_path: context.workspace.root_path().to_string_lossy().into_owned(),
-            compatible: true,
-            reason: None,
-        };
-        serde_json::to_value(result).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "context",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
     }
 
     async fn replace_context(
@@ -2594,947 +302,6 @@ impl NativeBridge {
             }
             return Ok(());
         }
-    }
-
-    async fn list(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.list_with_scanner(params, epoch, |workspace, options| workspace.list(options))
-            .await
-    }
-
-    async fn git_history(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: GitHistoryParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "git_history",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let skip = params.skip.unwrap_or(0);
-        let limit = params.limit.unwrap_or(DEFAULT_GIT_HISTORY_LIMIT);
-        if skip > MAX_GIT_HISTORY_SKIP || limit == 0 || limit > MAX_GIT_HISTORY_LIMIT {
-            return Err(BridgeError::invalid_request());
-        }
-        let context = self.git_context(epoch)?;
-        let root = context.workspace.root_path().to_path_buf();
-
-        let branch_output = run_git_readonly(
-            root.clone(),
-            vec!["rev-parse".into(), "--abbrev-ref".into(), "HEAD".into()],
-            4096,
-        )
-        .await?;
-        if branch_output.stdout.truncated {
-            return Err(git_output_too_large_error());
-        }
-        let mut branch = String::from_utf8_lossy(&branch_output.stdout.bytes)
-            .trim()
-            .to_owned();
-        let detached = branch == "HEAD";
-        if detached {
-            let head_output = run_git_readonly(
-                root.clone(),
-                vec!["rev-parse".into(), "--short".into(), "HEAD".into()],
-                4096,
-            )
-            .await?;
-            if head_output.stdout.truncated {
-                return Err(git_output_too_large_error());
-            }
-            branch = format!(
-                "Detached at {}",
-                String::from_utf8_lossy(&head_output.stdout.bytes).trim()
-            );
-        }
-
-        let output = run_git_readonly(
-            root,
-            vec![
-                "log".into(),
-                "-z".into(),
-                "--date=iso-strict".into(),
-                "--format=%H%x00%h%x00%an%x00%aI%x00%s".into(),
-                format!("--max-count={}", limit + 1),
-                format!("--skip={skip}"),
-            ],
-            MAX_GIT_HISTORY_BYTES,
-        )
-        .await?;
-        if output.stdout.truncated {
-            return Err(git_output_too_large_error());
-        }
-        let mut commits = parse_git_history(&output.stdout.bytes)?;
-        let has_more = commits.len() > limit;
-        commits.truncate(limit);
-        self.ensure_active_context(&context, epoch)?;
-        serde_json::to_value(GitHistoryResult {
-            branch,
-            detached,
-            commits,
-            has_more,
-        })
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "git_history",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn git_commit(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: GitCommitParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "git_commit",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        if !valid_git_hash(&params.hash) {
-            return Err(BridgeError::invalid_request());
-        }
-        let context = self.git_context(epoch)?;
-        let root = context.workspace.root_path().to_path_buf();
-        let metadata = run_git_readonly(
-            root.clone(),
-            vec![
-                "show".into(),
-                "-s".into(),
-                "--date=iso-strict".into(),
-                "--format=%H%x00%h%x00%an%x00%ae%x00%aI%x00%B".into(),
-                params.hash.clone(),
-            ],
-            MAX_GIT_COMMIT_BYTES,
-        )
-        .await?;
-        if metadata.stdout.truncated {
-            return Err(git_output_too_large_error());
-        }
-        let (hash, short_hash, author, author_email, authored_at, message) =
-            parse_git_commit_metadata(&metadata.stdout.bytes)?;
-        let files_output = run_git_readonly(
-            root,
-            vec![
-                "diff-tree".into(),
-                "--no-commit-id".into(),
-                "--name-status".into(),
-                "-r".into(),
-                "-m".into(),
-                "--first-parent".into(),
-                "-M".into(),
-                "--root".into(),
-                "-z".into(),
-                params.hash,
-            ],
-            MAX_GIT_COMMIT_BYTES,
-        )
-        .await?;
-        if files_output.stdout.truncated {
-            return Err(git_output_too_large_error());
-        }
-        let mut files = parse_git_changed_files(&files_output.stdout.bytes)?;
-        let files_truncated = files.len() > MAX_GIT_CHANGED_FILES;
-        files.truncate(MAX_GIT_CHANGED_FILES);
-        self.ensure_active_context(&context, epoch)?;
-        serde_json::to_value(GitCommitResult {
-            hash,
-            short_hash,
-            author,
-            author_email,
-            authored_at,
-            message,
-            files,
-            files_truncated,
-        })
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "git_commit",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn git_diff(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: GitDiffParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "git_diff",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        if !valid_git_hash(&params.hash) || !valid_git_relative_path(&params.path) {
-            return Err(BridgeError::invalid_request());
-        }
-        let context = self.git_context(epoch)?;
-        let root = context.workspace.root_path().to_path_buf();
-        let output = run_git_readonly(
-            root,
-            vec![
-                "show".into(),
-                "--format=".into(),
-                "--no-ext-diff".into(),
-                "--no-textconv".into(),
-                "--unified=3".into(),
-                "--find-renames".into(),
-                params.hash,
-                "--".into(),
-                params.path.clone(),
-            ],
-            MAX_GIT_DIFF_BYTES,
-        )
-        .await?;
-        self.ensure_active_context(&context, epoch)?;
-        serde_json::to_value(GitDiffResult {
-            path: params.path,
-            content: String::from_utf8_lossy(&output.stdout.bytes).into_owned(),
-            truncated: output.stdout.truncated,
-        })
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "git_diff",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    fn git_context(&self, epoch: u64) -> Result<ActiveContext, BridgeError> {
-        let state = lock_unpoisoned(&self.inner.state);
-        self.ensure_epoch(epoch)?;
-        let context = state.current.clone().ok_or_else(no_context_error)?;
-        if context.lifecycle_epoch != epoch {
-            return Err(no_context_error());
-        }
-        Ok(context)
-    }
-
-    async fn preview(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.preview_with_reader(params, epoch, |workspace, relative_path| {
-            workspace.preview(&relative_path)
-        })
-        .await
-    }
-
-    async fn preview_save(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.preview_save_with_writer(
-            params,
-            epoch,
-            |workspace, relative_path, version, content| {
-                workspace.save_preview(&relative_path, &version, &content)
-            },
-        )
-        .await
-    }
-
-    async fn media_info(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.media_info_with_reader(params, epoch, |workspace, relative_path| {
-            workspace.media_info(&relative_path)
-        })
-        .await
-    }
-
-    async fn media_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: MediaChunkParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "media_chunk",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        if params.length == 0
-            || params.length > MAX_MEDIA_CHUNK_BYTES
-            || params.offset >= params.expected_size_bytes
-            || !valid_content_version(&params.expected_version)
-        {
-            return Err(BridgeError::invalid_request());
-        }
-
-        let context = {
-            let state = lock_unpoisoned(&self.inner.state);
-            self.ensure_epoch(epoch)?;
-            state.current.clone().ok_or_else(no_context_error)?
-        };
-        if context.lifecycle_epoch != epoch {
-            return Err(no_context_error());
-        }
-        let workspace = context.workspace.clone();
-        let chunk = tokio::task::spawn_blocking(move || {
-            workspace.media_chunk(
-                &params.relative_path,
-                params.offset,
-                params.length,
-                params.expected_size_bytes,
-                &params.expected_version,
-            )
-        })
-        .await;
-        self.ensure_active_context(&context, epoch)?;
-        let chunk = chunk
-            .map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "media_chunk",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            })?
-            .map_err(map_media_error)?;
-        serde_json::to_value(MediaChunkResult {
-            offset: chunk.offset,
-            data_base64: BASE64_STANDARD.encode(chunk.data),
-            eof: chunk.eof,
-        })
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "media_chunk",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn model_resource_info(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ModelResourceInfoParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "model_resource_info",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        if !valid_content_version(&params.expected_model_version) {
-            return Err(BridgeError::invalid_request());
-        }
-        let context = {
-            let state = lock_unpoisoned(&self.inner.state);
-            self.ensure_epoch(epoch)?;
-            state.current.clone().ok_or_else(no_context_error)?
-        };
-        if context.lifecycle_epoch != epoch {
-            return Err(no_context_error());
-        }
-        let workspace = context.workspace.clone();
-        let info = tokio::task::spawn_blocking(move || {
-            workspace.model_resource_info(
-                &params.model_relative_path,
-                &params.resource_uri,
-                &params.expected_model_version,
-            )
-        })
-        .await;
-        self.ensure_active_context(&context, epoch)?;
-        let info: ModelResourceInfo = info
-            .map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "model_resource_info",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            })?
-            .map_err(map_media_error)?;
-        serde_json::to_value(info).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "model_resource_info",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn model_resource_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ModelResourceChunkParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "model_resource_chunk",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        if params.length == 0
-            || params.length > MAX_MEDIA_CHUNK_BYTES
-            || params.offset >= params.expected_size_bytes
-            || !valid_content_version(&params.expected_model_version)
-            || !valid_content_version(&params.expected_version)
-        {
-            return Err(BridgeError::invalid_request());
-        }
-        let context = {
-            let state = lock_unpoisoned(&self.inner.state);
-            self.ensure_epoch(epoch)?;
-            state.current.clone().ok_or_else(no_context_error)?
-        };
-        if context.lifecycle_epoch != epoch {
-            return Err(no_context_error());
-        }
-        let workspace = context.workspace.clone();
-        let chunk = tokio::task::spawn_blocking(move || {
-            workspace.model_resource_chunk(ModelResourceChunkRequest {
-                model_relative_path: &params.model_relative_path,
-                resource_uri: &params.resource_uri,
-                expected_model_version: &params.expected_model_version,
-                offset: params.offset,
-                length: params.length,
-                expected_size_bytes: params.expected_size_bytes,
-                expected_version: &params.expected_version,
-            })
-        })
-        .await;
-        self.ensure_active_context(&context, epoch)?;
-        let chunk = chunk
-            .map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "model_resource_chunk",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            })?
-            .map_err(map_media_error)?;
-        serde_json::to_value(MediaChunkResult {
-            offset: chunk.offset,
-            data_base64: BASE64_STANDARD.encode(chunk.data),
-            eof: chunk.eof,
-        })
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "model_resource_chunk",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn entry_create(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: EntryCreateParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_create",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let entry = self
-            .active_workspace_operation(epoch, move |workspace| {
-                workspace.create_entry(
-                    &params.parent_relative_path,
-                    &params.name,
-                    params.kind.into(),
-                )
-            })
-            .await?;
-        serde_json::to_value(entry).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "entry_create",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn entry_rename(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: EntryRenameParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_rename",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let entry = self
-            .active_workspace_operation(epoch, move |workspace| {
-                workspace.rename_entry(&params.relative_path, &params.new_name)
-            })
-            .await?;
-        serde_json::to_value(entry).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "entry_rename",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn entry_move(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: EntryMoveParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_move",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let entry = self
-            .active_workspace_operation(epoch, move |workspace| {
-                workspace.move_entry(
-                    &params.relative_path,
-                    &params.destination_parent_relative_path,
-                )
-            })
-            .await?;
-        serde_json::to_value(entry).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "entry_move",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn entry_move_batch(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        // Try parsing as batch first (from keyboard shortcut), fall back to single (from context menu).
-        if let Ok(batch_params) = serde_json::from_value::<BatchMoveParams>(params.clone()) {
-            if batch_params.source_paths.is_empty() || batch_params.source_paths.len() > 1024 {
-                return Err(BridgeError::invalid_request());
-            }
-
-            let mut results = Vec::new();
-            for source_path in batch_params.source_paths {
-                let target_dir = batch_params.target_directory.clone();
-                let entry = self
-                    .active_workspace_operation(epoch, move |workspace| {
-                        workspace.move_entry(&source_path, &target_dir)
-                    })
-                    .await?;
-                results.push(entry);
-            }
-
-            return serde_json::to_value(json!({ "entries": results })).map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "entry_move_batch",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            });
-        }
-
-        // Fall back to single-entry move for backward compatibility
-        self.entry_move(params, epoch).await
-    }
-
-    async fn entry_copy(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: BatchCopyParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_copy",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        if params.source_paths.is_empty() || params.source_paths.len() > 1024 {
-            return Err(BridgeError::invalid_request());
-        }
-
-        let mut results = Vec::new();
-        for source_path in params.source_paths {
-            let target_dir = params.target_directory.clone();
-            let entry = self
-                .active_workspace_operation(epoch, move |workspace| {
-                    workspace.copy_entry(&source_path, &target_dir)
-                })
-                .await?;
-            results.push(entry);
-        }
-
-        serde_json::to_value(json!({ "entries": results })).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "entry_copy",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn entry_delete(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: EntryPathParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_delete",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        self.active_workspace_operation(epoch, move |workspace| {
-            workspace.delete_entry(&params.relative_path)
-        })
-        .await?;
-        Ok(json!({ "deleted": true }))
-    }
-
-    async fn entry_reveal(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.entry_reveal_with_opener(params, epoch, reveal_in_file_explorer)
-            .await
-    }
-
-    async fn entry_reveal_with_opener<F>(
-        &self,
-        params: Value,
-        epoch: u64,
-        opener: F,
-    ) -> Result<Value, BridgeError>
-    where
-        F: FnOnce(&Path) -> Result<(), WorkspaceError> + Send + 'static,
-    {
-        let params: EntryPathParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_reveal_with_opener",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        self.active_workspace_operation(epoch, move |workspace| {
-            let target = workspace.reveal_path(&params.relative_path)?;
-            opener(&target)
-        })
-        .await?;
-        Ok(json!({ "revealed": true }))
-    }
-
-    async fn entry_import_begin(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ImportBeginParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_import_begin",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        match (params.kind, params.size_bytes) {
-            (EntryCreateKind::File, Some(_)) | (EntryCreateKind::Directory, None) => {}
-            _ => return Err(BridgeError::invalid_request()),
-        }
-
-        let session_id = CapabilityToken::generate().expose().to_owned();
-        let staging_nonce = CapabilityToken::generate().expose().to_owned();
-        let bridge = self.clone();
-        let response_session_id = session_id.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut state = lock_unpoisoned(&bridge.inner.state);
-            bridge.ensure_epoch(epoch)?;
-            if state.import_session.is_some() {
-                return Err(import_busy_error());
-            }
-            let context = state.current.as_ref().ok_or_else(no_context_error)?;
-            if context.lifecycle_epoch != epoch {
-                return Err(cancelled_error());
-            }
-            let session = context
-                .workspace
-                .begin_import(
-                    &params.destination_parent_relative_path,
-                    &params.name,
-                    params.kind.into(),
-                    params.size_bytes,
-                    &staging_nonce,
-                )
-                .map_err(map_import_error)?;
-            if bridge.ensure_epoch(epoch).is_err() {
-                let _ = session.abort();
-                return Err(cancelled_error());
-            }
-            state.import_session = Some(ActiveImportSession {
-                id: session_id,
-                lifecycle_epoch: epoch,
-                context_revision: context.revision,
-                session,
-            });
-            Ok(())
-        })
-        .await
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "entry_import_begin",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })??;
-
-        Ok(json!({
-            "sessionId": response_session_id,
-            "chunkSize": MAX_IMPORT_CHUNK_BYTES,
-        }))
-    }
-
-    async fn entry_import_directory(
-        &self,
-        params: Value,
-        epoch: u64,
-    ) -> Result<Value, BridgeError> {
-        let params: ImportDirectoryParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_import_directory",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        self.active_import_operation(epoch, params.session_id, move |session| {
-            session.create_directory(&params.relative_path)
-        })
-        .await?;
-        Ok(json!({ "created": true }))
-    }
-
-    async fn entry_import_file_begin(
-        &self,
-        params: Value,
-        epoch: u64,
-    ) -> Result<Value, BridgeError> {
-        let params: ImportFileBeginParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_import_file_begin",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        self.active_import_operation(epoch, params.session_id, move |session| {
-            session.begin_file(&params.relative_path, params.size_bytes)
-        })
-        .await?;
-        Ok(json!({ "ready": true }))
-    }
-
-    async fn entry_import_chunk(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ImportChunkParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_import_chunk",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let bytes = BASE64_STANDARD
-            .decode(params.data_base64)
-            .map_err(|error| {
-                operation_error(
-                    BridgeError::invalid_request(),
-                    "entry_import_chunk",
-                    format!("base64DecodeError={error}; rejected payload omitted"),
-                )
-            })?;
-        if bytes.is_empty() || bytes.len() > MAX_IMPORT_CHUNK_BYTES {
-            return Err(BridgeError::invalid_request());
-        }
-        let next_offset = self
-            .active_import_operation(epoch, params.session_id, move |session| {
-                session.append_chunk(params.offset, &bytes)
-            })
-            .await?;
-        Ok(json!({ "nextOffset": next_offset }))
-    }
-
-    async fn entry_import_file_finish(
-        &self,
-        params: Value,
-        epoch: u64,
-    ) -> Result<Value, BridgeError> {
-        let params: ImportSessionParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_import_file_finish",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        self.active_import_operation(epoch, params.session_id, |session| session.finish_file())
-            .await?;
-        Ok(json!({ "finished": true }))
-    }
-
-    async fn entry_import_commit(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ImportSessionParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_import_commit",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        validate_import_session_id(&params.session_id)?;
-        let bridge = self.clone();
-        let entry = tokio::task::spawn_blocking(move || {
-            let mut state = lock_unpoisoned(&bridge.inner.state);
-            bridge.ensure_epoch(epoch)?;
-            validate_active_import(&state, epoch, &params.session_id)?;
-            let active = state
-                .import_session
-                .take()
-                .ok_or_else(invalid_import_session_error)?;
-            // `ImportSession::commit` has no fallible work after its atomic
-            // rename, so consuming it here cannot strand an untracked stage.
-            active.session.commit().map_err(map_import_error)
-        })
-        .await
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "entry_import_commit",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })??;
-        Ok(json!({ "entry": entry }))
-    }
-
-    async fn entry_import_abort(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        let params: ImportSessionParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "entry_import_abort",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        validate_import_session_id(&params.session_id)?;
-        let bridge = self.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut state = lock_unpoisoned(&bridge.inner.state);
-            bridge.ensure_epoch(epoch)?;
-            validate_active_import(&state, epoch, &params.session_id)?;
-            let active = state
-                .import_session
-                .take()
-                .ok_or_else(invalid_import_session_error)?;
-            active.session.abort().map_err(map_import_error)
-        })
-        .await
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "entry_import_abort",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })??;
-        Ok(json!({ "aborted": true }))
     }
 
     async fn active_import_operation<T, F>(
@@ -3614,546 +381,6 @@ impl NativeBridge {
         })?
     }
 
-    async fn preview_save_with_writer<F>(
-        &self,
-        params: Value,
-        epoch: u64,
-        writer: F,
-    ) -> Result<Value, BridgeError>
-    where
-        F: FnOnce(Arc<Workspace>, String, String, Vec<u8>) -> Result<PreviewResult, WorkspaceError>
-            + Send
-            + 'static,
-    {
-        self.ensure_epoch(epoch)?;
-        let params: PreviewSaveParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "preview_save_with_writer",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        if params.expected_version.len() != 64
-            || !params
-                .expected_version
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err(BridgeError::invalid_request());
-        }
-        let content = BASE64_STANDARD
-            .decode(params.content_base64)
-            .map_err(|error| {
-                operation_error(
-                    BridgeError::invalid_request(),
-                    "preview_save_with_writer",
-                    format!("base64DecodeError={error}; rejected payload omitted"),
-                )
-            })?;
-        if content.len() > MAX_PREVIEW_BYTES {
-            return Err(map_workspace_error(WorkspaceError::ContentTooLarge));
-        }
-
-        // Mutation is intentionally performed under the active-context lock.
-        // Context clear/switch and lifecycle invalidation therefore linearize
-        // either before this save begins or after it has fully synced.
-        let bridge = self.clone();
-        tokio::task::spawn_blocking(move || {
-            let state = lock_unpoisoned(&bridge.inner.state);
-            bridge.ensure_epoch(epoch)?;
-            let context = state.current.as_ref().ok_or_else(no_context_error)?;
-            if context.lifecycle_epoch != epoch {
-                return Err(cancelled_error());
-            }
-            let preview = writer(
-                context.workspace.clone(),
-                params.relative_path,
-                params.expected_version,
-                content,
-            )
-            .map_err(map_workspace_error)?;
-            serde_json::to_value(preview).map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "preview_save_with_writer",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            })
-        })
-        .await
-        .map_err(|error| {
-            operation_error(
-                internal_error(),
-                "preview_save_with_writer",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })?
-    }
-
-    async fn list_with_scanner<F>(
-        &self,
-        params: Value,
-        epoch: u64,
-        scanner: F,
-    ) -> Result<Value, BridgeError>
-    where
-        F: FnOnce(Arc<Workspace>, ListOptions) -> Result<ListPage, WorkspaceError> + Send + 'static,
-    {
-        self.ensure_epoch(epoch)?;
-        let params: ListParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "list_with_scanner",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let context = {
-            let state = lock_unpoisoned(&self.inner.state);
-            self.ensure_epoch(epoch)?;
-            state.current.clone().ok_or_else(no_context_error)?
-        };
-        if context.lifecycle_epoch != epoch {
-            return Err(no_context_error());
-        }
-        let options = ListOptions {
-            relative_path: params.relative_path,
-            cursor: params.cursor,
-            limit: params.limit.unwrap_or(200),
-            show_hidden: true,
-            show_ignored: true,
-        };
-        let workspace = context.workspace.clone();
-        let page = tokio::task::spawn_blocking(move || scanner(workspace, options)).await;
-        self.ensure_active_context(&context, epoch)?;
-        let page = page
-            .map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "list_with_scanner",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            })?
-            .map_err(map_workspace_error)?;
-        serde_json::to_value(page).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "list_with_scanner",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn preview_with_reader<F>(
-        &self,
-        params: Value,
-        epoch: u64,
-        reader: F,
-    ) -> Result<Value, BridgeError>
-    where
-        F: FnOnce(Arc<Workspace>, String) -> Result<PreviewResult, WorkspaceError> + Send + 'static,
-    {
-        self.ensure_epoch(epoch)?;
-        let params: PreviewParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "preview_with_reader",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let context = {
-            let state = lock_unpoisoned(&self.inner.state);
-            self.ensure_epoch(epoch)?;
-            state.current.clone().ok_or_else(no_context_error)?
-        };
-        if context.lifecycle_epoch != epoch {
-            return Err(no_context_error());
-        }
-        let workspace = context.workspace.clone();
-        let preview =
-            tokio::task::spawn_blocking(move || reader(workspace, params.relative_path)).await;
-        self.ensure_active_context(&context, epoch)?;
-        let preview = preview
-            .map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "preview_with_reader",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            })?
-            .map_err(map_workspace_error)?;
-        serde_json::to_value(preview).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "preview_with_reader",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn media_info_with_reader<F>(
-        &self,
-        params: Value,
-        epoch: u64,
-        reader: F,
-    ) -> Result<Value, BridgeError>
-    where
-        F: FnOnce(Arc<Workspace>, String) -> Result<MediaInfo, WorkspaceError> + Send + 'static,
-    {
-        self.ensure_epoch(epoch)?;
-        let params: MediaInfoParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "media_info_with_reader",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let context = {
-            let state = lock_unpoisoned(&self.inner.state);
-            self.ensure_epoch(epoch)?;
-            state.current.clone().ok_or_else(no_context_error)?
-        };
-        if context.lifecycle_epoch != epoch {
-            return Err(no_context_error());
-        }
-        let workspace = context.workspace.clone();
-        let info =
-            tokio::task::spawn_blocking(move || reader(workspace, params.relative_path)).await;
-        self.ensure_active_context(&context, epoch)?;
-        let info = info
-            .map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "media_info_with_reader",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            })?
-            .map_err(map_media_error)?;
-        serde_json::to_value(info).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "media_info_with_reader",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn settings_get(&self, params: Value) -> Result<Value, BridgeError> {
-        require_empty_object(&params)?;
-        serde_json::to_value(read_unpoisoned(&self.inner.settings).clone()).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "settings_get",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })
-    }
-
-    async fn update_startup(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        require_empty_object(&params)?;
-        self.ensure_epoch(epoch)?;
-        let result = self
-            .inner
-            .update_checker
-            .check_startup(env!("CARGO_PKG_VERSION"))
-            .await?;
-        // This launch-wide metadata has no workspace capability. A project switch
-        // while GitHub responds must not turn a valid startup check into CANCELLED.
-        serde_json::to_value(result).map_err(|_| update_internal_error())
-    }
-
-    async fn update_check(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        require_empty_object(&params)?;
-        self.ensure_epoch(epoch)?;
-        let result = self
-            .inner
-            .update_checker
-            .check(env!("CARGO_PKG_VERSION"))
-            .await?;
-        self.ensure_epoch(epoch)?;
-        serde_json::to_value(result).map_err(|_| update_internal_error())
-    }
-
-    async fn update_install(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        #[cfg(windows)]
-        if UPDATE_INSTALLER_ACTIVE.load(Ordering::Acquire) {
-            return Err(update_busy_error());
-        }
-        self.ensure_epoch(epoch)?;
-        let params: UpdateInstallParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "update_install",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        let requested = Version::parse(&params.latest_version).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "update_install",
-                format!("versionParseError={error}; rejected version value omitted"),
-            )
-        })?;
-        if requested.to_string() != params.latest_version
-            || !requested.pre.is_empty()
-            || !requested.build.is_empty()
-        {
-            return Err(BridgeError::invalid_request());
-        }
-        let _guard = self
-            .inner
-            .update_install_lock
-            .try_lock()
-            .map_err(|_| update_busy_error())?;
-        let update = self
-            .inner
-            .update_checker
-            .download_installer(
-                env!("CARGO_PKG_VERSION"),
-                &params.latest_version,
-                &UpdateProgress {
-                    sender: self.inner.notification_sender.read().await.clone(),
-                    epoch,
-                    version: params.latest_version.clone(),
-                },
-            )
-            .await?;
-        self.ensure_epoch(epoch)?;
-        let progress = UpdateProgress {
-            sender: self.inner.notification_sender.read().await.clone(),
-            epoch,
-            version: params.latest_version.clone(),
-        };
-        progress.publish("waiting for installer window", json!({"timeoutMs":15000}));
-        let result = tokio::task::spawn_blocking(move || launch_downloaded_update(update))
-            .await
-            .map_err(|_| update_internal_error())??;
-        progress.publish(
-            if result.window_ready {
-                "installer window shown"
-            } else {
-                "installer window unconfirmed"
-            },
-            json!({"windowReady":result.window_ready,"installationComplete":false}),
-        );
-        serde_json::to_value(result).map_err(|_| update_internal_error())
-    }
-
-    fn window_transparency_set(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.ensure_epoch(epoch)?;
-        let params: WindowTransparencyParams = serde_json::from_value(params).map_err(|error| {
-            operation_error(
-                BridgeError::invalid_request(),
-                "window_transparency_set",
-                format!(
-                    "category={:?}; line={}; column={}; rejected payload omitted",
-                    error.classify(),
-                    error.line(),
-                    error.column()
-                ),
-            )
-        })?;
-        self.inner
-            .window_transparency
-            .set_enabled(params.enabled, &self.inner.lifecycle_epoch, epoch)
-            .map_err(map_window_transparency_error)?;
-        self.ensure_epoch(epoch)?;
-        Ok(json!({
-            "enabled": params.enabled,
-            "background": WINDOW_TRANSPARENCY_BACKGROUND,
-        }))
-    }
-
-    async fn settings_set(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.settings_set_with_preparer(params, epoch, |store, settings| store.prepare(&settings))
-            .await
-    }
-
-    async fn settings_set_with_preparer<F>(
-        &self,
-        params: Value,
-        epoch: u64,
-        prepare: F,
-    ) -> Result<Value, BridgeError>
-    where
-        F: FnOnce(SettingsStore, Settings) -> Result<PreparedSettings, WorkspaceError>
-            + Send
-            + 'static,
-    {
-        self.ensure_epoch(epoch)?;
-        let _update = self.inner.settings_update_lock.lock().await;
-        self.ensure_epoch(epoch)?;
-        let patch: SettingsPatch = if params.get("settings").is_some() {
-            serde_json::from_value::<SettingsWrapper>(params)
-                .map(|wrapper| wrapper.settings)
-                .map_err(|error| {
-                    operation_error(
-                        BridgeError::invalid_request(),
-                        "settings_set_with_preparer",
-                        format!(
-                            "category={:?}; line={}; column={}; rejected payload omitted",
-                            error.classify(),
-                            error.line(),
-                            error.column()
-                        ),
-                    )
-                })?
-        } else {
-            serde_json::from_value(params).map_err(|error| {
-                operation_error(
-                    BridgeError::invalid_request(),
-                    "settings_set_with_preparer",
-                    format!(
-                        "category={:?}; line={}; column={}; rejected payload omitted",
-                        error.classify(),
-                        error.line(),
-                        error.column()
-                    ),
-                )
-            })?
-        };
-        let mut updated = read_unpoisoned(&self.inner.settings).clone();
-        updated.apply(patch).map_err(map_workspace_error)?;
-        let response = serde_json::to_value(&updated).map_err(|error| {
-            operation_error(
-                internal_error(),
-                "settings_set_with_preparer",
-                format!(
-                    "exceptionType={}; cause={error}",
-                    std::any::type_name_of_val(&error)
-                ),
-            )
-        })?;
-        let store = self.inner.settings_store.clone();
-        let to_prepare = updated.clone();
-        let prepared = tokio::task::spawn_blocking(move || prepare(store, to_prepare)).await;
-        let mut settings = write_unpoisoned(&self.inner.settings);
-        let _state = lock_unpoisoned(&self.inner.state);
-        self.ensure_epoch(epoch)?;
-        let prepared = prepared
-            .map_err(|error| {
-                operation_error(
-                    internal_error(),
-                    "settings_set_with_preparer",
-                    format!(
-                        "exceptionType={}; cause={error}",
-                        std::any::type_name_of_val(&error)
-                    ),
-                )
-            })?
-            .map_err(map_workspace_error)?;
-        prepared.commit().map_err(map_workspace_error)?;
-        *settings = updated;
-        Ok(response)
-    }
-
-    async fn watch_start(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        self.ensure_epoch(epoch)?;
-        require_empty_object(&params)?;
-        let context = {
-            let state = lock_unpoisoned(&self.inner.state);
-            self.ensure_epoch(epoch)?;
-            state.current.clone().ok_or_else(no_context_error)?
-        };
-        let visibility = self.watch_visibility();
-        let subscription = WorkspaceWatcher::subscribe_with_visibility(
-            context.workspace.clone(),
-            Duration::from_millis(150),
-            visibility,
-        );
-        self.ensure_epoch(epoch)?;
-        let mut state = lock_unpoisoned(&self.inner.state);
-        self.ensure_epoch(epoch)?;
-        if state
-            .current
-            .as_ref()
-            .is_none_or(|active| active.revision != context.revision)
-        {
-            return Err(cancelled_error());
-        }
-        let subscription = subscription.map_err(map_workspace_error)?;
-        let generation = self.inner.watch_generation.fetch_add(1, Ordering::AcqRel) + 1;
-        if let Some(task) = state.watch_task.take() {
-            task.abort();
-        }
-        state.watch_enabled = true;
-        state.watch_visibility = None;
-        self.install_watcher_locked(&mut state, subscription, generation, epoch);
-        Ok(json!({ "watching": true }))
-    }
-
-    fn watch_stop(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        require_empty_object(&params)?;
-        let mut state = lock_unpoisoned(&self.inner.state);
-        self.ensure_epoch(epoch)?;
-        self.stop_watcher_locked(&mut state);
-        Ok(json!({ "watching": false }))
-    }
-
-    fn context_clear(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
-        require_empty_object(&params)?;
-        let mut state = lock_unpoisoned(&self.inner.state);
-        self.ensure_epoch(epoch)?;
-        let request_generation = self.bump_context_request_generation();
-        self.ensure_context_request(epoch, request_generation)?;
-        self.stop_watcher_locked(&mut state);
-        abort_import_locked(&mut state);
-        state.current = None;
-        self.inner.context_revision.fetch_add(1, Ordering::AcqRel);
-        Ok(json!({ "cleared": true }))
-    }
-
     fn stop_watcher_locked(&self, state: &mut BridgeState) {
         state.watch_enabled = false;
         self.inner.watch_generation.fetch_add(1, Ordering::AcqRel);
@@ -4223,13 +450,6 @@ impl NativeBridge {
                 }
             }
         }));
-    }
-
-    fn watch_visibility(&self) -> WatchVisibility {
-        WatchVisibility {
-            show_hidden: true,
-            show_ignored: true,
-        }
     }
 
     fn begin_context_request(&self, epoch: u64) -> Result<u64, BridgeError> {
@@ -4322,524 +542,6 @@ impl NativeBridge {
     }
 }
 
-#[async_trait]
-impl BridgeHandler for NativeBridge {
-    async fn handle(&self, request: BindingRequest) -> Result<Value, BridgeError> {
-        let epoch = request.lifecycle_epoch;
-        let method = request.method.clone();
-        let started = std::time::Instant::now();
-        let log_operation = !method.starts_with("explorer.runtime.")
-            && method != "explorer.startup.examples.status"
-            && method != "explorer.plugins.status"
-            && !method.ends_with(".chunk")
-            && !method.ends_with(".resource.chunk");
-        let request_ref = if request.id.starts_with("cle-")
-            && request.id.len() < 80
-            && request
-                .id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-        {
-            request.id.clone()
-        } else {
-            "untrusted-request-reference".into()
-        };
-        let mut operation=log_operation.then(||crate::runtime_log::Operation::start("native-bridge",method.clone(),json!({"requestRef":request_ref,"lifecycleEpoch":epoch,"contextRevision":self.inner.context_revision.load(Ordering::Acquire),"requestSummary":request_summary(&request.params)})));
-        // Keep validation and early `?`/returns inside the result boundary so every
-        // method (including rejected requests) reaches its terminal diagnostic.
-        let result = async {
-            self.ensure_epoch(epoch)?;
-            match request.method.as_str() {
-                "explorer.storage.request" => {
-                  let context=crate::renderer_storage::request_context(&request.params);
-                  crate::renderer_storage::request(request.params).map_err(|e| {
-                    crate::runtime_log::record("storage","native persistence","failed",json!({"code":"STORAGE_FAILED","requestContext":context,"ioKind":format!("{:?}",e.kind()),"osErrorCode":e.raw_os_error(),"errorChain":crate::network_diagnostics::error_details(&e)["errorChain"]}));
-                    BridgeError::new("STORAGE_FAILED",format!("Code-Codex storage failed: {e}"))
-                  })
-                },
-                "explorer.runtime.check" => Ok(crate::support_checks::run().await),
-                "explorer.startup.examples.status" => crate::startup_examples::status(),
-                "explorer.startup.examples.download" => {
-                    if request.params.as_object().is_none_or(|p|p.keys().any(|k|k!="id")){return Err(BridgeError::invalid_request());}
-                    let id=request.params.get("id").and_then(Value::as_str).ok_or_else(BridgeError::invalid_request)?;
-                    crate::startup_examples::download(id).await
-                }
-                "explorer.startup.examples.chunk" => {
-                    if request.params.as_object().is_none_or(|p|p.keys().any(|k|k!="id"&&k!="offset")){return Err(BridgeError::invalid_request());}
-                    let id=request.params.get("id").and_then(Value::as_str).ok_or_else(BridgeError::invalid_request)?;
-                    let offset=request.params.get("offset").and_then(Value::as_u64).and_then(|n|usize::try_from(n).ok()).ok_or_else(BridgeError::invalid_request)?;
-                    crate::startup_examples::chunk(id,offset)
-                }
-                "explorer.installation.open" => {
-                    if request.params.as_object().is_some_and(|p| !p.is_empty()) { return Err(BridgeError::invalid_request()); }
-                    let root = workspace_service::application_paths::install_root().map_err(|e|BridgeError::new("INSTALLATION_ROOT",format!("Resolving the installation folder failed: {e}")))?.ok_or_else(||BridgeError::new("INSTALLATION_UNAVAILABLE","No installed Code-Codex directory was found."))?;
-                    workspace_service::application_paths::validate_install_root(&root).map_err(|e|BridgeError::new("INSTALLATION_ROOT",format!("Validating the installation folder failed: {e}")))?;
-                    #[cfg(windows)]
-                    {
-                        tokio::task::spawn_blocking(move || reveal_in_file_explorer(&root)).await.map_err(|e|BridgeError::new("INSTALLATION_OPEN",format!("Installation folder worker failed: {e}")))?.map_err(|e|BridgeError::new("INSTALLATION_OPEN",format!("Opening the installation folder failed: {e}")))?;
-                        Ok(json!({"opened":true}))
-                    }
-                    #[cfg(not(windows))]
-                    { Err(BridgeError::new("UNSUPPORTED","Opening the installation folder is unavailable on this platform.")) }
-                }
-                "explorer.runtime.list" => {
-                    crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))
-                }
-                "explorer.runtime.read" => {
-                    let id = request
-                        .params
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .ok_or_else(BridgeError::invalid_request)?;
-                    crate::runtime_log::read(id).map_err(|e| BridgeError::new("RUNTIME_LOG", e))
-                }
-                "explorer.runtime.append" => {
-                    let events = request
-                        .params
-                        .get("events")
-                        .and_then(Value::as_array)
-                        .filter(|e| e.len() <= 128)
-                        .ok_or_else(BridgeError::invalid_request)?;
-                    // Validate the whole batch before appending any event.
-                    for event in events {
-                        for key in ["source", "action", "outcome"] {
-                            if !event.get(key).and_then(Value::as_str).is_some_and(|s| {
-                                !s.is_empty() && s.len() <= 160 && !s.chars().any(char::is_control)
-                            }) {
-                                return Err(BridgeError::invalid_request());
-                            }
-                        }
-                        if !event.get("details").is_some_and(Value::is_object)
-                            || event.to_string().len() > 8192
-                        {
-                            return Err(BridgeError::invalid_request());
-                        }
-                    }
-                    for event in events {
-                        crate::runtime_log::record(
-                            event["source"].as_str().unwrap(),
-                            event["action"].as_str().unwrap(),
-                            event["outcome"].as_str().unwrap(),
-                            event["details"].clone(),
-                        );
-                    }
-                    Ok(json!({"accepted":events.len()}))
-                }
-                "explorer.context" => self.context(request.params, epoch).await,
-                "explorer.context.clear" => self.context_clear(request.params, epoch),
-                "explorer.list" => self.list(request.params, epoch).await,
-                "explorer.git.history" => self.git_history(request.params, epoch).await,
-                "explorer.git.commit" => self.git_commit(request.params, epoch).await,
-                "explorer.git.diff" => self.git_diff(request.params, epoch).await,
-                "explorer.preview" => self.preview(request.params, epoch).await,
-                "explorer.preview.save" => self.preview_save(request.params, epoch).await,
-                "explorer.media.info" => self.media_info(request.params, epoch).await,
-                "explorer.media.chunk" => self.media_chunk(request.params, epoch).await,
-                "explorer.model.resource.info" => {
-                    self.model_resource_info(request.params, epoch).await
-                }
-                "explorer.model.resource.chunk" => {
-                    self.model_resource_chunk(request.params, epoch).await
-                }
-                "explorer.entry.create" => self.entry_create(request.params, epoch).await,
-                "explorer.entry.rename" => self.entry_rename(request.params, epoch).await,
-                "explorer.entry.move" => self.entry_move_batch(request.params, epoch).await,
-                "explorer.entry.copy" => self.entry_copy(request.params, epoch).await,
-                "explorer.entry.delete" => self.entry_delete(request.params, epoch).await,
-                "explorer.entry.reveal" => self.entry_reveal(request.params, epoch).await,
-                "explorer.entry.import.begin" => {
-                    self.entry_import_begin(request.params, epoch).await
-                }
-                "explorer.entry.import.directory" => {
-                    self.entry_import_directory(request.params, epoch).await
-                }
-                "explorer.entry.import.file.begin" => {
-                    self.entry_import_file_begin(request.params, epoch).await
-                }
-                "explorer.entry.import.chunk" => {
-                    self.entry_import_chunk(request.params, epoch).await
-                }
-                "explorer.entry.import.file.finish" => {
-                    self.entry_import_file_finish(request.params, epoch).await
-                }
-                "explorer.entry.import.commit" => {
-                    self.entry_import_commit(request.params, epoch).await
-                }
-                "explorer.entry.import.abort" => {
-                    self.entry_import_abort(request.params, epoch).await
-                }
-                "explorer.watch.start" => self.watch_start(request.params, epoch).await,
-                "explorer.watch.stop" => self.watch_stop(request.params, epoch),
-                "explorer.settings.get" => self.settings_get(request.params).await,
-                "explorer.settings.set" => self.settings_set(request.params, epoch).await,
-                "explorer.plugins.status" => crate::plugin_store::status(),
-                "explorer.plugins.install"
-                | "explorer.plugins.cancel"
-                | "explorer.plugins.load" => {
-                    let id = request
-                        .params
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| BridgeError::new("PLUGIN_ID", "A plugin ID is required."))?;
-                    match method.as_str() {
-                        "explorer.plugins.install" => crate::plugin_store::install(id).await,
-                        "explorer.plugins.cancel" => crate::plugin_store::cancel(id),
-                        _ => crate::plugin_store::sources(id)
-                            .map(|source| json!({"id":id,"verifiedSource":source})),
-                    }
-                }
-                "explorer.update.startup" => self.update_startup(request.params, epoch).await,
-                "explorer.update.check" => self.update_check(request.params, epoch).await,
-                "explorer.update.install" => self.update_install(request.params, epoch).await,
-                "explorer.window.transparency.set" => {
-                    self.window_transparency_set(request.params, epoch)
-                }
-                _ => Err(BridgeError::new(
-                    "INVALID_REQUEST",
-                    "The native method is not allowed.",
-                )),
-            }
-        }
-        .await;
-        if log_operation || (result.is_err() && !method.starts_with("explorer.runtime.")) {
-            let mut details = json!({"requestRef":request_ref,"durationMs":started.elapsed().as_millis(),"lifecycleEpoch":epoch,"currentLifecycleEpoch":self.inner.lifecycle_epoch.load(Ordering::Acquire),"contextRevision":self.inner.context_revision.load(Ordering::Acquire)});
-            if let Err(error) = &result {
-                details["errorCode"] = json!(error.code);
-                details["message"] = json!(error.message.chars().take(1500).collect::<String>());
-            }
-            if let Ok(value) = &result {
-                details["resultSummary"] = result_summary(value);
-                if method == "explorer.context" {
-                    details["workspaceAvailable"] = json!(value.get("rootName").is_some());
-                }
-            }
-            if let Some(operation) = operation.as_mut() {
-                operation.finish(if result.is_ok() { "passed" } else { "failed" }, details);
-            } else {
-                crate::runtime_log::record("native-bridge", &method, "failed", details);
-            }
-        }
-        result
-    }
-
-    fn lifecycle_epoch(&self) -> u64 {
-        self.inner.lifecycle_epoch.load(Ordering::Acquire)
-    }
-
-    fn invalidate_lifecycle(&self) {
-        self.inner.lifecycle_epoch.fetch_add(1, Ordering::AcqRel);
-        if self.inner.window_transparency.restore().is_err() {
-            tracing::warn!(event = "window_transparency_restore_failed");
-        }
-        let mut state = lock_unpoisoned(&self.inner.state);
-        self.bump_context_request_generation();
-        self.stop_watcher_locked(&mut state);
-        abort_import_locked(&mut state);
-        state.current = None;
-        self.inner.context_revision.fetch_add(1, Ordering::AcqRel);
-    }
-}
-
-fn lock_unpoisoned<T>(mutex: &StdMutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn abort_import_locked(state: &mut BridgeState) {
-    if let Some(active) = state.import_session.take()
-        && active.session.abort().is_err()
-    {
-        tracing::warn!(event = "workspace_import_cleanup_failed");
-    }
-}
-
-fn validate_import_session_id(session_id: &str) -> Result<(), BridgeError> {
-    if session_id.len() == 43
-        && session_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        Ok(())
-    } else {
-        Err(BridgeError::invalid_request())
-    }
-}
-
-fn validate_active_import(
-    state: &BridgeState,
-    epoch: u64,
-    session_id: &str,
-) -> Result<(), BridgeError> {
-    let context = state.current.as_ref().ok_or_else(no_context_error)?;
-    let active = state
-        .import_session
-        .as_ref()
-        .ok_or_else(invalid_import_session_error)?;
-    if active.id != session_id {
-        return Err(invalid_import_session_error());
-    }
-    if active.lifecycle_epoch != epoch
-        || context.lifecycle_epoch != epoch
-        || active.context_revision != context.revision
-    {
-        return Err(cancelled_error());
-    }
-    Ok(())
-}
-
-fn invalid_import_session_error() -> BridgeError {
-    BridgeError::new("INVALID_REQUEST", "The file import session is invalid.")
-}
-
-fn import_busy_error() -> BridgeError {
-    BridgeError::new("CONFLICT", "Another file import is already active.")
-}
-
-fn read_unpoisoned<T>(lock: &std::sync::RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
-    lock.read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn write_unpoisoned<T>(lock: &std::sync::RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
-    lock.write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn require_empty_object(value: &Value) -> Result<(), BridgeError> {
-    if value.as_object().is_some_and(serde_json::Map::is_empty) || value.is_null() {
-        Ok(())
-    } else {
-        Err(BridgeError::invalid_request())
-    }
-}
-
-fn valid_content_version(version: &str) -> bool {
-    version.len() == 64
-        && version
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-fn valid_git_hash(hash: &str) -> bool {
-    matches!(hash.len(), 40 | 64) && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn valid_git_relative_path(path: &str) -> bool {
-    if path.is_empty() || path.contains('\0') {
-        return false;
-    }
-    let path = Path::new(path);
-    !path.is_absolute()
-        && path
-            .components()
-            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
-        && path
-            .components()
-            .any(|component| matches!(component, Component::Normal(_)))
-}
-
-fn parse_git_history(bytes: &[u8]) -> Result<Vec<GitCommitSummary>, BridgeError> {
-    let fields = nul_fields(bytes);
-    if fields.is_empty() {
-        return Ok(Vec::new());
-    }
-    if fields.len() % 5 != 0 {
-        return Err(internal_error());
-    }
-    let mut commits = Vec::with_capacity(fields.len() / 5);
-    for fields in fields.chunks_exact(5) {
-        if !valid_git_hash(fields[0]) {
-            return Err(internal_error());
-        }
-        commits.push(GitCommitSummary {
-            hash: fields[0].to_owned(),
-            short_hash: fields[1].to_owned(),
-            author: fields[2].to_owned(),
-            authored_at: fields[3].to_owned(),
-            subject: fields[4].to_owned(),
-        });
-    }
-    Ok(commits)
-}
-
-fn parse_git_commit_metadata(
-    bytes: &[u8],
-) -> Result<(String, String, String, String, String, String), BridgeError> {
-    let fields = nul_fields(bytes);
-    if fields.len() != 6 || !valid_git_hash(fields[0]) {
-        return Err(internal_error());
-    }
-    Ok((
-        fields[0].to_owned(),
-        fields[1].to_owned(),
-        fields[2].to_owned(),
-        fields[3].to_owned(),
-        fields[4].to_owned(),
-        fields[5].trim_end().to_owned(),
-    ))
-}
-
-fn parse_git_changed_files(bytes: &[u8]) -> Result<Vec<GitChangedFile>, BridgeError> {
-    let fields = nul_fields(bytes);
-    let mut files = Vec::new();
-    let mut index = 0;
-    while index < fields.len() {
-        let status = fields[index];
-        index += 1;
-        if status.is_empty() || index >= fields.len() {
-            return Err(internal_error());
-        }
-        if status.starts_with('R') || status.starts_with('C') {
-            if index + 1 >= fields.len() {
-                return Err(internal_error());
-            }
-            let old_path = fields[index].to_owned();
-            let path = fields[index + 1].to_owned();
-            index += 2;
-            if !valid_git_relative_path(&old_path) || !valid_git_relative_path(&path) {
-                return Err(internal_error());
-            }
-            files.push(GitChangedFile {
-                status: status.to_owned(),
-                path,
-                old_path: Some(old_path),
-            });
-        } else {
-            let path = fields[index].to_owned();
-            index += 1;
-            if !valid_git_relative_path(&path) {
-                return Err(internal_error());
-            }
-            files.push(GitChangedFile {
-                status: status.to_owned(),
-                path,
-                old_path: None,
-            });
-        }
-    }
-    Ok(files)
-}
-
-fn nul_fields(bytes: &[u8]) -> Vec<&str> {
-    bytes
-        .split(|byte| *byte == 0)
-        .filter(|field| !field.is_empty())
-        .map(|field| std::str::from_utf8(field).unwrap_or_default())
-        .collect()
-}
-
-async fn collect_bounded<R>(mut reader: R, limit: usize) -> io::Result<BoundedGitOutput>
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
-    let mut buffer = [0_u8; 8192];
-    let mut truncated = false;
-    loop {
-        let read = reader.read(&mut buffer).await?;
-        if read == 0 {
-            break;
-        }
-        let keep = limit.saturating_sub(bytes.len()).min(read);
-        bytes.extend_from_slice(&buffer[..keep]);
-        truncated |= keep < read;
-    }
-    Ok(BoundedGitOutput { bytes, truncated })
-}
-
-async fn run_git_readonly(
-    root: PathBuf,
-    args: Vec<String>,
-    max_stdout_bytes: usize,
-) -> Result<GitCommandOutput, BridgeError> {
-    let command_kind = args
-        .iter()
-        .find(|arg| {
-            ["rev-parse", "symbolic-ref", "log", "show", "diff", "status"].contains(&arg.as_str())
-        })
-        .cloned()
-        .unwrap_or_else(|| "other-readonly".into());
-    let mut operation = crate::runtime_log::Operation::start(
-        "git",
-        "command",
-        json!({"commandKind":command_kind,"argumentCount":args.len(),"timeoutMs":GIT_COMMAND_TIMEOUT.as_millis(),"maxStdoutBytes":max_stdout_bytes}),
-    );
-    let result=async {
-    let mut command = TokioCommand::new("git");
-    command
-        .arg("--no-pager")
-        .arg("-c")
-        .arg("color.ui=false")
-        .args(args)
-        .current_dir(root)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("LC_ALL", "C")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|e| {
-        operation.event("process spawn","failed",crate::network_diagnostics::error_details(&e));
-        BridgeError::new(
-            "GIT_UNAVAILABLE",
-            "Git is not installed or is unavailable to Code-Codex.",
-        )
-    })?;
-    let stdout = child.stdout.take().ok_or_else(internal_error)?;
-    let stderr = child.stderr.take().ok_or_else(internal_error)?;
-    let completed = tokio::time::timeout(GIT_COMMAND_TIMEOUT, async {
-        tokio::join!(
-            child.wait(),
-            collect_bounded(stdout, max_stdout_bytes),
-            collect_bounded(stderr, MAX_GIT_STDERR_BYTES)
-        )
-    })
-    .await;
-    let (status, stdout, stderr) = match completed {
-        Ok(result) => result,
-        Err(_) => {
-            let _ = child.kill().await;
-            return Err(BridgeError::new(
-                "GIT_TIMEOUT",
-                "Git history took too long to load.",
-            ));
-        }
-    };
-    let status = status.map_err(|e|{operation.event("process exit","failed",crate::network_diagnostics::error_details(&e));internal_error()})?;
-    let stdout = stdout.map_err(|e|{operation.event("stdout collection","failed",crate::network_diagnostics::error_details(&e));internal_error()})?;
-    let stderr = stderr.map_err(|e|{operation.event("stderr collection","failed",crate::network_diagnostics::error_details(&e));internal_error()})?;
-    operation.event("process exit","observed",json!({"exitCode":status.code(),"stdoutBytes":stdout.bytes.len(),"stderrBytes":stderr.bytes.len(),"stderrSummary":String::from_utf8_lossy(&stderr.bytes).chars().take(1800).collect::<String>()}));
-    if !status.success() {
-        let stderr = String::from_utf8_lossy(&stderr.bytes);
-        if stderr.to_ascii_lowercase().contains("not a git repository") {
-            return Err(BridgeError::new(
-                "NOT_GIT_REPOSITORY",
-                "The selected project is not a Git repository.",
-            ));
-        }
-        return Err(BridgeError::new(
-            "GIT_FAILED",
-            "Git could not read this repository's history.",
-        ));
-    }
-    Ok(GitCommandOutput { stdout })
-    }.await;
-    match &result {
-        Ok(_) => operation.finish("passed", json!({})),
-        Err(e) => operation.finish("failed", json!({"errorCode":e.code,"reason":e.message})),
-    }
-    result
-}
-
-fn git_output_too_large_error() -> BridgeError {
-    BridgeError::new(
-        "GIT_OUTPUT_TOO_LARGE",
-        "This Git history result is too large to display safely.",
-    )
-}
-
 fn no_context_error() -> BridgeError {
     BridgeError::new("NO_CONTEXT", "The active task has no local workspace.")
 }
@@ -4867,156 +569,6 @@ fn cancelled_error() -> BridgeError {
         "CANCELLED",
         "The native operation belongs to an inactive document or context.",
     )
-}
-
-#[cfg(windows)]
-fn reveal_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
-    let existing_explorer_windows = visible_explorer_windows();
-    demote_foreground_codex_window();
-    allow_explorer_foreground_activation();
-    open_target_in_file_explorer(target)?;
-    raise_new_explorer_window(&existing_explorer_windows);
-    Ok(())
-}
-
-#[cfg(windows)]
-fn open_target_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
-    if target.is_dir() {
-        open_directory_in_file_explorer(target)
-    } else {
-        select_item_in_file_explorer(target)
-    }
-}
-
-#[cfg(windows)]
-fn open_directory_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
-    let target = path_to_wide(target);
-    let result = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            target.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            SW_RESTORE,
-        )
-    };
-    if (result as isize) > 32 {
-        Ok(())
-    } else {
-        Err(WorkspaceError::Internal)
-    }
-}
-
-#[cfg(windows)]
-fn select_item_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
-    let _com = ComInitialization::initialize()?;
-    let target = path_to_wide(target);
-    let mut item = std::ptr::null_mut();
-    let parse_result = unsafe {
-        SHParseDisplayName(
-            target.as_ptr(),
-            std::ptr::null_mut(),
-            &mut item,
-            0,
-            std::ptr::null_mut(),
-        )
-    };
-    if hresult_failed(parse_result) || item.is_null() {
-        return Err(WorkspaceError::Internal);
-    }
-
-    let reveal_result = unsafe { SHOpenFolderAndSelectItems(item, 0, std::ptr::null(), 0) };
-    unsafe {
-        ILFree(item);
-    }
-    if hresult_failed(reveal_result) {
-        Err(WorkspaceError::Internal)
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(windows)]
-fn path_to_wide(path: &Path) -> Vec<u16> {
-    path.as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect()
-}
-
-#[cfg(windows)]
-fn hresult_failed(result: i32) -> bool {
-    result < 0
-}
-
-#[cfg(windows)]
-struct ComInitialization {
-    initialized: bool,
-}
-
-#[cfg(windows)]
-impl ComInitialization {
-    fn initialize() -> Result<Self, WorkspaceError> {
-        let result = unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
-        if hresult_failed(result) && result != RPC_E_CHANGED_MODE {
-            return Err(WorkspaceError::Internal);
-        }
-        Ok(Self {
-            initialized: matches!(result, S_OK | S_FALSE),
-        })
-    }
-}
-
-#[cfg(windows)]
-impl Drop for ComInitialization {
-    fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                CoUninitialize();
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-fn raise_new_explorer_window(existing_windows: &[HWND]) {
-    let deadline = Instant::now() + Duration::from_millis(900);
-    while Instant::now() < deadline {
-        if let Some(window) = visible_explorer_windows()
-            .into_iter()
-            .find(|window| !existing_windows.contains(window))
-        {
-            raise_explorer_window(window);
-            return;
-        }
-        thread::sleep(Duration::from_millis(1));
-    }
-
-    if let Some(window) = visible_explorer_windows().into_iter().next() {
-        raise_explorer_window(window);
-    }
-}
-
-#[cfg(windows)]
-fn raise_explorer_window(window: HWND) {
-    if window.is_null() {
-        return;
-    }
-
-    const RAISE_FLAGS: u32 = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
-    const RELEASE_FLAGS: u32 = RAISE_FLAGS | SWP_NOACTIVATE;
-
-    unsafe {
-        let _ = ShowWindowAsync(window, SW_RESTORE);
-        let _ = SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, RAISE_FLAGS);
-        let _ = BringWindowToTop(window);
-        let _ = SetForegroundWindow(window);
-    }
-    thread::sleep(Duration::from_millis(250));
-    unsafe {
-        let _ = SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, RELEASE_FLAGS);
-    }
 }
 
 #[cfg(windows)]
@@ -5240,17 +792,125 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn language_rpc_preserves_files_rejects_invalid_fields_and_conflicts() {
+        let (directory, bridge) = manual_bridge().await;
+        let language_path = directory.path().join("settings/ui-language.json");
+        let initial = bridge
+            .handle(request("explorer.language.get", json!({})))
+            .await
+            .unwrap();
+        assert_eq!(initial["preference"]["revision"], 0);
+        assert!(!language_path.exists());
+        for params in [
+            json!({"locale":"fr","expectedRevision":0}),
+            json!({"locale":"en","expectedRevision":0,"path":"SENTINEL"}),
+            json!({"locale":"en","expectedRevision":-1}),
+        ] {
+            assert_eq!(
+                bridge
+                    .handle(request("explorer.language.set", params))
+                    .await
+                    .unwrap_err()
+                    .code,
+                "INVALID_REQUEST"
+            );
+        }
+        assert_eq!(
+            bridge
+                .handle(request("explorer.language.get", json!({"path":"SENTINEL"})))
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_REQUEST"
+        );
+        let result = bridge
+            .handle(request(
+                "explorer.language.set",
+                json!({"locale":"zh-CN","expectedRevision":0}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result["locale"], "zh-CN");
+        assert_eq!(result["revision"], 1);
+        let bytes = fs::read(&language_path).unwrap();
+        assert_eq!(
+            bridge
+                .handle(request(
+                    "explorer.language.set",
+                    json!({"locale":"en","expectedRevision":0})
+                ))
+                .await
+                .unwrap_err()
+                .code,
+            "CC-LANG-CONFLICT-001"
+        );
+        assert_eq!(
+            bridge
+                .handle(request_at(
+                    "explorer.language.set",
+                    json!({"locale":"en","expectedRevision":1}),
+                    999
+                ))
+                .await
+                .unwrap_err()
+                .code,
+            "CANCELLED"
+        );
+        assert_eq!(fs::read(&language_path).unwrap(), bytes);
+        fs::write(&language_path, b"damaged").unwrap();
+        let fallback = bridge
+            .handle(request("explorer.language.get", json!({})))
+            .await
+            .unwrap();
+        assert_eq!(fallback["issue"]["code"], "CC-LANG-INVALID-001");
+        assert_eq!(fs::read(&language_path).unwrap(), b"damaged");
+        bridge
+            .handle(request(
+                "explorer.language.set",
+                json!({"locale":"en","expectedRevision":0}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            bridge
+                .handle(request("explorer.language.get", json!({})))
+                .await
+                .unwrap()["preference"]["locale"],
+            "en"
+        );
+    }
+
+    #[tokio::test]
     async fn startup_example_rpc_routes_to_bounded_native_handlers() {
         let (_directory, bridge) = manual_bridge().await;
-        let status = bridge.handle(request("explorer.startup.examples.status", json!({}))).await.unwrap();
+        let status = bridge
+            .handle(request("explorer.startup.examples.status", json!({})))
+            .await
+            .unwrap();
         assert_eq!(status.as_array().unwrap().len(), 2);
         // Invalid IDs are rejected by the actual sample handler before any
         // network, application cache or user video library is touched.
-        for method in ["explorer.startup.examples.download", "explorer.startup.examples.chunk"] {
-            let params = if method.ends_with(".chunk") { json!({"id":"fixture-not-a-sample","offset":0}) } else { json!({"id":"fixture-not-a-sample"}) };
+        for method in [
+            "explorer.startup.examples.download",
+            "explorer.startup.examples.chunk",
+        ] {
+            let params = if method.ends_with(".chunk") {
+                json!({"id":"fixture-not-a-sample","offset":0})
+            } else {
+                json!({"id":"fixture-not-a-sample"})
+            };
             let error = bridge.handle(request(method, params)).await.unwrap_err();
-            assert_eq!(error.code, "EXAMPLE_ID", "wrong native dispatch for {method}");
-            let error = bridge.handle(request(method, json!({"id":"the-intelligence-age","url":"SENTINEL_EXTERNAL"}))).await.unwrap_err();
+            assert_eq!(
+                error.code, "EXAMPLE_ID",
+                "wrong native dispatch for {method}"
+            );
+            let error = bridge
+                .handle(request(
+                    method,
+                    json!({"id":"the-intelligence-age","url":"SENTINEL_EXTERNAL"}),
+                ))
+                .await
+                .unwrap_err();
             assert_eq!(error.code, "INVALID_REQUEST");
         }
     }
@@ -5620,8 +1280,31 @@ mod tests {
         request_receiver.await.unwrap();
         server.await.unwrap();
         let second = checker.check_startup("0.4.1").await.unwrap_err();
-        assert_eq!(first.code, "UPDATE_CHECK_RATE_LIMITED");
+        assert_eq!(first.code, "UPDATE_NET_HTTP_RATE_LIMIT");
         assert_eq!(second.code, first.code);
+    }
+
+    #[tokio::test]
+    async fn update_client_construction_failure_is_not_replaced_with_generic_unavailable() {
+        let invalid = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get("http://[invalid")
+            .build()
+            .unwrap_err();
+        let original = crate::network_diagnostics::transport_error(
+            "UPDATE",
+            "client build",
+            "fixture",
+            &invalid,
+        );
+        assert_eq!(original.code, "UPDATE_NET_CLIENT_CONFIGURATION");
+        let mut checker = UpdateChecker::new("http://127.0.0.1:1");
+        checker.client = Err(original.clone());
+        let observed = checker.check("0.4.62").await.unwrap_err();
+        assert_eq!(observed.code, original.code);
+        assert_eq!(observed.message, original.message);
     }
 
     #[tokio::test]
@@ -5698,7 +1381,7 @@ mod tests {
             .check("0.1.91")
             .await
             .expect_err("rate limited response");
-        assert_eq!(error.code, "UPDATE_CHECK_RATE_LIMITED");
+        assert_eq!(error.code, "UPDATE_NET_HTTP_FORBIDDEN");
         server.await.expect("rate limited response server");
     }
 
@@ -7922,6 +3605,16 @@ mod tests {
             .await
             .expect_err("old document request");
         assert_eq!(stale.code, "CANCELLED");
+        let fault = &stale.data.as_ref().expect("native failure envelope")["fault"];
+        assert_eq!(fault["schema"], 2);
+        assert_eq!(fault["observedCode"], "CANCELLED");
+        assert_eq!(fault["lifecycleEpoch"], 0);
+        assert!(
+            fault["failureRef"]
+                .as_str()
+                .unwrap()
+                .starts_with("bridge-0-")
+        );
 
         let current = bridge
             .handle(request_at("explorer.context", json!({}), 1))
@@ -8108,3 +3801,203 @@ mod update_handoff_tests {
         assert!(n.payload["params"]["installationComplete"].is_null());
     }
 }
+
+#[cfg(test)]
+#[allow(unused_imports)]
+mod test_imports {
+    pub(super) use async_trait::async_trait;
+    pub(super) use base64::Engine as _;
+    pub(super) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    pub(super) use cdp_client::CapabilityToken;
+    pub(super) use cdp_client::{BindingRequest, BridgeError, BridgeHandler, BridgeNotification};
+    pub(super) use context_resolver::{AppServerClient, ResolverError};
+    pub(super) use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
+    pub(super) use semver::Version;
+    pub(super) use serde::{Deserialize, Serialize};
+    pub(super) use serde_json::{Value, json};
+    pub(super) use sha2::Digest as _;
+    #[cfg(windows)]
+    pub(super) use std::ffi::OsString;
+    pub(super) use std::io;
+    pub(super) use std::io::Write as _;
+    #[cfg(windows)]
+    pub(super) use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    pub(super) use std::path::{Component, Path, PathBuf};
+    #[cfg(windows)]
+    pub(super) use std::process::Command;
+    pub(super) use std::process::Stdio;
+    #[cfg(windows)]
+    pub(super) use std::sync::OnceLock;
+    pub(super) use std::sync::atomic::{AtomicU64, Ordering};
+    pub(super) use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
+    #[cfg(windows)]
+    pub(super) use std::thread;
+    pub(super) use std::time::Duration;
+    #[cfg(windows)]
+    pub(super) use std::time::Instant;
+    pub(super) use tokio::sync::{Mutex, RwLock, broadcast};
+    pub(super) use tokio::task::JoinHandle;
+    pub(super) use tokio::{io::AsyncReadExt, process::Command as TokioCommand};
+    #[cfg(windows)]
+    pub(super) use windows_sys::Win32::Foundation::{
+        CloseHandle, E_INVALIDARG, GetLastError, HWND, LPARAM, RECT, RPC_E_CHANGED_MODE, S_FALSE,
+        S_OK, SetLastError, WAIT_TIMEOUT,
+    };
+    #[cfg(all(windows, test))]
+    pub(super) use windows_sys::Win32::Graphics::Dwm::DWMSBT_MAINWINDOW;
+    #[cfg(windows)]
+    pub(super) use windows_sys::Win32::Graphics::Dwm::{
+        DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+        DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
+    };
+    #[cfg(windows)]
+    pub(super) use windows_sys::Win32::System::Com::{
+        COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize,
+    };
+    #[cfg(windows)]
+    pub(super) use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    #[cfg(windows)]
+    pub(super) use windows_sys::Win32::System::Threading::{
+        GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        WaitForSingleObject,
+    };
+    #[cfg(windows)]
+    pub(super) use windows_sys::Win32::UI::Controls::MARGINS;
+    #[cfg(windows)]
+    pub(super) use windows_sys::Win32::UI::Shell::{
+        ILFree, SHOpenFolderAndSelectItems, SHParseDisplayName, ShellExecuteW,
+    };
+    #[cfg(windows)]
+    pub(super) use windows_sys::Win32::UI::WindowsAndMessaging::{
+        ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GW_OWNER, GWL_EXSTYLE,
+        GetClassNameW, GetForegroundWindow, GetPropW, GetSystemMetrics, GetWindow,
+        GetWindowLongPtrW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HWND_BOTTOM,
+        HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, IsWindowVisible, RemovePropW, SM_CXVIRTUALSCREEN,
+        SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow, SetPropW, SetWindowPos,
+        ShowWindowAsync, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
+        WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    };
+    #[cfg(windows)]
+    pub(super) use windows_sys::core::BOOL;
+    pub(super) use workspace_service::{
+        CreateEntryKind, ErrorCode, ImportSession, ListOptions, ListPage, MAX_IMPORT_CHUNK_BYTES,
+        MAX_MEDIA_CHUNK_BYTES, MAX_PREVIEW_BYTES, MediaInfo, ModelResourceChunkRequest,
+        ModelResourceInfo, PreparedSettings, PreviewResult, Settings, SettingsPatch, SettingsStore,
+        WatchSubscription, WatchVisibility, WatchVisibilityHandle, Workspace, WorkspaceError,
+        WorkspaceWatcher,
+    };
+}
+#[cfg(test)]
+#[allow(unused_imports)]
+use test_imports::*;
+
+// Domain modules keep the original public and wire contracts.
+#[path = "services/updates.rs"]
+mod services_updates;
+
+#[cfg(windows)]
+use services_updates::await_installer_window;
+#[cfg(any(windows, not(windows)))]
+use services_updates::launch_downloaded_update;
+use services_updates::{
+    DownloadedUpdate, GithubLatestRelease, GithubReleaseAsset, UpdateAvailability,
+    UpdateCheckResult, UpdateChecker, UpdateInstallParams, UpdateInstallResult, UpdateProgress,
+    classify_update, response_is_json, select_update_asset, trusted_update_download_host,
+    update_asset_error, update_busy_error, update_download_error, update_internal_error,
+    update_invalid_response_error, update_launch_error, update_local_error,
+    update_no_longer_available_error, update_transport_error, update_unavailable_error,
+    update_verification_error, validate_release_url, validate_update_asset,
+};
+#[path = "bridge/errors.rs"]
+mod errors;
+
+use errors::operation_error;
+#[path = "bridge/contracts.rs"]
+mod contracts;
+
+use contracts::{
+    BatchCopyParams, BatchMoveParams, BoundedGitOutput, ContextParams, ContextResult,
+    EntryCreateKind, EntryCreateParams, EntryMoveParams, EntryPathParams, EntryRenameParams,
+    GitChangedFile, GitCommandOutput, GitCommitParams, GitCommitResult, GitCommitSummary,
+    GitDiffParams, GitDiffResult, GitHistoryParams, GitHistoryResult, ImportBeginParams,
+    ImportChunkParams, ImportDirectoryParams, ImportFileBeginParams, ImportSessionParams,
+    ListParams, MediaChunkParams, MediaChunkResult, MediaInfoParams, ModelResourceChunkParams,
+    ModelResourceInfoParams, PreviewParams, PreviewSaveParams, SettingsWrapper,
+    WindowTransparencyParams, deserialize_optional_import_size,
+};
+#[path = "platform/windows/window.rs"]
+mod platform_windows_window;
+
+#[cfg(any(windows, not(windows)))]
+use platform_windows_window::reveal_in_file_explorer;
+use platform_windows_window::{
+    ACCENT_DISABLED, ACCENT_ENABLE_TRANSPARENT_GRADIENT, GetWindowCompositionAttributeFn,
+    SetWindowCompositionAttributeFn, WCA_ACCENT_POLICY, WINDOW_TRANSPARENCY_ACCENT_FLAGS,
+    WINDOW_TRANSPARENCY_BACKGROUND, WindowTransparencyController, WindowTransparencyError,
+};
+#[cfg(windows)]
+use platform_windows_window::{
+    AccentPolicy, ActiveWindowTransparency, BoundWindowProcess, ComInitialization,
+    DISABLED_ACCENT_POLICY, FULL_EXTENDED_CLIENT_FRAME, NO_EXTENDED_CLIENT_FRAME,
+    OriginalAccentPolicy, SystemBackdropSnapshot, TRANSPARENT_ACCENT_POLICY,
+    TransparencyClientFrame, WindowCandidate, WindowCompositionAttributeData,
+    WindowCornerPreferenceSnapshot, WindowEnumerationContext, WindowRectangle,
+    WindowTransparencyMarker, WindowTransparencyState, apply_window_transparency,
+    candidate_still_belongs_to_process, claim_window_marker, classify_system_backdrop_read,
+    classify_window_corner_preference_read, cleanup_claimed_window_marker,
+    clear_extended_client_frame, clear_extended_client_frame_with, collect_codex_window_candidate,
+    has_extended_style, hresult_failed, inspect_window_candidate, open_directory_in_file_explorer,
+    open_target_in_file_explorer, path_to_wide, raise_explorer_window, raise_new_explorer_window,
+    raw_window_has_marker, read_extended_style, read_window_accent_policy,
+    read_window_corner_preference, read_window_system_backdrop, rectangle_is_nontrivial,
+    release_window_marker, remove_window_marker, resolve_get_window_composition_attribute,
+    resolve_set_window_composition_attribute, restore_active_window, restore_extended_client_frame,
+    restore_window_accent_policy, restore_window_corner_preference, restore_window_system_backdrop,
+    select_codex_window, select_item_in_file_explorer, select_unique_candidate,
+    snapshot_window_accent_policy, transparency_client_frame, validate_transparency_window_style,
+    virtual_screen_rectangle, window_has_marker, window_identity, write_window_accent_policy,
+    write_window_corner_preference, write_window_system_backdrop,
+};
+#[path = "bridge/routes/git.rs"]
+mod routes_git;
+
+use routes_git::{
+    collect_bounded, git_output_too_large_error, nul_fields, parse_git_changed_files,
+    parse_git_commit_metadata, parse_git_history, run_git_readonly, valid_git_hash,
+    valid_git_relative_path,
+};
+#[path = "bridge/routes/workspace.rs"]
+mod routes_workspace;
+
+#[path = "bridge/routes/preview.rs"]
+mod routes_preview;
+
+#[path = "bridge/routes/mutation.rs"]
+mod routes_mutation;
+
+#[path = "bridge/routes/settings.rs"]
+mod routes_settings;
+
+#[path = "bridge/routes/updates.rs"]
+mod routes_updates;
+
+#[path = "bridge/routes/window.rs"]
+mod routes_window;
+
+#[path = "bridge/router.rs"]
+mod router;
+
+#[path = "bridge/state.rs"]
+mod state;
+
+use state::{
+    lock_unpoisoned, read_unpoisoned, require_empty_object, valid_content_version, write_unpoisoned,
+};
+#[path = "bridge/import_session.rs"]
+mod import_session;
+
+use import_session::{
+    abort_import_locked, import_busy_error, invalid_import_session_error, validate_active_import,
+    validate_import_session_id,
+};

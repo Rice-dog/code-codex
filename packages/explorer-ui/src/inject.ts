@@ -1,3 +1,4 @@
+import {nativeSettingsBackgroundCss} from './native-background-surfaces';
 import { optionalPluginExport } from './utility-plugin-facade';
 import { monitorStartupReadiness } from './startup-readiness';
 import { getBootstrapConfig } from "./bridge";
@@ -5,15 +6,8 @@ import { prepareStartupTransitionHandoff, getEarlyStartupTransition } from "./st
 import { reconcileApplicationMenu } from "./application-menu";
 import { openRuntimeInformation, observeCodexRuntime } from "./runtime-information";
 import { runtimeEvent } from "./runtime-events";
-import {
-  CodeCodexElement,
-  GLOW_HORIZON_BACKGROUND_ATTRIBUTE,
-  GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY,
-  PARTICLE_BACKGROUND_ATTRIBUTE,
-  PARTICLE_BACKGROUND_COLOR_PROPERTY,
-  TRANSPARENT_BACKGROUND_ATTRIBUTE,
-  TRANSPARENT_BACKGROUND_COLOR_PROPERTY,
-} from "./explorer-element";
+import { CodeCodexElement } from "./app/explorer-element";
+import { GLOW_HORIZON_BACKGROUND_ATTRIBUTE, GLOW_HORIZON_BACKGROUND_COLOR_PROPERTY, PARTICLE_BACKGROUND_ATTRIBUTE, PARTICLE_BACKGROUND_COLOR_PROPERTY, TRANSPARENT_BACKGROUND_ATTRIBUTE, TRANSPARENT_BACKGROUND_COLOR_PROPERTY } from "./core/configuration/explorer";
 import {
   codex26715Adapter,
   activePageElements,
@@ -25,7 +19,7 @@ import {
 } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { isHomeWorkspaceView } from "./home-view";
-import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground } from "./native-login";
+import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground, isNativeLoginView } from "./native-login";
 import { SURFACE_OPACITY_NATIVE_CSS } from "./surface-opacity";
 import {
   clearExplorerDismissalForSession,
@@ -143,23 +137,7 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
  * markers are emitted by Codex's Settings shell; avoid depending on hashed
  * class names such as MainContentSurface_*.
  */
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
-  main.main-surface,
-  [data-app-shell-main-surface="default"]
-):has(
-  [data-app-shell-focus-area="main"] > div > div[class*="electron\\:bg-surface"][class*="rounded-tl-lg"]
-) {
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
-  main.main-surface,
-  [data-app-shell-main-surface="default"]
-) [data-app-shell-focus-area="main"] > div > div[class*="electron\\:bg-surface"][class*="rounded-tl-lg"] {
-  background-color: transparent !important;
-  background-image: none !important;
-}
+${nativeSettingsBackgroundCss(PARTICLE_BACKGROUND_ATTRIBUTE)}
 
 html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
   aside.app-shell-left-panel,
@@ -261,23 +239,7 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
   background-color: var(--code-codex-particle-ui-surface) !important;
 }
 
-html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
-  main.main-surface,
-  [data-app-shell-main-surface="default"]
-):has(
-  [data-app-shell-focus-area="main"] > div > div[class*="electron\\:bg-surface"][class*="rounded-tl-lg"]
-) {
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
-html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
-  main.main-surface,
-  [data-app-shell-main-surface="default"]
-) [data-app-shell-focus-area="main"] > div > div[class*="electron\\:bg-surface"][class*="rounded-tl-lg"] {
-  background-color: transparent !important;
-  background-image: none !important;
-}
+${nativeSettingsBackgroundCss(GLOW_HORIZON_BACKGROUND_ATTRIBUTE)}
 
 html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] body :is(
   aside.app-shell-left-panel,
@@ -599,6 +561,7 @@ export function injectExplorer(): CodeCodexElement | null {
   if (sessionDismissed()) return existing;
   const homeView = isHomeWorkspaceView();
   existing?.setHomeViewActive(homeView);
+  existing?.reconcileLoginSession(isNativeLoginView(document));
   if (!homeView) {
     reconcileCurrentLayoutHeader(existing, "");
     if (existing || !document.body) return existing;

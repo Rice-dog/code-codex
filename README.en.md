@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.52-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.5.7-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -31,26 +31,26 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Public version **v0.4.52 / Startup 1.1.18** fixes uppercase startup-example RPC names being rejected during native authorization, leaving the download button at Connecting. Download, status and chunk endpoints now use lowercase dotted names; the client rejects invalid method names immediately without relaxing native security rules. Windows 10 compatibility, empty-cache file trees, network deadlines/integrity checks, the original library, selection, per-video settings and basic realtime playback remain; no advanced editing or precomposition cache. The player remains served from v0.4.48; the other 23 plugins/default media from v0.3.96. Published as [GitHub Release v0.4.52](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.52). Restart through the Code-Codex shortcut after upgrading so both UI and native code load the new protocol. 503 native tests passed, 5 ignored, one existing occluded desktop test excluded; real authorization/dispatch, immediate client failures, UI regressions and a separate public-media download/integrity test passed. No affected-user retest, local/independent MSI installation of this version or full official cold launch is claimed. Simulated UI checks are not a complete native end-to-end download.
+Version **v0.5.7** collects the changes since v0.4.52: global Chinese/English settings, the Custom Background image/video library, file-tree recovery across account changes, shared background transparency, installation/removal wizards and detailed diagnostics, and clearer application/plugin/native-service ownership. Plugins retain independent versions and explicit distribution locations; matching caches remain reusable. See the [v0.5.7 release notes](releases/README.md) for the complete changes and validation limits.
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
 
 ## Install Option 1: Download EXE
 
-Download the installer from [GitHub Release v0.4.52](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.52). [`releases`](releases/) retains the corresponding build assets:
+Download the installer from [GitHub Release v0.5.7](https://github.com/Rice-dog/code-codex/releases/tag/v0.5.7). [`releases`](releases/) retains the corresponding build assets:
 
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.4.52-x64-setup.exe`
-- Alternative: `CodeCodex-0.4.52-x64.msi`
-- Portable package: `CodeCodex-0.4.52-x64.zip`
+- Recommended: `CodeCodex-0.5.7-x64-setup.exe`
+- Alternative: `CodeCodex-0.5.7-x64.msi`
+- Portable package: `CodeCodex-0.5.7-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.4.52-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.5.7-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -93,14 +93,14 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.52
+./scripts/package.ps1 -Version 0.5.7
 ```
 
 The generated packages are written to `releases/`.
 
 ## Download all plugins on demand
 
-Starting with **0.3.96**, **all 24 Preview Market plugins are separate downloads**: 13 Appearance plugins, 10 File Preview plugins and one Tools plugin. The core retains the file tree, basic text preview and editing, market and settings framework, permission checks and runtime logs. Actual plugin rendering, format viewers, the startup player and tool implementations are no longer embedded.
+**All 25 Preview Market plugins are separate downloads**: 14 Appearance plugins, 10 File Preview plugins and one Tools plugin. The core retains the file tree, basic text preview and editing, market and settings framework, permission checks and runtime logs. Actual plugin rendering, format viewers, the startup player and tool implementations are no longer embedded.
 
 In Preview Market, click **Download**, then **Enable** after download and verification complete. The current Codex window can use the plugin immediately, without restarting. Downloading does not automatically enable it or open settings. Configuration is available after the complete package is installed; UI Surface Opacity still requires an actually enabled background.
 
@@ -128,7 +128,13 @@ For offline installation, retain the category structure and every required resou
 
 README screenshots under `docs/screenshots/` remain on GitHub and are excluded from EXE, MSI and ZIP installers. They are documentation images, separate from plugin default libraries; view the repository README for complete screenshots. Setup does not download all plugins automatically. Locally built packages need matching GitHub assets published before Download works for other users.
 
+### Upgrade notes
+
+EXE/ZIP users can update the existing installation without uninstalling; settings, original media and verified matching plugin caches are retained. An MSI-owned installation cannot be overwritten by the standalone EXE downloaded by the online updater; use the MSI/Windows Installer path. If the official session has no verified debugging listener, installation is retained and reopening through the Code-Codex launcher is required; the current chat is not closed automatically. A broken older menu can be bypassed by downloading the complete EXE installer manually. Every historical direct-upgrade and real MSI-upgrade combination has not been tested.
+
 ## Uninstall
+
+Removal uses the same branded wizard as installation: confirm, remove, then Finish.
 
 Every install path includes a source-built uninstaller program:
 
@@ -155,6 +161,10 @@ MSI installs can also be removed from Windows **Installed apps**.
 - Basic text preview, syntax highlighting and bounded editing; Markdown rendering is provided by its standalone viewer plugin.
 - Source previews and editors include a syntax-colored minimap, click/drag/wheel/keyboard navigation and a saved toggle. Narrow panes hide it automatically. It sits to the left of the single far-right scrollbar; its viewport rectangle appears during hover or scrolling.
 - A local bridge restricted to bounded workspace operations.
+
+### Global language and Custom Background
+
+Welcome preselects Chinese or English from the system language. After installation, use Code-Codex → Language to switch. Plugin names remain English; parameters and normal UI follow the global setting. Technical errors and diagnostics remain English. Custom Background imports local images/videos and provides per-media transforms, appearance controls and Reset. It works with UI Surface Opacity, keeps the settings video preview synchronized and avoids reloading the background when opening settings.
 
 ### Plugins
 
@@ -283,7 +293,8 @@ crates/
 packages/
   explorer-ui/         Injected TypeScript explorer UI
 
-installer/             Windows installer source files
+installer/src/         Installer/uninstaller source templates and shared fragments
+resources/             Bridge, language domains, plugin definitions/distribution lock, managed assets
 scripts/               Build and packaging helper scripts
 releases/              Ready-made downloadable packages
 ```
@@ -291,8 +302,7 @@ releases/              Ready-made downloadable packages
 ## Notes
 
 Generated build folders such as `target/`, `node_modules/`, `dist/`, and
-`artifacts/` are intentionally ignored by Git. Standalone test suites and CI
-workflows are not included in this public source package.
+`artifacts/` are intentionally ignored by Git. Rust tests, browser/PowerShell fixtures in `scripts/`, and public contract checks in `.github/workflows/architecture.yml` are included. Native windows, the official desktop client, and Office capabilities require separate verification on an appropriate machine.
 
 ## License
 
@@ -300,10 +310,15 @@ workflows are not included in this public source package.
 
 ## Centralized storage
 
-The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.52-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.5.7-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
 
 Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
 
 Runtime retention remains ten runs with a 5 MiB bound per run; installer reports retain ten files. Update events currently appear primarily in runtime logs. Initial extraction and emergency fallback may use the system temporary folder. Normal uninstall retains user data; explicit purge deletes only known product data paths and preserves unrelated files in the selected folder. Network paths, system folders, drive roots and linked ancestors are rejected. Unchanged downloadable plugin assets remain pinned to public v0.3.96.
 
 After a successful EXE installation, the current and actual previous versions are retained; eligible older versions are safely removed. Running, locked, unverifiable or unrecognized entries remain, with reasons in the installation log's versionRetention field. Sessions are not terminated to reclaim space. MSI continues to use Windows Installer version management.
+
+
+UI composition lives in `packages/explorer-ui/src/app/`; `contracts/`, `core/`, `features/`, `plugin-host/`, and `components/` own types, lifecycle primitives, domain controllers, plugin capabilities, and shared presentation. Root compatibility exports should not accumulate new behavior. Plugin definitions and the immutable distribution lock preserve independent package versions/tags across application upgrades; changed plugin bytes require explicit rebuild and identity review.
+
+Run `node scripts/check-architecture.mjs`, `node --test scripts/test-refactor-contracts.mjs scripts/test-plugin-publication.mjs`, and `cargo test --workspace --locked`. Installer workers are generated from source templates; check them with `node scripts/generate-installer.mjs` and `scripts/check-worker-protocol.ps1`.

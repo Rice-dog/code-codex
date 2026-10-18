@@ -1,5 +1,6 @@
+import './core/localization/preference';
 import { startEarlyStartupTransition, readStartupTransitionSettings, startupDocumentReady, startupTransitionModule } from "./startup-transition-plugin";
-import { runtimeEvent } from "./runtime-events";
+import { runtimeEvent, lastStartupFailureOrSkip } from "./runtime-events";
 
 const valid = window === window.top && location.protocol === "app:" && location.host === "-"
   && location.pathname === "/index.html" && !location.search;
@@ -26,8 +27,10 @@ if (valid && !shared[entered]) {
     void startEarlyStartupTransition().then(controller => {
       status.controller = !!controller;
       status.stage = controller ? "playing" : "skipped";
-      status.reason = controller ? "" : !status.enabled ? "plugin disabled" : status.readyAtEntry ? "native document already ready at entry" : "player unavailable; inspect video lookup and player events";
-      runtimeEvent("startup-animation", "early playback", status.stage, {readyAtEntry:status.readyAtEntry,enabled:status.enabled});
+      const terminal = controller ? undefined : lastStartupFailureOrSkip();
+      status.reason = controller ? "" : typeof terminal?.details.reason === 'string' ? terminal.details.reason
+        : !status.enabled ? "plugin disabled" : status.readyAtEntry ? "native document already ready at entry" : "player unavailable; inspect video lookup and player events";
+      runtimeEvent("startup-animation", "early playback", status.stage, {readyAtEntry:status.readyAtEntry,enabled:status.enabled,reason:status.reason});
       if (!controller) return;
       const tick = () => {
         status.phase = controller.phase;

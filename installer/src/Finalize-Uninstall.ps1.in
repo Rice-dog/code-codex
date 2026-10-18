@@ -1,0 +1,184 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [string]$InstallRoot,
+    [Parameter(Mandatory)]
+    [int]$ParentPid,
+    [int]$LauncherPid = 0,
+    [string]$MsiProductCode,
+    [switch]$PurgeSettings,
+    [switch]$SharedProgress
+)
+
+{{language-resources}}
+if ($env:CLE_UI_LANGUAGE -notin @('zh-CN','en')) { $env:CLE_UI_LANGUAGE=if ([Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName -eq 'zh') { 'zh-CN' } else { 'en' } }
+function ConvertTo-RemovalUiText([string]$Text) {
+    if ($env:CLE_UI_LANGUAGE -ne 'zh-CN') { return $Text }
+    $translated=$script:RemovalUiText.PSObject.Properties[$Text]
+    if ($translated) { return [string]$translated.Value }
+    if ($Text -match '^(Code-Codex uninstall)( v[0-9.]+)$') { return (ConvertTo-RemovalUiText $Matches[1])+$Matches[2] }
+    foreach ($entry in $script:RemovalUiText.PSObject.Properties) {
+        $template=[string]$entry.Name;$slot=[regex]::Match($template,'\{[A-Za-z][A-Za-z0-9]*\}')
+        if (-not $slot.Success -or $template.Substring($slot.Index+$slot.Length).Contains('{')) { continue }
+        $prefix=$template.Substring(0,$slot.Index);$suffix=$template.Substring($slot.Index+$slot.Length)
+        if ($Text.Length -le 4096 -and $Text.Length -ge $prefix.Length+$suffix.Length -and $Text.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -and $Text.EndsWith($suffix,[StringComparison]::OrdinalIgnoreCase)) {
+            return ([string]$entry.Value).Replace($slot.Value,$Text.Substring($prefix.Length,$Text.Length-$prefix.Length-$suffix.Length))
+        }
+    }
+    if ($Text.Contains("`n")) { return (($Text -split "`r?`n" | ForEach-Object { ConvertTo-RemovalUiText $_ }) -join "`n") }
+    return $Text
+}
+
+{{storage-contract}}
+
+$ErrorActionPreference = "Stop"
+$InstallFullPath = Assert-CodeCodexRoot $InstallRoot -Owned
+{{common:Enter-CodeCodexRemovalWorkingDirectory}}
+Enter-CodeCodexRemovalWorkingDirectory $InstallFullPath 'finalizer'
+$InstallPrefix = $InstallFullPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+$ShortcutOwnerMarker = "Managed by Code-Codex (code-codex/v1)"
+$LegacyShortcutDescription = "Launch Codex Desktop with Code-Codex file preview and editing"
+
+{{common:Test-ReparsePoint}}
+
+{{common:Get-ExistingItem}}
+
+{{common:Remove-ReparsePoint}}
+
+{{common:Test-SamePath}}
+
+{{common:Remove-VerifiedCodeCodexDesktopShortcut}}
+
+{{section:remove/safety}}{{section:remove/dialogs}}try {
+    $null = Assert-CodeCodexRoot $InstallFullPath -Owned
+
+    if (-not $SharedProgress) { $progressDialog = New-UninstallProgressDialog }
+    Set-UninstallProgress $progressDialog 56 "Waiting for uninstaller" "Allowing the previous removal step to close."
+    Wait-ForProcessExit $ParentPid "The uninstall script" $progressDialog
+    Wait-ForProcessExit $LauncherPid "The installed uninstaller" $progressDialog
+
+    if (-not [string]::IsNullOrWhiteSpace($MsiProductCode)) {
+        Set-UninstallProgress $progressDialog 60 "Starting Windows Installer" "Checking the registered Code-Codex package."
+        $msiProductCodePattern = '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$'
+        if ($MsiProductCode -notmatch $msiProductCodePattern) {
+            throw "Invalid Windows Installer product code."
+        }
+        $systemDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::System)
+        $systemDirectoryFull = [IO.Path]::GetFullPath($systemDirectory) + [IO.Path]::DirectorySeparatorChar
+        $msiexec = [IO.Path]::GetFullPath((Join-Path $systemDirectory "msiexec.exe"))
+        $msiexecItem = Get-ExistingItem $msiexec
+        if (-not $msiexec.StartsWith($systemDirectoryFull, [StringComparison]::OrdinalIgnoreCase) -or
+            $null -eq $msiexecItem -or $msiexecItem.PSIsContainer -or
+            (Test-ReparsePoint $msiexecItem)) {
+            throw "Trusted Windows Installer executable was not found."
+        }
+        $msiProcess = Start-Process `
+            -FilePath $msiexec `
+            -ArgumentList @("/x", $MsiProductCode, "/qn") `
+            -PassThru
+        Set-UninstallProgress $progressDialog 60 "Removing Windows Installer package" "Windows is uninstalling the registered Code-Codex files." -Indeterminate
+        while (-not $msiProcess.WaitForExit(100)) {
+            Invoke-UninstallProgressEvents $progressDialog
+        }
+        $msiProcess.WaitForExit()
+        Invoke-UninstallProgressEvents $progressDialog
+        if ([int]$msiProcess.ExitCode -notin @(0, 1641, 3010)) {
+            throw "Windows Installer could not remove Code-Codex (exit code $($msiProcess.ExitCode))."
+        }
+        Set-UninstallProgress $progressDialog 94 "Cleaning desktop shortcuts" "Removing shortcuts owned by Code-Codex."
+        Remove-VerifiedCodeCodexDesktopShortcut
+        # Runtime-created shortcut icons are not in the MSI file table.
+        Remove-CodeCodexGeneratedIcons $InstallFullPath
+        if ($PurgeSettings) {
+            foreach($name in @('data','plugins','logs','temp','backups','storage-layout.json')) { Remove-SafeTree (Join-Path $InstallFullPath $name) }
+            if ((Test-Path -LiteralPath $InstallFullPath) -and @(Get-ChildItem -LiteralPath $InstallFullPath -Force).Count -eq 0) { [IO.Directory]::Delete($InstallFullPath,$false) }
+            Remove-ItemProperty 'HKCU:\Software\CodeCodex' -Name RetainedRoot,InstallPath -ErrorAction SilentlyContinue
+        } else {
+            $null = Assert-CodeCodexRoot $InstallFullPath
+            New-Item -ItemType Directory -Path $InstallFullPath -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $InstallFullPath 'storage-layout.json'),'{"schema":1,"product":"Code-Codex","layout":"centralized"}')
+            New-Item 'HKCU:\Software\CodeCodex' -Force | Out-Null
+            New-ItemProperty 'HKCU:\Software\CodeCodex' -Name RetainedRoot -PropertyType String -Value $InstallFullPath -Force | Out-Null
+        }
+    }
+    else {
+        Set-UninstallProgress $progressDialog 60 "Cleaning desktop shortcuts" "Removing shortcuts owned by Code-Codex."
+        Remove-VerifiedCodeCodexDesktopShortcut
+        $removed = Test-CodeCodexRemovalComplete $InstallFullPath -Purge:$PurgeSettings
+        $firstFailure = $null
+        $lastFailure = "Installed files may still be in use."
+        for ($attempt = 1; -not $removed -and $attempt -le 30; $attempt++) {
+            if ($attempt -eq 1) {
+                Set-UninstallProgress $progressDialog 70 "Removing application files" "Deleting the installed Code-Codex versions and support files."
+            }
+            else {
+                Set-UninstallProgress $progressDialog 70 "Waiting for files to unlock" "Retrying file removal (attempt $attempt of 30)."
+            }
+            try {
+                Remove-CodeCodexApplicationFiles $InstallFullPath -Purge:$PurgeSettings
+            }
+            catch {
+                $lastFailure = $_.Exception.Message
+                if ($null -eq $firstFailure) { $firstFailure = $lastFailure }
+            }
+            # Cleanup may have committed before a late exception. Observe the
+            # resulting filesystem before attempting another owned deletion.
+            try {
+                $removed = Test-CodeCodexRemovalComplete $InstallFullPath -Purge:$PurgeSettings
+            }
+            catch {
+                $lastFailure = $_.Exception.Message
+                if ($null -eq $firstFailure) { $firstFailure = $lastFailure }
+                $removed = $false
+            }
+            Invoke-UninstallProgressEvents $progressDialog
+            if (-not $removed) {
+                Start-Sleep -Milliseconds 200
+                Invoke-UninstallProgressEvents $progressDialog
+            }
+        }
+
+        if (-not $removed) {
+            throw "Code-Codex removal incomplete after $($attempt - 1) attempts. First failure: $firstFailure; last failure: $lastFailure"
+        }
+        if ($null -ne $firstFailure) {
+            [Console]::Out.WriteLine("Removal completed after $($attempt - 1) cleanup attempt(s). Recovered failure: $firstFailure; last failure: $lastFailure")
+        }
+
+        New-Item 'HKCU:\Software\CodeCodex' -Force | Out-Null
+        Remove-ItemProperty 'HKCU:\Software\CodeCodex' -Name InstallPath -ErrorAction SilentlyContinue
+        if (-not $PurgeSettings) { New-ItemProperty 'HKCU:\Software\CodeCodex' -Name RetainedRoot -PropertyType String -Value $InstallFullPath -Force | Out-Null }
+        else { Remove-ItemProperty 'HKCU:\Software\CodeCodex' -Name RetainedRoot -ErrorAction SilentlyContinue }
+        # Keep the recovery entry until installed files are confirmed gone.
+        Set-UninstallProgress $progressDialog 94 "Removing Windows registration" "Deleting the Code-Codex installed-app entry."
+        $portableUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex"
+        if (Test-Path -LiteralPath $portableUninstallKey) {
+            Remove-Item `
+                -LiteralPath $portableUninstallKey `
+                -Recurse `
+                -Force `
+                -ErrorAction Stop
+        }
+    }
+
+    Complete-UninstallProgress $progressDialog
+    Start-Sleep -Milliseconds 250
+    Invoke-UninstallProgressEvents $progressDialog
+    Close-UninstallProgress $progressDialog
+    $progressDialog = $null
+    if (-not $SharedProgress) { Show-UninstallSuccess }
+}
+catch {
+    $exitCode = 3
+    Close-UninstallProgress $progressDialog
+    $progressDialog = $null
+    if ($SharedProgress) { [Console]::Error.WriteLine($_.ToString()+"`n"+$_.ScriptStackTrace) }
+    else { Show-UninstallFailure $_.Exception.Message }
+}
+finally {
+    Close-UninstallProgress $progressDialog
+    $self = $MyInvocation.MyCommand.Path
+    Remove-Item -LiteralPath $self -Force -ErrorAction SilentlyContinue
+}
+
+exit $exitCode

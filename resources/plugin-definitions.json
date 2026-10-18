@@ -1,0 +1,304 @@
+{
+  "schema": 1,
+  "plugins": [
+    {
+      "id": "glow-horizon",
+      "name": "Glow Horizon Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "black-hole",
+      "name": "Black Hole Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "heavenly-cloud",
+      "name": "Heavenly Cloud Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "aurora-ionosphere",
+      "name": "Aurora Ionosphere Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "milky-way",
+      "name": "Milky Way Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "mountain",
+      "name": "Layered Mountain Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "cloud-train",
+      "name": "Cloud Train Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "blinking-squares",
+      "name": "Blinking Squares Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "particle-image",
+      "name": "Particle Image Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.3",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "pixel-sculpt",
+      "name": "Pixel Sculpt Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.10",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "background",
+        "startup",
+        "preview"
+      ]
+    },
+    {
+      "id": "custom-background",
+      "name": "Custom Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.9",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "background",
+        "local-media",
+        "settings"
+      ]
+    },
+    {
+      "id": "surface-opacity",
+      "name": "UI Surface Opacity",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.3",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "appearance"
+      ]
+    },
+    {
+      "id": "transparent-background",
+      "name": "Transparent Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "appearance"
+      ]
+    },
+    {
+      "id": "git-history",
+      "name": "Git History",
+      "category": "developer-tools",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "developer-tools"
+      ]
+    },
+    {
+      "id": "codex-startup-transition",
+      "name": "Codex Startup Transition",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.1.26",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "startup",
+        "preview",
+        "video-storage"
+      ]
+    },
+    {
+      "id": "markdown-preview",
+      "name": "Markdown Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "csv-preview",
+      "name": "CSV Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "diagram-preview",
+      "name": "Diagram Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "image-preview",
+      "name": "Image Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "video-preview",
+      "name": "Video Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "pdf-preview",
+      "name": "PDF Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "audio-preview",
+      "name": "Audio Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "office-preview",
+      "name": "Office Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "notebook-preview",
+      "name": "Jupyter Notebook Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-10-18",
+      "capabilities": [
+        "file-preview"
+      ]
+    },
+    {
+      "id": "model-preview",
+      "name": "3D Model Preview",
+      "category": "file-preview",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.3.96",
+      "capabilities": [
+        "file-preview"
+      ]
+    }
+  ]
+}

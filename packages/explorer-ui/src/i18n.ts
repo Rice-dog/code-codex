@@ -1,0 +1,17 @@
+import { state, applyLanguagePreference } from './core/localization/preference';
+import type {LanguagePreference,LanguageService,LanguageRequest,UiLocale} from './contracts/localization';
+export type {LanguagePreference,UiLocale} from './contracts/localization';
+const service=()=> (window as unknown as Record<symbol,LanguageService|undefined>)[Symbol.for('code-codex:language-service:v1')];
+const initial:LanguagePreference={schema:1,locale:'en',revision:0,source:'system-default'};
+export const getLocale=():UiLocale=>service()?.getLocale()??state.preference.locale;
+export const languagePreference=():Readonly<LanguagePreference>=>service()?.languagePreference()??state.preference;
+export const languageDiagnostics=()=>service()?.languageDiagnostics()??{preference:state.preference,issue:null,catalogKeys:0,persistence:'host-unavailable'};
+export const parameterLanguage=():'zh'|'en'=>getLocale()==='zh-CN'?'zh':'en';
+export const translate=(text:string):string=>service()?.translate(text)??text;
+export const t=(key:string,params:Record<string,string|number>={}):string=>service()?.t(key,params)??key.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g,(all,k:string)=>String(params[k]??all));
+export const subscribeLanguage=(listener:()=>void):(()=>void)=>service()?.subscribeLanguage(listener)??(()=>{state.listeners.add(listener);return()=>{state.listeners.delete(listener);};})();
+export const applyLanguage=(preference:unknown):void=>{if(service())service()!.applyLanguage(preference);else applyLanguagePreference(preference);};
+export const refreshLanguage=():Promise<void>=>service()?.refreshLanguage()??Promise.resolve();
+export const connectLanguage=(request:LanguageRequest):void=>{service()?.connectLanguage(request);};
+export const selectLanguage=(locale:UiLocale):Promise<void>=>service()?.selectLanguage(locale)??Promise.reject(new Error('The host language service is unavailable.'));
+export const localizeOwnedUi=(root:HTMLElement|ShadowRoot):(()=>void)=>service()?.localizeOwnedUi(root)??(()=>{});

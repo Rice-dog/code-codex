@@ -1,3 +1,4 @@
+import {translate,subscribeLanguage} from './i18n';
 import { observeStartupVideoPlayback } from './startup-video-playback-metrics';
 import { runtimeEvent } from "./runtime-events";
 import { mountStartupBackground } from "./startup-background";
@@ -59,7 +60,8 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
   overlay.style.setProperty("--codex-startup-video-brightness", String(options.videoBrightness ?? 0.8));
   overlay.setAttribute("role", "status");
   overlay.setAttribute("aria-live", "polite");
-  overlay.setAttribute("aria-label", "Codex is starting");
+  const syncLanguage=()=>overlay.setAttribute("aria-label",translate("Codex is starting"));
+  syncLanguage();const unsubscribeLanguage=subscribeLanguage(syncLanguage);
   overlay.innerHTML = `<div class="codex-startup__video" aria-hidden="true"></div>`;
   root.append(overlay);
   options.target.append(host);
@@ -167,6 +169,7 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     video?.removeAttribute("src");
     video?.load();
     if (host.matches(":popover-open")) host.hidePopover();
+    unsubscribeLanguage();
     host.remove();
     options.onComplete?.(reason);
   }

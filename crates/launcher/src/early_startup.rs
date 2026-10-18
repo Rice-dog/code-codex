@@ -50,7 +50,10 @@ pub fn start(endpoint: CdpEndpoint, pid: u32, launched_after: SystemTime) -> Wor
     Worker { cancellation, task }
 }
 fn event(action: &str, outcome: &str, details: Value) {
-    runtime_log::record("startup-animation", action, outcome, details);
+    runtime_log::record("startup-animation", action, outcome, details.clone());
+    if matches!(action, "worker" | "player status" | "candidate session" | "listener ownership") {
+        crate::process_diagnostics::observe("startup animation", action, outcome, details);
+    }
 }
 fn eligible(kind: &str, url: &str) -> bool {
     kind == "page" && url == "app://-/index.html"
@@ -427,6 +430,7 @@ async fn session(
             json!({"reason":"plugin disabled","networkRequested":false}),
         );
     }
+    sources.insert(0,format!("window.__CODE_CODEX_INITIAL_LANGUAGE__=Object.freeze({});",json!(crate::gui_support::localization::preference())));
     sources.push(SOURCE.to_owned());
     for (index, source) in sources.into_iter().enumerate() {
         // Keep this session alive so the new-document registration survives navigation.
@@ -484,6 +488,9 @@ async fn session(
                         outcome,
                         entry["details"].clone(),
                     );
+                    if matches!(action, "early entry" | "early playback" | "launch playback" | "video lookup" | "first painted frame" | "video play") {
+                        crate::process_diagnostics::observe("startup animation", action, outcome, entry["details"].clone());
+                    }
                 }
             }
         }

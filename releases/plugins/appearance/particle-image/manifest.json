@@ -3,19 +3,20 @@
   "name": "Particle Image Background",
   "category": "appearance",
   "api": 1,
-  "version": "1.0.2",
-  "releaseTag": "v0.3.96",
-  "size": 82516,
-  "sha256": "bc2cb48278012a1973e35513d799bd0477e8f9a0661e41375c683445875eb568",
-  "asset": "CodeCodex-background-particle-image-1.0.2.js",
-  "relativePath": "CodeCodex-background-particle-image-1.0.2.js",
+  "version": "1.0.3",
+  "releaseTag": "plugin-assets-2026-10-18",
+  "size": 82529,
+  "sha256": "a2ded8609f66fb4f188a8406a4fafe83b1c639963a114ebf5e004c590c00ab67",
+  "asset": "CodeCodex-background-particle-image-1.0.3.js",
+  "relativePath": "CodeCodex-background-particle-image-1.0.3.js",
   "resources": [
     {
       "asset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
       "relativePath": "media/CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
       "kind": "thumbnail",
       "size": 13626,
-      "sha256": "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70"
+      "sha256": "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70",
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-image-39894de0da1fa952.png",
@@ -35,14 +36,16 @@
         "zoom": 1.45,
         "createdAt": 1787152068482,
         "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png"
-      }
+      },
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
       "relativePath": "media/CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
       "kind": "thumbnail",
       "size": 18485,
-      "sha256": "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3"
+      "sha256": "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3",
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
@@ -62,14 +65,16 @@
         "zoom": 1.35,
         "createdAt": 1786900081772,
         "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png"
-      }
+      },
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
       "relativePath": "media/CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
       "kind": "thumbnail",
       "size": 12669,
-      "sha256": "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182"
+      "sha256": "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182",
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-image-89d064cef83721eb.png",
@@ -89,14 +94,16 @@
         "zoom": 1.35,
         "createdAt": 1787375782731,
         "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png"
-      }
+      },
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
       "relativePath": "media/CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
       "kind": "thumbnail",
       "size": 12801,
-      "sha256": "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda"
+      "sha256": "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda",
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
@@ -116,14 +123,16 @@
         "zoom": 1.25,
         "createdAt": 1787388899281,
         "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png"
-      }
+      },
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
       "relativePath": "media/CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
       "kind": "thumbnail",
       "size": 17458,
-      "sha256": "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f"
+      "sha256": "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f",
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
@@ -143,14 +152,16 @@
         "zoom": 1.35,
         "createdAt": 1786964882337,
         "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png"
-      }
+      },
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
       "relativePath": "media/CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
       "kind": "thumbnail",
       "size": 15641,
-      "sha256": "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845"
+      "sha256": "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845",
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
@@ -170,7 +181,8 @@
         "zoom": 1.25,
         "createdAt": 1787386269570,
         "thumbnailAsset": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png"
-      }
+      },
+      "releaseTag": "v0.3.96"
     }
   ],
   "galleryVersion": 1,

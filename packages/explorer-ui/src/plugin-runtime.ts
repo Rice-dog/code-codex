@@ -1,14 +1,7 @@
 import { runtimeEvent } from './runtime-events';
 
-export type PluginCategory = 'appearance' | 'file-preview' | 'developer-tools';
-export interface PluginPackage {
-  id: string; name: string; category: PluginCategory; api: number; version: string;
-  size: number; sha256: string; asset: string; relativePath?: string;
-  capabilities?: string[]; dependencies?: string[];
-  resources?: Array<{asset: string; size: number; sha256: string; relativePath?: string; kind?: string}>;
-  defaultImageCount?: number;
-}
-export interface PluginModule { id: string; api: number; version: string; exports: Record<string, unknown>; }
+import type {PluginPackage,PluginModule} from './contracts/plugins';
+export type {PluginCategory,PluginPackage,PluginModule} from './contracts/plugins';
 declare const __CODE_CODEX_PLUGIN_CATALOG__: PluginPackage[];
 export const PLUGIN_PACKAGES: readonly PluginPackage[] = typeof __CODE_CODEX_PLUGIN_CATALOG__ === 'undefined' ? [] : __CODE_CODEX_PLUGIN_CATALOG__;
 export function pluginModules(): Map<string, PluginModule> {
@@ -28,6 +21,7 @@ export function pluginExport<T>(id: string, name: string): T {
 type Request = <T>(method: string, params?: Record<string, unknown>, timeoutMs?: number) => Promise<T>;
 let request: Request | undefined;
 const loads = new Map<string, Promise<void>>();
+let connectionGeneration = 0;
 function verifiedModules(): Map<string,{fingerprint:string;module:PluginModule}> {
   const host=window as unknown as Record<symbol,unknown>;
   return (host[Symbol.for('code-codex:verified-plugin-modules:v1')]??=new Map()) as Map<string,{fingerprint:string;module:PluginModule}>;
@@ -43,22 +37,23 @@ export function isPluginPackageLoaded(id:string):boolean {
   const info=PLUGIN_PACKAGES.find(p=>p.id===id),module=registeredModule(id),verified=verifiedModules().get(id);
   return !!info&&module?.api===info.api&&module.version===info.version&&verified?.fingerprint===packageFingerprint(info)&&verified.module===module;
 }
-export function connectPluginPackages(next: Request | undefined): void { request = next; }
+export function connectPluginPackages(next: Request | undefined): void { if(request!==next){connectionGeneration++;loads.clear();} request = next; }
 export async function ensurePluginPackage(id: string): Promise<void> {
   const info = PLUGIN_PACKAGES.find(p => p.id === id);
   if(isPluginPackageLoaded(id))return;
   if (loads.has(id)) return loads.get(id);
-  const current = request;
+  const current = request, generation=connectionGeneration;
   if (!info || !current) throw new Error(`Plugin ${id} is unavailable. Download it in Preview Market first.`);
   const task = (async () => {
     runtimeEvent('plugin-package', 'load', 'started', {id, category: info.category, version: info.version});
     await current('explorer.plugins.load', {id}, 30_000);
+    if(generation!==connectionGeneration)throw new Error(`Plugin ${id} load belongs to a replaced connection. Retry the current operation.`);
     const module = registeredModule(id);
     if (!module || module.api !== info.api || module.version !== info.version) throw new Error(`Plugin ${id} registered an incompatible module.`);
     verifiedModules().set(id,{fingerprint:packageFingerprint(info),module});
     runtimeEvent('plugin-package', 'load', 'passed', {id, category: info.category, version: info.version});
     window.dispatchEvent(new CustomEvent('code-codex:plugin-loaded', {detail: {id}}));
-  })().finally(() => loads.delete(id));
+  })().finally(() => {if(loads.get(id)===task)loads.delete(id);});
   loads.set(id, task);
   return task;
 }

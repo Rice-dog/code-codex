@@ -22,6 +22,8 @@ const CATEGORIES: [&str; 3] = ["appearance", "file-preview", "developer-tools"];
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Resource {
+    #[serde(default)]
+    pub release_tag: String,
     pub asset: String,
     pub size: usize,
     pub sha256: String,
@@ -81,6 +83,7 @@ impl Package {
                 relative_path: r.relative_path.clone(),
                 kind: r.kind.clone(),
                 mime_type: r.mime_type.clone(),
+                release_tag: if r.release_tag.is_empty() {self.release_tag.clone()} else {r.release_tag.clone()},
                 ..self.clone()
             })
             .collect::<Vec<_>>();
@@ -162,6 +165,15 @@ fn trusted_asset(p: &Package, name: &str) -> bool {
 fn safe_relative(value: &str) -> bool {
     !value.is_empty() && value.split('/').count() <= 4 && value.split('/').all(safe_component)
 }
+fn valid_release_tag(value: &str) -> bool {
+    let asset_release = value.strip_prefix("plugin-assets-").is_some_and(|date| {
+        date.len() == 10
+            && date.bytes().enumerate().all(|(i, c)| {
+                if i == 4 || i == 7 { c == b'-' } else { c.is_ascii_digit() }
+            })
+    });
+    safe_component(value) && (value.starts_with('v') || asset_release)
+}
 fn valid_package(p: &Package) -> bool {
     let mut paths = std::collections::HashSet::new();
     paths.insert(&p.relative_path);
@@ -169,8 +181,7 @@ fn valid_package(p: &Package) -> bool {
         && CATEGORIES.contains(&p.category.as_str())
         && safe_component(&p.id)
         && safe_component(&p.version)
-        && p.release_tag.starts_with('v')
-        && safe_component(&p.release_tag)
+        && valid_release_tag(&p.release_tag)
         && p.size > 0
         && p.size <= MAX_SCRIPT
         && valid_hash(&p.sha256)
@@ -184,6 +195,7 @@ fn valid_package(p: &Package) -> bool {
             r.size > 0
                 && r.size <= MAX_SCRIPT
                 && valid_hash(&r.sha256)
+                && (r.release_tag.is_empty() || valid_release_tag(&r.release_tag))
                 && trusted_asset(p, &r.asset)
                 && safe_relative(&r.relative_path)
                 && r.relative_path.rsplit('/').next() == Some(r.asset.as_str())
@@ -827,7 +839,7 @@ async fn install_inner(
     );
     let result = tokio::select! {
         ()=cancel.cancelled()=>Err(error("PLUGIN_CANCELLED","Plugin download was cancelled.")),
-        result=tokio::time::timeout(Duration::from_secs(120),download(&p,&closure, operation))=>result.map_err(|_|error("PLUGIN_NETWORK","Plugin package and resources download exceeded 120 seconds. Retry to reuse already verified files.")).and_then(|result|result),
+        result=tokio::time::timeout(Duration::from_secs(120),download(&p,&closure, operation))=>result.map_err(|_|crate::network_diagnostics::timeout_error("PLUGIN","package download","plugin package and resources",120_000,None)).and_then(|result|result),
     };
     if let Err(e) = &result {
         if let Ok(mut jobs) = jobs().lock() {
@@ -904,28 +916,17 @@ async fn download_asset(
             }
         }))
         .build()
-        .map_err(|e| {trace.fail("client build", &e, 0); error("PLUGIN_NETWORK", format!("Plugin HTTP client: {}", crate::network_diagnostics::error_message(&e)))})?;
-    let response = trace.send(client.get(&endpoint)).await.map_err(|e| {
-        error(
-            "PLUGIN_NETWORK",
-            format!(
-                "Plugin {} request failed: {}",
-                p.id,
-                crate::network_diagnostics::error_message(&e)
-            ),
-        )
-    })?;
-    if !response.status().is_success() || !trusted_url(response.url()) {
-        trace.operation.finish("failed",json!({"phase":"HTTP response validation","code":"PLUGIN_HTTP","status":response.status().as_u16(),"trustedFinalHost":trusted_url(response.url())}));
-        return Err(error(
-            "PLUGIN_HTTP",
-            format!(
-                "Plugin {} asset returned HTTP {}. Check that {} plugin assets were published, or retry later.",
-                p.id,
-                response.status(),
-                p.release_tag
-            ),
-        ));
+        .map_err(|e| {trace.fail("client build", &e, 0); crate::network_diagnostics::transport_error("PLUGIN","client build",&p.id,&e)})?;
+    let role = format!("plugin={} version={} release={} asset={}",p.id,p.version,p.release_tag,p.asset);
+    let response = trace.send(client.get(&endpoint)).await.map_err(|e|
+        crate::network_diagnostics::transport_error("PLUGIN","send",&role,&e))?;
+    if !response.status().is_success() {
+        let error = crate::network_diagnostics::http_error("PLUGIN",&role,&response);
+        trace.operation.finish("failed",json!({"phase":"HTTP response validation","code":error.code,"status":response.status().as_u16()}));
+        return Err(error);
+    }
+    if !trusted_url(response.url()) {
+        return Err(error("PLUGIN_REDIRECT","The plugin response used an untrusted host; download rejected."));
     }
     if response
         .content_length()
@@ -989,14 +990,7 @@ async fn receive_asset(
     let mut transfer = crate::network_diagnostics::TransferProgress::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| {
         trace.fail("body stream", &e, bytes.len() as u64);
-        error(
-            "PLUGIN_NETWORK",
-            format!(
-                "Plugin stream failed after {} bytes: {}",
-                bytes.len(),
-                crate::network_diagnostics::error_message(&e)
-            ),
-        )
+        crate::network_diagnostics::transport_error("PLUGIN","body stream",&format!("plugin={} asset={} receivedBytes={}",p.id,p.asset,bytes.len()),&e)
     })? {
         if bytes.len().saturating_add(chunk.len()) > p.size {
             return Err(error(
@@ -1160,6 +1154,43 @@ mod tests {
         file
     }
     #[test]
+    fn resource_releases_can_reuse_verified_old_media_but_never_accept_urls() {
+        let package=catalog().unwrap().into_iter().find(|p|p.id=="pixel-sculpt").unwrap();
+        assert!(package.resources.iter().any(|r|!r.release_tag.is_empty() && r.release_tag!=package.release_tag));
+        for resource in &package.resources {
+            let asset=package.assets().into_iter().find(|a|a.asset==resource.asset).unwrap();
+            assert_eq!(asset.release_tag,if resource.release_tag.is_empty(){package.release_tag.clone()}else{resource.release_tag.clone()});
+        }
+        let mut invalid=package;invalid.resources[0].release_tag="https://invalid.example/escape".into();assert!(!valid_package(&invalid));
+        invalid.resources[0].release_tag="v../escape".into();assert!(!valid_package(&invalid));
+    }
+
+    #[test]
+    fn dated_asset_release_tags_preserve_cache_identity_and_reject_unsafe_paths() {
+        let mut package = catalog().unwrap().into_iter().find(|p| !p.resources.is_empty()).unwrap();
+        let fingerprint = verified_module_source(&package);
+        package.release_tag = "plugin-assets-2026-10-18".into();
+        assert!(valid_package(&package));
+        assert_eq!(fingerprint, verified_module_source(&package));
+        package.resources[0].release_tag = package.release_tag.clone();
+        assert!(valid_package(&package));
+        for tag in ["plugin-assets-2026-10-18/escape", "plugin-assets-2026-10-18%2fescape",
+            "plugin-assets-2026-1-18", "plugin-assets-2026-10-18\n", "plugin-assets-latest", "https://invalid/"] {
+            assert!(!valid_release_tag(tag), "{tag:?}");
+        }
+        let bytes = b"verified unchanged package";
+        let mut cached = fixture_package(bytes);
+        let root = tempfile::tempdir().unwrap();
+        let original_path = path(root.path(), &cached);
+        std::fs::create_dir_all(original_path.parent().unwrap()).unwrap();
+        std::fs::write(&original_path, bytes).unwrap();
+        cached.release_tag = "plugin-assets-2026-10-18".into();
+        assert_eq!(original_path, path(root.path(), &cached));
+        assert!(source_available(root.path(), &cached));
+        assert_eq!(read_asset(root.path(), &cached).unwrap(), bytes);
+    }
+
+    #[test]
     fn catalog_is_bounded_unique_and_pinned() {
         let packages = catalog().unwrap();
         assert!(packages.len() >= 10);
@@ -1180,6 +1211,7 @@ mod tests {
         let first = b"default photo metadata";
         let mut p = fixture_package(b"main renderer");
         p.resources.push(Resource {
+            release_tag: String::new(),
             asset: "CodeCodex-plugin-fixture-default-photo.js".into(),
             relative_path: String::new(),
             kind: script_kind(),
@@ -1298,6 +1330,7 @@ mod tests {
         let mut p = fixture_package(main);
         p.category = "file-preview".into();
         p.resources.push(Resource {
+            release_tag: String::new(),
             asset: "CodeCodex-plugin-fixture-image.png".into(),
             relative_path: "media/CodeCodex-plugin-fixture-image.png".into(),
             kind: "image".into(),
@@ -1385,6 +1418,7 @@ mod tests {
             ("wasm", "module.wasm", &wasm[..]),
         ] {
             p.resources.push(Resource {
+            release_tag: String::new(),
                 asset: format!("CodeCodex-plugin-fixture-{name}"),
                 relative_path: format!("resources/CodeCodex-plugin-fixture-{name}"),
                 kind: kind.into(),
@@ -1433,6 +1467,7 @@ mod tests {
         let bytes = vec![b'x'; MAX_SCRIPT];
         let p = fixture_package(b"main");
         let r = Resource {
+            release_tag: String::new(),
             asset: "CodeCodex-plugin-fixture-buffer.bin".into(),
             relative_path: "resources/CodeCodex-plugin-fixture-buffer.bin".into(),
             kind: "binary".into(),
@@ -1456,6 +1491,7 @@ mod tests {
         p.default_image_count = 1;
         for (kind, asset) in [("thumbnail", "thumb.png"), ("image", "image.png")] {
             p.resources.push(Resource {
+            release_tag: String::new(),
                 asset: asset.into(),
                 relative_path: format!("media/{asset}"),
                 kind: kind.into(),
@@ -1509,7 +1545,7 @@ mod tests {
             .is_err()
         );
     }
-    async fn http_fixture(bytes: Vec<u8>, delay_tail: bool) -> reqwest::Response {
+    async fn http_fixture(bytes: Vec<u8>, release_tail: Option<std::sync::mpsc::Receiver<()>>) -> reqwest::Response {
         let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = server.local_addr().unwrap();
         std::thread::spawn(move || {
@@ -1523,9 +1559,11 @@ mod tests {
                 bytes.len()
             )
             .unwrap();
-            if delay_tail {
+            if let Some(release) = release_tail {
                 let _ = client.write_all(&bytes[..1]);
-                std::thread::sleep(Duration::from_millis(100));
+                // Keep the response incomplete until the cancellation test drops
+                // its sender. A fixed delay can expire before send() is observed.
+                let _ = release.recv();
                 let _ = client.write_all(&bytes[1..]);
             } else {
                 let _ = client.write_all(&bytes);
@@ -1542,7 +1580,7 @@ mod tests {
         let bytes = b"first party module";
         let p = fixture_package(bytes);
         let root = tempfile::tempdir().unwrap();
-        let response = http_fixture(bytes.to_vec(), false).await;
+        let response = http_fixture(bytes.to_vec(), None).await;
         receive(&p, response, root.path()).await.unwrap();
         assert_eq!(std::fs::read(test_path(root.path(), &p)).unwrap(), bytes);
     }
@@ -1552,7 +1590,7 @@ mod tests {
         for bytes in [b"tampered script".to_vec(), vec![b'x'; p.size + 100]] {
             let root = tempfile::tempdir().unwrap();
             assert!(
-                receive(&p, http_fixture(bytes, false).await, root.path())
+                receive(&p, http_fixture(bytes, None).await, root.path())
                     .await
                     .is_err()
             );
@@ -1564,9 +1602,11 @@ mod tests {
         let bytes = vec![b'x'; 1024];
         let p = fixture_package(&bytes);
         let root = tempfile::tempdir().unwrap();
-        let response = http_fixture(bytes, true).await;
+        let (release, gate) = std::sync::mpsc::channel();
+        let response = http_fixture(bytes, Some(gate)).await;
         tokio::select! {_ = tokio::time::sleep(Duration::from_millis(10))=>{},result=receive(&p,response,root.path())=>panic!("stream should still be pending: {result:?}")};
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        drop(release);
     }
     #[test]
     fn damaged_cache_is_repaired_only_after_new_bytes_verify() {

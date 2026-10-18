@@ -54,7 +54,7 @@ fn text<'a>(p: &'a Value, key: &str) -> io::Result<&'a str> {
         .ok_or_else(|| err("Required resource field missing"))
 }
 pub(crate) fn scope_path(root: &Path, scope: &str) -> io::Result<PathBuf> {
-    if !matches!(scope, "startup" | "particle-image" | "pixel-sculpt") {
+    if !matches!(scope, "startup" | "particle-image" | "pixel-sculpt" | "custom-background") {
         return Err(err("Unknown media scope"));
     }
     Ok(root.join("media").join(scope))
@@ -181,6 +181,7 @@ fn diagnostic_at(root: &Path) -> Value {
         "startup",
         "particle-image",
         "pixel-sculpt",
+        "custom-background",
     ] {
         let path = scope_path(root, scope).unwrap_or_else(|_| root.join("invalid"));
         let entries = match workspace_service::application_paths::validate_directory_path(&path)
@@ -305,7 +306,7 @@ pub(crate) fn request_context(params: &Value) -> Value {
     let scope = params["scope"].as_str().filter(|s| {
         matches!(
             *s,
-            "startup" | "particle-image" | "pixel-sculpt"
+            "startup" | "particle-image" | "pixel-sculpt" | "custom-background"
         )
     });
     json!({"action":action,"scope":scope,"offset":params["offset"].as_u64(),"encodedChunkBytes":params["data"].as_str().map(str::len),"contentOmitted":true})

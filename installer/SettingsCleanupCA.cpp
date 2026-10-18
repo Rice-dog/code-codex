@@ -11,6 +11,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <regex>
+#include "LanguageResources.h"
 
 namespace {
 
@@ -99,6 +101,26 @@ void LogMessage(MSIHANDLE install, const std::wstring& message) noexcept {
     MsiCloseHandle(record);
 }
 
+const wchar_t* LocalizeMsiMessage(MSIHANDLE install,const wchar_t* message) noexcept {
+    wchar_t language[32]={};DWORD length=31;
+    const UINT result=MsiGetPropertyW(install,L"CODECODEXUILANGUAGE",language,&length);
+    const bool chinese=(result==ERROR_SUCCESS && std::wstring_view(language)==L"zh-CN") || (length==0 && (GetUserDefaultUILanguage() & 0x3ff)==4);
+    if(chinese){for(const auto& entry:CodeCodexLanguageEntries){if(entry.first==message){return entry.second.data();}}}
+    return message;
+}
+
+UINT SetMsiLanguageLabels(MSIHANDLE install) noexcept {
+    constexpr std::array<std::pair<const wchar_t*,const wchar_t*>,10> labels{{
+        {L"CCLANGYES",L"Yes"},{L"CCLANGNO",L"No"},{L"CCLANGIGNORE",L"Ignore"},{L"CCLANGOK",L"OK"},{L"CCLANGRETRY",L"Retry"},
+        {L"CCLANGCANCEL",L"Cancel"},{L"CCLANGFINISH",L"Finish"},
+        {L"CCLANGFILEINUSE",L"Close the applications below, then retry."},
+        {L"CCLANGDOWNGRADE",L"A newer version of Code-Codex is already installed."},
+        {L"CCLANGCROSSFORMAT",L"A standalone installation of Code-Codex is already present. Uninstall it through Windows Installed apps before installing the MSI."}
+    }};
+    for(const auto& entry:labels){const UINT result=MsiSetPropertyW(install,entry.first,LocalizeMsiMessage(install,entry.second));if(result!=ERROR_SUCCESS){return result;}}
+    return ERROR_SUCCESS;
+}
+
 void ReportInstallerError(MSIHANDLE install, const wchar_t* message) noexcept {
     if (install == 0) {
         return;
@@ -108,7 +130,7 @@ void ReportInstallerError(MSIHANDLE install, const wchar_t* message) noexcept {
     if (record == 0) {
         return;
     }
-    if (MsiRecordSetStringW(record, 0, message) == ERROR_SUCCESS) {
+    if (MsiRecordSetStringW(record, 0, LocalizeMsiMessage(install,message)) == ERROR_SUCCESS) {
         MsiProcessMessage(install, INSTALLMESSAGE_ERROR, record);
     }
     MsiCloseHandle(record);
@@ -673,9 +695,11 @@ void CleanupSettingsRoot(MSIHANDLE install, const std::wstring& rootPath) {
         return;
     }
 
-    constexpr std::array<const wchar_t*, 2> knownFiles{
+    constexpr std::array<const wchar_t*, 4> knownFiles{
         L"settings.json",
         L"settings.json.tmp",
+        L"ui-language.json",
+        L".ui-language.lock",
     };
     for (const wchar_t* name : knownFiles) {
         RemoveKnownChild(install, locked.rootPath, name);
@@ -745,6 +769,57 @@ int wmain(int argc, wchar_t** argv) {
 }
 
 #else
+
+extern "C" __declspec(dllexport) UINT __stdcall InitializeUiLanguage(MSIHANDLE install) noexcept {
+    try {
+        wchar_t supplied[32] = {}; DWORD length = 31;
+        const UINT suppliedResult = MsiGetPropertyW(install,L"CODECODEXUILANGUAGE",supplied,&length);
+        if (suppliedResult != ERROR_SUCCESS) { return ERROR_INSTALL_FAILURE; }
+        if (length > 0) {
+            const std::wstring_view value(supplied);
+            if (value != L"zh-CN" && value != L"en") {
+                ReportInstallerError(install,L"CC-LANG-INVALID-001: CODECODEXUILANGUAGE must be zh-CN or en.");
+                return ERROR_INSTALL_FAILURE;
+            }
+        }
+        wchar_t initialized[4] = {}; DWORD initializedLength=3;
+        if (MsiGetPropertyW(install,L"CODECODEXUILANGUAGEINITIALIZED",initialized,&initializedLength)==ERROR_SUCCESS && std::wstring_view(initialized)==L"1") { return SetMsiLanguageLabels(install); }
+        std::wstring revision=L"0";
+        const std::wstring explicitLocale(supplied);
+        std::wstring locale = ((GetUserDefaultUILanguage() & 0x3ff) == 4) ? L"zh-CN" : L"en";
+        wchar_t registered[2048] = {}; DWORD count = 2047;
+        if (MsiGetPropertyW(install,L"REGISTEREDINSTALLFOLDER",registered,&count) == ERROR_SUCCESS && count > 0) {
+            LockedSettingsPath locked;
+            const std::wstring dataRoot = std::wstring(registered) + L"\\data";
+            if (LockSettingsPath(install,dataRoot,locked) && RecheckRootIdentity(locked)) {
+                const std::wstring path = dataRoot + L"\\ui-language.json";
+                ScopedHandle file(CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
+                if (file.get() != INVALID_HANDLE_VALUE) {
+                    BY_HANDLE_FILE_INFORMATION info = {}; LARGE_INTEGER size = {};
+                    if (GetFileInformationByHandle(file.get(),&info) && (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY)) == 0 &&
+                        GetFileSizeEx(file.get(),&size) && size.QuadPart > 0 && size.QuadPart <= 4096) {
+                        std::string body(static_cast<size_t>(size.QuadPart),'\0'); DWORD read = 0;
+                        if (ReadFile(file.get(),body.data(),static_cast<DWORD>(body.size()),&read,nullptr) && read == body.size()) {
+                            const std::regex pattern(R"cc("locale"\s*:\s*"(zh-CN|en)")cc");
+                            std::smatch found;
+                            if (std::regex_search(body,found,pattern)) { locale = found[1].str() == "zh-CN" ? L"zh-CN" : L"en"; }
+                            const std::regex revisionPattern(R"cc("revision"\s*:\s*([0-9]{1,10}))cc");
+                            if (std::regex_search(body,found,revisionPattern)) { const std::string value=found[1].str();revision.assign(value.begin(),value.end()); }
+                        }
+                    }
+                }
+            }
+        }
+        if (!explicitLocale.empty()) { locale=explicitLocale; }
+        if (MsiSetPropertyW(install,L"CODECODEXUILANGUAGEREVISION",revision.c_str())!=ERROR_SUCCESS || MsiSetPropertyW(install,L"CODECODEXUILANGUAGEINITIALIZED",L"1")!=ERROR_SUCCESS) { return ERROR_INSTALL_FAILURE; }
+        const UINT selected=MsiSetPropertyW(install,L"CODECODEXUILANGUAGE",locale.c_str());
+        return selected==ERROR_SUCCESS ? SetMsiLanguageLabels(install) : selected;
+    } catch (...) {
+        LogMessage(install,L"CC-LANG-DETECT-001: UI language detection fell back to English.");
+        MsiSetPropertyW(install,L"CODECODEXUILANGUAGEREVISION",L"0");
+        return MsiSetPropertyW(install,L"CODECODEXUILANGUAGE",L"en");
+    }
+}
 
 extern "C" __declspec(dllexport) UINT __stdcall BlockCrossFormatInstall(
     MSIHANDLE install) noexcept {

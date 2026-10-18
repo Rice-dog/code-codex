@@ -3,12 +3,12 @@
   "name": "UI Surface Opacity",
   "category": "appearance",
   "api": 1,
-  "version": "1.0.0",
-  "releaseTag": "v0.3.96",
-  "asset": "CodeCodex-plugin-surface-opacity-1.0.0.js",
-  "relativePath": "CodeCodex-plugin-surface-opacity-1.0.0.js",
-  "size": 11478,
-  "sha256": "cc75dfa941b72fd0bca2f927eb681b263b446e41f880e83c19977b1abf5dd8d2",
+  "version": "1.0.3",
+  "releaseTag": "plugin-assets-2026-10-18",
+  "asset": "CodeCodex-plugin-surface-opacity-1.0.3.js",
+  "relativePath": "CodeCodex-plugin-surface-opacity-1.0.3.js",
+  "size": 12484,
+  "sha256": "3c0fd562b05ab9af6451cf6e7de0d7d5f8095ce78761650a0a8c4392832c54ab",
   "resources": [],
   "capabilities": [
     "appearance"

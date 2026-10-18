@@ -7,6 +7,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+& node (Join-Path $PSScriptRoot 'generate-installer.mjs')
+if ($LASTEXITCODE -ne 0) { throw "Installer source generation/protocol verification failed." }
+& (Join-Path $PSScriptRoot 'check-worker-protocol.ps1')
 & (Join-Path $PSScriptRoot 'assert-storage-contract.ps1')
 $UiRoot = Join-Path $RepoRoot "packages\explorer-ui"
 $PreviousMsvcRustFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS

@@ -1,4 +1,4 @@
-import type { POWERPOINT_FULL_FIDELITY_NOTICE, GLTF_JSON_PREVIEW_MIME, GLTF_BINARY_PREVIEW_MIME } from "../main-preview";
+import { type POWERPOINT_FULL_FIDELITY_NOTICE, type GLTF_JSON_PREVIEW_MIME, type GLTF_BINARY_PREVIEW_MIME } from "../core/preview/configuration";
 import type { PptxViewer } from "@aiden0z/pptx-renderer";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist/types/src/pdf.d.ts";
 import type { Root } from "react-dom/client";

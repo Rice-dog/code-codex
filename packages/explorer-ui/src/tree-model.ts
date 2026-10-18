@@ -1,4 +1,4 @@
-import type { ChangeKind, ExplorerChange, FlatTreeRow, ListResult, TreeNodeInput } from "./types";
+import { type ChangeKind, type ExplorerChange, type FlatTreeRow, type ListResult, type TreeNodeInput } from "./contracts/bridge";
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 export const MAX_RENDERER_NODES = 10_000;

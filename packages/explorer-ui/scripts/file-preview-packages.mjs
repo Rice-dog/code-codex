@@ -1,3 +1,4 @@
+import {sourcePackage} from './plugin-source-definition.mjs';
 import {build} from 'esbuild';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
@@ -21,12 +22,13 @@ export const filePreviewDefinitions = [
  * PDF's local fake worker and Office's audited local Worker/WASM are intentionally
  * part of their own packages, avoiding any browser-side unverified network load.
  */
-export async function buildFilePreviewPackages(root,options,hostVersion) {
- const version='1.0.0', catalog=[];
+export async function buildFilePreviewPackages(root,options,outputRoot=resolve(root,'dist/plugins')) {
+ const catalog=[];
  const notices=await readFile(resolve(root,'../..','THIRD_PARTY_NOTICES_EN.md'),'utf8');
  const banner=`/*! Code-Codex first-party file preview package.\nSource: https://github.com/Rice-dog/code-codex\n${notices.replaceAll('*/','* /')}\n*/`;
  for(const[id,name,hostId]of filePreviewDefinitions){
-  const directory=resolve(root,'dist/plugins/file-preview',id);
+  const version=sourcePackage(id).version;
+  const directory=resolve(outputRoot,'file-preview',id);
   await mkdir(directory,{recursive:true});
   const resources=[];
   if(id==='office-preview'){
@@ -45,7 +47,7 @@ export async function buildFilePreviewPackages(root,options,hostVersion) {
   await writeFile(resolve(directory,`${id}.metafile.json`),JSON.stringify(result.metafile,null,2)+'\n');
   const bytes=await readFile(resolve(directory,asset));
   if(bytes.length>4*1024*1024)throw Error(`File preview ${id} exceeds the bounded 4 MiB script channel`);
-  const descriptor={id,name,hostId,category:'file-preview',api:1,version,releaseTag:`v${hostVersion}`,size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),asset,relativePath:asset,resources,defaultImageCount:0,capabilities:['file-preview'],source:'https://github.com/Rice-dog/code-codex',notices:'THIRD_PARTY_NOTICES_EN.md'};
+  const descriptor={id,name,hostId,category:'file-preview',api:1,version,releaseTag:sourcePackage(id).releaseTag,size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),asset,relativePath:asset,resources,defaultImageCount:0,capabilities:['file-preview'],source:'https://github.com/Rice-dog/code-codex',notices:'THIRD_PARTY_NOTICES_EN.md'};
   catalog.push(descriptor);
   await writeFile(resolve(directory,'manifest.json'),JSON.stringify(descriptor,null,2)+'\n');
   await writeFile(resolve(directory,'README.md'),`# ${name}\n\nCategory: File Preview. API 1; immutable package ${version}. Main script: ${asset}.\n\nDownload and SHA-256 verification complete before activation. The already-open Codex window can use the viewer immediately, without restarting. The host retains its tabs, workspace capabilities, size budgets and cancellation generations; the downloaded module owns format parsing, rendering and resource cleanup. This package contains only this viewer's dependencies.\n\nNo screenshots or personal media are part of the plugin package. PDF and Office use local audited runtimes and do not fetch executable dependencies from the document.\n`);

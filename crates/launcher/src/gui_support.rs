@@ -8,6 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 #[path = "setup_observability.rs"]
 pub(crate) mod setup_observability;
+#[path = "localization.rs"]
+pub(crate) mod localization;
 use serde_json::json;
 use setup_observability::SetupJournal;
 
@@ -584,7 +586,7 @@ $form.Controls.Add($brandIcon)
 $status = New-Object System.Windows.Forms.Label
 Set-UiBounds $status 20 105 420 28
 $status.AutoEllipsis = $true
-$status.Text = $env:CLE_PROGRESS_MESSAGE
+$status.Text = ConvertTo-CodeCodexUiText $env:CLE_PROGRESS_MESSAGE
 $form.Controls.Add($status)
 
 $detail = New-Object System.Windows.Forms.Label
@@ -605,6 +607,7 @@ $form.Controls.Add($bar)
 
 # Setup uses one branded wizard; the updater starts directly on Installing.
 $script:setupWizard = $env:CLE_SETUP_WIZARD -eq '1'
+$script:uninstallWizard = $env:CLE_UNINSTALL_WIZARD -eq '1'
 $script:setupPending = $env:CLE_SETUP_SELECT -eq '1'
 $script:allowClose = $false
 $script:setupPage = 'welcome'
@@ -614,7 +617,7 @@ if ($script:setupWizard) {
     if ($env:CLE_SETUP_INITIAL_ROOT) { $script:setupRoot = $env:CLE_SETUP_INITIAL_ROOT }
     $script:setupExistingRoot = Get-CodeCodexRegisteredRoot
     $script:setupExisting = Test-Path -LiteralPath (Join-Path $script:setupExistingRoot 'current-version') -PathType Leaf
-    if ($script:setupExisting) { $script:setupRoot = $script:setupExistingRoot }
+    if ($script:setupExisting -and -not $script:uninstallWizard) { $script:setupRoot = $script:setupExistingRoot }
     $script:uiLogicalSize = [System.Drawing.Size]::new(720, 400)
     $form.ControlBox = $true
     $brandPanel = New-Object CodeCodexBrandPanel
@@ -650,7 +653,8 @@ if ($script:setupWizard) {
     $brandVersion.BackColor = [System.Drawing.Color]::Transparent
     $brandPanel.Controls.Add($brandVersion)
     $stepCaption = New-Object System.Windows.Forms.Label
-    Set-UiBounds $stepCaption 268 26 424 22
+    Set-UiBounds $stepCaption 268 26 154 22
+    Set-UiFont $stepCaption 9
     $stepCaption.ForeColor = [System.Drawing.Color]::FromArgb(83, 103, 122)
     $form.Controls.Add($stepCaption)
     Set-UiBounds $status 268 65 424 78
@@ -750,7 +754,39 @@ if ($script:setupWizard) {
         $button.BackColor = [System.Drawing.Color]::White
         $button.ForeColor = [System.Drawing.Color]::FromArgb(48, 61, 74)
     }
+    $languageLabel = New-Object System.Windows.Forms.Label
+    $languageLabel.Text = '安装语言 / Language'
+    $languageLabel.Visible = $false
+    $languageLabel.ForeColor = [System.Drawing.Color]::FromArgb(83, 91, 104)
+    Set-UiFont $languageLabel 9
+    $form.Controls.Add($languageLabel)
+    $languageChoice = New-Object System.Windows.Forms.ComboBox
+    $languageChoice.DropDownStyle = [Windows.Forms.ComboBoxStyle]::DropDownList
+    $languageChoice.TabIndex = 2
+    $languageChoice.Visible = $false
+    $languageChoice.TabStop = $false
+    [void]$languageChoice.Items.Add('中文（简体）')
+    [void]$languageChoice.Items.Add('English')
+    $languageChoice.SelectedIndex = if ($script:CodeCodexUiLocale -eq 'zh-CN') { 0 } else { 1 }
+    $form.Controls.Add($languageChoice)
+    $languageChoice.Add_SelectedIndexChanged({
+        $script:CodeCodexUiLocale = if ($languageChoice.SelectedIndex -eq 0) { 'zh-CN' } else { 'en' }
+        Write-UiEvent 'language selection' 'changed' @{locale=$script:CodeCodexUiLocale;persisted=$false}
+        Show-SetupPage $script:setupPage
+    })
+    $removeSettings = New-Object System.Windows.Forms.CheckBox
+    $removeSettings.Text = 'Delete settings, downloaded plugins and local media'
+    Set-UiBounds $removeSettings 268 208 424 56
+    $removeSettings.Checked = $env:CLE_UNINSTALL_PURGE -eq '1'
+    $removeSettings.Visible = $false
+    $form.Controls.Add($removeSettings)
     function Show-SetupPage([string]$Page) {
+        # Keep the field hidden until the translated welcome layout is final.
+        # Never stage it in the header during page or language changes.
+        $languageChoice.Visible = $false
+        $languageChoice.TabStop = $false
+        $languageLabel.Visible = $false
+        $removeSettings.Visible = $Page -eq 'uninstall-confirm'
         Write-UiEvent 'wizard page' 'shown' @{page=$Page}
         $script:setupPage = $Page
         $licenseBox.Visible = $Page -eq 'license'
@@ -769,14 +805,20 @@ if ($script:setupWizard) {
         Set-UiBounds $status 268 50 424 $(if ($Page -eq 'welcome') { 78 } else { 40 })
         Set-UiBounds $detail 268 $(if ($Page -eq 'welcome') { 136 } else { 98 }) 424 58
         switch ($Page) {
+            'uninstall-confirm' {
+                $stepCaption.Text = ''
+                $status.Text = 'Uninstall Code-Codex'
+                $detail.Text = 'Remove Code-Codex from this computer. Settings, plugins and local media are kept unless selected below.'
+                $install.Text = 'Uninstall'
+            }
             'welcome' {
-                $stepCaption.Text = 'WELCOME'
+                $stepCaption.Text = ''
                 $status.Text = "Welcome to`nCode-Codex Setup"
                 $detail.Text = 'Add a file tree, previews and customizable backgrounds to your Codex workspace.'
                 $install.Text = 'Next'
             }
             'license' {
-                $stepCaption.Text = '01 / LICENSE AGREEMENT'
+                $stepCaption.Text = '01 / LICENSE'
                 $status.Text = 'License Agreement'
                 $detail.Text = 'Code-Codex uses the MIT License. Third-party license notices are included with the installed software.'
                 $install.Text = 'Next'
@@ -785,24 +827,38 @@ if ($script:setupWizard) {
                 $licenseBox.ScrollToCaret()
             }
             'folder' {
-                $stepCaption.Text = '02 / INSTALLATION FOLDER'
+                $stepCaption.Text = '02 / FOLDER'
                 $status.Text = if ($script:setupExisting) { 'Update Code-Codex' } else { 'Installation Folder' }
                 $detail.Text = if ($script:setupExisting) { 'Your settings, downloaded plugins and media will be kept.' } else { 'Use the default folder on your C drive, or choose a dedicated folder.' }
                 $install.Text = 'Install'
             }
             'installing' {
-                $stepCaption.Text = '03 / INSTALLING'
-                $status.Text = 'Preparing setup...'
-                $detail.Text = 'Preparing the installation files.'
+                $stepCaption.Text = if ($script:uninstallWizard) { 'UNINSTALLING' } else { '03 / INSTALLING' }
+                $status.Text = if ($script:uninstallWizard) { 'Preparing uninstall...' } else { 'Preparing setup...' }
+                $detail.Text = if ($script:uninstallWizard) { 'Verifying the installed files and running processes.' } else { 'Preparing the installation files.' }
             }
             'finish' {
                 $stepCaption.Text = '04 / COMPLETE'
-                $status.Text = 'Installation Complete'
+                $status.Text = if ($script:uninstallWizard) { 'Uninstallation complete' } else { 'Installation Complete' }
                 $install.Text = 'Finish'
                 $script:allowClose = $true
             }
         }
+        Update-CodeCodexFormLanguage $form
         Update-UiLayout
+        if ($Page -eq 'welcome') {
+            # Use the translated paragraph's actual line count so both languages
+            # keep the language field close to the introduction at every DPI.
+            $measured = [System.Windows.Forms.TextRenderer]::MeasureText($detail.Text, $detail.Font, [System.Drawing.Size]::new($detail.Width,10000), ([System.Windows.Forms.TextFormatFlags]::WordBreak -bor [System.Windows.Forms.TextFormatFlags]::NoPadding))
+            $paragraphHeight = [int][Math]::Ceiling($measured.Height * 96.0 / $form.LayoutDpi)
+            $languageTop = 136 + $paragraphHeight + 22
+            Set-UiBounds $detail 268 136 424 $paragraphHeight
+            Set-UiBounds $languageLabel 268 $languageTop 232 20
+            Set-UiBounds $languageChoice 268 ($languageTop + 28) 232 28
+            $languageLabel.Visible = $true
+            $languageChoice.TabStop = $true
+            $languageChoice.Visible = $true
+        }
     }
     $agreement.Add_CheckedChanged({ Write-UiEvent 'license consent' 'changed' @{accepted=$agreement.Checked}; if ($script:setupPage -eq 'license') { $install.Enabled = $agreement.Checked } })
     $custom.Add_CheckedChanged({
@@ -812,7 +868,7 @@ if ($script:setupWizard) {
     $browse.Add_Click({
         Write-UiEvent 'folder picker' 'opened'
         $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-        $dialog.Description = 'Choose a parent folder. A dedicated Code-Codex folder will be created.'
+        $dialog.Description = ConvertTo-CodeCodexUiText 'Choose a parent folder. A dedicated Code-Codex folder will be created.'
         $dialog.SelectedPath = Split-Path -Parent $pathBox.Text
         try { if ($dialog.ShowDialog($form) -eq 'OK') { $pathBox.Text = Join-Path $dialog.SelectedPath 'Code-Codex' } }
         finally { $dialog.Dispose(); Write-UiEvent 'folder picker' 'closed' }
@@ -846,6 +902,21 @@ if ($script:setupWizard) {
     $cancel.Add_Click({ if ($script:setupPage -ne 'report') { Write-UiEvent 'user action' 'cancelled'; $form.Close() } })
     $install.Add_Click({
         switch ($script:setupPage) {
+            'uninstall-confirm' {
+                try {
+                    $decision = @{ purgeSettings = [bool]$removeSettings.Checked } | ConvertTo-Json -Compress
+                    $stagedDecision = $env:CLE_SETUP_DECISION_PATH + '.tmp'
+                    [IO.File]::WriteAllText($stagedDecision,$decision,[Text.UTF8Encoding]::new($false))
+                    [IO.File]::Move($stagedDecision,$env:CLE_SETUP_DECISION_PATH)
+                    Write-UiEvent 'uninstall confirmation' 'accepted' @{purgeSettings=$removeSettings.Checked}
+                    $script:setupPending = $false
+                    Show-SetupPage 'installing'
+                } catch {
+                    Write-UiEvent 'uninstall confirmation' 'failed' @{reason=$_.Exception.Message}
+                    $detail.Text = ConvertTo-CodeCodexUiText 'Uninstall could not start. No files have been removed.'
+                }
+                return
+            }
             'welcome' { Show-SetupPage 'license'; return }
             'license' { if ($agreement.Checked) { Show-SetupPage 'folder' }; return }
             'finish' { Write-UiEvent 'user action' 'Finish'; $form.Close(); return }
@@ -860,7 +931,7 @@ if ($script:setupWizard) {
             return
         }
         try {
-            $decision = @{ installRoot = $root } | ConvertTo-Json -Compress
+            $decision = @{ installRoot = $root; uiLanguage = $script:CodeCodexUiLocale } | ConvertTo-Json -Compress
             $stagedDecision = $env:CLE_SETUP_DECISION_PATH + '.tmp'
             [IO.File]::WriteAllText($stagedDecision, $decision, [System.Text.UTF8Encoding]::new($false))
             [IO.File]::Move($stagedDecision, $env:CLE_SETUP_DECISION_PATH)
@@ -879,7 +950,7 @@ if ($script:setupWizard) {
         $browse.Enabled = $false
         $pathHint.Text = 'Installation folder is locked during updates. Your settings, plugins and media will be kept.'
     } elseif ($env:CLE_SETUP_INITIAL_ROOT) { $custom.Checked = $true }
-    Show-SetupPage $(if ($script:setupPending) { 'welcome' } else { 'installing' })
+    Show-SetupPage $(if ($script:setupPending) { if ($script:uninstallWizard) { 'uninstall-confirm' } else { 'welcome' } } else { 'installing' })
     $form.Add_FormClosing({
         if (-not $script:setupPending -and -not $script:allowClose -and $_.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) { $_.Cancel = $true }
     })
@@ -890,8 +961,8 @@ if ($script:setupWizard) {
 
 function Set-ProgressMessage([string]$Message) {
     $lines = $Message -split "`n", 2
-    $status.Text = $lines[0]
-    $detail.Text = if ($lines.Length -gt 1) { $lines[1] } else { '' }
+    $status.Text = ConvertTo-CodeCodexUiText $lines[0]
+    $detail.Text = if ($lines.Length -gt 1) { ConvertTo-CodeCodexUiText $lines[1] } else { '' }
 }
 
 $parentId = 0
@@ -935,10 +1006,11 @@ $timer.Add_Tick({
             } elseif (-not $script:setupPending -and $parts.Length -eq 4 -and $parts[1] -eq 'finish' -and $script:setupWizard) {
                 Show-SetupPage 'finish'
                 Set-UiBounds $detail 268 112 424 ([int][Math]::Round($form.ClientSize.Height/($form.LayoutDpi/96.0))-190)
-                $detail.Text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[3]))
+                $detail.Text = ConvertTo-CodeCodexUiText ([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[3])))
                 $form.Refresh()
                 Write-UiMarker $env:CLE_PROGRESS_ACK_PATH ($parts[0]+'|finish')
                 Write-UiEvent 'finish page' 'acknowledged' @{sequence=$parts[0]}
+                Update-CodeCodexFormLanguage $form
                 $script:lastCommand = $command
             } elseif ($parts.Length -eq 4 -and $parts[1] -eq 'checks') {
                 $script:setupPending = $false
@@ -950,7 +1022,8 @@ $timer.Add_Tick({
             } elseif ($parts.Length -eq 4 -and $parts[1] -eq 'report' -and $script:setupWizard) {
                 $script:report = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[3])) | ConvertFrom-Json
                 $script:setupPending = $false; $script:allowClose = $true; $script:setupPage = 'report'
-                $status.Text = 'Installation Diagnostic'; Set-UiFont $status 18 ([Drawing.FontStyle]::Bold)
+                $status.Text = if ($script:uninstallWizard) { 'Uninstall Diagnostic' } else { 'Installation Diagnostic' }; Set-UiFont $status 18 ([Drawing.FontStyle]::Bold)
+                $removeSettings.Visible=$false; $languageLabel.Visible=$false; $languageChoice.Visible=$false
                 $stepCaption.Text = 'DIAGNOSTIC REPORT'; $detail.Visible=$false; $bar.Visible=$false; $licenseBox.Visible=$false; $agreement.Visible=$false; $custom.Visible=$false; $pathPanel.Visible=$false
                 if (-not $script:reportBox) {
                     $script:reportBox = New-Object System.Windows.Forms.TextBox
@@ -963,7 +1036,7 @@ $timer.Add_Tick({
                 $actions.Visible=$true; $back.Visible=$true; $cancel.Visible=$true
                 $back.Text='Copy details'; $cancel.Text='Open report'; $cancel.Enabled=[bool]$script:report.path
                 $install.Text='Close'; $install.Enabled=$true; $form.ControlBox=$true; $form.AcceptButton=$install; $form.CancelButton=$install
-                Update-UiLayout; $form.Refresh(); Write-UiMarker $env:CLE_PROGRESS_ACK_PATH ($parts[0]+'|report')
+                Update-CodeCodexFormLanguage $form; Update-UiLayout; $form.Refresh(); Write-UiMarker $env:CLE_PROGRESS_ACK_PATH ($parts[0]+'|report')
                 Write-UiEvent 'diagnostic report' 'acknowledged' @{sequence=$parts[0]}
                 $script:lastCommand=$command
             } elseif (-not $script:setupPending -and $parts.Length -eq 4 -and $parts[1] -eq 'progress') {
@@ -976,6 +1049,7 @@ $timer.Add_Tick({
                 Set-ProgressMessage ([System.Text.Encoding]::UTF8.GetString(
                     [Convert]::FromBase64String($parts[3])
                 ))
+                Update-CodeCodexFormLanguage $form
                 $script:lastCommand = $command
             } elseif (-not $script:setupPending -and $parts.Length -eq 4 -and $parts[1] -eq 'marquee') {
                 Set-ProgressMessage ([System.Text.Encoding]::UTF8.GetString(
@@ -1031,7 +1105,7 @@ pub(crate) struct ProgressDialog {
 #[allow(dead_code)]
 impl ProgressDialog {
     pub(crate) fn open(title: &str, message: &str, value: u8, version: &str) -> Self {
-        Self::open_mode(title, message, value, version, false, None, None)
+        Self::open_mode(title, message, value, version, false, None, None, None)
     }
 
     pub(crate) fn open_setup(
@@ -1049,6 +1123,7 @@ impl ProgressDialog {
             true,
             initial_root,
             Some((background, license)),
+            None,
         )
     }
 
@@ -1066,7 +1141,13 @@ impl ProgressDialog {
             false,
             None,
             Some((background, license)),
+            None,
         )
+    }
+
+    pub(crate) fn open_uninstall(title: &str, version: &str, root: &std::ffi::OsStr, purge: bool) -> Self {
+        Self::open_mode(title, "Preparing uninstall...", 0, version, true, Some(root),
+            Some((include_bytes!("../resources/setup-brand-background.png"), "")), Some(purge))
     }
 
     fn open_mode(
@@ -1077,6 +1158,7 @@ impl ProgressDialog {
         select: bool,
         initial_root: Option<&std::ffi::OsStr>,
         setup_assets: Option<(&[u8], &str)>,
+        uninstall: Option<bool>,
     ) -> Self {
         let journal = SetupJournal::new();
         journal.event(
@@ -1093,8 +1175,10 @@ impl ProgressDialog {
         let state_directory = match tempfile::Builder::new()
             .prefix("CodeCodex-Progress-")
             .tempdir_in(
-                workspace_service::application_paths::temp_root()
-                    .unwrap_or_else(|_| std::env::temp_dir()),
+                if uninstall.is_some() { std::env::temp_dir() } else {
+                    workspace_service::application_paths::temp_root()
+                        .unwrap_or_else(|_| std::env::temp_dir())
+                },
             ) {
             Ok(v) => v,
             Err(e) => {
@@ -1114,11 +1198,16 @@ impl ProgressDialog {
         let background_path = state_directory.path().join("Setup.Background.png");
         let license_path = state_directory.path().join("LICENSE.txt");
         let script_path = state_directory.path().join("Setup.UI.ps1");
-        let ui_script = format!("\u{feff}{PROGRESS_DIALOG_SCRIPT}");
+        let language_script=include_str!("../../../resources/i18n/Language.ps1");
+        let language_en_path=state_directory.path().join("en.json");
+        let language_zh_path=state_directory.path().join("zh-CN.json");
+        let ui_script = format!("\u{feff}{language_script}\n{PROGRESS_DIALOG_SCRIPT}");
         let mut resources: Vec<(&Path, &[u8])> = vec![
             (&script_path, ui_script.as_bytes()),
             (&state_path, b"0|progress|0|"),
             (&icon_path, include_bytes!("../resources/code-codex.png")),
+            (&language_en_path,include_bytes!("../../../resources/i18n/en.json")),
+            (&language_zh_path,include_bytes!("../../../resources/i18n/zh-CN.json")),
         ];
         if setup_assets.is_some() {
             resources.push((
@@ -1160,7 +1249,9 @@ impl ProgressDialog {
                 "-File",
             ])
             .arg(&script_path)
-            .env("CLE_PROGRESS_TITLE", title)
+            .env("CLE_UI_LANGUAGE",localization::locale().as_str())
+            .env("CLE_UI_LANGUAGE_RESOURCES",state_directory.path())
+            .env("CLE_PROGRESS_TITLE", localization::text(title))
             .env("CLE_PROGRESS_MESSAGE", single_line_message(message))
             .env("CLE_PROGRESS_VALUE", value.min(100).to_string())
             .env("CLE_PROGRESS_VERSION", single_line_message(version))
@@ -1172,6 +1263,8 @@ impl ProgressDialog {
             .env("CLE_SETUP_BACKGROUND_PATH", &background_path)
             .env("CLE_SETUP_LICENSE_PATH", &license_path)
             .env("CLE_SETUP_SELECT", if select { "1" } else { "0" })
+            .env("CLE_UNINSTALL_WIZARD", if uninstall.is_some() { "1" } else { "0" })
+            .env("CLE_UNINSTALL_PURGE", if uninstall == Some(true) { "1" } else { "0" })
             .env(
                 "CLE_SETUP_WIZARD",
                 if setup_assets.is_some() { "1" } else { "0" },
@@ -1297,6 +1390,7 @@ impl ProgressDialog {
                     #[serde(rename_all = "camelCase", deny_unknown_fields)]
                     struct Selection {
                         install_root: String,
+                        ui_language: workspace_service::ui_language::Locale,
                     }
                     if bytes.len() > 4096 {
                         return Err(
@@ -1317,6 +1411,7 @@ impl ProgressDialog {
                         "accepted",
                         json!({"responseBytes":bytes.len()}),
                     );
+                    localization::set_session(selection.ui_language);
                     return Ok(Some(selection.install_root.into()));
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -1337,6 +1432,31 @@ impl ProgressDialog {
                         "Setup window exited before installation started: {status}"
                     ))
                 };
+            }
+            self.check_heartbeat()?;
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    pub(crate) fn wait_for_uninstall_confirmation(&mut self) -> Result<Option<bool>, String> {
+        let path = self.state_directory.as_ref().ok_or_else(|| self.startup_error.clone().unwrap_or("Uninstall window unavailable".into()))?.path().join("selection.json");
+        loop {
+            match fs::read(&path) {
+                Ok(bytes) => {
+                    #[derive(serde::Deserialize)]
+                    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                    struct Confirmation { purge_settings: bool }
+                    if bytes.len() > 1024 { return Err("Invalid uninstall confirmation response".into()); }
+                    let value: Confirmation = serde_json::from_slice(&bytes).map_err(|e| format!("Invalid uninstall confirmation: {e}"))?;
+                    self.journal.event("uninstall confirmation", "accepted", json!({"purgeSettings":value.purge_settings}));
+                    return Ok(Some(value.purge_settings));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("Uninstall confirmation could not be read: {e}")),
+            }
+            let child = self.child.as_mut().ok_or("Uninstall window unavailable")?;
+            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                return if status.success() { Ok(None) } else { Err(format!("Uninstall window exited before confirmation: {status}")) };
             }
             self.check_heartbeat()?;
             thread::sleep(Duration::from_millis(50));
@@ -1604,7 +1724,7 @@ fn single_line_message(message: &str) -> String {
 
 pub(crate) fn show_dialog(title: &str, message: &str, error: bool) {
     let Ok(powershell) = trusted_system32_powershell() else {
-        native_dialog(title, message, error);
+        native_dialog(&localization::text(title), &localization::text(message), error);
         return;
     };
 
@@ -1617,15 +1737,15 @@ pub(crate) fn show_dialog(title: &str, message: &str, error: bool) {
             "-Command",
             DIALOG_SCRIPT,
         ])
-        .env("CLE_DIALOG_TITLE", title)
-        .env("CLE_DIALOG_MESSAGE", message)
+        .env("CLE_DIALOG_TITLE", localization::text(title))
+        .env("CLE_DIALOG_MESSAGE", localization::text(message))
         .env("CLE_DIALOG_ERROR", if error { "1" } else { "0" })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     configure_hidden(&mut command);
     if !command.status().is_ok_and(|status| status.success()) {
-        native_dialog(title, message, error);
+        native_dialog(&localization::text(title), &localization::text(message), error);
     }
 }
 

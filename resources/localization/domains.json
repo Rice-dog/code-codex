@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "domains": [
+    "installer",
+    "core",
+    "components",
+    "plugins"
+  ],
+  "generatedCompatibilityFiles": [
+    "resources/i18n/en.json",
+    "resources/i18n/zh-CN.json"
+  ]
+}

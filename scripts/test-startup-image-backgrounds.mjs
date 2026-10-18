@@ -171,8 +171,8 @@ try{
   await navigate('/ui');
   const shadow=`document.querySelector('${tag}').shadowRoot`;
   await evaluate(`(()=>{const e=document.querySelector('${tag}');e.openPreviewMarket();${shadow}.querySelector('[data-appearance-plugin="code-codex.startup-transition"]').scrollIntoView({block:'center'});${shadow}.querySelector('.startupTransition-settings-trigger').click()})()`);await delay(250);
-  const market=await evaluate(`(()=>{const s=${shadow};return {market:[...s.querySelectorAll('[data-appearance-plugin] h4')].map(e=>e.textContent).filter(name=>name.endsWith(' Background')&&name!=='Transparent Background'),options:[...s.querySelector('#cle-startupTransition-background').options].map(o=>({id:o.value,name:o.textContent}))}})()`);
-  check('real startup selector matches every dynamic Preview Market background',market,market.market.length===10&&market.options.length===10&&market.market.every(name=>market.options.some(option=>option.name===name)));
+  const market=await evaluate(`(()=>{const s=${shadow};return {market:[...s.querySelectorAll('[data-appearance-plugin] h4')].map(e=>e.textContent).filter(name=>name.endsWith(' Background')&&name!=='Transparent Background'&&name!=='Custom Background'),options:[...s.querySelector('#cle-startupTransition-background').options].map(o=>({id:o.value,name:o.textContent}))}})()`);
+  check('real startup selector matches every startup-capable Preview Market background (Custom has no startup capability)',market,market.market.length===10&&market.options.length===10&&market.market.every(name=>market.options.some(option=>option.name===name)));
   const uiSettingsBefore=await evaluate('fixtureStorageSnapshot()');
   for(const id of ['particle-image','pixel-sculpt']){
     await evaluate(`(()=>{const s=${shadow},source=s.querySelector('#cle-startupTransition-source'),select=s.querySelector('#cle-startupTransition-background');source.value='background';source.dispatchEvent(new Event('change',{bubbles:true}));select.value=${JSON.stringify(id)};select.dispatchEvent(new Event('change',{bubbles:true}))})()`);await delay(1500);

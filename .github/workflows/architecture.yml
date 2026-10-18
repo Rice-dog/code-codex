@@ -1,0 +1,31 @@
+name: Architecture and contracts
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  native-protocol:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test -p cdp-client --locked -- --test-threads=1
+  contracts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/explorer-ui/package-lock.json
+      - run: npm --prefix packages/explorer-ui ci
+      - run: node packages/explorer-ui/node_modules/typescript/bin/tsc --noEmit -p packages/explorer-ui/tsconfig.json
+      - run: node scripts/check-architecture.mjs
+      - run: node scripts/check-i18n.mjs
+      - run: node scripts/generate-installer.mjs
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-worker-protocol.ps1
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-completion.ps1
+      - run: node --test scripts/test-refactor-contracts.mjs scripts/test-plugin-publication.mjs scripts/test-maintenance-isolation.mjs scripts/test-file-mutation-isolation.mjs
+      - run: node scripts/test-background-surfaces.mjs

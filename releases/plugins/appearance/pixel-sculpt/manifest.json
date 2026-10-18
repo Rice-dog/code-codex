@@ -3,12 +3,12 @@
   "name": "Pixel Sculpt Background",
   "category": "appearance",
   "api": 1,
-  "version": "1.0.2",
-  "releaseTag": "v0.3.96",
-  "size": 2412208,
-  "sha256": "61db19e65bc178b93a8eaae274f423d81d9ee36cb6ea0874344d276360f42543",
-  "asset": "CodeCodex-background-pixel-sculpt-1.0.2.js",
-  "relativePath": "CodeCodex-background-pixel-sculpt-1.0.2.js",
+  "version": "1.0.10",
+  "releaseTag": "plugin-assets-2026-10-18",
+  "size": 2412999,
+  "sha256": "576ce8fc720678c7ee94bae8d562075e4a725c8991b222f8c6c062201d913d89",
+  "asset": "CodeCodex-background-pixel-sculpt-1.0.10.js",
+  "relativePath": "CodeCodex-background-pixel-sculpt-1.0.10.js",
   "resources": [
     {
       "asset": "CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
@@ -26,7 +26,8 @@
         "positionX": 50,
         "positionY": 50,
         "zoom": 1
-      }
+      },
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
@@ -44,7 +45,8 @@
         "positionX": 50,
         "positionY": 50,
         "zoom": 1
-      }
+      },
+      "releaseTag": "v0.3.96"
     },
     {
       "asset": "CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
@@ -62,7 +64,8 @@
         "positionX": 50,
         "positionY": 50,
         "zoom": 1
-      }
+      },
+      "releaseTag": "v0.3.96"
     }
   ],
   "galleryVersion": 1,

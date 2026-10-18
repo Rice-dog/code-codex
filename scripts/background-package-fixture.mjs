@@ -6,9 +6,11 @@ import { verifiedPluginSources } from './plugin-package-files.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
-export function installedBackgroundFixture(root) {
+export function installedBackgroundFixture(root,ids) {
   const directory=resolve(root,'packages/explorer-ui/dist/plugins');
-  const catalog=JSON.parse(readFileSync(resolve(directory,'catalog.json'),'utf8'));
+  const all=JSON.parse(readFileSync(resolve(directory,'catalog.json'),'utf8'));
+  if(ids&&ids.some(id=>!all.some(p=>p.id===id)))throw Error('Unknown installed fixture package');
+  const catalog=ids?all.filter(p=>ids.includes(p.id)):all;
   const scripts=catalog.map(p=>{
     const bytes=readFileSync(pluginAssetPath(directory,p));
     if(bytes.length!==p.size||createHash('sha256').update(bytes).digest('hex')!==p.sha256)throw Error(`Fixture package ${p.id} failed its production catalog`);

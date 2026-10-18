@@ -1,5 +1,5 @@
 import { parentPath } from "./tree-model";
-import type { FlatTreeRow } from "./types";
+import { type FlatTreeRow } from "./contracts/bridge";
 
 export function normalizeFileFilter(value: string): string {
   return value.trim().toLocaleLowerCase();

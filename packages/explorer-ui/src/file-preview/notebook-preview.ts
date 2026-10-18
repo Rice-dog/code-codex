@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { highlightSyntaxForPath } from "../syntax-highlight";
-import type { CodeCodexMainPreviewElement as PreviewHost } from "../main-preview";
+import { type CodeCodexMainPreviewElement as PreviewHost } from "../app/main-preview-element";
 import type { NotebookMimeBundle, NotebookModel, NotebookCellModel, NotebookOutputModel, NotebookParseBudget, NotebookRenderBudget, MainPreviewMediaView, NotebookPreviewJob } from './contracts';
 export const NOTEBOOK_PREVIEW_MIME = "application/x-ipynb+json";
 

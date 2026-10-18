@@ -30,6 +30,12 @@ const INSTALL_ERROR_PREFIX: &str = "CODECODEX_INSTALL_ERROR:";
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InstallErrorReport {
+    #[serde(default)]
+    code: String,
+    #[serde(default)]
+    installation_committed: bool,
+    #[serde(default)]
+    rollback: serde_json::Value,
     stage: String,
     operation: String,
     target_name: String,
@@ -71,6 +77,10 @@ struct PortableExecutableLayout {
 
 fn main() -> ExitCode {
     let mut arguments: Vec<_> = env::args_os().skip(1).collect();
+    match requested_ui_language(&arguments){
+        Ok(Some(locale))=>gui_support::localization::set_session(locale),Ok(None)=>{},
+        Err(error)=>{gui_support::show_dialog(TITLE,&error,true);return ExitCode::FAILURE;}
+    }
     let automatic_update = env::var_os("CLE_UPDATE_WINDOW_READY").is_some();
     let interactive = wants_setup_selection(&arguments, automatic_update);
     let branded_wizard = interactive || automatic_update;
@@ -126,7 +136,11 @@ fn main() -> ExitCode {
     }
     if interactive {
         match progress.wait_for_setup_selection() {
-            Ok(Some(root)) => arguments = selected_install_arguments(&arguments, root),
+            Ok(Some(root)) => {
+                arguments = selected_install_arguments(&arguments, root);
+                if let Some(index)=arguments.iter().position(|v|v.eq_ignore_ascii_case("-UiLanguage")) {arguments.drain(index..(index+2).min(arguments.len()));}
+                arguments.extend([OsString::from("-UiLanguage"),OsString::from(gui_support::localization::locale().as_str())]);
+            },
             Ok(None) => {
                 journal.event("setup", "cancelled", json!({"beforePayload":true}));
                 progress.close();
@@ -167,12 +181,15 @@ fn main() -> ExitCode {
                 .find_map(|line| line.strip_prefix("Code-Codex managed shortcut: "))
                 .map(str::trim)
                 .filter(|path| !path.is_empty());
-            let message = match shortcut {
+            let mut message = match shortcut {
                 Some(path) => format!(
                     "Code-Codex was installed successfully.\n\nUse this desktop shortcut to start Codex with Code-Codex:\n{path}"
                 ),
                 None => "Code-Codex was installed successfully. Open the Code-Codex desktop shortcut to start Codex with Code-Codex.".to_owned(),
             };
+            if stdout.lines().any(|line|line.trim()=="CODECODEX_LANGUAGE_NOT_SAVED") {
+                message.push_str("\n\nLanguage preference was not saved. Open Code-Codex > Language and select it again to repair this preference.");
+            }
             if branded_wizard {
                 if let Err(error) = progress.finish_setup(&message) {
                     deliver_failure(
@@ -205,11 +222,22 @@ fn main() -> ExitCode {
     }
 }
 
+fn requested_ui_language(arguments:&[OsString])->Result<Option<workspace_service::ui_language::Locale>,String>{
+    let mut selected=None;
+    for (index,arg) in arguments.iter().enumerate(){if arg.eq_ignore_ascii_case("-UiLanguage"){
+        if selected.is_some(){return Err("CC-LANG-INVALID-001: duplicate UiLanguage".into());}
+        selected=Some(match arguments.get(index+1).and_then(|v|v.to_str()){
+            Some("en")=>workspace_service::ui_language::Locale::English,Some("zh-CN")=>workspace_service::ui_language::Locale::Chinese,
+            _=>return Err("CC-LANG-INVALID-001: UiLanguage must be zh-CN or en".into()),
+        });
+    }}Ok(selected)
+}
+
 fn wants_setup_selection(arguments: &[OsString], automatic_update: bool) -> bool {
     arguments
         .iter()
         .any(|arg| arg.eq_ignore_ascii_case("-SelectDirectory"))
-        || (arguments.is_empty() && !automatic_update)
+        || (!automatic_update && (arguments.is_empty() || (arguments.len()==2 && arguments[0].eq_ignore_ascii_case("-UiLanguage"))))
 }
 
 fn explicit_install_root(arguments: &[OsString]) -> Option<&std::ffi::OsStr> {
@@ -542,7 +570,7 @@ fn run_setup(
                 progress,
             )?
             .ok_or_else(|| {
-                "the plain setup program requires Install-CodeCodex.ps1 next to it".to_owned()
+                "CC-INSTALL-SCRIPT-MISSING-001: The plain setup program requires Install-CodeCodex.ps1 next to it".to_owned()
             })
         }
     }
@@ -562,7 +590,7 @@ fn run_embedded_setup(
             workspace_service::application_paths::temp_root()
                 .unwrap_or_else(|_| std::env::temp_dir()),
         )
-        .map_err(|error| format!("a temporary setup directory could not be created: {error}"))?;
+        .map_err(|error| format!("CC-INSTALL-TEMP-001: A temporary setup directory could not be created: {error}"))?;
     let archive = temporary_directory.path().join("payload.zip");
     progress.set_progress_detail(
         25,
@@ -600,6 +628,7 @@ fn format_setup_failure(exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) ->
         serde_json::from_str::<InstallErrorReport>(line.strip_prefix(INSTALL_ERROR_PREFIX)?).ok()
     });
     if let Some(report) = structured {
+        sections.push(format!("Support code: {}\nInstallation committed: {}\nRollback result: {}", if report.code.is_empty(){"CC-INSTALL-UNCLASSIFIED-001"}else{&report.code}, report.installation_committed, report.rollback));
         let decoded_message = base64::engine::general_purpose::STANDARD
             .decode(&report.message_base64)
             .ok()
@@ -937,10 +966,10 @@ fn extract_embedded_archive(
         .seek(SeekFrom::Start(payload_offset))
         .map_err(|error| format!("the embedded installer payload could not be read: {error}"))?;
     let mut output = File::create(destination).map_err(|error| {
-        format!("the temporary installer archive could not be created: {error}")
+        format!("CC-INSTALL-ARCHIVE-WRITE-001: The temporary installer archive could not be created: {error}")
     })?;
     let copied = std::io::copy(&mut source.take(payload_length), &mut output).map_err(|error| {
-        format!("the embedded installer payload could not be extracted: {error}")
+        format!("CC-INSTALL-PAYLOAD-READ-001: The embedded installer payload could not be extracted: {error}")
     })?;
     if copied != payload_length {
         return Err("the embedded installer payload is truncated".to_owned());
@@ -995,11 +1024,11 @@ fn expand_archive(archive: &Path, destination: &Path) -> Result<(), String> {
         .stderr(Stdio::piped());
     gui_support::configure_hidden(&mut command);
     let output = command.output().map_err(|error| {
-        format!("the embedded installer archive could not be expanded: {error}")
+        format!("CC-INSTALL-EXPAND-001: The embedded installer archive could not be expanded: {error}")
     })?;
     if !output.status.success() {
         return Err(format!(
-            "the embedded installer archive could not be expanded:\n\n{}",
+            "CC-INSTALL-EXPAND-001: The embedded installer archive could not be expanded:\n\n{}",
             format_setup_failure(output.status.code(), &output.stdout, &output.stderr)
         ));
     }
@@ -1053,6 +1082,11 @@ mod tests {
     #[test]
     fn manual_setup_waits_for_selection_but_automatic_update_does_not() {
         assert!(wants_setup_selection(&[], false));
+        assert!(wants_setup_selection(&["-UiLanguage".into(),"en".into()],false));
+        assert_eq!(requested_ui_language(&["-UiLanguage".into(),"en".into()]).unwrap(),Some(workspace_service::ui_language::Locale::English));
+        assert!(requested_ui_language(&["-UiLanguage".into()]).is_err());
+        assert!(requested_ui_language(&["-UiLanguage".into(),"fr".into()]).is_err());
+        assert!(requested_ui_language(&["-UiLanguage".into(),"en".into(),"-UiLanguage".into(),"zh-CN".into()]).is_err());
         assert!(!wants_setup_selection(&[], true));
         assert!(!wants_setup_selection(&["-NoActivate".into()], false));
         assert!(wants_setup_selection(&["-selectdirectory".into()], false));

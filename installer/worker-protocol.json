@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "commonSources": [
+    "Test-ReparsePoint",
+    "Get-ExistingItem",
+    "Test-SamePath",
+    "Remove-ReparsePoint",
+    "Remove-VerifiedCodeCodexDesktopShortcut",
+    "Enter-CodeCodexRemovalWorkingDirectory"
+  ],
+  "uninstallParameters": [
+    "KeepSettings",
+    "PurgeSettings",
+    "InstallRoot",
+    "SharedProgress"
+  ],
+  "finalizerParameters": [
+    "InstallRoot",
+    "ParentPid",
+    "LauncherPid",
+    "MsiProductCode",
+    "PurgeSettings",
+    "SharedProgress"
+  ],
+  "requiredFinalizerCapabilities": [
+    "SharedProgress",
+    "PurgeSettings"
+  ],
+  "progressChannel": "CLE_PROGRESS_STATE_PATH",
+  "standaloneWorkers": true,
+  "sectionSources": [
+    "install/diagnostics",
+    "install/file-operations",
+    "install/report-retention",
+    "install/execute",
+    "remove/safety",
+    "remove/dialogs"
+  ],
+  "managedAssets": "resources/managed-assets.json"
+}

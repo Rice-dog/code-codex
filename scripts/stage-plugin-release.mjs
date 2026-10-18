@@ -15,7 +15,7 @@ for(const p of catalog){
   if(bytes.length!==asset.size||createHash('sha256').update(bytes).digest('hex')!==asset.sha256)throw Error(`Plugin asset mismatch: ${p.id}/${relative}`);
   await mkdir(dirname(resolve(directory,relative)),{recursive:true});
   await copyFile(resolve(source,p.category,p.id,relative),resolve(directory,relative));
-  inventory.push({assetName:asset.asset,path:`plugins/${p.category}/${p.id}/${relative}`,size:bytes.length,sha256:asset.sha256});
+  inventory.push({releaseTag:asset.releaseTag||p.releaseTag,assetName:asset.asset,path:`plugins/${p.category}/${p.id}/${relative}`,size:bytes.length,sha256:asset.sha256});
  }
  for(const file of ['manifest.json','README.md','THIRD_PARTY_NOTICES_EN.md'])await copyFile(resolve(source,p.category,p.id,file),resolve(directory,file));
 }

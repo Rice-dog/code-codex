@@ -1,0 +1,7 @@
+{
+  "git.files.summary": "{count} changed {fileLabel}",
+  "preview.csv.summary": "{rows} {rowLabel} · {columns} {columnLabel} · comma-delimited",
+  "preview.drawio.summary": "Draw.io · {pages} {pageLabel} · Local renderer",
+  "preview.model.summary": "{meshes} {meshLabel} · {resources} local {resourceLabel}{animations}",
+  "preview.notebook.summary": "{kernel} · {language} · nbformat 4.{minor} · {cells} {cellLabel}"
+}

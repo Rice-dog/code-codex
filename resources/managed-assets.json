@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "generatedIcons": [
+    "Codex.ico",
+    "Codex-Official.ico"
+  ],
+  "applicationEntries": [
+    "versions",
+    "integration",
+    "docs",
+    "CodeCodex.exe",
+    "CodeCodex.Shortcut.exe",
+    "Uninstall-CodeCodex.exe",
+    "Uninstall-CodeCodex.ps1",
+    "Finalize-Uninstall.ps1",
+    "CodeCodex.Brand.png",
+    "current-version",
+    "install-type",
+    "README.md",
+    "README.en.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES_EN.md",
+    "THIRD_PARTY_NOTICES_ZH_CN.md",
+    "THIRD_PARTY_LICENSES.txt",
+    "sbom.spdx.json"
+  ]
+}

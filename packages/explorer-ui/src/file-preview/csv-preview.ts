@@ -1,4 +1,4 @@
-import type { CodeCodexMainPreviewElement as PreviewHost } from "../main-preview";
+import { type CodeCodexMainPreviewElement as PreviewHost } from "../app/main-preview-element";
 import type { CsvModel, MainPreviewTextView } from './contracts';
 const MAX_CSV_ROWS = 1_000;
 

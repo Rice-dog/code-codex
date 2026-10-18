@@ -1,17 +1,11 @@
-import type {
-  BootstrapConfig,
-  BridgeErrorData,
-  BridgeMessage,
-  BridgeNotification,
-  BridgeRequest,
-  BridgeResponse,
-  ObjectBridge,
-} from "./types";
+import { nativeFailureCorrelation } from './host/bridge/fault-correlation';
+import { type BootstrapConfig, type BridgeErrorData, type BridgeMessage, type BridgeNotification, type BridgeRequest, type BridgeResponse, type ObjectBridge } from "./contracts/bridge";
 const MESSAGE_EVENT = "code-codex:message";
 import { connectRuntimeInformation } from "./runtime-information";
 import { runtimeEvent } from "./runtime-events";
 import { runtimeErrorDetails } from "./runtime-operations";
 import { reconnectRendererStorage } from './renderer-storage';
+import { applyLanguage, connectLanguage } from './i18n';
 
 function safeRuntimeName(value: string | undefined, fallback: string): string {
   return typeof value === "string" && /^__[A-Za-z][A-Za-z0-9_]{1,94}$/.test(value)
@@ -35,6 +29,7 @@ function consumeBootstrap(): Readonly<BootstrapConfig> {
         ...(typeof source.manualWorkspace === "boolean" ? { manualWorkspace: source.manualWorkspace } : {}),
         ...(typeof source.startupSplashActive === "boolean" ? { startupSplashActive: source.startupSplashActive } : {}),
         ...(typeof source.centralizedStorage === "boolean" ? { centralizedStorage: source.centralizedStorage } : {}),
+        ...(source.language && typeof source.language === 'object' ? { language: source.language } : {}),
       }
     : {};
 
@@ -61,6 +56,7 @@ function consumeBootstrap(): Readonly<BootstrapConfig> {
 }
 
 const bootstrap = consumeBootstrap();
+if (bootstrap.language) applyLanguage(bootstrap.language);
 
 export function getBootstrapConfig(): Readonly<BootstrapConfig> {
   return bootstrap;
@@ -106,6 +102,14 @@ interface PendingRequest {
 
 type NotificationListener = (notification: BridgeNotification) => void;
 
+// One receiver can serve storage bootstrap and the retained explorer together.
+// A later client must never steal replies from an existing client after login.
+const receiverHubKey = Symbol.for('code-codex:bridge-receivers:v2');
+type ReceiverHub = { listeners: Set<(message: unknown) => void>; receive: (message: unknown) => void };
+const receiverHubs = ((window as unknown as Record<symbol, Map<string, ReceiverHub>>)[receiverHubKey] ??= new Map());
+const sequenceKey = Symbol.for('code-codex:bridge-request-sequence:v1');
+const sequenceHost = window as unknown as Record<symbol, number>;
+
 export class ExplorerBridge extends EventTarget {
   readonly #pending = new Map<string, PendingRequest>();
   readonly #listeners = new Set<NotificationListener>();
@@ -136,11 +140,15 @@ export class ExplorerBridge extends EventTarget {
       this.#handle(event.detail);
     }) as EventListener;
     const runtime = window as unknown as Record<string, unknown>;
-    const previousReceiver = runtime[this.#receiverName];
-    this.#previousReceiver = typeof previousReceiver === "function"
-      ? previousReceiver as (message: BridgeMessage | string) => void
-      : undefined;
-    runtime[this.#receiverName] = this.#receive;
+    this.#previousReceiver = undefined;
+    let hub = receiverHubs.get(this.#receiverName);
+    if (!hub) {
+      const listeners = new Set<(message: unknown) => void>();
+      hub = { listeners, receive: message => { for (const listener of [...listeners]) listener(message); } };
+      receiverHubs.set(this.#receiverName, hub);
+    }
+    hub.listeners.add(this.#receive as (message: unknown) => void);
+    runtime[this.#receiverName] = hub.receive;
     window.addEventListener(MESSAGE_EVENT, this.#eventListener);
 
     const binding = this.#binding();
@@ -149,6 +157,7 @@ export class ExplorerBridge extends EventTarget {
       if (typeof unsubscribe === "function") this.#unsubscribeObjectBridge = unsubscribe;
     }
     connectRuntimeInformation(this.request.bind(this));
+    if (bootstrap.language) connectLanguage(this.request.bind(this));
     if (bootstrap.centralizedStorage) reconnectRendererStorage(this.request.bind(this));
   }
 
@@ -157,7 +166,8 @@ export class ExplorerBridge extends EventTarget {
   }
 
   request<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = this.#timeoutMs): Promise<T> {
-    const requestRef = `cle-${Date.now().toString(36)}-${(++this.#sequence).toString(36)}`;
+    const serial = sequenceHost[sequenceKey] = (sequenceHost[sequenceKey] ?? 0) + 1;
+    const requestRef = `cle-${Date.now().toString(36)}-${serial.toString(36)}`;
     const started = performance.now();
     const observed=!method.startsWith('explorer.runtime.') && method!=='explorer.plugins.status' && !method.endsWith('.chunk');
     const complete=(outcome:string,extra:Record<string,unknown>={})=>{if(observed || (outcome!=='passed' && !method.startsWith('explorer.runtime.')))runtimeEvent('renderer-bridge',method,outcome,{requestRef,timeoutMs,durationMs:Math.round(performance.now()-started),...extra});};
@@ -175,7 +185,7 @@ export class ExplorerBridge extends EventTarget {
     };
 
     return new Promise<T>((resolve, reject) => {
-      const rejectLogged=(error:unknown)=>{complete(this.#disposed?'cancelled':'failed',runtimeErrorDetails(error));reject(error);};
+      const rejectLogged=(error:unknown)=>{complete(this.#disposed?'cancelled':'failed',{...runtimeErrorDetails(error),...nativeFailureCorrelation(error)});reject(error);};
       const resolveLogged=(value:unknown)=>{
         const object=value && typeof value==='object'?value as Record<string,unknown>:{};
         const summary:Record<string,unknown>={};
@@ -217,9 +227,11 @@ export class ExplorerBridge extends EventTarget {
     this.#disposed = true;
     window.removeEventListener(MESSAGE_EVENT, this.#eventListener);
     const runtime = window as unknown as Record<string, unknown>;
-    if (runtime[this.#receiverName] === this.#receive) {
-      if (this.#previousReceiver) runtime[this.#receiverName] = this.#previousReceiver;
-      else delete runtime[this.#receiverName];
+    const hub = receiverHubs.get(this.#receiverName);
+    hub?.listeners.delete(this.#receive as (message: unknown) => void);
+    if (hub && !hub.listeners.size) {
+      if (runtime[this.#receiverName] === hub.receive) delete runtime[this.#receiverName];
+      receiverHubs.delete(this.#receiverName);
     }
     this.#unsubscribeObjectBridge?.();
     this.#listeners.clear();
@@ -305,6 +317,7 @@ export class ExplorerBridge extends EventTarget {
     }
 
     if (isBridgeNotification(message)) {
+      if (message.method === 'explorer.language.changed') applyLanguage(message.params);
       runtimeEvent("native-bridge", "notification", "received", {method:message.method});
       for (const listener of this.#listeners) listener(message);
       this.dispatchEvent(new CustomEvent(message.method, { detail: message.params }));
@@ -319,3 +332,4 @@ function isBridgeResponse(value: unknown): value is BridgeResponse {
 function isBridgeNotification(value: unknown): value is BridgeNotification {
   return Boolean(value && typeof value === "object" && typeof (value as { method?: unknown }).method === "string");
 }
+export type { WorkspaceBridge } from './contracts/bridge';

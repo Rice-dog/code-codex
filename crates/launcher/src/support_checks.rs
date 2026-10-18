@@ -180,11 +180,10 @@ fn component_paths(root: &std::path::Path) -> [(&'static str, std::path::PathBuf
         ),
         (
             "code-codex-shim.exe",
-            install_root.join(if installed {
-                "CodeCodex.exe"
-            } else {
-                "code-codex-shim.exe"
-            }),
+            if installed {
+                let versioned = root.file_name().map(|version| install_root.join(format!("CodeCodex-{}.exe", version.to_string_lossy())));
+                versioned.filter(|path|path.is_file()).unwrap_or_else(||install_root.join("CodeCodex.exe"))
+            } else { install_root.join("code-codex-shim.exe") },
         ),
         (
             "code-codex-shortcut.exe",
@@ -225,12 +224,25 @@ fn local_checks() -> Value {
         }
         Err(e) => json!({"status":"failed","code":e.code,"reason":e.message}),
     };
-    json!({"components":components,"settings":settings,"plugins":packages,"storageLayout":workspace_service::application_paths::diagnostic_status(),"nativePersistence":crate::renderer_storage::diagnostic_status(),"diskWriteProbe":"not attempted","officialInternals":"not inspected"})
+    let language=match workspace_service::ui_language::LanguageStore::for_current_user() {
+        Ok(store)=>match store.load(){Ok(value)=>json!({"status":"passed","saved":value.is_some(),"preference":value.unwrap_or_else(||workspace_service::ui_language::Preference::fallback(crate::gui_support::localization::system_locale())),"readOnly":true}),Err(error)=>json!({"status":"fallback","code":error.code(),"reason":error.to_string(),"preference":crate::gui_support::localization::preference(),"readOnly":true})},
+        Err(error)=>json!({"status":"fallback","code":"CC-LANG-READ-001","reason":error.to_string(),"readOnly":true}),
+    };
+    json!({"uiLanguage":language,"components":components,"settings":settings,"plugins":packages,"storageLayout":workspace_service::application_paths::diagnostic_status(),"nativePersistence":crate::renderer_storage::diagnostic_status(),"diskWriteProbe":"not attempted","officialInternals":"not inspected"})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn component_locations_find_versioned_root_launcher() {
+        let temp = tempfile::tempdir().unwrap();
+        let version = temp.path().join("versions/0.4.62");
+        std::fs::create_dir_all(&version).unwrap();
+        let shim = temp.path().join("CodeCodex-0.4.62.exe");
+        std::fs::write(&shim, b"fixture").unwrap();
+        assert_eq!(component_paths(&version)[2].1, shim);
+    }
     #[test]
     fn component_locations_match_staging_and_installed_layouts() {
         let staging = std::path::Path::new("payload");
