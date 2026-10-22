@@ -334,7 +334,7 @@
     "echarts": "6.1.0",
     "jszip": "3.10.1",
     "markdown-it": "^15.0.0",
-    "pdfjs-dist": "5.4.624",
+    "pdfjs-dist": "6.2.108",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "three": "0.185.1",
