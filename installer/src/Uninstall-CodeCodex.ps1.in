@@ -419,6 +419,20 @@ Remove-ItemProperty `
     -Name "CodeCodex" `
     -ErrorAction SilentlyContinue
 
+# This opt-in value is separate from the obsolete CodeCodex entry and the
+# official app's login setting. Failure to revoke must not report success.
+function Remove-CodeCodexLoginStartup([string]$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run') {
+    if (Test-Path -LiteralPath $RunKey) {
+        $loginKey = Get-Item -LiteralPath $RunKey -ErrorAction Stop
+        try {
+            if ($null -ne $loginKey.GetValue('CodeCodexLogin')) {
+                Remove-ItemProperty -LiteralPath $RunKey -Name 'CodeCodexLogin' -ErrorAction Stop
+            }
+        } finally { $loginKey.Dispose() }
+    }
+}
+Remove-CodeCodexLoginStartup
+
 if ($PurgeSettings) {
     Publish-CodeCodexProgress 49 "Cleaning settings" "Removing Code-Codex preferences selected for removal."
     $settingsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "CodeCodex"))

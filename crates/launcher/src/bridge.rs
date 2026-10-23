@@ -3131,6 +3131,41 @@ mod tests {
         assert!(!directory.path().join("stale.md").exists());
     }
 
+    #[tokio::test]
+    async fn login_startup_rejects_invalid_payloads_and_invalidated_documents() {
+        let (_directory, bridge) = manual_bridge().await;
+        for (method, params) in [
+            ("explorer.login.startup.get", json!({"extra":true})),
+            ("explorer.login.startup.set", json!({"enabled":"true"})),
+            ("explorer.login.startup.set", json!({"enabled":true,"command":"untrusted"})),
+            ("explorer.login.startup.set", json!({})),
+        ] {
+            assert_eq!(bridge.handle(request(method, params)).await.unwrap_err().code, "INVALID_REQUEST");
+        }
+        bridge.invalidate_lifecycle();
+        for (method, params) in [
+            ("explorer.login.startup.get", json!({})),
+            ("explorer.login.startup.set", json!({"enabled":true})),
+        ] {
+            assert_eq!(bridge.handle(request_at(method, params, 0)).await.unwrap_err().code, "CANCELLED");
+        }
+    }
+
+    #[tokio::test]
+    async fn login_startup_queued_write_cannot_commit_after_lifecycle_invalidation() {
+        let (_directory, bridge) = manual_bridge().await;
+        let update = bridge.inner.settings_update_lock.lock().await;
+        let pending_bridge = bridge.clone();
+        let pending = tokio::spawn(async move {
+            pending_bridge.handle(request("explorer.login.startup.set", json!({"enabled":true}))).await
+        });
+        tokio::task::yield_now().await;
+        assert!(!pending.is_finished());
+        bridge.invalidate_lifecycle();
+        drop(update);
+        assert_eq!(pending.await.unwrap().unwrap_err().code, "CANCELLED");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn context_clear_waits_for_an_in_progress_save_to_commit() {
         let (directory, bridge) = manual_bridge().await;
@@ -3978,6 +4013,8 @@ mod routes_mutation;
 
 #[path = "bridge/routes/settings.rs"]
 mod routes_settings;
+#[path = "bridge/routes/login_startup.rs"]
+mod routes_login_startup;
 
 #[path = "bridge/routes/updates.rs"]
 mod routes_updates;

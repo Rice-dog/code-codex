@@ -348,6 +348,7 @@ impl AppError {
         match self {
             Self::UnsupportedVersion => exit_codes::UNSUPPORTED_VERSION,
             Self::AlreadyRunning => exit_codes::ALREADY_RUNNING,
+            Self::StartupConflict(_) => exit_codes::STARTUP_FAILURE,
             Self::Discovery(_)
             | Self::Bootstrap(_)
             | Self::Workspace(_)
@@ -690,6 +691,13 @@ impl AppError {
                 "Codex Desktop is already running without Code-Codex",
                 reason,
                 "Close Codex Desktop, then start it from the Codex or Code-Codex desktop shortcut.",
+            ),
+            Self::StartupConflict(_) => StartupDiagnostic::new(
+                "CC-START-STATE-002",
+                "Reopening Codex through Code-Codex",
+                "Codex could not be reopened automatically",
+                reason,
+                "Close Codex manually and try again. To revoke automatic restart permission, run code-codex reset-startup-recovery.",
             ),
             Self::Launch(error) => {
                 let (code, stage, summary) = launch_diagnostic(error);

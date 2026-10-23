@@ -513,6 +513,14 @@ function revealExplorer(): CodeCodexElement | null {
 }
 
 const applicationMenuActions = {
+  getLoginStartup: () => {
+    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG) ?? revealExplorer();
+    return explorer?.isConnected ? explorer.getLoginStartup() : Promise.reject(new Error('Code-Codex is disconnected'));
+  },
+  setLoginStartup: (enabled: boolean) => {
+    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG) ?? revealExplorer();
+    return explorer?.isConnected ? explorer.setLoginStartup(enabled) : Promise.reject(new Error('Code-Codex is disconnected'));
+  },
   openRuntimeInformation: () => { void openRuntimeInformation(); },
   openInstallationFolder: () => {
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG) ?? revealExplorer();

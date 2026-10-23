@@ -353,6 +353,7 @@ dependencies = [
  "win32job",
  "windows-permissions",
  "windows-sys 0.61.2",
+ "winreg",
  "workspace-service",
 ]
 

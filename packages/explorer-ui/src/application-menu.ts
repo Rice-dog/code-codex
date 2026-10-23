@@ -1,7 +1,9 @@
 import { getLocale, selectLanguage, subscribeLanguage, translate, t } from './i18n';
 import { icons } from './icons';
+import type { LoginStartupActions } from './contracts/login-startup';
+import { LoginStartupController } from './features/startup/login-startup';
 
-interface ApplicationMenuActions {
+interface ApplicationMenuActions extends LoginStartupActions {
   isExplorerVisible(): boolean;
   toggleExplorer(): void;
   openPreviewMarket(): void;
@@ -190,6 +192,10 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   installationItem.setAttribute("role", "menuitem");
   installationItem.tabIndex = -1;
   installationItem.textContent = "Open Installation Folder";
+  const loginStartupItem = document.createElement('button');
+  loginStartupItem.type = 'button';
+  loginStartupItem.tabIndex = -1;
+  const loginStartup = new LoginStartupController(loginStartupItem, actions);
   const languageItem = document.createElement('button');
   languageItem.type = 'button';languageItem.setAttribute('role','menuitem');languageItem.tabIndex=-1;
   languageItem.setAttribute('aria-haspopup','menu');languageItem.setAttribute('aria-expanded','false');
@@ -226,7 +232,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   repositoryItem.textContent = "Open GitHub Repository";
   const separator = document.createElement("div");
   separator.setAttribute("role", "separator");
-  popup.append(treeItem, marketItem, runtimeItem, installationItem, languageItem, separator, updateItem, repositoryItem);
+  popup.append(treeItem, marketItem, runtimeItem, installationItem, loginStartupItem, languageItem, separator, updateItem, repositoryItem);
 
   // Keep this sibling separate from Codex's React-owned Radix menubar. It
   // shares the visual row without joining Radix's private keyboard collection.
@@ -234,8 +240,9 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   document.body.append(popup);
   document.body.append(languagePopup);
 
-  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, installationItem, languageItem, updateItem, repositoryItem];
+  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, installationItem, loginStartupItem, languageItem, updateItem, repositoryItem];
   const updateText=()=>{
+    loginStartup.render();
     treeItem.textContent=t(actions.isExplorerVisible()?'menu.hideTree':'menu.showTree');
     for(const [item,key] of [[marketItem,'menu.market'],[runtimeItem,'menu.runtime'],[installationItem,'menu.installation'],[updateItem,'menu.updates'],[repositoryItem,'menu.repository']] as const)item.textContent=t(key);
     languageLabel.textContent=t('menu.language');
@@ -268,6 +275,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     if (returnFocus && trigger.isConnected) trigger.focus();
   };
   const open = (focusFirst = false) => {
+    void loginStartup.refresh();
     updateText();
     popup.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
@@ -295,10 +303,11 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
       close();
     } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
-      const index = items.indexOf(document.activeElement as HTMLElement);
-      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
-        (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-      items[next]?.focus();
+      const navigable = items.filter(item => !(item instanceof HTMLButtonElement) || !item.disabled);
+      const index = navigable.indexOf(document.activeElement as HTMLElement);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? navigable.length - 1 :
+        (index + (event.key === "ArrowDown" ? 1 : -1) + navigable.length) % navigable.length;
+      navigable[next]?.focus();
     }
   }, { signal });
   languageItem.addEventListener('pointerenter',()=>openSub(),{signal});
@@ -316,6 +325,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   marketItem.addEventListener("click", () => { close(); actions.openPreviewMarket(); }, { signal });
   runtimeItem.addEventListener("click", () => { close(); actions.openRuntimeInformation(); }, { signal });
   installationItem.addEventListener("click", () => { close(); actions.openInstallationFolder(); }, { signal });
+  loginStartupItem.addEventListener('click', () => { void loginStartup.toggle(); }, { signal });
   updateItem.addEventListener("click", () => { close(); actions.checkForUpdates(); }, { signal });
   repositoryItem.addEventListener("click", () => close(), { signal });
   document.addEventListener("pointerdown", (event) => {
@@ -329,6 +339,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     owner, mount, host, popup,
     dispose: () => {
       controller.abort();
+      loginStartup.dispose();
       unsubscribe();languagePopup.remove();
       host.remove();
       popup.remove();

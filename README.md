@@ -294,6 +294,10 @@ releases/              已生成的可下载安装包
 
 ## 说明
 
+通过 Code-Codex 启动时若原版 Codex 已打开，会提示是否关闭并通过 Code-Codex 重新打开，并提醒正在运行的任务和未保存的内容可能中断。可勾选“以后自动执行”，取消或关闭弹窗则保留当前会话；正常退出超时不会强制终止。授权撤销与验证边界见[启动冲突恢复](docs/startup-conflict-recovery.md)。
+
+顶部 **Code-Codex** 菜单提供“登录 Windows 时启动 Code-Codex”开关，默认关闭，可随时取消。只注册当前用户的 Code-Codex 启动项，不修改原版 Codex 自启，也不自动授予关闭原版的权限；升级保留选择，卸载移除启动项。详情和命令行取消方式见[登录自启](docs/login-startup.md)。
+
 `target/`、`node_modules/`、`dist/`、`artifacts/` 等生成目录会被 Git 忽略。源码包含 Rust 单元/集成测试、scripts 下的浏览器与 PowerShell 验证，以及 `.github/workflows/architecture.yml` 的公共合同检查。Windows 原生窗口、官方客户端和 Office 等能力需要在具备相应环境时单独验收。
 
 ## 许可证
