@@ -1,9 +1,12 @@
-# Code-Codex v0.5.39
+# Code-Codex v0.5.40
 
-本次软件更新覆盖上一公开软件版本 **v0.5.21 → v0.5.39** 的全部保留变更，包括 PR66、PR67 及其后续修正。期间本地测试版本不另算公开软件更新。
+本次软件更新覆盖上一公开软件版本 **v0.5.21 → v0.5.40** 的全部保留变更，包括 PR66、PR67 及其后续修正。期间本地测试版本不另算公开软件更新。
+
+本版替代已撤回公开发布的 v0.5.39，并合入官方外观接口兼容修复；累计更新范围仍为 v0.5.21 → v0.5.40。
 
 ## 简体中文
 
+- **背景直接启用与主题兼容**：适配官方将外观操作拆到独立模块后的结构；兼容原组合接口，按唯一受支持接口自动读取/切换主题。无需先手动设置深色，停用恢复原偏好。多候选或未知接口保持拒绝并保留具体原因，移除无效的通用重启建议；插件资源身份不变。
 - **原版已运行时的恢复**：继续使用同一个启动诊断窗口，直接显示完整的“关闭并重新启动 / 取消”操作。默认取消，确认后窗口立即隐藏；按保留的进程身份请求正常退出，再检查后继进程、页面及 Bridge 就绪。可记住自动重启选择，也可撤销；开启开机自启不会自动授予关闭会话的权限。
 - **慢启动与动画等待**：正常较慢启动不再被独立的 90 秒恢复计时器误报。首次主页面尚未挂载时，超过 120 秒观察门槛继续等待，不再仅因时间流逝关闭客户端。过长的启动动画让出原生界面；它不会伪造就绪、修改网络设置或自动重试关闭操作。真正的身份、安全和启动失败仍保留诊断。
 - **进程检错与诊断**：改进既有进程查询、退出收尾及过期快照竞争的处理，保留同代句柄、完整快照和总预算约束；明确区分尚未就绪、实际退出、查询失败和页面资格失败。技术原因、错误码与原始日志保留英文，普通操作说明随界面语言显示。
@@ -15,16 +18,21 @@
 
 ### 安装与验证范围
 
-优先下载 `CodeCodex-0.5.39-x64-setup.exe`；另提供 MSI、ZIP、独立卸载程序、插件目录和 SHA256 清单。插件实际代码及媒体继续按目录中锁定的既有资源 tag 下载，不随软件版本统一改地址。
+优先下载 `CodeCodex-0.5.40-x64-setup.exe`；另提供 MSI、ZIP、独立卸载程序、插件目录和 SHA256 清单。插件实际代码及媒体继续按目录中锁定的既有资源 tag 下载，不随软件版本统一改地址。
 
-已执行原生 CDP/恢复、菜单、语言升级、安装器与卸载生命周期等回归；627 项本机 Rust 测试通过、5 项按条件忽略，来自串行工作区执行及解除窗口遮挡后的单项补测。CI 与真实宿主安装/热激活分别核对，安装包和下载附件核验大小、SHA、版本字段及内嵌内容。测试替身不代表所有真实客户端和系统环境均已验证。
+维护基线已执行原生 CDP/恢复、菜单、语言升级、安装器与卸载生命周期等回归；此前 627 项本机 Rust 测试通过、5 项按条件忽略，来自串行工作区执行及解除窗口遮挡后的单项补测，不冒称本次重新执行一次全量工作区测试。CI 与真实宿主安装/热激活分别核对，安装包和下载附件核验大小、SHA、版本字段及内嵌内容。测试替身不代表所有真实客户端和系统环境均已验证。
 
 实际 Windows 登录自启且未开代理的冷启动、所有历史版本逐一原地升级、完整 MSI 升级事务及其他 GPU/Windows 环境尚未全面实测。此前官方页面迟迟未挂载的具体网络原因仍未证明；本次改进等待和诊断机制，不承诺解决所有网络或官方客户端初始化问题。
 
+本次外观修复另外通过 24 项适配回归；真实官方客户端从浅色直接点击启用“闪烁方块”和“像素雕塑”，自动切换深色、显示背景，停用恢复原主题，重复启用通过。网络下载超时和另一条间歇 Bridge 超时不属于这项主题修复，不据此声称已解决。
+
 ## English
 
-This software release includes all retained changes from the previous public software release, **v0.5.21 to v0.5.39**, including PR66, PR67 and the subsequent maintainer corrections. Intermediate local test builds are not separate public software releases.
+This software release includes all retained changes from the previous public software release, **v0.5.21 to v0.5.40**, including PR66, PR67 and the subsequent maintainer corrections. Intermediate local test builds are not separate public software releases.
 
+This release replaces the withdrawn public v0.5.39 and incorporates the official Appearance compatibility fix; the cumulative baseline remains v0.5.21.
+
+- **Direct background activation and theme compatibility:** Adapts to the official Appearance action moving into a separate module while retaining the older combined interface. A unique supported adapter reads/applies the required theme automatically; users need not select Dark first, and Disable restores the original preference. Ambiguous/unknown interfaces remain rejected with their cause retained. Removes ineffective generic restart advice without changing plugin asset identities.
 - **Recovery when stock Codex is already running:** The shared diagnostic initially presents the complete Close and restart / Cancel controls. Cancellation is the default; an explicit restart immediately hides the window, requests graceful exit using the retained process identity, then checks the successor, renderer and Bridge readiness. Remembered restart consent is revocable and independent of login startup.
 - **Slow startup and animation waiting:** The independent 90-second recovery timer no longer reports healthy delayed startup as failure. An owned launch keeps waiting for an initially unmounted native page beyond its 120-second observation threshold without terminating Codex merely because time elapsed. A prolonged animation yields to the native interface without inferring readiness, changing network settings or automatically repeating a close request. Genuine identity, security and launch failures remain diagnosable.
 - **Process inspection and diagnostics:** Improves existing-instance inspection, teardown and stale-snapshot races while retaining same-generation handles, complete snapshots and total budgets. Separates pending readiness, actual exit, query failures and renderer qualification. Technical reasons, support codes and raw logs remain English; ordinary guidance follows the selected UI language.
@@ -36,8 +44,10 @@ This software release includes all retained changes from the previous public sof
 
 ### Installation and verification scope
 
-Prefer `CodeCodex-0.5.39-x64-setup.exe`; MSI, ZIP, a standalone uninstaller, plugin catalog and SHA256 manifest are also provided. Plugin code/media continue using their existing exact catalog tags rather than being repointed to the software version.
+Prefer `CodeCodex-0.5.40-x64-setup.exe`; MSI, ZIP, a standalone uninstaller, plugin catalog and SHA256 manifest are also provided. Plugin code/media continue using their existing exact catalog tags rather than being repointed to the software version.
 
-Native CDP/recovery, menus, localization, installer and uninstall lifecycle regressions were exercised. The 627 local Rust passes and 5 conditional ignores combine a serial workspace run with a follow-up of the previously occluded interactive test. CI, actual host installation/hot activation and package/download integrity are verified separately. Fixtures are not evidence that every client/system configuration works.
+The maintenance baseline exercised native CDP/recovery, menus, localization, installer and uninstall lifecycle regressions. Its earlier 627 local Rust passes and 5 conditional ignores combine a serial workspace run with a follow-up of the previously occluded interactive test; they are not represented as a fresh complete workspace run for this publication. CI, actual host installation/hot activation and package/download integrity are verified separately. Fixtures are not evidence that every client/system configuration works.
 
 A real Windows-login startup with no proxy, every historical in-place upgrade, a full MSI upgrade transaction and other GPU/Windows environments have not all been exercised. The network cause of the earlier unmounted official page remains unproven; these changes improve waiting and diagnostics rather than guaranteeing all network or official-client initialization failures are resolved.
+
+The Appearance repair additionally passed 24 adapter regressions. In the actual official client, a single Enable click from Light activated Blinking Squares and Pixel Sculpt with automatic Dark application, and Disable restored the original preference; repeated enable passed. Download timeouts and an independent intermittent Bridge timeout are separate from this theme repair and are not claimed fixed.

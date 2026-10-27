@@ -83,6 +83,8 @@ jobs:
       - run: node scripts/test-login-startup.mjs
       - name: Build the full renderer used by menu-session integration
         run: npm --prefix packages/explorer-ui run build
+      - name: Official Appearance adapters and automatic background theme restoration
+        run: node scripts/test-appearance-adapter.mjs
       - run: node scripts/test-initial-startup-overlay.mjs
       - run: node scripts/test-menu-session.mjs
       - run: node scripts/test-language-runtime-upgrade.mjs

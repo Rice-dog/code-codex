@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.5.39-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.5.40-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,9 +28,10 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前版本 **v0.5.39** 汇总自上一公开软件版本 v0.5.21 以来的改进：明确授权的启动恢复、慢启动等待、独立桌面入口、顶部菜单与开机自启、完整卸载流程、插件名称汉化，以及 Particle Image 自动轮换修复。匹配插件缓存继续复用。完整累计更新及验证边界见 [发布说明](releases/README.md)。
+当前版本 **v0.5.40** 汇总自上一公开软件版本 v0.5.21 以来的改进：明确授权的启动恢复、慢启动等待、独立桌面入口、顶部菜单与开机自启、完整卸载流程、插件名称汉化，以及 Particle Image 自动轮换修复。匹配插件缓存继续复用。背景启用已适配官方拆分后的外观接口，可自动应用所需主题并在停用后恢复，无需先手动选择深色。完整累计更新及验证边界见 [发布说明](releases/README.md)。
 
 有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。
+
 
 
 
@@ -43,15 +44,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.5.39-x64-setup.exe`
-- 备选：`CodeCodex-0.5.39-x64.msi`
-- 便携包：`CodeCodex-0.5.39-x64.zip`
+- 推荐：`CodeCodex-0.5.40-x64-setup.exe`
+- 备选：`CodeCodex-0.5.40-x64.msi`
+- 便携包：`CodeCodex-0.5.40-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.5.39-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.5.40-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -66,7 +67,7 @@ v0.5.21 及更早公开版采用找不到原生入口时才创建独立入口的
 
 ### 集中目录与自定义安装
 
-EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.5.39-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
+EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.5.40-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
 
 - `versions/`：不可变程序版本；`integration/`：快捷方式与安装事务。
 - `data/`：文件树设置、插件参数与用户图片/视频；官方 Codex 账号、聊天、项目文件仍由官方客户端管理。
@@ -108,7 +109,7 @@ EXE 成功安装后保留当前版本与实际上一版，安全清理更旧的�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.5.39
+./scripts/package.ps1 -Version 0.5.40
 ```
 
 生成结果会写入 `releases/`。
@@ -177,7 +178,7 @@ Code-Codex 文件。本地维护构建卸载时同时删除自建的受管 `Code
 
 ### 全局语言与自定义背景
 
-欢迎页按系统语言预选中文或英文，安装后可在 Code-Codex → 语言子菜单切换；插件名称始终使用英文，参数与普通界面跟随全局语言。技术错误与诊断日志统一英文。Custom Background 支持导入本地图片/视频、逐素材位置/缩放/旋转与外观参数、重置当前素材；与 UI Surface Opacity 共存，设置预览跟随当前背景视频进度，打开面板不重新加载背景。
+欢迎页按系统语言预选中文或英文，安装后可在 Code-Codex → 语言子菜单切换；插件名称、参数与普通界面跟随全局中英文语言设置。技术错误与诊断日志统一英文。Custom Background 支持导入本地图片/视频、逐素材位置/缩放/旋转与外观参数、重置当前素材；与 UI Surface Opacity 共存，设置预览跟随当前背景视频进度，打开面板不重新加载背景。
 
 ### 插件
 
