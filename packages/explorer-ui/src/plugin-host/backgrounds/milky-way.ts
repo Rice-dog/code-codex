@@ -175,7 +175,7 @@ export class MilkyWayBackgroundController {
       recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
 
       if (codexDarkThemeApplied()) return;
-      throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
+      throw new Error("Code-Codex could not access the official Appearance controls. Background activation was cancelled. See the diagnostic details for the compatibility failure.", { cause: error });
     }
     const lease = readParticleThemeLease();
     if (current === "dark") {

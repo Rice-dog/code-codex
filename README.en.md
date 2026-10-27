@@ -21,7 +21,7 @@ consent. Upgrades preserve the choice; uninstall removes the entry. See
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.5.39-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.5.40-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -41,9 +41,10 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Current release **v0.5.39** includes all retained changes since v0.5.21: consent-based startup recovery, delayed native-page waiting, independent desktop entries, native-style menus/login startup, uninstall lifecycle fixes, localized plugin names and Particle Image rotation recovery. Matching plugin caches remain reusable. See the [release notes](releases/README.md) for the full scope and validation limits.
+Current release **v0.5.40** includes all retained changes since v0.5.21: consent-based startup recovery, delayed native-page waiting, independent desktop entries, native-style menus/login startup, uninstall lifecycle fixes, localized plugin names and Particle Image rotation recovery. Matching plugin caches remain reusable. Background Enable now adapts to the split official Appearance module, applies the required theme automatically and restores the prior preference on Disable. See the [release notes](releases/README.md) for the full scope and validation limits.
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
+
 
 
 
@@ -56,15 +57,15 @@ Download the installer from [latest GitHub Release](https://github.com/Rice-dog/
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.5.39-x64-setup.exe`
-- Alternative: `CodeCodex-0.5.39-x64.msi`
-- Portable package: `CodeCodex-0.5.39-x64.zip`
+- Recommended: `CodeCodex-0.5.40-x64-setup.exe`
+- Alternative: `CodeCodex-0.5.40-x64.msi`
+- Portable package: `CodeCodex-0.5.40-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.5.39-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.5.40-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -109,7 +110,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.5.39
+./scripts/package.ps1 -Version 0.5.40
 ```
 
 The generated packages are written to `releases/`.
@@ -181,7 +182,7 @@ MSI installs can also be removed from Windows **Installed apps**.
 
 ### Global language and Custom Background
 
-Welcome preselects Chinese or English from the system language. After installation, use Code-Codex → Language to switch. Plugin names remain English; parameters and normal UI follow the global setting. Technical errors and diagnostics remain English. Custom Background imports local images/videos and provides per-media transforms, appearance controls and Reset. It works with UI Surface Opacity, keeps the settings video preview synchronized and avoids reloading the background when opening settings.
+Welcome preselects Chinese or English from the system language. After installation, use Code-Codex → Language to switch. Plugin names follow the selected Chinese or English UI language; parameters and normal UI follow the global setting. Technical errors and diagnostics remain English. Custom Background imports local images/videos and provides per-media transforms, appearance controls and Reset. It works with UI Surface Opacity, keeps the settings video preview synchronized and avoids reloading the background when opening settings.
 
 ### Plugins
 
@@ -327,7 +328,7 @@ Generated build folders such as `target/`, `node_modules/`, `dist/`, and
 
 ## Centralized storage
 
-The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.5.39-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.5.40-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
 
 Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
 

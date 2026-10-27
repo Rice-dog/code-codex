@@ -11,13 +11,17 @@ export function isCodexRpcNamespace(value: unknown): value is Record<string,unkn
 
 
 
-export function findCodexAppInitialModule(): string|undefined {
+function appearanceModuleCandidates(): readonly string[] {
   const candidates=[
     ...Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="modulepreload"][href]'),(link) => link.href),
     ...Array.from(document.querySelectorAll<HTMLScriptElement>("script[type=module][src]"),(script) => script.src),
     ...performance.getEntriesByType("resource").map((entry) => entry.name),
   ];
-  return candidates.find((candidate) => {
+  return [...new Set(candidates)];
+}
+
+export function findCodexAppInitialModule(): string|undefined {
+  return appearanceModuleCandidates().find((candidate) => {
     try {
       return /\/app-initial-[^/]+\.js$/.test(new URL(candidate,location.href).pathname);
     } catch(__codeCodexCaught) {
@@ -25,6 +29,18 @@ export function findCodexAppInitialModule(): string|undefined {
 
       return false;
     }
+  });
+}
+
+/** Only a loaded/preloaded official role module may supply the split dispatcher. */
+export function findCodexAppearanceActionModules(): readonly string[] {
+  return appearanceModuleCandidates().filter((candidate) => {
+    try {
+      const url = new URL(candidate, location.href);
+      return url.protocol === location.protocol && url.host === location.host
+        && !url.search && !url.hash
+        && /\/run-app-action-in-primary-window-[^/]+\.js$/.test(url.pathname);
+    } catch { return false; }
   });
 }
 
