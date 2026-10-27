@@ -1,48 +1,43 @@
-# Code-Codex v0.5.21
+# Code-Codex v0.5.39
 
-本次正式软件更新覆盖 **v0.5.7 → v0.5.21** 的完整保留变更；期间的本地版本及插件兼容资源发布不另算软件更新。
+本次软件更新覆盖上一公开软件版本 **v0.5.21 → v0.5.39** 的全部保留变更，包括 PR66、PR67 及其后续修正。期间本地测试版本不另算公开软件更新。
 
 ## 简体中文
 
-- **ASCII Tiles Background（字符玻璃砖）**：新增 WebGL2 背景、字符与玻璃砖外观参数、鼠标按压和回弹、邻砖传播及分组重置。修正交互时整屏淡网格游动、反向回弹和鼠标附近暗影；保留砖面按压效果。加入从网页版移植的对角线逐砖开场动画，打开参数面板不重播背景。
-- **统一且各有特色的插件图标**：26 款插件使用不同功能图形，共享描边、尺寸及主题配色，不再重复使用眼睛占位。
-- **插件置顶**：每张卡片右上角新增 Pin。各分类内按置顶先后排列，取消后恢复原顺序，重开和升级保留选择；图形采用 50% 不透明度，保持低调且可辨认。
-- **启动动画来源**：选择“插件”时可用 ASCII Tiles Background 及 Custom Background 当前图片或视频。启动副本读取已保存参数，拥有独立播放/渲染和资源生命周期，不切换或重启正常背景；视频准备完成后保留播放速度。
-- **UI Surface Opacity**：将原“顶部标签栏”明确为“顶部菜单栏”，控制 File/Edit/View/Help/Code-Codex 所在整行。保留原调节值，修正调顶部反而改变对话标题/文件标签底色的区域误判。
-- **下载与缓存**：补齐本次更新涉及的精确插件资源，保留独立版本和固定下载地址规则。未改包继续复用匹配缓存；发生内容更新、缺失或损坏的包需要下载对应版本。技术错误和日志继续使用英文。
+- **原版已运行时的恢复**：继续使用同一个启动诊断窗口，直接显示完整的“关闭并重新启动 / 取消”操作。默认取消，确认后窗口立即隐藏；按保留的进程身份请求正常退出，再检查后继进程、页面及 Bridge 就绪。可记住自动重启选择，也可撤销；开启开机自启不会自动授予关闭会话的权限。
+- **慢启动与动画等待**：正常较慢启动不再被独立的 90 秒恢复计时器误报。首次主页面尚未挂载时，超过 120 秒观察门槛继续等待，不再仅因时间流逝关闭客户端。过长的启动动画让出原生界面；它不会伪造就绪、修改网络设置或自动重试关闭操作。真正的身份、安全和启动失败仍保留诊断。
+- **进程检错与诊断**：改进既有进程查询、退出收尾及过期快照竞争的处理，保留同代句柄、完整快照和总预算约束；明确区分尚未就绪、实际退出、查询失败和页面资格失败。技术原因、错误码与原始日志保留英文，普通操作说明随界面语言显示。
+- **安装与桌面入口**：始终创建独立的 Code-Codex 桌面快捷方式；找到原生 Codex 快捷方式时继续支持接管及卸载恢复。没有原生桌面图标也能使用独立入口，有效受管记录中的入口丢失可修复。
+- **顶部菜单与开机自启**：菜单选中高亮、已展开时悬停切换更接近原生行为；开机自启使用右侧标准勾选和居中的简洁中英确认框。菜单 Bridge 独立于文件树生命周期，隐藏文件树后仍可操作自启和卸载入口。
+- **卸载流程**：顶部 Code-Codex 菜单可直接打开现有卸载向导。修正从运行中的菜单启动卸载时的进程链处理，保护暂存向导、worker 和完成页 UI，按用户选择保留或删除设置、插件和素材。
+- **插件显示与图片轮换**：26 款插件名称随全局中英文显示；避免旧语言服务在热升级后覆盖新目录。修复 Particle Image 自动图片轮换与外观操作共享忙碌状态的问题，启用、导入或删除后的轮换能够恢复。
+- **升级与缓存**：26 个插件的独立版本、固定资源地址及资源字节保持不变；校验匹配的下载缓存可复用。EXE 更新沿用原安装目录，并保留设置、用户素材和匹配插件，无需先卸载；MSI 所有权安装继续走 Windows Installer 路径。
 
-### 升级与验证范围
+### 安装与验证范围
 
-EXE/ZIP 用户可在原安装目录更新，保留设置、原素材及匹配的插件缓存，不需要先卸载。MSI 所有权安装继续使用 MSI/Windows Installer 路径。安装会尝试即时激活；没有可信调试端口的官方会话仍需通过 Code-Codex 启动器重新打开，程序不会自动关闭聊天。
+优先下载 `CodeCodex-0.5.39-x64-setup.exe`；另提供 MSI、ZIP、独立卸载程序、插件目录和 SHA256 清单。插件实际代码及媒体继续按目录中锁定的既有资源 tag 下载，不随软件版本统一改地址。
 
-已执行相关浏览器/WebGL、参数、启动副本、Pin、Surface 菜单和原生契约回归，并验证当前 Windows 的实际安装、文件校验及可见文件树 ready。部分安装的默认激活观察超过时限，显式重试后确认新版；超时不等于安装文件失败。完整 MSI 升级事务、所有历史版本直升、其它 GPU/Windows 环境及 macOS 尚未逐一实测，不将 fixture 当全平台保证。
+已执行原生 CDP/恢复、菜单、语言升级、安装器与卸载生命周期等回归；627 项本机 Rust 测试通过、5 项按条件忽略，来自串行工作区执行及解除窗口遮挡后的单项补测。CI 与真实宿主安装/热激活分别核对，安装包和下载附件核验大小、SHA、版本字段及内嵌内容。测试替身不代表所有真实客户端和系统环境均已验证。
+
+实际 Windows 登录自启且未开代理的冷启动、所有历史版本逐一原地升级、完整 MSI 升级事务及其他 GPU/Windows 环境尚未全面实测。此前官方页面迟迟未挂载的具体网络原因仍未证明；本次改进等待和诊断机制，不承诺解决所有网络或官方客户端初始化问题。
 
 ## English
 
-This software update covers all retained changes from **v0.5.7 to v0.5.21**. Intermediate local builds and compatibility-resource prereleases are not separate software updates.
+This software release includes all retained changes from the previous public software release, **v0.5.21 to v0.5.39**, including PR66, PR67 and the subsequent maintainer corrections. Intermediate local test builds are not separate public software releases.
 
-- **ASCII Tiles Background:** Adds a WebGL2 background with glyph/glass controls, mouse pressing and rebound, neighboring-tile propagation and grouped resets. Fixes the faint screen-wide moving grid, reverse rebound and dark cursor veil while preserving the pressed glass-face effect. Ports the Web effect's diagonal tile entrance without replaying the background when its settings panel opens.
-- **Distinct, consistent plugin icons:** All26 plugins have individual functional artwork with shared outline weight, sizing and theme colors instead of repeated eye placeholders.
-- **Plugin pins:** Each card has a top-right Pin. Pinned cards appear first within their category in pin order; unpinning restores catalog order. Choices persist across reopening and upgrades. Glyphs use50% opacity for a quieter appearance.
-- **Startup animation sources:** Plugin mode can select ASCII Tiles Background or the currently selected Custom Background image/video. Startup copies read saved parameters and own independent playback/rendering and cleanup, without switching or restarting the normal background. Video playback speed is retained after preparation.
-- **UI Surface Opacity:** Renames the existing Tab bar control to Top menu bar and targets the complete File/Edit/View/Help/Code-Codex row. Saved values are retained; conversation titles and file tabs no longer receive this region's backing color.
-- **Downloads and caches:** Publishes the exact updated plugin resources while retaining independent package versions and explicitly pinned download addresses. Unchanged matching caches are reusable; changed, missing or corrupt packages require their corresponding version. Technical errors and logs remain English.
+- **Recovery when stock Codex is already running:** The shared diagnostic initially presents the complete Close and restart / Cancel controls. Cancellation is the default; an explicit restart immediately hides the window, requests graceful exit using the retained process identity, then checks the successor, renderer and Bridge readiness. Remembered restart consent is revocable and independent of login startup.
+- **Slow startup and animation waiting:** The independent 90-second recovery timer no longer reports healthy delayed startup as failure. An owned launch keeps waiting for an initially unmounted native page beyond its 120-second observation threshold without terminating Codex merely because time elapsed. A prolonged animation yields to the native interface without inferring readiness, changing network settings or automatically repeating a close request. Genuine identity, security and launch failures remain diagnosable.
+- **Process inspection and diagnostics:** Improves existing-instance inspection, teardown and stale-snapshot races while retaining same-generation handles, complete snapshots and total budgets. Separates pending readiness, actual exit, query failures and renderer qualification. Technical reasons, support codes and raw logs remain English; ordinary guidance follows the selected UI language.
+- **Installation and desktop entry:** Always creates an independent Code-Codex desktop shortcut, alongside takeover/restoration of an available original shortcut. A stock desktop icon is no longer required for the independent entry, and missing managed entries can be repaired.
+- **Top menu and login startup:** Adds native-style selection highlighting and hover switching, a standard right-aligned check and a centered concise bilingual confirmation. The menu Bridge survives file-tree dismissal, preserving login-startup and uninstall actions.
+- **Uninstall lifecycle:** The top menu opens the existing uninstall wizard. Corrects process-chain selection when uninstall starts from a running session, protecting the staged wizard, worker and completion UI while respecting the user's data-retention choice.
+- **Plugin labels and image rotation:** Localizes all 26 plugin display names with the global language and prevents an old injected language service from replacing the upgraded catalog. Fixes Particle Image auto-rotation sharing the appearance busy state, including resumption after enable, import and deletion.
+- **Upgrade and cache reuse:** Retains all 26 independent plugin versions, pinned asset addresses and resource bytes. Matching verified caches remain reusable. EXE updates reuse the installation root and preserve settings, user media and matching plugins; MSI-owned installations retain the Windows Installer path.
 
-### Upgrade and validation limits
+### Installation and verification scope
 
-EXE/ZIP users can update in the existing installation directory without uninstalling; settings, original media and matching plugin caches are retained. MSI-owned installations must continue through MSI/Windows Installer. Installation attempts live activation. An official session without a verified debugging listener must still be reopened through the Code-Codex launcher; chats are not terminated automatically.
+Prefer `CodeCodex-0.5.39-x64-setup.exe`; MSI, ZIP, a standalone uninstaller, plugin catalog and SHA256 manifest are also provided. Plugin code/media continue using their existing exact catalog tags rather than being repointed to the software version.
 
-Relevant browser/WebGL, options, startup-copy, Pin, Surface-menu and native-contract regressions were exercised, along with actual installation, file hashes and a visible ready tree on the current Windows machine. Some default activation observations timed out and were subsequently confirmed through an explicit retry; this is distinct from file-installation failure. Complete MSI upgrades, every historical direct upgrade, other GPU/Windows environments and macOS have not all been physically tested. Fixtures do not establish universal platform coverage.
+Native CDP/recovery, menus, localization, installer and uninstall lifecycle regressions were exercised. The 627 local Rust passes and 5 conditional ignores combine a serial workspace run with a follow-up of the previously occluded interactive test. CI, actual host installation/hot activation and package/download integrity are verified separately. Fixtures are not evidence that every client/system configuration works.
 
-## Downloads / 下载
-
-- `CodeCodex-0.5.21-x64-setup.exe`
-- `CodeCodex-0.5.21-x64.msi`
-- `CodeCodex-0.5.21-x64.zip`
-- `Uninstall-CodeCodex.exe`
-- `CodeCodex-plugin-catalog-0.5.21.json`
-- `SHA256SUMS.txt`
-
-插件依据 catalog 中各自的精确 tag 下载。v0.5.15、v0.5.18、v0.5.19 的兼容资源预发布仅补齐这些固定地址，不包含完整软件安装包，也不是额外软件更新。GitHub 自动生成的 Source code 归档与上述六项手动上传附件分开。
-
-Plugins download from their exact catalog tags. Compatibility-resource prereleases at v0.5.15, v0.5.18 and v0.5.19 only supply those fixed asset addresses, contain no software installer and are not additional software updates. GitHub's automatic Source code archives are separate from the six uploaded assets above.
+A real Windows-login startup with no proxy, every historical in-place upgrade, a full MSI upgrade transaction and other GPU/Windows environments have not all been exercised. The network cause of the earlier unmounted official page remains unproven; these changes improve waiting and diagnostics rather than guaranteeing all network or official-client initialization failures are resolved.
