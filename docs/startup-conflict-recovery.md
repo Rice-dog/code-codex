@@ -24,8 +24,16 @@ background. A failure reopens the original diagnostic with the original conflict
 and current specific reason; no automatic second close or restart is attempted.
 A running process or exit code zero alone is insufficient. Same-version visible
 file tree plus Bridge readiness, or explicit cancellation, ends the background
-window process. A 90-second readiness deadline remains a verification limit,
-never forced termination. Missing instances, early controller exit and channel
+window process. After 90 seconds the recovery core records a one-time
+`CC-START-RECOVERY-WAIT-001` observation; the GUI and PowerShell readers do not
+convert elapsed time into failure or show a diagnostic while healthy startup
+continues. Owned launch/activate also keeps waiting for the initial canonical
+native page beyond its 120-second observation threshold
+(`CC-START-RENDERER-WAIT-001`). Individual commands, explicit attach, process
+identity and layout qualification remain guarded. The optional early animation
+yields after its separate 120-second overlay lifetime without declaring native
+readiness or closing Codex. Official network initialization is not diagnosed by
+these timers. Actual startup/security failures, early controller exit and channel
 failure still retain a copyable report. Shared readers permit atomic replacement;
 a transient file-sharing read is retried for at most three timer ticks rather
 than permanently freezing the display on its last successful snapshot.
