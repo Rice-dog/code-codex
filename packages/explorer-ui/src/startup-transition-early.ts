@@ -32,9 +32,20 @@ if (valid && !shared[entered]) {
         : !status.enabled ? "plugin disabled" : status.readyAtEntry ? "native document already ready at entry" : "player unavailable; inspect video lookup and player events";
       runtimeEvent("startup-animation", "early playback", status.stage, {readyAtEntry:status.readyAtEntry,enabled:status.enabled,reason:status.reason});
       if (!controller) return;
+      // Optional animation must not conceal an unready native page indefinitely.
+      // This is an overlay lifetime, not an application readiness/failure timer.
+      const overlayLimit = window.setTimeout(() => {
+        if (controller.phase === "complete") return;
+        controller.dispose();
+        status.stage = "waiting-native";
+        status.reason = "Animation lifetime elapsed; native initialization continues";
+        runtimeEvent("startup-animation", "early overlay", "released", {
+          code: "CC-START-ANIMATION-WAIT-001", failureInferred: false, nativeReadyInferred: false,
+        });
+      }, 120_000);
       const tick = () => {
         status.phase = controller.phase;
-        if (controller.phase === "complete") { status.stage = "complete"; runtimeEvent("startup-animation","early playback","complete"); return; }
+        if (controller.phase === "complete") { window.clearTimeout(overlayLimit); if (status.stage === "waiting-native") return; status.stage = "complete"; runtimeEvent("startup-animation","early playback","complete"); return; }
         requestAnimationFrame(tick);
       };
       tick();

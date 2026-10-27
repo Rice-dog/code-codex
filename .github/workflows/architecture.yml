@@ -11,6 +11,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo test -p cdp-client --locked -- --test-threads=1
+  startup-recovery-native:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/explorer-ui/package-lock.json
+      - name: Update the native Rust toolchain
+        run: rustup update stable --no-self-update
+      - run: npm --prefix packages/explorer-ui ci
+      - run: npm --prefix packages/explorer-ui run build
+      - name: Build the embedded native launcher (never installs or activates Codex)
+        shell: pwsh
+        run: ./scripts/build.ps1 -Configuration Release -SkipUi
+      - name: Native recovery protocol and process-identity unit tests
+        run: |
+          cargo test --release --locked -p code-codex --bin code-codex startup_conflict:: -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked -p code-codex --bin code-codex startup_recovery_ui:: -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked -p code-codex --bin code-codex process_preflight:: -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked -p code-codex --bin code-codex-launcher recovery_tests:: -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked -p code-codex --bin code-codex login_startup -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked -p code-codex --bin code-codex tests::automatic_restart_permission_has_an_explicit_reset_command -- --exact
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked -p code-codex --bin code-codex tests::user_visible_launcher_failures_have_stable_exit_categories -- --exact
+      - name: Recovery decisions and preference-persistence failures
+        run: powershell -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File scripts/test-startup-conflict.ps1 -RequireNative
+      - name: Compiled CLI and embedded worker transport
+        run: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-startup-conflict-native.ps1
+      - name: Shared diagnostic window and bounded recovery channel
+        run: |
+          powershell -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File scripts/test-unified-startup-recovery.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File scripts/test-unified-startup-recovery.ps1 -Locale zh-CN -Output artifacts/unified-startup-recovery-zh
+      - name: Compiled GUI with disposable recovery-controller fixtures
+        run: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-unified-startup-launcher.ps1
+      - name: Disposable visible, hidden, multiple, modal and veto windows
+        run: powershell -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File scripts/test-startup-conflict-windows.ps1
   contracts:
     runs-on: windows-latest
     steps:
@@ -27,5 +74,15 @@ jobs:
       - run: node scripts/generate-installer.mjs
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-worker-protocol.ps1
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-completion.ps1
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-process-identity.ps1
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-menu-lifecycle.ps1
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-login-startup-installer.ps1
+      - run: powershell -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File scripts/test-startup-conflict.ps1
       - run: node --test scripts/test-refactor-contracts.mjs scripts/test-plugin-publication.mjs scripts/test-maintenance-isolation.mjs scripts/test-file-mutation-isolation.mjs
       - run: node scripts/test-background-surfaces.mjs
+      - run: node scripts/test-login-startup.mjs
+      - name: Build the full renderer used by menu-session integration
+        run: npm --prefix packages/explorer-ui run build
+      - run: node scripts/test-initial-startup-overlay.mjs
+      - run: node scripts/test-menu-session.mjs
+      - run: node scripts/test-language-runtime-upgrade.mjs

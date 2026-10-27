@@ -91,6 +91,7 @@ mod layout_observation_tests {
 
 #[cfg(test)]
 mod tests {
+    include!("initial_wait_tests.rs");
 
     #[test]
     fn detailed_protocol_errors_preserve_kind_and_hide_payload() {
@@ -443,6 +444,23 @@ mod tests {
                 gate.authorize(&payload.to_string()).await.unwrap_err().code,
                 "INVALID_REQUEST"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn login_startup_renderer_methods_cross_real_authorization_and_replay_guards() {
+        let source = include_str!("../../../packages/explorer-ui/src/app/explorer-element.ts");
+        let backend = include_str!("../../launcher/src/bridge/router.rs");
+        let token = CapabilityToken::generate();
+        let gate = SecureGate::new(token.clone());
+        for (index, method) in ["explorer.login.startup.get", "explorer.login.startup.set"].iter().enumerate() {
+            assert!(source.contains(method));
+            assert!(backend.contains(&format!("\"{method}\" =>")));
+            let mut payload = json!({"id":format!("login-startup-{index}"),"token":"invalid","method":method,"params":{}});
+            assert_eq!(gate.authorize(&payload.to_string()).await.unwrap_err().code, "UNAUTHORIZED");
+            payload["token"] = json!(token.expose());
+            gate.authorize(&payload.to_string()).await.unwrap();
+            assert_eq!(gate.authorize(&payload.to_string()).await.unwrap_err().code, "INVALID_REQUEST");
         }
     }
 

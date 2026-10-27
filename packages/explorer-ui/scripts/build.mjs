@@ -102,11 +102,13 @@ if (earlyBundleBytes >= earlyBundleLimit) {
 
 // Only the tiny verified-cache startup dispatcher is embedded in the core.
 
-// Catalog names are proper names in both languages, at every entry point.
+// Display names belong to the host; package identities and pinned assets stay English.
 const languageEn=JSON.parse(await readFile(resolve(root,'../../resources/i18n/en.json'),'utf8'));
 const languageZh=JSON.parse(await readFile(resolve(root,'../../resources/i18n/zh-CN.json'),'utf8'));
 const currentCatalog=JSON.parse(options.define.__CODE_CODEX_PLUGIN_CATALOG__);
-for(const plugin of currentCatalog)for(const [key,text]of Object.entries(languageEn))if(text===plugin.name&&languageZh[key]!==plugin.name)throw new Error(`Plugin name must remain English: ${plugin.name}`);
+const displayNames=JSON.parse(await readFile(resolve(root,'../../resources/plugin-display-names.json'),'utf8'));
+if(Object.keys(displayNames).length!==currentCatalog.length)throw new Error('Plugin display name coverage differs from the catalog');
+for(const plugin of currentCatalog){const key=`plugin.name.${plugin.id}`;if(displayNames[plugin.id]!==plugin.name||languageEn[key]!==plugin.name||!languageZh[key]?.trim())throw new Error(`Missing or mismatched plugin display name: ${plugin.id}`);}
 
 // Define optional example data only for the core, after pinned plugins and early loader.
 // Object-valued defines can perturb minifier identifiers even in unrelated builds.

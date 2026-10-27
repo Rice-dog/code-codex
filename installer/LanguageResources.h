@@ -3,7 +3,9 @@
 #include <array>
 #include <string_view>
 #include <utility>
-inline constexpr std::array<std::pair<std::wstring_view,std::wstring_view>,16> CodeCodexLanguageEntries{{
+inline constexpr std::array<std::pair<std::wstring_view,std::wstring_view>,18> CodeCodexLanguageEntries{{
+    {L"Cancel",L"\u53d6\u6d88"},
+    {L"OK",L"\u786e\u5b9a"},
     {L"Cancel",L"\u53d6\u6d88"},
     {L"No",L"\u5426"},
     {L"Setup could not verify the existing Code-Codex installation owner. No files were changed.",L"\u5b89\u88c5\u7a0b\u5e8f\u65e0\u6cd5\u9a8c\u8bc1\u73b0\u6709 Code-Codex \u5b89\u88c5\u7684\u5f52\u5c5e\uff0c\u672a\u66f4\u6539\u6587\u4ef6\u3002"},

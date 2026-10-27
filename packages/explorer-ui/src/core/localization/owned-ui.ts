@@ -1,7 +1,8 @@
 import { translate,t,getLocale,parameterLanguage,subscribeLanguage } from '../../i18n';
+import { isPluginName, pluginDisplayName } from './plugin-names';
 // Only product-owned, explicitly supplied UI roots are adapted. User content is
 // excluded by data-i18n-skip; never observe the official document or translate code.
-const skip='.git-history-commit-copy strong,.git-history-commit-meta,.git-history-detail > h4,.git-history-detail-meta,.git-history-file-path,.preview-extension h4,#cle-startupTransition-background option,[data-i18n-skip],pre,code,textarea,input,[contenteditable="true"],script,style,.node-name:not([data-i18n-owned]),.project-name,.particle-library-name,.particle-image-transform-name,.tree-label,.tree-name,.file-name,.startup-video-card-name,.particle-image-name,.pixel-sculpt-image-name,.tab-label,.file-content,.markdown-body,.git-diff-reader,.notebook-cell,.notebook-output,.office-document,.office-word-document,.office-slide-viewport,.office-sheet-tabs,.csv-title,.diagram-title,.notebook-title,.diagram-canvas,.gallery-name,.detail,table';
+const skip='.git-history-commit-copy strong,.git-history-commit-meta,.git-history-detail > h4,.git-history-detail-meta,.git-history-file-path,[data-i18n-skip],pre,code,textarea,input,[contenteditable="true"],script,style,.node-name:not([data-i18n-owned]),.project-name,.particle-library-name,.particle-image-transform-name,.tree-label,.tree-name,.file-name,.startup-video-card-name,.particle-image-name,.pixel-sculpt-image-name,.tab-label,.file-content,.markdown-body,.git-diff-reader,.notebook-cell,.notebook-output,.office-document,.office-word-document,.office-slide-viewport,.office-sheet-tabs,.csv-title,.diagram-title,.notebook-title,.diagram-canvas,.gallery-name,.detail,table';
 const contentLabels='.markdown-body[aria-label],.git-diff-reader[aria-label],.notebook-cell[aria-label],.csv-table[aria-label],.diagram-canvas[aria-label]';
 export function localizeOwnedUi(root: HTMLElement|ShadowRoot): () => void {
   const originals=new WeakMap<Node,{ source: string; rendered: string }>();
@@ -17,6 +18,15 @@ export function localizeOwnedUi(root: HTMLElement|ShadowRoot): () => void {
       originals.set(n,{ source,rendered: value }); if(current!==value) n.textContent=value;
     } else if(n instanceof Element) {
       if(!n.matches(contentLabels)&&((n.matches(skip)&&!n.matches('input,textarea'))||n.parentElement?.closest(skip))) return;
+      if (n.matches('[data-plugin-name],.preview-extension h4,#cle-startupTransition-background option') && n.childElementCount===0) {
+        const source=n.getAttribute('data-plugin-name-source')??n.textContent?.trim()??'';
+        if(isPluginName(source)) {
+          n.setAttribute('data-plugin-name-source',source);
+          const value=pluginDisplayName(source);
+          if(n.textContent!==value)n.textContent=value;
+        }
+        return;
+      }
       const key=n.getAttribute('data-i18n-key');
       if(key&&n.childElementCount===0&&!n.matches('[data-plugin-name]')) {
         const value=t(key);

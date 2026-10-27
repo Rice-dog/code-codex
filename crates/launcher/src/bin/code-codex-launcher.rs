@@ -22,13 +22,13 @@ use std::os::windows::process::CommandExt as _;
 
 #[path = "../exit_codes.rs"]
 mod exit_codes;
+#[path = "../localization.rs"]
+mod localization;
 #[path = "../runtime_redaction.rs"]
 #[allow(dead_code)]
 mod redaction;
 #[path = "../startup_diagnostics.rs"]
 mod startup_diagnostics;
-#[path = "../localization.rs"]
-mod localization;
 
 use startup_diagnostics::{StartupDiagnostic, parse_diagnostic};
 
@@ -37,153 +37,12 @@ const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_DIALOG_DETAILS_CHARS: usize = 12 * 1024;
 const MAX_DIAGNOSTIC_REPORTS: usize = 10;
 
-const DIALOG_SCRIPT: &str = r#"
-$ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName System.Windows.Forms
-[System.Windows.Forms.Application]::EnableVisualStyles()
-
-$form = New-Object System.Windows.Forms.Form
-$form.Text = $env:CLE_ERROR_TITLE
-$form.ClientSize = New-Object System.Drawing.Size(620, 410)
-$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
-$form.MaximizeBox = $false
-$form.MinimizeBox = $false
-$form.ShowInTaskbar = $true
-$form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-$form.TopMost = $true
-$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
-$form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
-$form.Icon = [System.Drawing.SystemIcons]::Error
-
-$icon = New-Object System.Windows.Forms.PictureBox
-$icon.Location = New-Object System.Drawing.Point(22, 22)
-$icon.Size = New-Object System.Drawing.Size(32, 32)
-$icon.Image = [System.Drawing.SystemIcons]::Error.ToBitmap()
-$icon.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
-$form.Controls.Add($icon)
-
-$summary = New-Object System.Windows.Forms.Label
-$summary.Location = New-Object System.Drawing.Point(70, 18)
-$summary.Size = New-Object System.Drawing.Size(525, 44)
-$summary.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 13)
-$summary.Text = $env:CLE_ERROR_SUMMARY
-$form.Controls.Add($summary)
-
-$metadata = New-Object System.Windows.Forms.Label
-$metadata.Location = New-Object System.Drawing.Point(22, 72)
-$metadata.Size = New-Object System.Drawing.Size(573, 24)
-$metadata.ForeColor = [System.Drawing.Color]::DimGray
-$metadata.Text = ('{0}: {1}    {2}: {3}' -f $env:CLE_ERROR_STAGE_LABEL, $env:CLE_ERROR_STAGE, $env:CLE_ERROR_CODE_LABEL, $env:CLE_ERROR_CODE)
-$form.Controls.Add($metadata)
-
-$reasonTitle = New-Object System.Windows.Forms.Label
-$reasonTitle.Location = New-Object System.Drawing.Point(22, 108)
-$reasonTitle.Size = New-Object System.Drawing.Size(573, 20)
-$reasonTitle.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 9)
-$reasonTitle.Text = 'Specific reason'
-$form.Controls.Add($reasonTitle)
-
-$reason = New-Object System.Windows.Forms.TextBox
-$reason.Location = New-Object System.Drawing.Point(22, 132)
-$reason.Size = New-Object System.Drawing.Size(573, 62)
-$reason.Multiline = $true
-$reason.ReadOnly = $true
-$reason.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-$reason.BackColor = [System.Drawing.SystemColors]::Window
-$reason.Text = $env:CLE_ERROR_REASON -replace "(?<!`r)`n", "`r`n"
-$form.Controls.Add($reason)
-
-$actionTitle = New-Object System.Windows.Forms.Label
-$actionTitle.Location = New-Object System.Drawing.Point(22, 210)
-$actionTitle.Size = New-Object System.Drawing.Size(573, 20)
-$actionTitle.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 9)
-$actionTitle.Text = 'Suggested action'
-$form.Controls.Add($actionTitle)
-
-$action = New-Object System.Windows.Forms.Label
-$action.Location = New-Object System.Drawing.Point(22, 234)
-$action.Size = New-Object System.Drawing.Size(573, 52)
-$action.Text = $env:CLE_ERROR_GUIDANCE
-$form.Controls.Add($action)
-
-$report = New-Object System.Windows.Forms.Label
-$report.Location = New-Object System.Drawing.Point(22, 294)
-$report.Size = New-Object System.Drawing.Size(573, 36)
-$report.ForeColor = [System.Drawing.Color]::DimGray
-$report.AutoEllipsis = $true
-$report.Text = if ([string]::IsNullOrWhiteSpace($env:CLE_ERROR_REPORT)) {
-    'The diagnostic report could not be saved.'
-} else {
-    $env:CLE_ERROR_REPORT_LABEL + ': ' + $env:CLE_ERROR_REPORT
-}
-$form.Controls.Add($report)
-
-$copy = New-Object System.Windows.Forms.Button
-$copy.Location = New-Object System.Drawing.Point(22, 350)
-$copy.Size = New-Object System.Drawing.Size(118, 34)
-$copy.Text = 'Copy details'
-$copy.Add_Click({
-    $details = $script:copyDetails
-    try {
-        if (-not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_LIVE_STATE) -and [IO.File]::Exists($env:CLE_ERROR_LIVE_STATE)) {
-            $current = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($env:CLE_ERROR_LIVE_STATE))
-            $details = $current.details
-        } elseif (-not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_REPORT) -and
-        [IO.File]::Exists($env:CLE_ERROR_REPORT)) {
-            $details = [IO.File]::ReadAllText($env:CLE_ERROR_REPORT)
-        }
-    } catch {}
-    [System.Windows.Forms.Clipboard]::SetText($details)
-})
-$form.Controls.Add($copy)
-
-$open = New-Object System.Windows.Forms.Button
-$open.Location = New-Object System.Drawing.Point(150, 350)
-$open.Size = New-Object System.Drawing.Size(118, 34)
-$open.Text = 'Open report'
-$open.Enabled = -not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_REPORT)
-$open.Add_Click({
-    if (-not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_REPORT)) {
-        $explorer = Join-Path $env:SystemRoot 'explorer.exe'
-        & $explorer ('/select,"{0}"' -f $env:CLE_ERROR_REPORT)
-    }
-})
-$form.Controls.Add($open)
-
-$close = New-Object System.Windows.Forms.Button
-$close.Location = New-Object System.Drawing.Point(477, 350)
-$close.Size = New-Object System.Drawing.Size(118, 34)
-$close.Text = 'Close'
-$close.DialogResult = [System.Windows.Forms.DialogResult]::OK
-$form.Controls.Add($close)
-$form.AcceptButton = $close
-$form.CancelButton = $close
-
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 150
-$script:lastLive = ''
-$script:copyDetails = $env:CLE_ERROR_DETAILS
-$timer.Add_Tick({
-    try {
-        if (-not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_LIVE_STATE) -and [IO.File]::Exists($env:CLE_ERROR_LIVE_STATE)) {
-            $raw = [IO.File]::ReadAllText($env:CLE_ERROR_LIVE_STATE)
-            if ($raw -ne $script:lastLive) {
-                $state = ConvertFrom-Json -InputObject $raw
-                $script:copyDetails = $state.details
-                $reason.Text = $state.reason -replace "(?<!`r)`n", "`r`n"
-                $action.Text = $state.guidance
-                $script:lastLive = $raw
-            }
-        }
-    } catch {}
-})
-$form.Add_FormClosed({ $timer.Stop() })
-$timer.Start()
-[void]$form.ShowDialog()
-$timer.Dispose()
-$form.Dispose()
-"#;
+const DIALOG_SCRIPT: &str = concat!(
+    include_str!("../startup_dialog.ps1"),
+    "\nStart-CodeCodexStartupDialog"
+);
+#[path = "../startup_recovery_ui.rs"]
+mod startup_recovery_ui;
 
 fn main() -> ExitCode {
     let started = Instant::now();
@@ -210,12 +69,27 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // A failure marker arrives before expensive post-failure checks finish.
+    let live_directory = tempfile::Builder::new()
+        .prefix("CodeCodex-Error-")
+        .tempdir_in(
+            workspace_service::application_paths::temp_root()
+                .unwrap_or_else(|_| std::env::temp_dir()),
+        )
+        .ok();
+    let live_state = live_directory.as_ref().map(|d| d.path().join("state.json"));
+
     let mut command = Command::new(&command_line);
     command
         .args(env::args_os().skip(1))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(directory) = live_directory.as_ref() {
+        command
+            .env(startup_recovery_ui::CHANNEL_ENV, directory.path())
+            .env("CLE_RECOVERY_UI_OWNER_PID", std::process::id().to_string());
+    }
     configure_hidden(&mut command);
 
     let mut child = match command.spawn() {
@@ -243,27 +117,61 @@ fn main() -> ExitCode {
         thread::spawn(move || read_live_tail(stderr, MAX_CAPTURE_BYTES, reader_live))
     });
 
-    // A failure marker arrives before expensive post-failure checks finish.
-    let live_directory = tempfile::Builder::new()
-        .prefix("CodeCodex-Error-")
-        .tempdir_in(
-            workspace_service::application_paths::temp_root()
-                .unwrap_or_else(|_| std::env::temp_dir()),
-        )
-        .ok();
-    let live_state = live_directory.as_ref().map(|d| d.path().join("state.json"));
     let mut last = None;
     let mut report_path = None;
-    let mut dialog = None;
+    let mut dialog: Option<std::process::Child> = None;
     let mut dialog_attempted = false;
+    let mut last_recovery = None;
     let status = loop {
-        let next = live.lock().ok().and_then(|v| v.clone());
-        if next.is_some() && next != last {
+        let recovery =
+            live_directory
+                .as_ref()
+                .and_then(|dir| match startup_recovery_ui::read(dir.path()) {
+                    // The core owns readiness and failures. Never turn a UI
+                    // observation deadline into a competing recovery-state write.
+                    Ok(Some(state)) => Some(state),
+                    _ => None,
+                });
+        if let Some(state) = recovery.as_ref() {
+            last_recovery = Some(state.clone());
+        }
+        if dialog_attempted {
+            let missing = dialog
+                .as_mut()
+                .is_none_or(|window| !matches!(window.try_wait(), Ok(None)));
+            if missing {
+                if let (Some(directory), Some(state)) = (
+                    live_directory.as_ref(),
+                    recovery.as_ref().or(last_recovery.as_ref()),
+                ) {
+                    let _ = startup_recovery_ui::cancel_pending(directory.path(), state);
+                }
+            }
+        }
+        let next = recovery
+            .as_ref()
+            .map(|state| {
+                let mut diagnostic = state.diagnostic.clone();
+                diagnostic.reason = startup_recovery_ui::presentation(state)["reason"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                diagnostic
+            })
+            .or_else(|| live.lock().ok().and_then(|v| v.clone()));
+        let presentable = recovery
+            .as_ref()
+            .is_none_or(|state| matches!(state.phase.as_str(), "awaiting-consent" | "failed"));
+        if next.is_some() && (next != last || (!dialog_attempted && presentable)) {
             let diagnostic = next.as_ref().expect("diagnostic present");
             let report = format_report(
                 diagnostic,
                 None,
-                "Automatic checks are in progress; see Reason above.",
+                if recovery.is_some() {
+                    "Consent-based recovery is in progress. Original conflict and stage results retained above."
+                } else {
+                    "Automatic checks are in progress; see Reason above."
+                },
                 &format!(
                     "GUI PID: {}; child PID: {}; runtime: {} ms; child still running",
                     std::process::id(),
@@ -279,7 +187,7 @@ fn main() -> ExitCode {
             if let Some(path) = live_state.as_ref() {
                 let _ = write_live_state(path, diagnostic, &report);
             }
-            if !dialog_attempted {
+            if !dialog_attempted && presentable {
                 dialog_attempted = true;
                 dialog = spawn_startup_error(
                     diagnostic,
@@ -296,10 +204,57 @@ fn main() -> ExitCode {
             _ => thread::sleep(Duration::from_millis(50)),
         }
     };
+    // A child exit (including zero) is not proof of a replacement interface.
+    // Keep the already-open diagnostic window usable even if the controller
+    // disappeared before publishing its terminal state.
+    let mut unverified_recovery_exit = false;
+    if let Some(directory) = live_directory.as_ref() {
+        if let Ok(Some(mut recovery)) = startup_recovery_ui::read(directory.path()) {
+            if !["ready", "failed", "cancelled"].contains(&recovery.phase.as_str()) {
+                unverified_recovery_exit = true;
+                recovery.phase = "failed".into();
+                recovery.diagnostic = StartupDiagnostic::new(
+                    "CC-START-RECOVERY-INSTANCE-001",
+                    "Verifying replacement instance",
+                    "The replacement Codex instance was not confirmed",
+                    "The startup controller exited before a visible replacement interface and Bridge were verified. The old instance exiting, or an exit status of zero, is not successful recovery.",
+                    "Copy this report and inspect the last completed stage. Start Code-Codex again explicitly; no repeated close request was issued.",
+                );
+                let _ = startup_recovery_ui::write(directory.path(), &recovery);
+                let details = format_report(
+                    &recovery.diagnostic,
+                    None,
+                    "Recovery ended before readiness. Original conflict and milestones are retained below.",
+                    &format!("GUI PID: {}; child PID: {}", std::process::id(), child_pid),
+                );
+                let details = format!(
+                    "{details}\n{}",
+                    startup_recovery_ui::presentation(&recovery)["details"]
+                        .as_str()
+                        .unwrap_or_default()
+                );
+                if let Some(path) = report_path.as_ref() {
+                    let _ = replace_report(path, details.as_bytes());
+                }
+                if let Some(path) = live_state.as_ref() {
+                    let _ = write_live_state(path, &recovery.diagnostic, &details);
+                }
+            }
+        }
+    }
     let _stdout = join_capture(stdout_reader);
     let stderr = join_capture(stderr_reader);
     match status {
-        Ok(status) if status.success() => ExitCode::SUCCESS,
+        Ok(status) if status.success() => {
+            if let Some(mut window) = dialog {
+                let _ = window.wait();
+            }
+            if unverified_recovery_exit {
+                ExitCode::from(exit_codes::STARTUP_FAILURE)
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
         Ok(status) => {
             let code = status.code();
             let stderr_text = String::from_utf8_lossy(&stderr);
@@ -331,6 +286,19 @@ fn main() -> ExitCode {
                     stderr.len()
                 ),
             );
+            let report = if let Some(recovery) = live_directory
+                .as_ref()
+                .and_then(|d| startup_recovery_ui::read(d.path()).ok().flatten())
+            {
+                format!(
+                    "{report}\n\nOriginal conflict and recovery timeline:\n{}\n",
+                    startup_recovery_ui::presentation(&recovery)["details"]
+                        .as_str()
+                        .unwrap_or_default()
+                )
+            } else {
+                report
+            };
             if report_path.is_none() {
                 report_path = persist_report(&report).ok();
             } else if let Some(path) = report_path.as_ref() {
@@ -367,8 +335,26 @@ fn main() -> ExitCode {
                     started.elapsed().as_millis()
                 ),
             );
-            let report_path = persist_report(&report).ok();
-            show_startup_error(&diagnostic, &report, report_path.as_deref());
+            if let Some(directory) = live_directory.as_ref() {
+                if let Ok(Some(mut state)) = startup_recovery_ui::read(directory.path()) {
+                    state.phase = "failed".into();
+                    state.diagnostic = diagnostic.clone();
+                    let _ = startup_recovery_ui::write(directory.path(), &state);
+                }
+            }
+            if let Some(path) = report_path.as_ref() {
+                let _ = replace_report(path, report.as_bytes());
+            } else {
+                report_path = persist_report(&report).ok();
+            }
+            if let Some(path) = live_state.as_ref() {
+                let _ = write_live_state(path, &diagnostic, &report);
+            }
+            if !dialog_attempted {
+                show_startup_error(&diagnostic, &report, report_path.as_deref());
+            } else if let Some(mut window) = dialog {
+                let _ = window.wait();
+            }
             ExitCode::FAILURE
         }
     }
@@ -528,7 +514,7 @@ fn format_report(
     let exit_code = exit_code
         .map(|code| code.to_string())
         .unwrap_or_else(|| "unavailable".to_owned());
-    let raw=format!(
+    let raw = format!(
         "Code-Codex startup diagnostic\n\nCode-Codex version: {}\nSupport code: {}\nStage: {}\nSummary: {}\nReason: {}\nSuggested action: {}\nProcess exit code: {}\nGUI launcher process: {}\n\nPost-failure installation check (cdp.notRequested means this separate check was not given the launch's random port; the actual endpoint observations are in Reason above):\n{}\n",
         env!("CARGO_PKG_VERSION"),
         diagnostic.code,
@@ -540,10 +526,21 @@ fn format_report(
         launcher_context,
         diagnosis.trim(),
     );
-    format!("{}\n{}: {} / revision {}\n{}: {}\n{}: {}\n{}: {}\n\n{}:\n{}",
-        localization::text("Code-Codex startup diagnostic"),localization::text("UI language"),localization::locale().as_str(),localization::preference().revision,
-        localization::text("Stage"),localization::text(&diagnostic.stage),localization::text("Summary"),localization::text(&diagnostic.summary),
-        localization::text("Suggested action"),localization::text(&diagnostic.guidance),localization::text("Original diagnostic evidence"),raw)
+    format!(
+        "{}\n{}: {} / revision {}\n{}: {}\n{}: {}\n{}: {}\n\n{}:\n{}",
+        localization::text("Code-Codex startup diagnostic"),
+        localization::text("UI language"),
+        localization::locale().as_str(),
+        localization::preference().revision,
+        localization::text("Stage"),
+        localization::text(&diagnostic.stage),
+        localization::text("Summary"),
+        localization::text(&diagnostic.summary),
+        localization::text("Suggested action"),
+        localization::text(&diagnostic.guidance),
+        localization::text("Original diagnostic evidence"),
+        raw
+    )
 }
 
 fn persist_report(report: &str) -> io::Result<PathBuf> {
@@ -685,19 +682,20 @@ fn spawn_startup_error(
     else {
         return None;
     };
-    let dialog_script=localization::dialog_script(DIALOG_SCRIPT);
+    let dialog_script = localization::dialog_script(DIALOG_SCRIPT);
     let mut command = Command::new(powershell);
     command
         .args([
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
+            "-STA",
             "-Command",
-            &dialog_script,
+            "$ProgressPreference='SilentlyContinue';[Console]::InputEncoding=[Text.UTF8Encoding]::new($false); & ([scriptblock]::Create([Console]::In.ReadToEnd()))",
         ])
         .env("CLE_ERROR_TITLE", localization::text(ERROR_TITLE))
-        .env("CLE_ERROR_SUMMARY", localization::text(&diagnostic.summary))
-        .env("CLE_ERROR_STAGE", localization::text(&diagnostic.stage))
+        .env("CLE_ERROR_SUMMARY", &diagnostic.summary)
+        .env("CLE_ERROR_STAGE", &diagnostic.stage)
         .env("CLE_ERROR_CODE", &diagnostic.code)
         .env("CLE_ERROR_STAGE_LABEL",localization::text("Stage"))
         .env("CLE_ERROR_CODE_LABEL",localization::text("Support code"))
@@ -706,7 +704,7 @@ fn spawn_startup_error(
             "CLE_ERROR_REASON",
             bounded_dialog_details(&diagnostic.reason),
         )
-        .env("CLE_ERROR_GUIDANCE", localization::text(&diagnostic.guidance))
+        .env("CLE_ERROR_GUIDANCE", &diagnostic.guidance)
         .env("CLE_ERROR_DETAILS", bounded_dialog_details(details))
         .env(
             "CLE_ERROR_REPORT",
@@ -719,8 +717,25 @@ fn spawn_startup_error(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    if let Some(root) = live_state.and_then(Path::parent) {
+        command.env(startup_recovery_ui::CHANNEL_ENV, root);
+    }
+    command.env("CLE_ERROR_OWNER_PID", std::process::id().to_string());
+    command.stdin(Stdio::piped());
     configure_hidden(&mut command);
-    command.spawn().ok()
+    let mut child = command.spawn().ok()?;
+    use std::io::Write as _;
+    if child
+        .stdin
+        .take()?
+        .write_all(dialog_script.as_bytes())
+        .is_err()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    Some(child)
 }
 
 #[cfg(not(windows))]

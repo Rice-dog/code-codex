@@ -119,6 +119,30 @@ pub(crate) fn dialog_script(source: &str) -> String {
     let (en, zh) = catalogs();
     let mut result = source.to_owned();
     if let Some(entries) = en.as_object() {
+        // Dynamic recovery guidance arrives after the dialog source is
+        // localized. Embed the same catalog as data for that one UI field;
+        // never replace protocol values or raw diagnostic evidence.
+        if result.contains("# CODE_CODEX_GUIDANCE_TRANSLATIONS") {
+            let mut translations = std::collections::BTreeMap::new();
+            for (key, value) in entries {
+                if let (Some(original), Some(translated)) = (value.as_str(), zh[key].as_str()) {
+                    translations.entry(original).or_insert(translated);
+                }
+            }
+            let pairs = translations
+                .iter()
+                .map(|(original, translated)| {
+                    format!(
+                        "$script:guidanceTranslations.Add('{}','{}')",
+                        original.replace('\'', "''"),
+                        translated.replace('\'', "''")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(";\n");
+            result = result.replace("$script:guidanceTranslations=@{} # CODE_CODEX_GUIDANCE_TRANSLATIONS",
+                &format!("$script:guidanceTranslations=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)\n{pairs}"));
+        }
         for (key, value) in entries {
             if let (Some(original), Some(translated)) = (value.as_str(), zh[key].as_str()) {
                 if original.contains(['\n', '\r']) {
@@ -134,4 +158,25 @@ pub(crate) fn dialog_script(source: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    #[test]
+    fn ordinary_recovery_guidance_localizes_without_changing_protocol_or_evidence() {
+        const HELP: &str =
+            "Close Codex, then start it through Code-Codex, or click Close and restart below.";
+        let source = include_str!("startup_dialog.ps1");
+        set_session(Locale::English);
+        assert_eq!(dialog_script(source), source);
+        set_session(Locale::Chinese);
+        let translated = dialog_script(source);
+        assert!(translated.contains(&format!("$script:guidanceTranslations.Add('{HELP}','关闭 Codex，并通过 Code-Codex 来启动，或者直接点击下方的“关闭并重新启动”按钮。')")));
+        assert!(translated.contains("$script:action.Text=$script:guidanceTranslations[$Guidance]"));
+        assert!(!translated.contains("# CODE_CODEX_GUIDANCE_TRANSLATIONS"));
+        assert!(translated.contains("CC-START-RECOVERY-UI-002: Startup state could not be read."));
+        assert!(translated.contains("Original conflict: "));
+        set_session(Locale::English);
+    }
 }

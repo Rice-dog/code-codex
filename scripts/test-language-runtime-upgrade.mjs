@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {resolve} from 'node:path';
+import {createServer} from 'node:http';
+import {launchFixture,delay} from './browser-fixture.mjs';
+const root=resolve(import.meta.dirname,'..'),ui=resolve(root,'packages/explorer-ui'),out=resolve(root,'artifacts/language-runtime-upgrade');mkdirSync(out,{recursive:true});
+const version=JSON.parse(readFileSync(resolve(ui,'package.json'),'utf8')).version;
+const names=JSON.parse(readFileSync(resolve(root,'resources/plugin-display-names.json'),'utf8')),zh=JSON.parse(readFileSync(resolve(root,'resources/i18n/zh-CN.json'),'utf8'));
+const {build}=createRequire(resolve(ui,'package.json'))('esbuild');
+const frozenRoot=resolve(root,'scripts/fixtures/language-v0.5.31');
+const frozen=JSON.parse(readFileSync(resolve(frozenRoot,'manifest.json'),'utf8'));
+const old=file=>{const text=readFileSync(resolve(frozenRoot,file),'utf8').replace(/\r\n/g,'\n');assert.equal(createHash('sha256').update(text,'utf8').digest('hex'),frozen.sha256[file],`Frozen legacy fixture changed: ${file}`);return text;};
+await build({stdin:{contents:old('packages/explorer-ui/src/core/localization/runtime.ts'),resolveDir:resolve(ui,'src/core/localization'),loader:'ts'},bundle:true,format:'iife',outfile:resolve(out,'old.js'),plugins:[{name:'old-catalog',setup(b){b.onLoad({filter:/resources[\\/]i18n[\\/](en|zh-CN)\.json$/},args=>({contents:old('resources/i18n/'+args.path.split(/[\\/]/).at(-1)),loader:'json'}));}}]});
+await build({stdin:{contents:`import './core/localization/runtime';import{ApplicationDialog}from './components/application-dialog';import{localizeOwnedUi,applyLanguage}from './i18n';window.dialog=new ApplicationDialog();window.service=()=>window[Symbol.for('code-codex:language-service:v1')];window.locale=(locale)=>applyLanguage({schema:1,locale,revision:++window.revision,source:'menu'});window.revision=0;locale('zh-CN');window.disposeUi=localizeOwnedUi(document.querySelector('#owned'));`,resolveDir:resolve(ui,'src'),loader:'ts'},define:{__CODE_CODEX_VERSION__:JSON.stringify(version)},bundle:true,format:'iife',outfile:resolve(out,'current.js')});
+const html=`<!doctype html><meta charset="utf-8"><style>dialog{margin:0;inset:0}</style><div id="owned">${Object.entries(names).map(([id,name])=>`<article class="preview-extension" data-id="${id}"><h4>${name}</h4></article><h3 data-plugin-name>${name}</h3>`).join('')}<select id="cle-startupTransition-background">${Object.values(names).map(name=>`<option>${name}</option>`).join('')}</select><pre>Custom Background</pre><div class="node-name">Custom Background</div><div class="particle-library-name">Custom Background.mp4</div></div><script src="/current.js"></script>`;
+const server=createServer((req,res)=>{res.setHeader('Content-Type',req.url?.endsWith('.js')?'text/javascript':'text/html;charset=utf-8');res.end(req.url==='/old.js'?readFileSync(resolve(out,'old.js')):req.url==='/current.js'?readFileSync(resolve(out,'current.js')):html);});await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await launchFixture(`http://127.0.0.1:${server.address().port}`),checks=[];
+const ev=x=>browser.evaluate(x),settle=`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`;
+async function check(name,code){assert.ok(await ev(code),name);checks.push(name);}
+try{
+ await check('Current language runtime owns the installed version and complete keys',`service().runtimeVersion===${JSON.stringify(version)}&&service().languageDiagnostics().catalogKeys===${Object.keys(zh).length}`);
+ const expected=Object.fromEntries(Object.entries(names).map(([id])=>[id,zh['plugin.name.'+id]]));
+ await check('All 26 market cards show approved Chinese names',`JSON.stringify(Object.fromEntries([...document.querySelectorAll('.preview-extension')].map(x=>[x.dataset.id,x.querySelector('h4').textContent])))===${JSON.stringify(JSON.stringify(expected))}`);
+ await check('Settings titles and startup source options use the same Chinese names',`[...document.querySelectorAll('[data-plugin-name]')].every((x,i)=>x.textContent===${JSON.stringify(Object.values(expected))}[i])&&[...document.querySelectorAll('option')].every((x,i)=>x.textContent===${JSON.stringify(Object.values(expected))}[i])`);
+ await check('User code, file name and imported media name remain unchanged',`document.querySelector('pre').textContent==='Custom Background'&&document.querySelector('.node-name').textContent==='Custom Background'&&document.querySelector('.particle-library-name').textContent==='Custom Background.mp4'`);
+ await ev(`window.decision=dialog.confirm('loginStartup.title','loginStartup.confirm');${settle}`);
+ await ev(`new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='/old.js';s.onload=resolve;s.onerror=reject;document.head.append(s);})`);
+ await check('Actual old 1079-key runtime cannot replace new service',`service().runtimeVersion===${JSON.stringify(version)}&&service().languageDiagnostics().catalogKeys===${Object.keys(zh).length}`);
+ await check('After old injection, dialog title/body/buttons are exact concise Chinese',`(()=>{const d=document.querySelector('dialog'),s=d.querySelector('[data-code-codex-dialog-content]').shadowRoot;return d.getAttribute('aria-label')==='是否开启 Code-Codex 开机自启？'&&s.querySelector('p').textContent==='开启后，登录 Windows 时将自动通过 Code-Codex 启动 Codex。此操作不会关闭当前正在运行的 Codex。'&&s.querySelector('[data-accept]').textContent==='确定'&&s.querySelector('[data-cancel]').textContent==='取消'})()`);
+ await ev(`locale('en');${settle}`);
+ await check('English restores all original names without changing card identity',`[...document.querySelectorAll('.preview-extension h4')].every((x,i)=>x.textContent===${JSON.stringify(Object.values(names))}[i])`);
+ await check('Open dialog switches to complete English text',`(()=>{const d=document.querySelector('dialog'),s=d.querySelector('[data-code-codex-dialog-content]').shadowRoot;return d.getAttribute('aria-label')==='Enable Code-Codex login startup?'&&s.querySelector('p').textContent.includes('This will not close the Codex session currently running.')&&s.querySelector('[data-accept]').textContent==='OK'&&s.querySelector('[data-cancel]').textContent==='Cancel'})()`);
+ await ev(`document.querySelector('[data-code-codex-dialog-content]').shadowRoot.querySelector('[data-cancel]').click();decision`);
+ await check('Modal cancelled and disposed',`!document.querySelector('dialog')`);
+ await ev(`window.ownedService=service();window[Symbol.for('code-codex:language-service:v1')]={...ownedService,runtimeVersion:'0.0.1'};`);
+ await check('A versioned downgrade is refused',`service()===ownedService`);
+ await ev(`locale('zh-CN');const card=document.createElement('article');card.className='preview-extension';card.innerHTML='<h4>ASCII Tiles Background</h4>';document.querySelector('#owned').append(card);${settle}`);
+ await check('Late-loaded plugin UI uses current host names',`document.querySelector('.preview-extension:last-child h4')?.textContent==='字符玻璃砖'||[...document.querySelectorAll('.preview-extension h4')].at(-1).textContent==='字符玻璃砖'`);
+ writeFileSync(resolve(out,'result.json'),JSON.stringify({passed:true,checks,oldCatalogKeys:1079,currentCatalogKeys:Object.keys(zh).length,version},null,2));console.log(`Language runtime upgrade: ${checks.length} checks passed; old 1079-key script executed after current runtime`);
+}finally{await browser.close();await new Promise(r=>server.close(r));}

@@ -34,6 +34,7 @@
     "install/report-retention",
     "install/execute",
     "remove/safety",
+    "remove/process-selection",
     "remove/dialogs"
   ],
   "managedAssets": "resources/managed-assets.json"

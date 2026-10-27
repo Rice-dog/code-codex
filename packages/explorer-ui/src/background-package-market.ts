@@ -1,4 +1,5 @@
 import {translate,t} from './i18n';
+import {pluginDisplayName} from './core/localization/plugin-names';
 import type { WorkspaceBridge } from './contracts/bridge';
 import { PLUGIN_PACKAGES, isPluginPackageLoaded } from './plugin-runtime';
 import { ensurePluginPackage } from './plugin-load-diagnostics';
@@ -146,7 +147,7 @@ export class BackgroundPackageMarket {
         const label=download.querySelector<HTMLElement>('span')!;
         const progress=download.querySelector('progress')!;
         progress.hidden=!busy;
-        progress.setAttribute('aria-label',t('Download {name}',{name:info.name}));
+        progress.setAttribute('aria-label',t('Download {name}',{name:pluginDisplayName(info.id)}));
         const packageBytes=info.size+(info.resources??[]).reduce((sum,asset)=>sum+asset.size,0);
         const percent=state?.total?Math.min(100,Math.max(0,Math.floor((state.downloaded??0)/state.total*100))):null;
         if(busy){
@@ -167,16 +168,16 @@ export class BackgroundPackageMarket {
         // Preserve any legitimate runtime busy state while status is unknown.
         if(state)button.disabled=false;
         button.dataset.enabled='false';button.setAttribute('aria-pressed','false');
-        button.setAttribute('aria-label',t(busy?'Cancel download of {name}':'Download {name}',{name:info.name}));
+        button.setAttribute('aria-label',t(busy?'Cancel download of {name}':'Download {name}',{name:pluginDisplayName(info.id)}));
       } else if(!isPluginPackageLoaded(info.id)) {
         // A saved enabled preference is not proof of a loaded package. Keep
         // this card actionable while preserving the user's preference bytes.
         button.textContent='Enable';button.disabled=false;button.dataset.enabled='false';button.setAttribute('aria-pressed','false');
-        button.setAttribute('aria-label',`Enable ${info.name}`);
+        button.setAttribute('aria-label',t('Enable {name}',{name:pluginDisplayName(info.id)}));
         const status=card.querySelector<HTMLElement>('.preview-extension-status');
         if(status){status.textContent='Installed';status.dataset.enabled='false';}
       } else if(wasDownload||releasedLoading) {
-        button.textContent=translate(active?'Disable':'Enable');button.disabled=false;button.setAttribute('aria-label',t(active?'Disable {name}':'Enable {name}',{name:info.name}));
+        button.textContent=translate(active?'Disable':'Enable');button.disabled=false;button.setAttribute('aria-label',t(active?'Disable {name}':'Enable {name}',{name:pluginDisplayName(info.id)}));
         const status=card.querySelector<HTMLElement>('.preview-extension-status');if(status&&!active)status.textContent='Installed';
       }
       const settings=card.querySelector<HTMLButtonElement>('.particle-settings-trigger');

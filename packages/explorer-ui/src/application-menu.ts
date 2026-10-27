@@ -1,13 +1,16 @@
 import { getLocale, selectLanguage, subscribeLanguage, translate, t } from './i18n';
 import { icons } from './icons';
+import type { LoginStartupActions } from './contracts/login-startup';
+import { LoginStartupController } from './features/startup/login-startup';
 
-interface ApplicationMenuActions {
+interface ApplicationMenuActions extends LoginStartupActions {
   isExplorerVisible(): boolean;
   toggleExplorer(): void;
   openPreviewMarket(): void;
   checkForUpdates(): void;
   openRuntimeInformation(): void;
   openInstallationFolder(): void;
+  openUninstaller(): Promise<{ opened: boolean }>;
 }
 
 interface MenuMount {
@@ -43,6 +46,10 @@ ${MENU_HOST_SELECTOR} {
 ${MENU_HOST_SELECTOR} > button {
   -webkit-app-region: no-drag;
 }
+${MENU_HOST_SELECTOR} > button[aria-expanded="true"] {
+  background: var(--color-codex-application-menu-selection, rgba(255,255,255,.96));
+  color: var(--color-text, #1a1c1f);
+}
 ${MENU_POPUP_SELECTOR} {
   position: fixed;
   z-index: 2147483000;
@@ -58,6 +65,7 @@ ${MENU_POPUP_SELECTOR} {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   overflow-y: auto;
   user-select: none;
+  outline: none;
 }
 ${MENU_POPUP_SELECTOR}[hidden] { display: none !important; }
 ${MENU_POPUP_SELECTOR} > :is(button, a) {
@@ -91,6 +99,15 @@ ${MENU_POPUP_SELECTOR} > [data-code-codex-language-trigger] {
   justify-content: space-between;
   gap: 16px;
 }
+${MENU_POPUP_SELECTOR} > [data-code-codex-login-startup] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+[data-code-codex-menu-check] { margin-inline-start: auto; font: inherit; }
+[data-code-codex-menu-check][hidden] { display: none; }
+${MENU_POPUP_SELECTOR} > button:disabled { opacity: .6; cursor: default; }
 [data-code-codex-submenu-chevron] {
   display: flex;
   flex: 0 0 16px;
@@ -153,10 +170,11 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   const trigger = document.createElement("button");
   trigger.type = "button";
   trigger.id = "code-codex-application-menu-trigger";
-  trigger.className = mount.lastNativeTrigger.className;
+  trigger.className = nativeTriggers().find(button => button.dataset.state !== 'open')?.className ?? mount.lastNativeTrigger.className;
   trigger.textContent = "Code-Codex";
   trigger.setAttribute("aria-haspopup", "menu");
   trigger.setAttribute("aria-expanded", "false");
+  trigger.dataset.state = 'closed';
   trigger.setAttribute("aria-controls", "code-codex-application-menu-popup");
   host.append(trigger);
 
@@ -164,6 +182,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   popup.dataset.codeCodexApplicationMenuPopup = "true";
   popup.id = "code-codex-application-menu-popup";
   popup.setAttribute("role", "menu");
+  popup.tabIndex = -1;
   popup.setAttribute("aria-labelledby", trigger.id);
   popup.hidden = true;
   const treeItem = document.createElement("button");
@@ -190,6 +209,10 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   installationItem.setAttribute("role", "menuitem");
   installationItem.tabIndex = -1;
   installationItem.textContent = "Open Installation Folder";
+  const loginStartupItem = document.createElement('button');
+  loginStartupItem.type = 'button';
+  loginStartupItem.tabIndex = -1;
+  const loginStartup = new LoginStartupController(loginStartupItem, actions);
   const languageItem = document.createElement('button');
   languageItem.type = 'button';languageItem.setAttribute('role','menuitem');languageItem.tabIndex=-1;
   languageItem.setAttribute('aria-haspopup','menu');languageItem.setAttribute('aria-expanded','false');
@@ -226,7 +249,13 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   repositoryItem.textContent = "Open GitHub Repository";
   const separator = document.createElement("div");
   separator.setAttribute("role", "separator");
-  popup.append(treeItem, marketItem, runtimeItem, installationItem, languageItem, separator, updateItem, repositoryItem);
+  const uninstallSeparator = document.createElement('div');
+  uninstallSeparator.setAttribute('role', 'separator');
+  const uninstallItem = document.createElement('button');
+  uninstallItem.type = 'button'; uninstallItem.tabIndex = -1;
+  uninstallItem.setAttribute('role', 'menuitem');
+  uninstallItem.dataset.codeCodexUninstall = 'true';
+  popup.append(treeItem, marketItem, runtimeItem, installationItem, loginStartupItem, languageItem, separator, updateItem, repositoryItem, uninstallSeparator, uninstallItem);
 
   // Keep this sibling separate from Codex's React-owned Radix menubar. It
   // shares the visual row without joining Radix's private keyboard collection.
@@ -234,10 +263,11 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   document.body.append(popup);
   document.body.append(languagePopup);
 
-  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, installationItem, languageItem, updateItem, repositoryItem];
+  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, installationItem, loginStartupItem, languageItem, updateItem, repositoryItem, uninstallItem];
   const updateText=()=>{
+    loginStartup.render();
     treeItem.textContent=t(actions.isExplorerVisible()?'menu.hideTree':'menu.showTree');
-    for(const [item,key] of [[marketItem,'menu.market'],[runtimeItem,'menu.runtime'],[installationItem,'menu.installation'],[updateItem,'menu.updates'],[repositoryItem,'menu.repository']] as const)item.textContent=t(key);
+    for(const [item,key] of [[marketItem,'menu.market'],[runtimeItem,'menu.runtime'],[installationItem,'menu.installation'],[updateItem,'menu.updates'],[repositoryItem,'menu.repository'],[uninstallItem,'menu.uninstall']] as const)item.textContent=t(key);
     languageLabel.textContent=t('menu.language');
     languagePopup.setAttribute('aria-label',t('menu.language'));
     for(const button of languageOptions){const checked=button.dataset.locale===getLocale();button.setAttribute('aria-checked',String(checked));button.textContent=(checked?'✓  ':'　 ')+button.dataset.languageLabel;}
@@ -265,15 +295,55 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     if (popup.hidden) return;
     popup.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
+    trigger.dataset.state = 'closed';
     if (returnFocus && trigger.isConnected) trigger.focus();
   };
   const open = (focusFirst = false) => {
+    dismissNativeMenu();
+    void loginStartup.refresh();
     updateText();
     popup.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
+    trigger.dataset.state = 'open';
     position();
     if (focusFirst) treeItem.focus();
+    else popup.focus({ preventScroll: true });
   };
+
+  // Coordinate through DOM events/state, without joining React/Radix internals.
+  function nativeTriggers(): HTMLButtonElement[] {
+    return [...mount.menubar.querySelectorAll<HTMLButtonElement>('button[id^="application-menu-trigger-"][id$="-menu"]')];
+  }
+  const nativeOpen = () => nativeTriggers().some(button => button.getAttribute('aria-expanded') === 'true');
+  function dismissNativeMenu(): void {
+    if (!nativeOpen()) return;
+    const content = document.getElementById('application-menu-content') ?? document.activeElement;
+    content?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  }
+  const openNative = (button: HTMLButtonElement) => {
+    close();
+    button.focus({ preventScroll: true });
+    // Radix's public trigger event handles opening; click alone is not an opener.
+    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  };
+  trigger.addEventListener('pointerenter', event => {
+    if (event.pointerType === 'touch') return;
+    if (nativeOpen()) open();
+  }, { signal });
+  mount.menubar.addEventListener('pointerover', event => {
+    if (popup.hidden || event.pointerType === 'touch') return;
+    const button = (event.target as Element | null)?.closest<HTMLButtonElement>('button[id^="application-menu-trigger-"][id$="-menu"]');
+    if (button && !button.disabled) openNative(button);
+  }, { capture: true, signal });
+  document.addEventListener('keydown', event => {
+    const button = (event.target as Element | null)?.closest<HTMLButtonElement>('button[id^="application-menu-trigger-"][id$="-menu"]');
+    const content = (event.target as Element | null)?.closest('[data-radix-menubar-content]');
+    if (event.key === 'ArrowRight' && (button === mount.lastNativeTrigger || content?.getAttribute('aria-labelledby') === mount.lastNativeTrigger.id)) {
+      event.preventDefault(); event.stopPropagation(); open(true);
+    }
+  }, { capture: true, signal });
+  const nativeStateObserver = new MutationObserver(() => { if (!popup.hidden && nativeOpen()) close(); });
+  nativeStateObserver.observe(mount.menubar, { subtree: true, attributes: true, attributeFilter: ['aria-expanded'] });
 
   trigger.addEventListener("click", () => popup.hidden ? open() : close(), { signal });
   trigger.addEventListener("keydown", (event) => {
@@ -283,6 +353,11 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
       (event.key === "ArrowDown" ? treeItem : repositoryItem).focus();
     } else if (event.key === "Escape") {
       close(true);
+    } else if (['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+      const buttons = nativeTriggers();
+      const button = event.key === 'ArrowLeft' ? buttons.at(-1) : buttons[0];
+      if (button) openNative(button);
     }
   }, { signal });
   popup.addEventListener("keydown", (event) => {
@@ -293,12 +368,18 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
       close(true);
     } else if (event.key === "Tab") {
       close();
+    } else if (['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+      const buttons = nativeTriggers();
+      const button = event.key === 'ArrowLeft' ? buttons.at(-1) : buttons[0];
+      if (button) openNative(button);
     } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
-      const index = items.indexOf(document.activeElement as HTMLElement);
-      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
-        (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-      items[next]?.focus();
+      const navigable = items.filter(item => !(item instanceof HTMLButtonElement) || !item.disabled);
+      const index = navigable.indexOf(document.activeElement as HTMLElement);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? navigable.length - 1 :
+        (index + (event.key === "ArrowDown" ? 1 : -1) + navigable.length) % navigable.length;
+      navigable[next]?.focus();
     }
   }, { signal });
   languageItem.addEventListener('pointerenter',()=>openSub(),{signal});
@@ -316,19 +397,30 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   marketItem.addEventListener("click", () => { close(); actions.openPreviewMarket(); }, { signal });
   runtimeItem.addEventListener("click", () => { close(); actions.openRuntimeInformation(); }, { signal });
   installationItem.addEventListener("click", () => { close(); actions.openInstallationFolder(); }, { signal });
+  loginStartupItem.addEventListener('click', () => { close(); void loginStartup.toggle(); }, { signal });
   updateItem.addEventListener("click", () => { close(); actions.checkForUpdates(); }, { signal });
   repositoryItem.addEventListener("click", () => close(), { signal });
+  uninstallItem.addEventListener('click', () => {
+    if (uninstallItem.disabled) return;
+    close(); uninstallItem.disabled = true;
+    void actions.openUninstaller().catch(error => {
+      window.alert(`Opening the Code-Codex uninstaller failed.\n${String(error)}`);
+    }).finally(() => { uninstallItem.disabled = false; });
+  }, { signal });
   document.addEventListener("pointerdown", (event) => {
     const target = event.target;
     if (target instanceof Node && !host.contains(target) && !popup.contains(target) && !languagePopup.contains(target)) close();
   }, { capture: true, signal });
   window.addEventListener("resize", position, { signal });
   window.addEventListener("scroll", position, { capture: true, signal });
+  window.addEventListener('blur', () => close(), { signal });
 
   return {
     owner, mount, host, popup,
     dispose: () => {
       controller.abort();
+      nativeStateObserver.disconnect();
+      loginStartup.dispose();
       unsubscribe();languagePopup.remove();
       host.remove();
       popup.remove();

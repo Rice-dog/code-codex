@@ -1,6 +1,7 @@
 import english from '../../../../../resources/i18n/en.json';
 import chinese from '../../../../../resources/i18n/zh-CN.json';
 import { runtimeEvent } from '../../runtime-events';
+import { installLanguageService } from './service-owner';
 
 import type { UiLocale,LanguagePreference,LanguageRequest as Request,LanguageService } from '../../contracts/localization';
 import { localizeOwnedUi } from './owned-ui';
@@ -89,5 +90,8 @@ export function selectLanguage(locale: UiLocale): Promise<void> {
 
 // A narrow host capability lets optional plugins share language without bundling
 // installation dictionaries, native persistence, or DOM observers.
-const service: LanguageService={ getLocale,languagePreference,languageDiagnostics,parameterLanguage,translate,t,subscribeLanguage,applyLanguage,refreshLanguage,connectLanguage,selectLanguage,localizeOwnedUi };
-(window as unknown as Record<symbol,LanguageService>)[Symbol.for('code-codex:language-service:v1')]=service;
+declare const __CODE_CODEX_VERSION__: string;
+const service: LanguageService & { readonly runtimeVersion: string }={ runtimeVersion:typeof __CODE_CODEX_VERSION__==='undefined'?'0.0.0':__CODE_CODEX_VERSION__,getLocale,languagePreference,languageDiagnostics,parameterLanguage,translate,t,subscribeLanguage,applyLanguage,refreshLanguage,connectLanguage,selectLanguage,localizeOwnedUi };
+if(installLanguageService(service))queueMicrotask(()=>{
+  for(const listener of [...state.listeners])try{listener();}catch(error){runtimeEvent('localization','runtime upgrade','failed',{reason:String(error)});}
+});

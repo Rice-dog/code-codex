@@ -45,6 +45,7 @@ pub(super) fn begin_startup_trace(mode: &'static str) {
 }
 
 pub(super) fn record_startup_event(stage: &'static str, outcome: &'static str) {
+    crate::startup_recovery_ui::stage(stage, outcome);
     runtime_log::record("launcher", stage, outcome, json!({}));
     if let Ok(mut trace) = startup_trace().lock() {
         let elapsed = trace.started.map_or(0, |start| start.elapsed().as_millis());
@@ -94,8 +95,19 @@ pub(super) fn record_supervisor_progress(progress: Arc<SupervisorProgress>) {
     tokio::spawn(async move {
         let mut previous = String::new();
         loop {
+            if crate::startup_recovery_ui::check_readiness_delay() {
+                runtime_log::record(
+                    "launcher",
+                    "replacement readiness",
+                    "waiting",
+                    json!({
+                        "code":"CC-START-RECOVERY-WAIT-001", "failureInferred":false,
+                        "diagnosticWindowShown":false, "launchContinues":true
+                    }),
+                );
+            }
             let state = observed.snapshot();
-            let summary = json!({"phase":state.last_phase,"sessionsStarted":state.sessions_started,"sessionsEnded":state.sessions_ended,"layoutRejections":state.layout_rejections,"layoutMatches":state.layout_probe_matches,"bootstrapAttempts":state.bootstrap_attempts,"bootstrapFailures":state.bootstrap_failures,"targets":state.last_target_count,"matches":state.last_filter_match_count,"documentState":state.last_ready_state,"listError":state.last_list_error,"sessionError":state.last_session_error,"recoveryWaiting":state.recovery_waiting,"recoveryWaits":state.recovery_waits,"recoveryResumes":state.recovery_resumes,"lastRecoveryWaitMs":state.last_recovery_wait_ms});
+            let summary = json!({"phase":state.last_phase,"sessionsStarted":state.sessions_started,"sessionsEnded":state.sessions_ended,"layoutRejections":state.layout_rejections,"layoutMatches":state.layout_probe_matches,"bootstrapAttempts":state.bootstrap_attempts,"bootstrapFailures":state.bootstrap_failures,"targets":state.last_target_count,"matches":state.last_filter_match_count,"documentState":state.last_ready_state,"listError":state.last_list_error,"sessionError":state.last_session_error,"initialWaiting":state.initial_waiting,"initialWaitObserved":state.initial_wait_observed,"initialWaitCode":if state.initial_waiting {Some("CC-START-RENDERER-WAIT-001")}else{None},"layoutObservation":state.last_layout_diagnostic,"networkCause":"unproven; official request timings not collected","recoveryWaiting":state.recovery_waiting,"recoveryWaits":state.recovery_waits,"recoveryResumes":state.recovery_resumes,"lastRecoveryWaitMs":state.last_recovery_wait_ms});
             let encoded = summary.to_string();
             if encoded != previous {
                 runtime_log::record("cdp", "renderer supervisor", "observed", summary);
@@ -348,6 +360,7 @@ impl AppError {
         match self {
             Self::UnsupportedVersion => exit_codes::UNSUPPORTED_VERSION,
             Self::AlreadyRunning => exit_codes::ALREADY_RUNNING,
+            Self::StartupConflict(_) => exit_codes::STARTUP_FAILURE,
             Self::Discovery(_)
             | Self::Bootstrap(_)
             | Self::Workspace(_)
@@ -690,6 +703,13 @@ impl AppError {
                 "Codex Desktop is already running without Code-Codex",
                 reason,
                 "Close Codex Desktop, then start it from the Codex or Code-Codex desktop shortcut.",
+            ),
+            Self::StartupConflict(_) => StartupDiagnostic::new(
+                "CC-START-STATE-002",
+                "Reopening Codex through Code-Codex",
+                "Codex could not be reopened automatically",
+                reason,
+                "Close Codex manually and try again. To revoke automatic restart permission, run code-codex reset-startup-recovery.",
             ),
             Self::Launch(error) => {
                 let (code, stage, summary) = launch_diagnostic(error);

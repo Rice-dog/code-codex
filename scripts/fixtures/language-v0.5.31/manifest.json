@@ -1,0 +1,10 @@
+{
+  "sourceCommit": "8023bb2e9b54c99a335f5d6d3a58d97d947b33f3",
+  "purpose": "Frozen old runtime/catalog for current-owner downgrade regression; no Git history or network required",
+  "sha256": {
+    "packages/explorer-ui/src/core/localization/runtime.ts": "fe6f82d8b78ef06aa6476d5d9e9c443cafb9311db645d9684ffbe6df69460ba6",
+    "resources/i18n/en.json": "604abb6d8ee018203278b96f4b0ccb40955e0d95d5e583480816070ea5ae7278",
+    "resources/i18n/zh-CN.json": "490d0842c37193c21e81dd7590c63070efde812d07c84dcb2af66fb7378635e1"
+  },
+  "hashEncoding": "UTF-8 with LF; normalize checkout CRLF before hashing without changing historical content"
+}

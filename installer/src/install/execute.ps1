@@ -208,6 +208,9 @@ else {
 
 Publish-CodeCodexProgress 81 "Installing support files" "Updating the launcher, uninstaller, and documentation."
 Copy-AtomicFile $SourceShim (Join-Path $InstallRoot "CodeCodex-$Version.exe")
+# Stable, already-managed root entry for the opt-in login command. The shim
+# resolves current-version, so upgrades and rollback do not pin a retired binary.
+Copy-AtomicFile $SourceShim (Join-Path $InstallRoot "CodeCodex.exe")
 Copy-AtomicFile $SourceShortcutTool (Join-Path $InstallRoot "CodeCodex.Shortcut.exe")
 Copy-AtomicFile $SourceUninstallerExecutable (Join-Path $InstallRoot "Uninstall-CodeCodex.exe")
 Copy-AtomicFile $SourceUninstaller (Join-Path $InstallRoot "Uninstall-CodeCodex.ps1")
@@ -229,9 +232,8 @@ New-Item 'HKCU:\Software\CodeCodex' -Force | Out-Null
 New-ItemProperty 'HKCU:\Software\CodeCodex' -Name InstallPath -Value $InstallRoot -PropertyType String -Force | Out-Null
 
 Publish-CodeCodexProgress 88 "Registering installation" "Updating the Windows installed-app entry."
-# Remove the obsolete sign-in launch entry. The existing Codex or ChatGPT
-# shortcut is now the single user-controlled entry point for both the official
-# app and Code-Codex.
+# Remove only the obsolete unconditional sign-in entry. The new opt-in
+# CodeCodexLogin value is separate and must be preserved across upgrades.
 Remove-ItemProperty `
     -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
     -Name "CodeCodex" `
@@ -268,6 +270,7 @@ foreach ($pair in @(
     @($SourceBinary, (Join-Path $VersionRoot "code-codex.exe")),
     @($SourceRuntimeLauncher, (Join-Path $VersionRoot "CodeCodex.exe")),
     @($SourceShim, (Join-Path $InstallRoot "CodeCodex-$Version.exe")),
+    @($SourceShim, (Join-Path $InstallRoot "CodeCodex.exe")),
     @($SourceShortcutTool, $installedShortcutTool),
     @($SourceUninstallerExecutable, (Join-Path $InstallRoot "Uninstall-CodeCodex.exe"))
 )) {

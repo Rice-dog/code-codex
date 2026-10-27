@@ -309,6 +309,86 @@ function Test-SamePath([string]$Left, [string]$Right) {
     }
 }
 
+function Test-CodeCodexParentEdge([object]$Parent, [object]$Child) {
+    return $null -ne $Parent -and $null -ne $Child -and
+        $null -ne $Parent.CreationDate -and $null -ne $Child.CreationDate -and
+        [uint32]$Parent.ProcessId -eq [uint32]$Child.ParentProcessId -and
+        $Parent.CreationDate -le $Child.CreationDate
+}
+
+function Get-CodeCodexRemovalProtection([object[]]$Snapshot, [uint32]$WorkerId) {
+    # The menu launches this wizard from the very core we need to stop. Protect
+    # the removal branch, including the sibling UI, before walking that tree.
+    # No renderer-supplied PID or environment flag can grant this exclusion.
+    $byId = @{}
+    foreach ($entry in $Snapshot) {
+        $id = [uint32]$entry.ProcessId
+        if ($byId.ContainsKey($id)) { throw 'CC-UNINSTALL-PROCESS-001: duplicate process identity in removal snapshot.' }
+        $byId[$id] = $entry
+    }
+    $current = $byId[$WorkerId]
+    if ($null -eq $current -or $null -eq $current.CreationDate) {
+        throw 'CC-UNINSTALL-PROCESS-001: the removal worker identity is unavailable; shutdown was not started.'
+    }
+    $roots = @($WorkerId)
+    $visited = @{}
+    while ($null -ne $current -and -not $visited.ContainsKey([uint32]$current.ProcessId)) {
+        $visited[[uint32]$current.ProcessId] = $true
+        if ([string]$current.Name -ieq 'Uninstall-CodeCodex.exe') { $roots += [uint32]$current.ProcessId }
+        $parent = $byId[[uint32]$current.ParentProcessId]
+        if (-not (Test-CodeCodexParentEdge $parent $current)) { break }
+        $current = $parent
+    }
+    $protected = @{}
+    $frontier = @($roots | Sort-Object -Unique)
+    foreach ($id in $frontier) { $protected[[uint32]$id] = $true }
+    while ($frontier.Count -gt 0) {
+        $next = @()
+        foreach ($entry in $Snapshot) {
+            $id = [uint32]$entry.ProcessId
+            $parentId = [uint32]$entry.ParentProcessId
+            if (-not $protected.ContainsKey($id) -and $parentId -in $frontier -and
+                (Test-CodeCodexParentEdge $byId[$parentId] $entry)) {
+                $protected[$id] = $true
+                $next += $id
+            }
+        }
+        $frontier = $next
+    }
+    return $protected
+}
+
+function Get-CodeCodexOwnedDescendants([object[]]$Snapshot, [object[]]$Running, [hashtable]$Protected) {
+    $byId = @{}
+    foreach ($entry in $Snapshot) { $byId[[uint32]$entry.ProcessId] = $entry }
+    $seen = @{}
+    $frontier = @($Running | ForEach-Object { [uint32]$_.ProcessId })
+    foreach ($id in $frontier) { $seen[$id] = $true }
+    $depth = 1
+    while ($frontier.Count -gt 0 -and $depth -le 32) {
+        $next = @()
+        foreach ($entry in $Snapshot) {
+            $id = [uint32]$entry.ProcessId
+            $parentId = [uint32]$entry.ParentProcessId
+            if ($Protected.ContainsKey($id) -or $seen.ContainsKey($id) -or $parentId -notin $frontier -or
+                -not (Test-CodeCodexParentEdge $byId[$parentId] $entry)) { continue }
+            $seen[$id] = $true
+            $next += $id
+            $path = $null
+            if (-not [string]::IsNullOrWhiteSpace([string]$entry.ExecutablePath)) {
+                try { $path = [IO.Path]::GetFullPath([string]$entry.ExecutablePath) } catch {}
+            }
+            [pscustomobject]@{
+                ProcessId = $id; Name = [string]$entry.Name; ExecutablePath = $path
+                CreationDate = $entry.CreationDate; Depth = $depth
+            }
+        }
+        $frontier = $next
+        $depth++
+    }
+}
+
+
 function Test-SameProcessIdentity([object]$Expected, [object]$Current) {
     if ($null -eq $Expected -or $null -eq $Current -or
         $null -eq $Expected.CreationDate -or $null -eq $Current.CreationDate) {
@@ -428,7 +508,10 @@ if ($null -ne $installItem) {
     $unverifiedRunning = @()
     Publish-CodeCodexProgress 24 "Checking running processes" "Finding Code-Codex sessions that need to close."
     $processSnapshot = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $protectedProcessIds = Get-CodeCodexRemovalProtection $processSnapshot ([uint32]$PID)
+    [Console]::Out.WriteLine("CC-UNINSTALL-PROCESS-000: worker=$PID; protected=$(@($protectedProcessIds.Keys | Sort-Object) -join ',')")
     foreach ($process in $processSnapshot) {
+        if ($protectedProcessIds.ContainsKey([uint32]$process.ProcessId)) { continue }
         $knownProductName = [string]$process.Name -in @(
             "code-codex.exe",
             "CodeCodex.exe"
@@ -462,40 +545,7 @@ if ($null -ne $installItem) {
     # Retain the process identities for the session launched by Code-Codex.
     # This includes the app server, package guard, and Codex window, but not an
     # unrelated Codex process whose parent chain is outside this launch.
-    $ownedDescendants = @()
-    $ownedProcessIds = @($running | ForEach-Object { [uint32]$_.ProcessId })
-    $frontierProcessIds = @($ownedProcessIds)
-    $descendantDepth = 1
-    while ($frontierProcessIds.Count -gt 0 -and $descendantDepth -le 32) {
-        $children = @(
-            $processSnapshot |
-                Where-Object {
-                    [uint32]$_.ParentProcessId -in $frontierProcessIds -and
-                    [uint32]$_.ProcessId -notin $ownedProcessIds
-                }
-        )
-        if ($children.Count -eq 0) { break }
-
-        foreach ($child in $children) {
-            $childPath = $null
-            if (-not [string]::IsNullOrWhiteSpace([string]$child.ExecutablePath)) {
-                try {
-                    $childPath = [IO.Path]::GetFullPath([string]$child.ExecutablePath)
-                }
-                catch {}
-            }
-            $ownedDescendants += [pscustomobject]@{
-                ProcessId = [uint32]$child.ProcessId
-                Name = [string]$child.Name
-                ExecutablePath = $childPath
-                CreationDate = $child.CreationDate
-                Depth = $descendantDepth
-            }
-        }
-        $frontierProcessIds = @($children | ForEach-Object { [uint32]$_.ProcessId })
-        $ownedProcessIds += $frontierProcessIds
-        $descendantDepth++
-    }
+    $ownedDescendants = @(Get-CodeCodexOwnedDescendants $processSnapshot $running $protectedProcessIds)
 
     # A desktop user should not have to discover and close hidden launcher and
     # service processes before uninstalling. Stop only product executables that
@@ -510,6 +560,7 @@ if ($null -ne $installItem) {
     Publish-CodeCodexProgress 31 "Closing Code-Codex" "Stopping verified Code-Codex processes before removal."
     $stoppedProcessIds = @()
     foreach ($runningProcess in $running) {
+        if ($protectedProcessIds.ContainsKey([uint32]$runningProcess.ProcessId)) { continue }
         $currentProcess = Get-CimInstance `
             Win32_Process `
             -Filter ("ProcessId = {0}" -f [uint32]$runningProcess.ProcessId) `
@@ -566,6 +617,7 @@ if ($null -ne $installItem) {
                 @{ Expression = { $_.Depth }; Descending = $true }, `
                 ProcessId
     )) {
+        if ($protectedProcessIds.ContainsKey([uint32]$ownedDescendant.ProcessId)) { continue }
         $currentDescendant = Get-CimInstance `
             Win32_Process `
             -Filter ("ProcessId = {0}" -f [uint32]$ownedDescendant.ProcessId) `
@@ -733,6 +785,20 @@ Remove-ItemProperty `
     -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
     -Name "CodeCodex" `
     -ErrorAction SilentlyContinue
+
+# This opt-in value is separate from the obsolete CodeCodex entry and the
+# official app's login setting. Failure to revoke must not report success.
+function Remove-CodeCodexLoginStartup([string]$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run') {
+    if (Test-Path -LiteralPath $RunKey) {
+        $loginKey = Get-Item -LiteralPath $RunKey -ErrorAction Stop
+        try {
+            if ($null -ne $loginKey.GetValue('CodeCodexLogin')) {
+                Remove-ItemProperty -LiteralPath $RunKey -Name 'CodeCodexLogin' -ErrorAction Stop
+            }
+        } finally { $loginKey.Dispose() }
+    }
+}
+Remove-CodeCodexLoginStartup
 
 if ($PurgeSettings) {
     Publish-CodeCodexProgress 49 "Cleaning settings" "Removing Code-Codex preferences selected for removal."

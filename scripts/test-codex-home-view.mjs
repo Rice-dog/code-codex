@@ -78,7 +78,10 @@ try{
  result.draftRetained=preview.state.editor?.draft==='Unsaved Home draft';
  result.expansionRetained=Boolean(s.querySelector('[role=treeitem][data-path="src"][aria-expanded="true"]'));
  scroller.scrollTop=scroller.scrollHeight;await delay(50);
- result.watchRetained=Boolean(s.querySelector('[role=treeitem][data-path="watched.ts"]'))&&listeners.size===1;
+ // Document-scoped menu transport and tree transport are independent clients.
+ // Verify watcher behavior, rather than requiring one transport receiver.
+ result.watchRetained=s.querySelectorAll('[role=treeitem][data-path="watched.ts"]').length===1&&count('explorer.watch.start')===baseline.start&&count('explorer.watch.stop')===baseline.stop;
+ result.bridgeTransportClients=listeners.size;
  // Native Home can be evicted from its Activity cache. Keep our tree and editor alive.
  for(const destination of ['builtin:automations','builtin:images','settings']){
   selectFeature(destination);await wait(()=>e.hasAttribute('data-home-view-hidden'),'hidden on '+destination);

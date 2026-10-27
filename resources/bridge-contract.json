@@ -153,6 +153,14 @@
       "effect": "read"
     },
     {
+      "name": "explorer.login.startup.get",
+      "effect": "read"
+    },
+    {
+      "name": "explorer.login.startup.set",
+      "effect": "preference-write"
+    },
+    {
       "name": "explorer.language.get",
       "effect": "read"
     },
@@ -195,6 +203,10 @@
     {
       "name": "explorer.window.transparency.set",
       "effect": "session-state"
+    },
+    {
+      "name": "explorer.installation.uninstall",
+      "effect": "external-ui"
     }
   ]
 }

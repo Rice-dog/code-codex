@@ -45,6 +45,8 @@ pub struct SupervisorProgressSnapshot {
     pub last_filter_match_count: usize,
     pub sessions_started: u64,
     pub sessions_ended: u64,
+    pub initial_waiting: bool,
+    pub initial_wait_observed: bool,
     pub recovery_waiting: bool,
     pub recovery_waits: u64,
     pub recovery_resumes: u64,
@@ -140,12 +142,13 @@ impl SupervisorProgress {
     }
 }
 
-/// Controls what happens after a previously-qualified renderer disappears.
+/// Controls waiting for the initial renderer and later renderer disappearance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdlePolicy {
     /// Return after `idle_timeout`; useful when attaching to an external process.
     ExitAfterTimeout,
-    /// Continue polling until explicit cancellation; used for an owned Codex job.
+    /// Keep initial and subsequent discovery alive until explicit cancellation.
+    /// The startup timeout is an observation threshold for this owned-job policy.
     RecoverUntilCancelled,
 }
 
@@ -205,6 +208,7 @@ where
             .checked_add(self.options.startup_timeout)
             .ok_or(CdpError::Protocol)?;
         let mut qualified_target_seen = false;
+        let keep_initial_waiting = self.options.idle_policy == IdlePolicy::RecoverUntilCancelled;
         let mut next_session_generation = 1_u64;
         let mut idle_since = None;
         let mut recovery_started: Option<Instant> = None;
@@ -219,6 +223,27 @@ where
         loop {
             if cancellation.is_cancelled() {
                 break;
+            }
+            if keep_initial_waiting
+                && !qualified_target_seen
+                && started.elapsed() >= self.options.startup_timeout
+            {
+                if let Some(progress) = &self.options.progress {
+                    if !progress.snapshot().initial_wait_observed {
+                        progress.update(|state| {
+                            state.initial_waiting = true;
+                            state.initial_wait_observed = true;
+                        });
+                        progress.record("initial_renderer_waiting");
+                        tracing::info!(
+                            event = "initial_renderer_waiting",
+                            code = "CC-START-RENDERER-WAIT-001",
+                            failure_inferred = false,
+                            network_cause = "unproven",
+                            native_dispatch = "blocked until qualified"
+                        );
+                    }
+                }
             }
             while let Ok(status) = session_status_receiver.try_recv() {
                 apply_session_status(
@@ -256,7 +281,8 @@ where
                 }
                 Err(error)
                     if !qualified_target_seen
-                        && started.elapsed() < self.options.startup_timeout =>
+                        && (keep_initial_waiting
+                            || started.elapsed() < self.options.startup_timeout) =>
                 {
                     if let Some(progress) = &self.options.progress {
                         if progress.snapshot().last_list_error.is_none() {
@@ -351,10 +377,15 @@ where
                 next_session_generation = next_generation;
                 let initial_settle_timeout =
                     recently_qualified_target_grace(&mut recently_qualified_targets, &target_id);
-                let cold_startup_deadline =
-                    cold_startup_deadline(startup_deadline, qualified_target_seen);
                 let canonical_startup_grace =
                     canonical_renderer_startup_grace(&target, qualified_target_seen);
+                // Only the canonical first page may wait without an overall deadline.
+                // Individual commands and all noncanonical candidates stay bounded.
+                let cold_startup_deadline = if keep_initial_waiting && canonical_startup_grace {
+                    None
+                } else {
+                    cold_startup_deadline(startup_deadline, qualified_target_seen)
+                };
                 let status_sender = session_status_sender.clone();
                 let progress = self.options.progress.clone();
                 let task = tokio::spawn(async move {
@@ -461,6 +492,12 @@ where
                         writes_replayed = false
                     );
                 }
+                if let Some(progress) = &self.options.progress {
+                    if progress.snapshot().initial_waiting {
+                        progress.update(|state| state.initial_waiting = false);
+                        progress.record("initial_renderer_qualified_after_wait");
+                    }
+                }
                 qualified_target_seen = true;
                 idle_since = None;
             }
@@ -491,7 +528,8 @@ where
                     } else {
                         idle_since = None;
                     }
-                } else if started.elapsed() >= self.options.startup_timeout {
+                } else if !keep_initial_waiting && started.elapsed() >= self.options.startup_timeout
+                {
                     return Err(CdpError::NoCompatibleTarget);
                 }
             }

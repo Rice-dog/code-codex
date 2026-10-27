@@ -337,6 +337,7 @@ pub fn begin(mode: &str) {
         });
 }
 pub fn record(source: &str, action: &str, outcome: &str, details: Value) {
+    crate::startup_recovery_ui::observe(source, action, outcome, &details);
     #[cfg(test)]
     TEST_EVENTS.with(|events| { if let Some(events)=events.borrow_mut().as_mut() {events.push(json!({"source":source,"action":action,"outcome":outcome,"details":redaction::value(details.clone())}));} });
     if let Some(log) = LOG.get()

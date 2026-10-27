@@ -78,6 +78,9 @@ pub(super) fn initial_qualification_retry_timeout(
     match cold_startup_timeout {
         Some(remaining) if canonical_startup_grace => remaining,
         Some(remaining) => relative_grace.min(remaining),
+        // No absolute cold deadline + canonical first page is the owned-run
+        // wait policy. Navigation/replacement and auxiliary pages never use it.
+        None if canonical_startup_grace => Duration::MAX,
         None => relative_grace,
     }
 }
