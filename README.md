@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.5.21-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.5.39-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,31 +28,30 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前版本 **v0.5.21** 汇总自 v0.5.7 以来的改进：ASCII Tiles Background 字符玻璃砖、统一且各有特色的26款插件图标、按分类保存的插件置顶、ASCII/自定义图片视频启动动画来源，以及顶部菜单栏透明度区域修复。插件使用独立版本和精确发布地址，匹配缓存可继续复用。完整累计更新与验证边界见 [发布说明](releases/README.md)。
+当前版本 **v0.5.39** 汇总自上一公开软件版本 v0.5.21 以来的改进：明确授权的启动恢复、慢启动等待、独立桌面入口、顶部菜单与开机自启、完整卸载流程、插件名称汉化，以及 Particle Image 自动轮换修复。匹配插件缓存继续复用。完整累计更新及验证边界见 [发布说明](releases/README.md)。
 
 有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。
 
 
 
 
-> 本地测试构建 v0.5.38 首次启动页面迟迟未就绪时持续等待，不再因120秒识别预算关闭 Codex；启动动画超时后让出原生界面，正常慢启动保持静默。保留重启恢复期间90秒等待观测与真实就绪确认。保留热升级语言服务保护，开机自启确认框使用居中简洁文案及完整中英按钮；26 款外观、预览和工具插件名称随全局语言显示。保留顶部菜单高亮、悬停切换、右侧勾选和卸载向导入口；插件 ID、下载地址和实际字节不变。本地安装包尚未作为 GitHub Release 发布；源码合并与软件发布分别进行。
 
 ## 安装方式一：直接下载 EXE
 
-推荐从 [GitHub Release v0.5.21](https://github.com/Rice-dog/code-codex/releases/tag/v0.5.21) 下载安装包；[`releases`](releases/) 保留对应构建资产：
+推荐从 [GitHub 最新 Release](https://github.com/Rice-dog/code-codex/releases/latest) 下载安装包；[`releases`](releases/) 保留对应构建资产：
 
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.5.21-x64-setup.exe`
-- 备选：`CodeCodex-0.5.21-x64.msi`
-- 便携包：`CodeCodex-0.5.21-x64.zip`
+- 推荐：`CodeCodex-0.5.39-x64-setup.exe`
+- 备选：`CodeCodex-0.5.39-x64.msi`
+- 便携包：`CodeCodex-0.5.39-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.5.21-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.5.39-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -60,14 +59,14 @@ Get-FileHash .\CodeCodex-0.5.21-x64-setup.exe -Algorithm SHA256
 如果已经安装官方 Codex Desktop，安装器会检查当前用户和公共桌面的快捷方式：
 优先使用指向官方 Codex 的快捷方式，也可接管用户创建的 `Codex`、`ChatGPT`
 快捷方式，或指向 `Codex.exe` / `ChatGPT.exe` 的重命名快捷方式。原快捷方式会备份，
-卸载时恢复。本地维护构建始终创建独立的 `Code-Codex` 桌面快捷方式：有原生入口时两个入口并存，
+卸载时恢复。本版始终创建独立的 `Code-Codex` 桌面快捷方式：有原生入口时两个入口并存，
 没有原生入口时使用独立入口；有效记录中的原生入口丢失也可以修复。安装完成页显示主入口路径。
-旧公开版采用找不到原生入口时才创建独立入口的策略。
+v0.5.21 及更早公开版采用找不到原生入口时才创建独立入口的策略。
 
 
 ### 集中目录与自定义安装
 
-EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.5.21-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
+EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.5.39-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
 
 - `versions/`：不可变程序版本；`integration/`：快捷方式与安装事务。
 - `data/`：文件树设置、插件参数与用户图片/视频；官方 Codex 账号、聊天、项目文件仍由官方客户端管理。
@@ -109,7 +108,7 @@ EXE 成功安装后保留当前版本与实际上一版，安全清理更旧的�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.5.21
+./scripts/package.ps1 -Version 0.5.39
 ```
 
 生成结果会写入 `releases/`。
