@@ -58,7 +58,6 @@ const MIN_UPDATE_ASSET_BYTES: u64 = 256 * 1024;
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);
-#[cfg(windows)]
 static UPDATE_INSTALLER_ACTIVE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
@@ -658,7 +657,26 @@ fn allow_explorer_foreground_activation() {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn reveal_in_file_explorer(target: &Path) -> Result<(), WorkspaceError> {
+    // `open -R` reveals the item in Finder; a directory is opened instead.
+    let mut command = std::process::Command::new("/usr/bin/open");
+    if !target.is_dir() {
+        command.arg("-R");
+    }
+    let status = command
+        .arg("--")
+        .arg(target)
+        .status()
+        .map_err(|_| WorkspaceError::Internal)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(WorkspaceError::Internal)
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn reveal_in_file_explorer(_target: &Path) -> Result<(), WorkspaceError> {
     Err(WorkspaceError::Internal)
 }
@@ -3974,15 +3992,15 @@ use contracts::{
 #[path = "platform/windows/window.rs"]
 mod platform_windows_window;
 
-#[cfg(any(windows, not(windows)))]
+#[cfg(windows)]
 use platform_windows_window::reveal_in_file_explorer;
 use platform_windows_window::{
-    ACCENT_DISABLED, ACCENT_ENABLE_TRANSPARENT_GRADIENT, GetWindowCompositionAttributeFn,
-    SetWindowCompositionAttributeFn, WCA_ACCENT_POLICY, WINDOW_TRANSPARENCY_ACCENT_FLAGS,
     WINDOW_TRANSPARENCY_BACKGROUND, WindowTransparencyController, WindowTransparencyError,
 };
 #[cfg(windows)]
 use platform_windows_window::{
+    ACCENT_DISABLED, ACCENT_ENABLE_TRANSPARENT_GRADIENT, GetWindowCompositionAttributeFn,
+    SetWindowCompositionAttributeFn, WCA_ACCENT_POLICY, WINDOW_TRANSPARENCY_ACCENT_FLAGS,
     AccentPolicy, ActiveWindowTransparency, BoundWindowProcess, ComInitialization,
     DISABLED_ACCENT_POLICY, FULL_EXTENDED_CLIENT_FRAME, NO_EXTENDED_CLIENT_FRAME,
     OriginalAccentPolicy, SystemBackdropSnapshot, TRANSPARENT_ACCENT_POLICY,

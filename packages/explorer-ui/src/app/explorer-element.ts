@@ -633,7 +633,7 @@ export class CodeCodexElement extends HTMLElement {
       ${blinkingSquaresPanelMarkup()}
       ${startupTransitionPanelMarkup()}
       ${asciiTilesPanelMarkup()}${surfaceOpacityPanelMarkup(bilingualLabelMarkup)}
-      <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
+      <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}<span class="rail-icon" aria-hidden="true">${icons.folder}</span></button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
         applyPluginCardIcons(this.#shadow);
@@ -2277,6 +2277,8 @@ export class CodeCodexElement extends HTMLElement {
         const inlineHidden = this.#inlineParent ? this.#isHidden(this.#inlineParent) : false;
         const drawer = window.innerWidth <= 820 || inlineHidden || this.#requestedPlacement === "drawer";
         this.dataset.placement = drawer ? "drawer" : this.#requestedPlacement;
+        if (/^Mac/i.test(navigator.platform))
+            this.dataset.platform = "mac";
         if (drawer && this.parentElement !== document.body && document.body) {
             this.#moveHost(document.body, null);
         }

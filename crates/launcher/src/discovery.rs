@@ -119,6 +119,7 @@ pub enum DiscoverySource {
     WindowsPackageManager,
     UserInstall,
     Path,
+    MacOsApplication,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +251,11 @@ pub fn discover_codex(
             app_user_model_id: None,
             app_server: None,
         });
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(installation) = discover_macos_application(preference) {
+        return Ok(installation);
     }
 
     let mut package_error = DiscoveryError::CodexNotFound;
@@ -659,6 +665,128 @@ fn discover_user_install(preference: ChannelPreference) -> Option<CodexInstallat
     })
 }
 
+#[cfg(target_os = "macos")]
+const MACOS_BUNDLE_IDENTIFIER: &str = "com.openai.codex";
+#[cfg(target_os = "macos")]
+const MACOS_TEAM_IDENTIFIER: &str = "2DC432GLL2";
+#[cfg(target_os = "macos")]
+const MACOS_APP_SERVER_RELATIVE: &str = "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
+
+/// Finds the official stable Codex Desktop bundle.
+///
+/// A bundle is accepted only when its identifier is `com.openai.codex` and its
+/// whole-bundle signature satisfies OpenAI's Developer ID team requirement.
+#[cfg(target_os = "macos")]
+fn discover_macos_application(preference: ChannelPreference) -> Option<CodexInstallation> {
+    // No beta bundle identity is known; never attach debugging flags to a guess.
+    if !channel_matches("stable", preference) {
+        return None;
+    }
+    let mut bundles = vec![PathBuf::from("/Applications/ChatGPT.app")];
+    if let Some(home) = env::var_os("HOME") {
+        bundles.push(PathBuf::from(home).join("Applications/ChatGPT.app"));
+    }
+    bundles.into_iter().find_map(|bundle| inspect_macos_bundle(&bundle))
+}
+
+#[cfg(target_os = "macos")]
+fn inspect_macos_bundle(bundle: &Path) -> Option<CodexInstallation> {
+    let bundle = dunce::canonicalize(bundle).ok()?;
+    let info = bundle.join("Contents/Info.plist");
+    if macos_plist_string(&info, "CFBundleIdentifier")? != MACOS_BUNDLE_IDENTIFIER {
+        return None;
+    }
+    if !macos_signature_is_official(&bundle) {
+        return None;
+    }
+    let executable_name = macos_plist_string(&info, "CFBundleExecutable")?;
+    // The name comes from a signed plist, but a path separator would still
+    // let it leave Contents/MacOS.
+    if executable_name.is_empty() || executable_name.contains(['/', '\\']) {
+        return None;
+    }
+    let executable = canonical_executable(&bundle.join("Contents/MacOS").join(executable_name)).ok()?;
+    if !executable.starts_with(&bundle) {
+        return None;
+    }
+    let app_server = canonical_executable(&bundle.join(MACOS_APP_SERVER_RELATIVE))
+        .ok()
+        .filter(|path| path.starts_with(&bundle));
+    Some(CodexInstallation {
+        executable,
+        version: macos_plist_string(&info, "CFBundleShortVersionString")
+            .map(|version| macos_four_part_version(&version))
+            .unwrap_or_else(|| "unknown".to_owned()),
+        channel: "stable".to_owned(),
+        source: DiscoverySource::MacOsApplication,
+        package_name: Some(MACOS_BUNDLE_IDENTIFIER.to_owned()),
+        package_full_name: None,
+        app_user_model_id: None,
+        app_server,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_plist_string(plist: &Path, key: &str) -> Option<String> {
+    let output = Command::new("/usr/bin/plutil")
+        .args(["-extract", key, "raw", "-o", "-"])
+        .arg(plist)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_signature_is_official(bundle: &Path) -> bool {
+    let requirement = format!(
+        "=anchor apple generic and certificate leaf[subject.OU] = \"{MACOS_TEAM_IDENTIFIER}\""
+    );
+    Command::new("/usr/bin/codesign")
+        .args(["--verify", "--strict", "--deep", "-R"])
+        .arg(requirement)
+        .arg(bundle)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// The renderer only recognises Windows-style `major.minor.build.revision`
+/// versions, but a macOS bundle reports three parts (`26.1027.30824`). Pad a
+/// plain three-part numeric version so layout detection compares it correctly;
+/// anything else is passed through untouched.
+#[cfg(target_os = "macos")]
+fn macos_four_part_version(version: &str) -> String {
+    let parts: Vec<&str> = version.split('.').collect();
+    let numeric = parts
+        .iter()
+        .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+    if numeric && parts.len() == 3 {
+        format!("{version}.0")
+    } else {
+        version.to_owned()
+    }
+}
+
+/// The executable must live inside the same bundle as the discovered app.
+#[cfg(target_os = "macos")]
+fn is_inside_macos_bundle(executable: &Path, app_executable: &Path) -> bool {
+    // <bundle>/Contents/MacOS/<name>
+    let Some(bundle) = app_executable.ancestors().nth(3) else {
+        return false;
+    };
+    executable.starts_with(bundle) && executable.ends_with(MACOS_APP_SERVER_RELATIVE)
+}
+
 pub fn discover_app_server_source(
     explicit: Option<&Path>,
     installation: Option<&CodexInstallation>,
@@ -674,9 +802,12 @@ pub fn discover_app_server_source(
         });
     }
 
-    let Some(installation) = installation
-        .filter(|installation| installation.source == DiscoverySource::WindowsPackageManager)
-    else {
+    let Some(installation) = installation.filter(|installation| {
+        matches!(
+            installation.source,
+            DiscoverySource::WindowsPackageManager | DiscoverySource::MacOsApplication
+        )
+    }) else {
         // User installs and PATH binaries have no package/publisher anchor. A
         // caller can still authorize a development binary with --app-server.
         return Err(DiscoveryError::AppServerNotFound);
@@ -696,10 +827,14 @@ pub fn discover_app_server_source(
     if !is_windows_apps_anchor(&executable) {
         return Err(DiscoveryError::AppServerNotFound);
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    if !is_inside_macos_bundle(&executable, &installation.executable) {
+        return Err(DiscoveryError::AppServerNotFound);
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     return Err(DiscoveryError::AppServerNotFound);
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     Ok(AppServerSource {
         executable,
         kind: AppServerSourceKind::PackagedOfficial,
@@ -720,7 +855,15 @@ pub fn prepare_app_server_launch(
             {
                 stage_packaged_app_server(&source.executable)
             }
-            #[cfg(not(windows))]
+            #[cfg(target_os = "macos")]
+            {
+                // The bundle signature was verified at discovery time; macOS
+                // has no equivalent of the Windows image-lock staging.
+                Ok(AppServerLaunch {
+                    executable: source.executable,
+                })
+            }
+            #[cfg(not(any(windows, target_os = "macos")))]
             {
                 Err(DiscoveryError::AppServerNotFound)
             }

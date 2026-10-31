@@ -1427,13 +1427,14 @@ pub(super) fn redacted_codex_diagnostic(installation: &CodexInstallation) -> Val
         DiscoverySource::WindowsPackageManager => "windowsPackageManager",
         DiscoverySource::UserInstall => "userInstall",
         DiscoverySource::Path => "path",
+        DiscoverySource::MacOsApplication => "macOsApplication",
     };
     json!({
         "status": "available",
         "version": installation.version,
         "channel": installation.channel,
         "source": source,
-        "officialPackage": installation.source == DiscoverySource::WindowsPackageManager,
+        "officialPackage": matches!(installation.source, DiscoverySource::WindowsPackageManager | DiscoverySource::MacOsApplication),
         "packageName": installation.package_name,
         "packagedAppServer": installation.app_server.is_some()
     })
