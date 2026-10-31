@@ -57,6 +57,12 @@ impl NativeBridge {
         params: Value,
         epoch: u64,
     ) -> Result<Value, BridgeError> {
+        // The published installer is a Windows EXE; refuse before downloading it.
+        #[cfg(not(windows))]
+        return Err(BridgeError::new(
+            "UPDATE_INSTALL_UNSUPPORTED",
+            "Automatic Code-Codex updates are supported on Windows only.",
+        ));
         #[cfg(windows)]
         if UPDATE_INSTALLER_ACTIVE.load(Ordering::Acquire) {
             return Err(update_busy_error());

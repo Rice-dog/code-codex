@@ -65,11 +65,55 @@ export const style0 = String.raw`
     filter: drop-shadow(10px 0 24px rgba(0, 0, 0, .18));
   }
 
+  /* macOS draws the window controls and the app header inside the page, so a
+     drawer from the very top would cover them. Open to the right of the
+     official 36px icon column (x=8..44) so that column stays usable. */
+  :host([data-placement="drawer"][data-platform="mac"]) {
+    inset: 52px auto 0 52px;
+    height: calc(100vh - 52px);
+  }
+
   :host([data-placement="drawer"][data-collapsed="true"]) {
     inset: 88px auto auto 0;
     height: 42px;
     min-height: 42px;
     filter: drop-shadow(4px 4px 12px rgba(0, 0, 0, .16));
+  }
+
+  /* Collapsed on macOS: one more 36px function button in the official sidebar's
+     icon column, whose last button ends at y=220 (8px gap, same x). */
+  :host([data-placement="drawer"][data-platform="mac"][data-collapsed="true"]) {
+    inset: 228px auto auto 8px;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    filter: none;
+  }
+  .collapsed-tab .rail-icon { display: none; }
+  /* A background plugin paints .collapsed-tab with an !important dark surface
+     (specificity 0,3,1). Out-rank it, otherwise the function button turns into
+     a dark block beside the official icon column. */
+  :host([data-platform="mac"][data-collapsed="true"]) .collapsed-tab {
+    background: transparent !important;
+    border: 0;
+    border-radius: 8px;
+    color: var(--cle-muted);
+  }
+  :host([data-platform="mac"][data-collapsed="true"]) .collapsed-tab:hover {
+    color: var(--cle-ink);
+    background: var(--cle-hover) !important;
+  }
+  :host([data-platform="mac"]) .collapsed-tab > svg { display: none; }
+  :host([data-platform="mac"]) .collapsed-tab .rail-icon {
+    display: grid;
+    place-items: center;
+  }
+  :host([data-platform="mac"]) .collapsed-tab .rail-icon svg {
+    width: 20px;
+    height: 20px;
+    transform: none;
+    stroke-width: 1.15;
   }
 
   :host([data-collapsed="true"]) {

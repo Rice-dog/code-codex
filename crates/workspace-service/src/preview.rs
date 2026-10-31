@@ -51,7 +51,6 @@ const MAX_NATIVE_POWERPOINT_SLIDES: usize = 256;
 const MAX_NATIVE_POWERPOINT_SLIDE_BYTES: u64 = 16 * 1024 * 1024;
 const NATIVE_POWERPOINT_WIDTH: u32 = 1_440;
 const NATIVE_POWERPOINT_TIMEOUT: Duration = Duration::from_secs(60);
-#[cfg(windows)]
 const NATIVE_POWERPOINT_COM_UNAVAILABLE_EXIT_CODE: i32 = 41;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

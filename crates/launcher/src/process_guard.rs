@@ -1669,10 +1669,29 @@ fn verify_listener_owner_inner(
     launched_pid: u32,
     launched_after: SystemTime,
 ) -> Result<(), ProcessGuardError> {
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
+        let snapshot = macos_ownership_snapshot(port)?;
+        let launched_after_millis = launched_after
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| {
+                ProcessGuardError::OwnershipUnknown
+                    .context("verify_listener_owner_inner", format!("cause={error}"))
+            })?
+            .as_millis()
+            .try_into()
+            .map_err(|error| {
+                ProcessGuardError::OwnershipUnknown
+                    .context("verify_listener_owner_inner", format!("cause={error}"))
+            })?;
+        verify_snapshot(&snapshot, launched_pid, launched_after_millis)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        // Fail closed: without a platform implementation nothing proves who
+        // owns the debugging port.
         let _ = (port, launched_pid, launched_after);
-        Ok(())
+        Err(ProcessGuardError::OwnershipUnknown)
     }
     #[cfg(windows)]
     {
@@ -1745,7 +1764,24 @@ fn verified_listener_snapshot(
     port: u16,
     official_executable: &Path,
 ) -> Result<OwnershipSnapshot, ProcessGuardError> {
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let official_executable = dunce::canonicalize(official_executable).map_err(|error| {
+            ProcessGuardError::Detailed(format!(
+                "official executable canonicalization failed: OS error {:?}",
+                error.raw_os_error()
+            ))
+        })?;
+        if !official_executable.is_file() {
+            return Err(ProcessGuardError::Detailed(
+                "canonical official executable is not a file".into(),
+            ));
+        }
+        let snapshot = macos_ownership_snapshot(port)?;
+        verify_snapshot_executable(&snapshot, &official_executable)?;
+        Ok(snapshot)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (port, official_executable);
         Err(ProcessGuardError::OwnershipUnknown)
@@ -1988,7 +2024,11 @@ Invoke-CCStep 'serialize ownership snapshot' {{ [pscustomobject]@{{Listeners=$l;
 }
 
 pub fn is_executable_running(executable: &Path) -> Result<bool, ProcessGuardError> {
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_is_executable_running(executable)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = executable;
         Ok(false)
@@ -2073,6 +2113,142 @@ fn parse_running_query_result(
         .parse::<u32>()
         .map(|count| count > 0)
         .map_err(|_| ProcessGuardError::ProcessInspectionUnknown)
+}
+
+/// Runs a fixed system tool with fixed arguments and returns its stdout.
+#[cfg(target_os = "macos")]
+fn macos_capture(tool: &str, args: &[&str], accept_empty_failure: bool) -> Result<String, ProcessGuardError> {
+    let output = std::process::Command::new(tool)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_err(|error| {
+            ProcessGuardError::ProcessInspectionUnknown
+                .context("macos_capture", format!("tool={tool}; cause={error}"))
+        })?;
+    // lsof exits 1 when nothing matches; that is an answer, not a failure.
+    if !output.status.success() && !(accept_empty_failure && output.stdout.is_empty()) {
+        return Err(ProcessGuardError::ProcessInspectionUnknown
+            .context("macos_capture", format!("tool={tool}; status={}", output.status)));
+    }
+    String::from_utf8(output.stdout).map_err(|_| {
+        ProcessGuardError::ProcessInspectionUnknown.context("macos_capture", format!("tool={tool}; non-UTF-8 output"))
+    })
+}
+
+/// Splits the first whitespace-delimited token from `text`.
+#[cfg(target_os = "macos")]
+fn macos_next_token(text: &str) -> Option<(&str, &str)> {
+    let text = text.trim_start();
+    if text.is_empty() {
+        return None;
+    }
+    let end = text.find(char::is_whitespace).unwrap_or(text.len());
+    Some((&text[..end], &text[end..]))
+}
+
+/// Parses `ps` elapsed time: `[[dd-]hh:]mm:ss`.
+#[cfg(target_os = "macos")]
+fn macos_parse_elapsed_seconds(value: &str) -> Option<u64> {
+    let (days, clock) = match value.split_once('-') {
+        Some((days, clock)) => (days.parse::<u64>().ok()?, clock),
+        None => (0, value),
+    };
+    let mut seconds = 0_u64;
+    let parts: Vec<&str> = clock.split(':').collect();
+    if parts.is_empty() || parts.len() > 3 {
+        return None;
+    }
+    for part in parts {
+        seconds = seconds.checked_mul(60)?.checked_add(part.parse::<u64>().ok()?)?;
+    }
+    seconds.checked_add(days.checked_mul(86_400)?)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_process_records() -> Result<Vec<ProcessRecord>, ProcessGuardError> {
+    let text = macos_capture("/bin/ps", &["-axo", "pid=,ppid=,etime=,comm="], false)?;
+    // One shared "now" keeps every derived creation time consistent, so an
+    // ancestor is never recorded as newer than its descendant.
+    let now_millis: i64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ProcessGuardError::ProcessInspectionUnknown)?
+        .as_millis()
+        .try_into()
+        .map_err(|_| ProcessGuardError::ProcessInspectionUnknown)?;
+    let mut records = Vec::new();
+    for line in text.lines() {
+        let Some((pid, rest)) = macos_next_token(line) else { continue };
+        let Some((ppid, rest)) = macos_next_token(rest) else { continue };
+        let Some((etime, rest)) = macos_next_token(rest) else { continue };
+        let (Ok(process_id), Ok(parent_process_id), Some(elapsed)) =
+            (pid.parse::<u32>(), ppid.parse::<u32>(), macos_parse_elapsed_seconds(etime))
+        else {
+            // A process can exit between listing and formatting; an
+            // unparsable row is skipped and simply cannot vouch for anyone.
+            continue;
+        };
+        let executable = rest.trim();
+        records.push(ProcessRecord {
+            process_id,
+            parent_process_id,
+            creation_unix_millis: now_millis
+                .saturating_sub(i64::try_from(elapsed).unwrap_or(i64::MAX).saturating_mul(1000)),
+            executable_path: (!executable.is_empty()).then(|| executable.to_owned()),
+        });
+    }
+    if records.is_empty() {
+        return Err(ProcessGuardError::ProcessInspectionUnknown);
+    }
+    Ok(records)
+}
+
+/// Whether `lsof` printed a loopback-only listening address such as
+/// `127.0.0.1:9222` or `[::1]:9222`.
+#[cfg(target_os = "macos")]
+fn macos_is_loopback_listener(name: &str, port: u16) -> bool {
+    let Some((host, listener_port)) = name.rsplit_once(':') else {
+        return false;
+    };
+    listener_port == port.to_string() && matches!(host, "127.0.0.1" | "[::1]" | "localhost")
+}
+
+#[cfg(target_os = "macos")]
+fn macos_ownership_snapshot(port: u16) -> Result<OwnershipSnapshot, ProcessGuardError> {
+    let filter = format!("-iTCP:{port}");
+    let text = macos_capture("/usr/sbin/lsof", &["-nP", &filter, "-sTCP:LISTEN", "-Fpn"], true)?;
+    let mut listeners: Vec<u32> = Vec::new();
+    let mut current: Option<u32> = None;
+    for line in text.lines() {
+        match line.split_at_checked(1) {
+            Some(("p", pid)) => current = Some(pid.parse().map_err(|_| ProcessGuardError::OwnershipUnknown)?),
+            Some(("n", name)) => {
+                let pid = current.ok_or(ProcessGuardError::OwnershipUnknown)?;
+                // A wildcard or LAN listener exposes the debugger to the network.
+                if !macos_is_loopback_listener(name, port) {
+                    return Err(ProcessGuardError::OwnershipMismatch);
+                }
+                if !listeners.contains(&pid) {
+                    listeners.push(pid);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(OwnershipSnapshot { listeners, processes: macos_process_records()? })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_is_executable_running(executable: &Path) -> Result<bool, ProcessGuardError> {
+    let official = dunce::canonicalize(executable)
+        .map_err(|error| ProcessGuardError::ProcessInspectionUnknown.context("macos_is_executable_running", error))?;
+    let official = official.to_string_lossy().to_lowercase();
+    // Helper processes live in nested bundles with different executable paths,
+    // so an exact match identifies only the main (root) process.
+    Ok(macos_process_records()?
+        .iter()
+        .any(|record| record.executable_path.as_deref().is_some_and(|path| path.to_lowercase() == official)))
 }
 
 fn verify_snapshot(
@@ -2859,5 +3035,86 @@ mod early_owner_tests {
             .expect("native owner check");
         assert!(verify_listener_owner_fast(port, 0, UNIX_EPOCH).is_err());
         assert!(verify_listener_owner_fast(port, std::process::id(), SystemTime::now()).is_err());
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod macos_tests {
+    use super::*;
+    use std::net::{Ipv4Addr, TcpListener};
+
+    fn started_before_now() -> i64 {
+        i64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_millis(),
+        )
+        .expect("millis")
+            - 60_000
+    }
+
+    #[test]
+    fn elapsed_time_parses_every_ps_format() {
+        assert_eq!(macos_parse_elapsed_seconds("00:07"), Some(7));
+        assert_eq!(macos_parse_elapsed_seconds("12:34"), Some(754));
+        assert_eq!(macos_parse_elapsed_seconds("01:02:03"), Some(3723));
+        assert_eq!(macos_parse_elapsed_seconds("2-03:04:05"), Some(183_845));
+        assert_eq!(macos_parse_elapsed_seconds(""), None);
+        assert_eq!(macos_parse_elapsed_seconds("1:2:3:4"), None);
+        assert_eq!(macos_parse_elapsed_seconds("x-01:00"), None);
+    }
+
+    #[test]
+    fn only_loopback_listener_addresses_are_accepted() {
+        assert!(macos_is_loopback_listener("127.0.0.1:9222", 9222));
+        assert!(macos_is_loopback_listener("[::1]:9222", 9222));
+        assert!(!macos_is_loopback_listener("*:9222", 9222));
+        assert!(!macos_is_loopback_listener("0.0.0.0:9222", 9222));
+        assert!(!macos_is_loopback_listener("192.168.1.5:9222", 9222));
+        assert!(!macos_is_loopback_listener("127.0.0.1:9223", 9222));
+    }
+
+    #[test]
+    fn a_real_loopback_listener_is_attributed_to_its_owner_only() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("listener");
+        let port = listener.local_addr().expect("address").port();
+        let snapshot = macos_ownership_snapshot(port).expect("snapshot");
+        assert_eq!(snapshot.listeners, vec![std::process::id()]);
+
+        verify_snapshot(&snapshot, std::process::id(), started_before_now())
+            .expect("the real owner is accepted");
+        // A different PID, even a real one, must not be accepted as owner.
+        assert!(verify_snapshot(&snapshot, 1, started_before_now()).is_err());
+        // A process that started after the claimed launch time cannot match.
+        let far_future = started_before_now() + 10 * 3_600_000;
+        assert!(verify_snapshot(&snapshot, std::process::id(), far_future).is_err());
+    }
+
+    #[test]
+    fn the_listener_executable_must_match_the_official_image() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("listener");
+        let port = listener.local_addr().expect("address").port();
+        let own = dunce::canonicalize(std::env::current_exe().expect("exe")).expect("canonical");
+        verified_listener_snapshot(port, &own).expect("own image is accepted");
+        assert!(verified_listener_snapshot(port, Path::new("/bin/sh")).is_err());
+    }
+
+    #[test]
+    fn a_port_with_no_listener_proves_nothing() {
+        let port = {
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("listener");
+            listener.local_addr().expect("address").port()
+        };
+        let snapshot = macos_ownership_snapshot(port).expect("snapshot");
+        assert!(snapshot.listeners.is_empty());
+        assert!(verify_snapshot(&snapshot, std::process::id(), started_before_now()).is_err());
+    }
+
+    #[test]
+    fn a_running_image_is_detected_and_a_stopped_one_is_not() {
+        let own = std::env::current_exe().expect("exe");
+        assert!(macos_is_executable_running(&own).expect("check"));
+        assert!(!macos_is_executable_running(Path::new("/usr/bin/false")).expect("check"));
     }
 }

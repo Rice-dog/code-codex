@@ -55,6 +55,13 @@ html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horiz
   background-color: transparent !important;
   background-image: none !important;
 }
+/* The official left panel extends itself 20px to the right with an ::after that
+ * uses \`background: inherit\`, to sit behind the main surface's rounded corner.
+ * The panel is opaque there. With the translucent panel colour above, that extra
+ * layer stacks on the main surface as a darker vertical strip. */
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body aside.app-shell-left-panel::after {
+  background: transparent !important;
+}
 `;
 const CURRENT_LAYOUT_EXPLORER_SELECTOR = `${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:workspace-row"]`;
 const CURRENT_LAYOUT_HEADER_LEFT_PROPERTY = "--code-codex-current-layout-header-left";
@@ -428,7 +435,10 @@ function chooseMount(): MountPoint | null {
   if (!document.body || !isHomeWorkspaceView()) return null;
   const bootstrap = getBootstrapConfig();
   const mainSurface = qualifiedMainSurface();
-  if (!bootstrap.forceDrawer && window.innerWidth > 820) {
+  // On macOS the explorer is a sidebar function button that opens as a drawer,
+  // not a permanent column inside the layout.
+  const preferDrawer = bootstrap.forceDrawer || /^Mac/i.test(navigator.platform);
+  if (!preferDrawer && window.innerWidth > 820) {
     const inline = stableInlineMount(mainSurface, bootstrap.codexVersion ?? bootstrap.version);
     if (inline) return inline;
   }

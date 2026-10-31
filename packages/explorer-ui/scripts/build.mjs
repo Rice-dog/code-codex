@@ -85,7 +85,8 @@ const options = {
 // Distribution identity is independent of the main application version.
 const requestedPlugins=process.argv.find(arg=>arg.startsWith('--rebuild-plugins='))?.split('=')[1];
 if(requestedPlugins)await rebuildPlugins(root,options,requestedPlugins);
-const pluginCatalog = await prepareLockedPlugins(root);
+// Local development builds may opt out of release input verification; releases never set this.
+const pluginCatalog = await prepareLockedPlugins(root, { verifyInputs: process.env.CODE_CODEX_SKIP_PLUGIN_INPUT_VERIFY !== "1" });
 options.define.__CODE_CODEX_PLUGIN_CATALOG__ = JSON.stringify(pluginCatalog);
 
 await build({
