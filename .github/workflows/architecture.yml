@@ -91,3 +91,10 @@ jobs:
       - run: node scripts/test-initial-startup-overlay.mjs
       - run: node scripts/test-menu-session.mjs
       - run: node scripts/test-language-runtime-upgrade.mjs
+      - name: Suspended account handoff and candidate cleanup
+        run: |
+          node scripts/test-account-suspension.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/test-account-lease-handoff.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/test-account-candidate-cleanup.mjs
