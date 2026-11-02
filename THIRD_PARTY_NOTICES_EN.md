@@ -252,4 +252,6 @@ This notice is a provenance and license-scope record, not legal advice.
 
 Nothing in this notice limits rights granted directly by an applicable license, applicable statutory exceptions, or written permission from a rights holder. No warranty is made that the information is complete; the maintainer should obtain qualified legal advice before commercial distribution or whenever the provenance of a material component remains uncertain.
 
+## Shallow Ocean Letters Background
 
+Adapted from the user-provided shallow ocean2 project. It references the public prompt for Ocean Shallows by @Vib3Coded. The user regenerated, debugged and extended the implementation with AI tools and states that no original author source code or assets were used. The integrated procedural scene uses Three.js 0.128.0 (MIT, copyright 2010–2021 three.js authors), pinned separately from existing Three.js consumers. Source algorithms are preserved under a scoped host lifecycle and shared Code-Codex controls.

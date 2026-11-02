@@ -1,4 +1,5 @@
-import { requestBackgroundFrame, cancelBackgroundFrame } from './background-startup-hold';
+import {registerVisualSession} from './core/background-runtime/visual-session';
+import { requestBackgroundFrame, cancelBackgroundFrame, backgroundStartupHeld } from './background-startup-hold';
 import { BLINKING_SQUARES_DEFAULTS, type BlinkingSquaresSettings } from "./blinking-squares-settings";
 
 export const BLACK_HOLE_BACKGROUND_SETTINGS_KEY = "code-codex:black-hole-background:v1";
@@ -500,8 +501,21 @@ export function startGlowHorizonRenderer(
     { distance: .72, opacity: .34, blur: 4, width: 5 },
     { distance: 1, opacity: .18, blur: 7, width: 7 },
   ] as const;
+  type PhysicalState={progress:number;velocity:number;springing:boolean;openingActive:boolean};
+  let capture:Map<HTMLElement,Keyframe>|undefined;
+  let animations:Animation[]=[];
+  let timeline:{started:number;samples:PhysicalState[]}|undefined;
+  let pausedAt=0;
+  const dynamic=new Set(['transform','opacity','filter','visibility']);
+  const syncTimeline=():void=>{
+    if(!timeline)return;
+    const index=Math.max(0,Math.min(timeline.samples.length-1,Math.floor(((pausedAt||performance.now())-timeline.started)/(1000/60))));
+    const sample=timeline.samples[index];if(sample){progress=sample.progress;velocity=sample.velocity;springing=sample.springing;openingActive=sample.openingActive;}
+    lastFrameAt=pausedAt||performance.now();
+  };
   const styleCache = new WeakMap<HTMLElement, Map<string, string>>();
   const setStyle = (element: HTMLElement, property: string, value: string): void => {
+    if(capture&&dynamic.has(property)){let frame=capture.get(element);if(!frame){frame={};capture.set(element,frame);}frame[property as keyof Keyframe]=value;return;}
     let values = styleCache.get(element);
     if (!values) {
       values = new Map<string, string>();
@@ -589,12 +603,30 @@ export function startGlowHorizonRenderer(
   };
 
   const schedule = (): void => {
-    if (!running || animationFrame) return;
-    animationFrame = requestBackgroundFrame(horizon, tick);
+    if(!running)return;
+    for(const animation of animations)animation.cancel();animations=[];
+    timeline=undefined;render();
+    const saved={progress,velocity,springing,openingActive,lastFrameAt};
+    const samples:PhysicalState[]=[];const tracks=new Map<HTMLElement,Keyframe[]>();
+    const started=performance.now();lastFrameAt=started;
+    for(let i=0;i<=900;i++){
+      if(i)advance(started+i*1000/60);
+      samples.push({progress,velocity,springing,openingActive});capture=new Map();render();
+      for(const[element,frame]of capture){const list=tracks.get(element)??[];list.push(frame);tracks.set(element,list);}
+      if(!openingActive&&!springing)break;
+    }
+    capture=undefined;
+    ({progress,velocity,springing,openingActive,lastFrameAt}=saved);
+    if(samples.length>1){
+      timeline={started,samples};
+      for(const[element,frames]of tracks)animations.push(element.animate(frames,{duration:(samples.length-1)*1000/60,fill:'forwards',easing:'linear'}));
+      refreshActivity();
+    }
   };
 
   const finishWheel = (): void => {
     if (!running) return;
+    syncTimeline();
     // Framer Motion carries the gesture velocity into the release spring. Keep
     // the same behavior for a downward rewind; otherwise the horizon stops
     // dead and the return feels like a snap instead of an inertial release.
@@ -612,6 +644,7 @@ export function startGlowHorizonRenderer(
     if (!running || reducedMotion || !settings.inertialWheel || glowHorizonInsideControls(event)) return;
     const host = horizon.parentElement;
     if (!host || !glowHorizonElementVisible(host)) return;
+    syncTimeline();
     const pixelDelta = glowHorizonNormalizeWheelDelta(event);
     if (Math.abs(pixelDelta) < .01) return;
     const now = performance.now();
@@ -651,9 +684,7 @@ export function startGlowHorizonRenderer(
     schedule();
   };
 
-  function tick(now: number): void {
-    animationFrame = 0;
-    if (!running) return;
+  function advance(now: number): void {
     const dt = Math.min(.05, Math.max(0, (now - lastFrameAt) / 1000));
     lastFrameAt = now;
     if (!reducedMotion) {
@@ -689,15 +720,17 @@ export function startGlowHorizonRenderer(
       springMode = "return";
       wheelTarget = 1;
     }
-    render();
-    // A downward rewind can intentionally leave progress below 1 while the
-    // release timer is waiting. Do not spin an idle RAF loop in that state;
-    // the timer will schedule the return spring when input ends.
-    if (running && (openingActive || springing)) schedule();
   }
 
+  const releaseSession=registerVisualSession(horizon,'glow-horizon','compositor',()=>({tracks:animations.length,paused:!!pausedAt}));
+  const refreshActivity=():void=>{
+    const paused=document.hidden||backgroundStartupHeld(layer);
+    if(paused&&!pausedAt){pausedAt=performance.now();for(const animation of animations)animation.pause();}
+    else if(!paused&&pausedAt){const elapsed=performance.now()-pausedAt;openingStartedAt+=elapsed;if(timeline)timeline.started+=elapsed;lastFrameAt+=elapsed;pausedAt=0;for(const animation of animations)animation.play();}
+  };
+
   const onReducedMotionChange = (event: MediaQueryListEvent): void => {
-    reducedMotion = event.matches;
+    syncTimeline();timeline=undefined;reducedMotion = event.matches;
     if (reducedMotion) {
       progress = 1;
       velocity = 0;
@@ -725,11 +758,12 @@ export function startGlowHorizonRenderer(
   window.addEventListener("wheel", handleWheel, { passive: true });
   reducedMotionQuery.addEventListener("change", onReducedMotionChange);
   const updateSettings = (next: GlowHorizonBackgroundSettings): void => {
-    settings = normalizeGlowHorizonSettings(next);
+    syncTimeline();timeline=undefined;settings = normalizeGlowHorizonSettings(next);
     render();
     schedule();
   };
   const replay = (): void => {
+    timeline=undefined;
     if (reducedMotion) {
       progress = 1;
       velocity = 0;
@@ -760,25 +794,29 @@ export function startGlowHorizonRenderer(
   };
   const dispose = (): void => {
     if (!running) return;
-    running = false;
+    running = false;releaseSession();for(const animation of animations)animation.cancel();animations=[];timeline=undefined;
+    document.removeEventListener('visibilitychange',refreshActivity);window.removeEventListener('code-codex:background-hold-changed',refreshActivity);
     if (animationFrame) cancelBackgroundFrame(animationFrame);
     animationFrame = 0;
     if (wheelReleaseTimer !== undefined) window.clearTimeout(wheelReleaseTimer);
     window.removeEventListener("wheel", handleWheel);
     reducedMotionQuery.removeEventListener("change", onReducedMotionChange);
   };
+  document.addEventListener('visibilitychange',refreshActivity);window.addEventListener('code-codex:background-hold-changed',refreshActivity);
   render();
   schedule();
   return { updateSettings, replay, dispose };
 }
 
 export class GlowHorizonRenderer {
+  readonly ready:Promise<void>;
   readonly #runtime: GlowHorizonRendererRuntime;
   #settings: GlowHorizonBackgroundSettings;
 
   constructor(layer: HTMLElement, settings: GlowHorizonBackgroundSettings) {
     this.#settings = normalizeGlowHorizonSettings(settings);
     this.#runtime = startGlowHorizonRenderer(layer, () => this.#settings);
+    this.ready=new Promise(resolve=>requestAnimationFrame(()=>resolve()));
   }
 
   updateSettings(settings: GlowHorizonBackgroundSettings): void {

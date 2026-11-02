@@ -37,7 +37,11 @@ export function isPluginPackageLoaded(id:string):boolean {
   const info=PLUGIN_PACKAGES.find(p=>p.id===id),module=registeredModule(id),verified=verifiedModules().get(id);
   return !!info&&module?.api===info.api&&module.version===info.version&&verified?.fingerprint===packageFingerprint(info)&&verified.module===module;
 }
-export function connectPluginPackages(next: Request | undefined): void { if(request!==next){connectionGeneration++;loads.clear();} request = next; }
+export function connectPluginPackages(next: Request | undefined): void {
+  if(request===next)return;
+  connectionGeneration++;loads.clear();request=next;
+  window.dispatchEvent(new Event('code-codex:plugin-connection-ready'));
+}
 export async function ensurePluginPackage(id: string): Promise<void> {
   const info = PLUGIN_PACKAGES.find(p => p.id === id);
   if(isPluginPackageLoaded(id))return;

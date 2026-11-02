@@ -193,4 +193,55 @@ function Write-AtomicText([string]$Destination, [string]$Content) {
     }
 }
 
+function Update-CodeCodexSameVersionPayload([string]$Root, [string]$Version, [string]$Binary, [string]$Launcher) {
+    $owned = Assert-CodeCodexRoot $Root -Owned
+    if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' -or $Version.Length -gt 32) { throw 'CC-INSTALL-PAYLOAD-VERSION-001: Invalid payload version.' }
+    $folder = Assert-CodeCodexRoot (Join-Path $owned "versions\$Version")
+    $items = @()
+    foreach ($pair in @(@($Binary,'code-codex.exe'),@($Launcher,'CodeCodex.exe'))) {
+        $target = Join-Path $folder $pair[1]
+        $oldHash = Get-Sha256Hash $target; $newHash = Get-Sha256Hash $pair[0]
+        $items += [ordered]@{name=$pair[1];source=$pair[0];target=$target;oldSha256=$oldHash;newSha256=$newHash;replaced=$false}
+    }
+    $script:SameVersionPayload = [ordered]@{schema=1;version=$Version;at=[DateTime]::UtcNow.ToString('o');outcome='same-bytes';items=$items}
+    if (-not @($items | Where-Object { $_.oldSha256 -ne $_.newSha256 }).Count) { return }
+    $backup = Assert-CodeCodexRoot (Join-Path $owned ('logs\payload-backups\'+[Guid]::NewGuid().ToString('N')))
+    New-Item -ItemType Directory -Path $backup -ErrorAction Stop | Out-Null
+    # Back up and verify the entire pair before changing either executable.
+    foreach ($item in $items) {
+        $item.backup = Join-Path $backup $item.name
+        Copy-Item -LiteralPath $item.target -Destination $item.backup -ErrorAction Stop
+        if ((Get-Sha256Hash $item.backup) -ne $item.oldSha256) { throw 'CC-INSTALL-PAYLOAD-BACKUP-001: The previous build backup could not be verified.' }
+    }
+    $script:SameVersionPayload.outcome = 'prepared'
+    $script:SameVersionPayload.journal = Join-Path $backup 'payload.json'
+    Write-AtomicText $script:SameVersionPayload.journal ($script:SameVersionPayload | ConvertTo-Json -Depth 6)
+    foreach ($item in $items) {
+        if ($item.oldSha256 -eq $item.newSha256) { continue }
+        if ((Get-Sha256Hash $item.target) -ne $item.oldSha256) { throw 'CC-INSTALL-PAYLOAD-STALE-001: Installed bytes changed after backup; replacement refused.' }
+        Copy-AtomicFile $item.source $item.target
+        $item.replaced = $true
+        if ((Get-Sha256Hash $item.target) -ne $item.newSha256) { throw 'CC-INSTALL-PAYLOAD-HASH-001: Replaced application bytes do not match the package.' }
+        Write-AtomicText $script:SameVersionPayload.journal ($script:SameVersionPayload | ConvertTo-Json -Depth 6)
+    }
+    $script:SameVersionPayload.outcome = 'replaced'
+    Write-AtomicText $script:SameVersionPayload.journal ($script:SameVersionPayload | ConvertTo-Json -Depth 6)
+}
+
+function Restore-CodeCodexSameVersionPayload {
+    if (-not $script:SameVersionPayload -or $script:SameVersionPayload.outcome -eq 'same-bytes') { return }
+    foreach ($item in $script:SameVersionPayload.items) {
+        if (-not $item.replaced) { continue }
+        $null = Assert-CodeCodexRoot (Split-Path -Parent $item.target)
+        $null = Assert-CodeCodexRoot (Split-Path -Parent $item.backup)
+        $current = Get-Sha256Hash $item.target
+        if ($current -eq $item.oldSha256) { continue }
+        if ($current -ne $item.newSha256 -or (Get-Sha256Hash $item.backup) -ne $item.oldSha256) { throw 'CC-INSTALL-PAYLOAD-ROLLBACK-CONFLICT-001: Application or backup bytes changed; automatic rollback refused.' }
+        Copy-AtomicFile $item.backup $item.target
+        if ((Get-Sha256Hash $item.target) -ne $item.oldSha256) { throw 'CC-INSTALL-PAYLOAD-ROLLBACK-HASH-001: Restored bytes could not be verified.' }
+    }
+    $script:SameVersionPayload.outcome = 'rolled-back'
+    if ($script:SameVersionPayload.journal) { Write-AtomicText $script:SameVersionPayload.journal ($script:SameVersionPayload | ConvertTo-Json -Depth 6) }
+}
+
 $script:InstallRollbackPrepared = $false

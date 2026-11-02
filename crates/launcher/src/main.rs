@@ -1,4 +1,6 @@
 mod bootstrap;
+mod activation_lifetime;
+mod accounts;
 mod bridge;
 mod discovery;
 mod early_startup;
@@ -181,6 +183,8 @@ struct ActivateArgs {
     common: CommonArgs,
     #[arg(long, value_enum, default_value_t = ChannelPreference::Any)]
     channel: ChannelPreference,
+    #[arg(long, hide = true)]
+    activation_worker: bool,
 }
 
 #[derive(Debug, Args)]

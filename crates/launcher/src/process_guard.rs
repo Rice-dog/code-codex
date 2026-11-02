@@ -511,7 +511,7 @@ pub fn launched_process_state(pid: u32) -> String {
 }
 
 #[cfg(windows)]
-fn process_handle_exit_code(handle: &OwnedHandle) -> io::Result<Option<u32>> {
+pub(crate) fn process_handle_exit_code(handle: &OwnedHandle) -> io::Result<Option<u32>> {
     match unsafe { WaitForSingleObject(handle.as_raw_handle().cast(), 0) } {
         WAIT_TIMEOUT => Ok(None),
         WAIT_OBJECT_0 => {
@@ -1378,7 +1378,7 @@ pub(crate) fn verify_process_identity_native(
 }
 
 #[cfg(windows)]
-fn retain_native_identity(
+pub(crate) fn retain_native_identity(
     pid: u32,
     launched_after: SystemTime,
     official_executable: &Path,

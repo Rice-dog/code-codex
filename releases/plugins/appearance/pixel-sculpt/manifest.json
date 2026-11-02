@@ -3,12 +3,12 @@
   "name": "Pixel Sculpt Background",
   "category": "appearance",
   "api": 1,
-  "version": "1.0.10",
-  "releaseTag": "plugin-assets-2026-10-18",
-  "size": 2412999,
-  "sha256": "576ce8fc720678c7ee94bae8d562075e4a725c8991b222f8c6c062201d913d89",
-  "asset": "CodeCodex-background-pixel-sculpt-1.0.10.js",
-  "relativePath": "CodeCodex-background-pixel-sculpt-1.0.10.js",
+  "version": "1.0.13",
+  "releaseTag": "plugin-assets-2026-11-01",
+  "size": 2459087,
+  "sha256": "1f1fd702c928e194390aabc7e72bc15753f11517b7e756d1001b0b7f8f7202b0",
+  "asset": "CodeCodex-background-pixel-sculpt-1.0.13.js",
+  "relativePath": "CodeCodex-background-pixel-sculpt-1.0.13.js",
   "resources": [
     {
       "asset": "CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",

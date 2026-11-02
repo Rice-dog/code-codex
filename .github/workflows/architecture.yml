@@ -45,6 +45,9 @@ jobs:
           cargo test --release --locked -p code-codex --bin code-codex tests::automatic_restart_permission_has_an_explicit_reset_command -- --exact
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --release --locked -p code-codex --bin code-codex tests::user_visible_launcher_failures_have_stable_exit_categories -- --exact
+      - name: Localized native dialog generation
+        # Validate the actual native generator as well as the WinForms fixture.
+        run: cargo test --release --locked -p code-codex --bin code-codex localization::recovery_tests -- --test-threads=1
       - name: Recovery decisions and preference-persistence failures
         run: powershell -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File scripts/test-startup-conflict.ps1 -RequireNative
       - name: Compiled CLI and embedded worker transport

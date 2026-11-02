@@ -1,0 +1,22 @@
+import {install as install0} from "./source/object-occlusion.js";
+import {install as install1} from "./source/drift-duo.js";
+import {install as install2} from "./source/penguin-ice.js";
+import {install as install3} from "./source/visitors.js";
+import {install as install4} from "./source/meteor-event.js";
+import {install as install5} from "./source/audio-engine.js";
+import {install as install6} from "./source/water-seabed.js";
+import {install as install7} from "./source/marine-life.js";
+import {install as install8} from "./source/reef-ecosystem.js";
+import {install as install9} from "./source/opening-animation.js";
+export function installScene(scope){const {window,document,matchMedia}=scope;
+install0(window,document,window,matchMedia);
+install1(window,document,window,matchMedia);
+install2(window,document,window,matchMedia);
+install3(window,document,window,matchMedia);
+install4(window,document,window,matchMedia);
+install5(window,document,window,matchMedia);
+install6(window,document,window,matchMedia);
+install7(window,document,window,matchMedia);
+install8(window,document,window,matchMedia);
+install9(window,document,window,matchMedia);
+}

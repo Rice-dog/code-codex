@@ -1,333 +1,347 @@
-[
-  {
-    "assetName": "CodeCodex-0.5.40-x64-setup.exe",
-    "path": "CodeCodex-0.5.40-x64-setup.exe",
-    "size": 16099277,
-    "sha256": "4098c3afa06142a6aa5af298d5e9da40fabb243727bc9321f26120b5875dd85f"
-  },
-  {
-    "assetName": "CodeCodex-0.5.40-x64.msi",
-    "path": "CodeCodex-0.5.40-x64.msi",
-    "size": 11100160,
-    "sha256": "6b2de207990f4344d2aa0d44460ba86fcd4039498caf4e5264723871fed907d2"
-  },
-  {
-    "assetName": "CodeCodex-0.5.40-x64.zip",
-    "path": "CodeCodex-0.5.40-x64.zip",
-    "size": 13331893,
-    "sha256": "439df42b37ecadff8246ab5cd8e06c6b7a9c291af772a7a9769046d4a3bfb652"
-  },
-  {
-    "assetName": "Uninstall-CodeCodex.exe",
-    "path": "Uninstall-CodeCodex.exe",
-    "size": 2708480,
-    "sha256": "0ec0657fd5ffb2ab54efca7923e3004280baf656ef8eab96eb82452287a2bc0f"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-glow-horizon-1.0.0.js",
-    "path": "plugins/appearance/glow-horizon/CodeCodex-background-glow-horizon-1.0.0.js",
-    "size": 31192,
-    "sha256": "650f79fe0aee14c6c290d12140b03f18938f284677fc5ea7df743699b7a6d60b"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-black-hole-1.0.0.js",
-    "path": "plugins/appearance/black-hole/CodeCodex-background-black-hole-1.0.0.js",
-    "size": 49441,
-    "sha256": "723193dbb9ca89b09dc63978b6b2acdc32e85b5d722b69cf913125622daddf56"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-heavenly-cloud-1.0.0.js",
-    "path": "plugins/appearance/heavenly-cloud/CodeCodex-background-heavenly-cloud-1.0.0.js",
-    "size": 31974,
-    "sha256": "06ca562e6976516ec43134146b65e3588e5b779a9e777268ba83c4f05c64263c"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-aurora-ionosphere-1.0.0.js",
-    "path": "plugins/appearance/aurora-ionosphere/CodeCodex-background-aurora-ionosphere-1.0.0.js",
-    "size": 43264,
-    "sha256": "db5ca913b587b4665d9a99b0652a436d5fccbd5cedb460dbe9cb15fb12a03fb8"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-milky-way-1.0.0.js",
-    "path": "plugins/appearance/milky-way/CodeCodex-background-milky-way-1.0.0.js",
-    "size": 32289,
-    "sha256": "2fa663d312f082b191e45890e8bf8fc1c3f18eb1b5c5300aa8037704a117c853"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-mountain-1.0.0.js",
-    "path": "plugins/appearance/mountain/CodeCodex-background-mountain-1.0.0.js",
-    "size": 32545,
-    "sha256": "bb2cfcf36979f27f6ae9cea2aff93eeb905a5b1227869dd582dea5a4e83f861e"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-cloud-train-1.0.0.js",
-    "path": "plugins/appearance/cloud-train/CodeCodex-background-cloud-train-1.0.0.js",
-    "size": 43216,
-    "sha256": "93198c2a9d8f2a19b811150890cf4cee6b8aaf0f99524f7a6c975d800da583c4"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-blinking-squares-1.0.0.js",
-    "path": "plugins/appearance/blinking-squares/CodeCodex-background-blinking-squares-1.0.0.js",
-    "size": 236708,
-    "sha256": "f07c95845db5884dfbbc4943f694d131cf64825b9f81686c8ee2de743dea53a3"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
-    "size": 13626,
-    "sha256": "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-image-39894de0da1fa952.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-39894de0da1fa952.png",
-    "size": 1286914,
-    "sha256": "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
-    "size": 18485,
-    "sha256": "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
-    "size": 2111416,
-    "sha256": "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
-    "size": 12669,
-    "sha256": "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-image-89d064cef83721eb.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-89d064cef83721eb.png",
-    "size": 1230838,
-    "sha256": "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
-    "size": 12801,
-    "sha256": "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
-    "size": 1266233,
-    "sha256": "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
-    "size": 17458,
-    "sha256": "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
-    "size": 1783281,
-    "sha256": "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
-    "size": 15641,
-    "sha256": "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
-    "path": "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
-    "size": 1549320,
-    "sha256": "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b"
-  },
-  {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-background-particle-image-1.0.3.js",
-    "path": "plugins/appearance/particle-image/CodeCodex-background-particle-image-1.0.3.js",
-    "size": 82529,
-    "sha256": "a2ded8609f66fb4f188a8406a4fafe83b1c639963a114ebf5e004c590c00ab67"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
-    "path": "plugins/appearance/pixel-sculpt/media/CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
-    "size": 1633897,
-    "sha256": "0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
-    "path": "plugins/appearance/pixel-sculpt/media/CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
-    "size": 1748802,
-    "sha256": "3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
-    "path": "plugins/appearance/pixel-sculpt/media/CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
-    "size": 1753647,
-    "sha256": "079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79"
-  },
-  {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-background-pixel-sculpt-1.0.10.js",
-    "path": "plugins/appearance/pixel-sculpt/CodeCodex-background-pixel-sculpt-1.0.10.js",
-    "size": 2412999,
-    "sha256": "576ce8fc720678c7ee94bae8d562075e4a725c8991b222f8c6c062201d913d89"
-  },
-  {
-    "releaseTag": "v0.5.19",
-    "assetName": "CodeCodex-background-custom-background-1.0.10.js",
-    "path": "plugins/appearance/custom-background/CodeCodex-background-custom-background-1.0.10.js",
-    "size": 31263,
-    "sha256": "792a71fa6d89d1a4b5aae1c1bb6baa36f009bf35f43855cee61d1e6792104c1e"
-  },
-  {
-    "releaseTag": "v0.5.18",
-    "assetName": "CodeCodex-plugin-surface-opacity-1.0.6.js",
-    "path": "plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.6.js",
-    "size": 12760,
-    "sha256": "8b2b40a290c14eea2a69edb617908621a85e2c9dd028998ebea0ac2b149b833f"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-transparent-background-1.0.0.js",
-    "path": "plugins/appearance/transparent-background/CodeCodex-plugin-transparent-background-1.0.0.js",
-    "size": 1736,
-    "sha256": "862678f97edda3bb575b20e1c1a66e1dd6e12dabf9eaee30b1ebe8a35758119b"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-git-history-1.0.0.js",
-    "path": "plugins/developer-tools/git-history/CodeCodex-plugin-git-history-1.0.0.js",
-    "size": 5646,
-    "sha256": "1fcdf42d099e7159e1cf07517882c6b21ba7e99aa23be9c3c9e0a8fed6ffe77e"
-  },
-  {
-    "releaseTag": "v0.5.19",
-    "assetName": "CodeCodex-plugin-codex-startup-transition-1.1.27.js",
-    "path": "plugins/appearance/codex-startup-transition/CodeCodex-plugin-codex-startup-transition-1.1.27.js",
-    "size": 38281,
-    "sha256": "15c117ceba380815d38928d76c7e40f08c19f952cca37605d4c56b0d7740af82"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-markdown-preview-1.0.0.js",
-    "path": "plugins/file-preview/markdown-preview/CodeCodex-plugin-markdown-preview-1.0.0.js",
-    "size": 207915,
-    "sha256": "69e849e596dd0295f8dcc1b4d4a1298e7d9f7c48dc8b476df07903d307c2ac0d"
-  },
-  {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-plugin-csv-preview-1.0.1.js",
-    "path": "plugins/file-preview/csv-preview/CodeCodex-plugin-csv-preview-1.0.1.js",
-    "size": 21494,
-    "sha256": "a60714f6f335875fbac4ac2edae756c1503b7365f665a0dfb933cfe39b2f959b"
-  },
-  {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-plugin-diagram-preview-1.0.1.js",
-    "path": "plugins/file-preview/diagram-preview/CodeCodex-plugin-diagram-preview-1.0.1.js",
-    "size": 47214,
-    "sha256": "742a9425c452ed1a78473df12fef980ccc438ad9e9f92dcb3bea203d7acb764e"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-image-preview-1.0.0.js",
-    "path": "plugins/file-preview/image-preview/CodeCodex-plugin-image-preview-1.0.0.js",
-    "size": 19679,
-    "sha256": "5dbed7beb1c7665a83c4fce192193359bc543c694ff56d5589ff4efe0ccceb2c"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-video-preview-1.0.0.js",
-    "path": "plugins/file-preview/video-preview/CodeCodex-plugin-video-preview-1.0.0.js",
-    "size": 19679,
-    "sha256": "e499f389722694bf88f9a8128fe62eb5c7c7c0b45e638649b454f8d2aacde228"
-  },
-  {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-plugin-pdf-preview-1.0.1.js",
-    "path": "plugins/file-preview/pdf-preview/CodeCodex-plugin-pdf-preview-1.0.1.js",
-    "size": 1445453,
-    "sha256": "0097ddf35219738659f82327a6819481240231338180b4737acdefd1b9183bbd"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-audio-preview-1.0.0.js",
-    "path": "plugins/file-preview/audio-preview/CodeCodex-plugin-audio-preview-1.0.0.js",
-    "size": 19679,
-    "sha256": "7cf9bae954295a88964e0d77ad8949e2862e480155d517f489928910de64a88b"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-office-preview-1.0.0-parser.worker.js",
-    "path": "plugins/file-preview/office-preview/resources/CodeCodex-plugin-office-preview-1.0.0-parser.worker.js",
-    "size": 10039,
-    "sha256": "70e6cf8b2937a8df90800f17e5e2df6315a8a61a79af1f932ea85d4381dc540d"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-office-preview-1.0.0-parser.wasm",
-    "path": "plugins/file-preview/office-preview/resources/CodeCodex-plugin-office-preview-1.0.0-parser.wasm",
-    "size": 573411,
-    "sha256": "6cd3fb9f1082477f155009bd583a1d18deb8b46bde829d25cf9ab00b120b4c90"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-office-preview-1.0.0.js",
-    "path": "plugins/file-preview/office-preview/CodeCodex-plugin-office-preview-1.0.0.js",
-    "size": 3626557,
-    "sha256": "b836d12f23f7805e6faea5c2d1f8fe7d066f7a8c82571d2603f3bf786a09c37a"
-  },
-  {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-plugin-notebook-preview-1.0.1.js",
-    "path": "plugins/file-preview/notebook-preview/CodeCodex-plugin-notebook-preview-1.0.1.js",
-    "size": 210257,
-    "sha256": "b6264078fae002f7a7210775296118dbf3ce618979b64892e9bdea4454a05599"
-  },
-  {
-    "releaseTag": "v0.3.96",
-    "assetName": "CodeCodex-plugin-model-preview-1.0.0.js",
-    "path": "plugins/file-preview/model-preview/CodeCodex-plugin-model-preview-1.0.0.js",
-    "size": 677208,
-    "sha256": "c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2"
-  },
-  {
-    "releaseTag": "v0.5.15",
-    "assetName": "CodeCodex-background-ascii-tiles-1.0.7.js",
-    "path": "plugins/appearance/ascii-tiles/CodeCodex-background-ascii-tiles-1.0.7.js",
-    "size": 25486,
-    "sha256": "0fb2418cb92a1cf81724f10034881dcafae0e0d6de01d6ef620d1db47869d8da"
-  },
-  {
-    "assetName": "CodeCodex-plugin-catalog-0.5.40.json",
-    "path": "plugins/catalog.json",
-    "size": 27005,
-    "sha256": "bcd02cb46d0266add87015d33e724e7d314a78cd6ea00a64842870264f5566cc"
-  }
+﻿[
+    {
+        "assetName":  "CodeCodex-0.5.89-x64-setup.exe",
+        "path":  "CodeCodex-0.5.89-x64-setup.exe",
+        "size":  16561207,
+        "sha256":  "ee9229d1085487801404f0fa6a9b22cea0c8b17caa58b1ab1a7bb6036777f466"
+    },
+    {
+        "assetName":  "CodeCodex-0.5.89-x64.msi",
+        "path":  "CodeCodex-0.5.89-x64.msi",
+        "size":  11800576,
+        "sha256":  "d99f03e75bcaba6adeeb26aa4e634bb78615d62a4c86f3bdac652e2df771543f"
+    },
+    {
+        "assetName":  "CodeCodex-0.5.89-x64.zip",
+        "path":  "CodeCodex-0.5.89-x64.zip",
+        "size":  13788191,
+        "sha256":  "1c0c22491334508f54194c580f3b3d778f01e71c491cfd9db88cd43a925d3069"
+    },
+    {
+        "assetName":  "Uninstall-CodeCodex.exe",
+        "path":  "Uninstall-CodeCodex.exe",
+        "size":  2720768,
+        "sha256":  "4ed3b848474d84d254cbcd8526fc6f385c377dc335e895dbb358f2aa90b5cddd"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-glow-horizon-1.0.1.js",
+        "path":  "plugins/appearance/glow-horizon/CodeCodex-background-glow-horizon-1.0.1.js",
+        "size":  30520,
+        "sha256":  "4bf3ebba5ac222851e7ba0f4318bd693fdb28109fd06bd4a12da591098b95106"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-black-hole-1.0.6.js",
+        "path":  "plugins/appearance/black-hole/CodeCodex-background-black-hole-1.0.6.js",
+        "size":  74178,
+        "sha256":  "ac2f4a1b14f21b2c944c1ffbcef01f63e7597cb08bc8721282ba1840f2d282e7"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-heavenly-cloud-1.0.1.js",
+        "path":  "plugins/appearance/heavenly-cloud/CodeCodex-background-heavenly-cloud-1.0.1.js",
+        "size":  55670,
+        "sha256":  "857fea5dd51f9bd4cb78a99e976858500d518855f1a7a3af28daeb00ae9ec864"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-aurora-ionosphere-1.0.1.js",
+        "path":  "plugins/appearance/aurora-ionosphere/CodeCodex-background-aurora-ionosphere-1.0.1.js",
+        "size":  67223,
+        "sha256":  "a954f763514f81ede56bb029491b8c22a350b45e000d89abf524a4211a9c1450"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-milky-way-1.0.1.js",
+        "path":  "plugins/appearance/milky-way/CodeCodex-background-milky-way-1.0.1.js",
+        "size":  57427,
+        "sha256":  "79130c8153cec1a4535b9ad8fa80729637512bb92dfbf1e959528a3027b65557"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-mountain-1.0.1.js",
+        "path":  "plugins/appearance/mountain/CodeCodex-background-mountain-1.0.1.js",
+        "size":  55502,
+        "sha256":  "0e7528c07f1d4cab39c137496d61a14a1d5f0f9cf16927afddabaff6088565bd"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-cloud-train-1.0.1.js",
+        "path":  "plugins/appearance/cloud-train/CodeCodex-background-cloud-train-1.0.1.js",
+        "size":  66219,
+        "sha256":  "9ea2d81c62e5eb593b8070a96c852332817b2c62df2f45517a4140916b875137"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-blinking-squares-1.0.1.js",
+        "path":  "plugins/appearance/blinking-squares/CodeCodex-background-blinking-squares-1.0.1.js",
+        "size":  70157,
+        "sha256":  "fa6496296c511a5474d181442572f80646da2cdf34ea0dd4fec6e08abb416cec"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",
+        "size":  13626,
+        "sha256":  "d0c1927cc2cbe67d7d8f921f7ea3b7cf4d78bed77b824a3e3689cc6f3ea75e70"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-image-39894de0da1fa952.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-39894de0da1fa952.png",
+        "size":  1286914,
+        "sha256":  "39894de0da1fa95279f10283dc2795c493c45489ade8fcd07c237240a53145a2"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-e1c658aa459cfcef.png",
+        "size":  18485,
+        "sha256":  "293266dbd9da3bc68d329bd9a1a1b18352fce004c31ca5daeab0018aa265cea3"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-e1c658aa459cfcef.png",
+        "size":  2111416,
+        "sha256":  "e1c658aa459cfcef8144f532db845a66e61e61f24c0b2ea8a7fb29f4742eb898"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-89d064cef83721eb.png",
+        "size":  12669,
+        "sha256":  "5fced5d5e0f03c48554fce20afffafe47a9ab7b3e73d1b59396cea413cf46182"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-image-89d064cef83721eb.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-89d064cef83721eb.png",
+        "size":  1230838,
+        "sha256":  "89d064cef83721eb5d4e30525396e1e5103090ec7b91c5243e213f98d3ec271b"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-098c5fbaa5c415ec.png",
+        "size":  12801,
+        "sha256":  "d22a87c0ab753ec5d8575abee89fc66f041bbd0b9e4edb25b57c63fdcac6dcda"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-098c5fbaa5c415ec.png",
+        "size":  1266233,
+        "sha256":  "098c5fbaa5c415ec7e8d673f7de4e8597d3a252b44c28322002416dd8550bac3"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-6447780fc6368ce2.png",
+        "size":  17458,
+        "sha256":  "a00c16e3480b8ba82f84b6cecaf8c870019d6268ba5acc07ef6f203117ccbe7f"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-6447780fc6368ce2.png",
+        "size":  1783281,
+        "sha256":  "6447780fc6368ce2d048ad7ebe5c050c81b21ada04950e41267ab3d9408ac767"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-thumbnail-746ff537a0eca39e.png",
+        "size":  15641,
+        "sha256":  "8c2c002692634c371659dfaaf3ddd7542f1dc598d682c52c835fc1ba99cd4845"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
+        "path":  "plugins/appearance/particle-image/media/CodeCodex-background-particle-image-image-746ff537a0eca39e.png",
+        "size":  1549320,
+        "sha256":  "746ff537a0eca39ef16325fe26d9488ea8089435321be8ecb2559fe686cce62b"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-particle-image-1.0.5.js",
+        "path":  "plugins/appearance/particle-image/CodeCodex-background-particle-image-1.0.5.js",
+        "size":  147039,
+        "sha256":  "e29398439ce983e0ff097d225f4653d2464b09a26efb013f9257ef39d0022788"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
+        "path":  "plugins/appearance/pixel-sculpt/media/CodeCodex-background-pixel-sculpt-image-0e0ec1222ff7a1bc.png",
+        "size":  1633897,
+        "sha256":  "0e0ec1222ff7a1bcd2e3c11f0f10da249c7acef1af71ef2e8741c51ae390a08b"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
+        "path":  "plugins/appearance/pixel-sculpt/media/CodeCodex-background-pixel-sculpt-image-3fde0595509bc4d5.png",
+        "size":  1748802,
+        "sha256":  "3fde0595509bc4d5b3b3b5939ed9f8914345d492669ca6468cad1d69cedb9b33"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
+        "path":  "plugins/appearance/pixel-sculpt/media/CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png",
+        "size":  1753647,
+        "sha256":  "079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-pixel-sculpt-1.0.13.js",
+        "path":  "plugins/appearance/pixel-sculpt/CodeCodex-background-pixel-sculpt-1.0.13.js",
+        "size":  2459087,
+        "sha256":  "1f1fd702c928e194390aabc7e72bc15753f11517b7e756d1001b0b7f8f7202b0"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-custom-background-1.0.11.js",
+        "path":  "plugins/appearance/custom-background/CodeCodex-background-custom-background-1.0.11.js",
+        "size":  31780,
+        "sha256":  "bff2200553a94731d78d1e1fe63c00cd5fb6e9e83c2d0872890ded60378dbe4d"
+    },
+    {
+        "releaseTag":  "v0.5.89",
+        "assetName":  "CodeCodex-plugin-surface-opacity-1.0.12.js",
+        "path":  "plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.12.js",
+        "size":  17347,
+        "sha256":  "41c6d5139933c31ea989e1120fd5031dd0c6f56a14ffb6aa0500969018ba0dce"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-transparent-background-1.0.0.js",
+        "path":  "plugins/appearance/transparent-background/CodeCodex-plugin-transparent-background-1.0.0.js",
+        "size":  1736,
+        "sha256":  "862678f97edda3bb575b20e1c1a66e1dd6e12dabf9eaee30b1ebe8a35758119b"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-git-history-1.0.0.js",
+        "path":  "plugins/developer-tools/git-history/CodeCodex-plugin-git-history-1.0.0.js",
+        "size":  5646,
+        "sha256":  "1fcdf42d099e7159e1cf07517882c6b21ba7e99aa23be9c3c9e0a8fed6ffe77e"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-plugin-codex-startup-transition-1.1.32.js",
+        "path":  "plugins/appearance/codex-startup-transition/CodeCodex-plugin-codex-startup-transition-1.1.32.js",
+        "size":  42495,
+        "sha256":  "de094f68fb7db7d744d71704453bd117ea862192884027ea8ff1182a55b1298a"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-markdown-preview-1.0.0.js",
+        "path":  "plugins/file-preview/markdown-preview/CodeCodex-plugin-markdown-preview-1.0.0.js",
+        "size":  207915,
+        "sha256":  "69e849e596dd0295f8dcc1b4d4a1298e7d9f7c48dc8b476df07903d307c2ac0d"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-10-18",
+        "assetName":  "CodeCodex-plugin-csv-preview-1.0.1.js",
+        "path":  "plugins/file-preview/csv-preview/CodeCodex-plugin-csv-preview-1.0.1.js",
+        "size":  21494,
+        "sha256":  "a60714f6f335875fbac4ac2edae756c1503b7365f665a0dfb933cfe39b2f959b"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-10-18",
+        "assetName":  "CodeCodex-plugin-diagram-preview-1.0.1.js",
+        "path":  "plugins/file-preview/diagram-preview/CodeCodex-plugin-diagram-preview-1.0.1.js",
+        "size":  47214,
+        "sha256":  "742a9425c452ed1a78473df12fef980ccc438ad9e9f92dcb3bea203d7acb764e"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-image-preview-1.0.0.js",
+        "path":  "plugins/file-preview/image-preview/CodeCodex-plugin-image-preview-1.0.0.js",
+        "size":  19679,
+        "sha256":  "5dbed7beb1c7665a83c4fce192193359bc543c694ff56d5589ff4efe0ccceb2c"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-video-preview-1.0.0.js",
+        "path":  "plugins/file-preview/video-preview/CodeCodex-plugin-video-preview-1.0.0.js",
+        "size":  19679,
+        "sha256":  "e499f389722694bf88f9a8128fe62eb5c7c7c0b45e638649b454f8d2aacde228"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-10-18",
+        "assetName":  "CodeCodex-plugin-pdf-preview-1.0.1.js",
+        "path":  "plugins/file-preview/pdf-preview/CodeCodex-plugin-pdf-preview-1.0.1.js",
+        "size":  1445453,
+        "sha256":  "0097ddf35219738659f82327a6819481240231338180b4737acdefd1b9183bbd"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-audio-preview-1.0.0.js",
+        "path":  "plugins/file-preview/audio-preview/CodeCodex-plugin-audio-preview-1.0.0.js",
+        "size":  19679,
+        "sha256":  "7cf9bae954295a88964e0d77ad8949e2862e480155d517f489928910de64a88b"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-office-preview-1.0.0-parser.worker.js",
+        "path":  "plugins/file-preview/office-preview/resources/CodeCodex-plugin-office-preview-1.0.0-parser.worker.js",
+        "size":  10039,
+        "sha256":  "70e6cf8b2937a8df90800f17e5e2df6315a8a61a79af1f932ea85d4381dc540d"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-office-preview-1.0.0-parser.wasm",
+        "path":  "plugins/file-preview/office-preview/resources/CodeCodex-plugin-office-preview-1.0.0-parser.wasm",
+        "size":  573411,
+        "sha256":  "6cd3fb9f1082477f155009bd583a1d18deb8b46bde829d25cf9ab00b120b4c90"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-office-preview-1.0.0.js",
+        "path":  "plugins/file-preview/office-preview/CodeCodex-plugin-office-preview-1.0.0.js",
+        "size":  3626557,
+        "sha256":  "b836d12f23f7805e6faea5c2d1f8fe7d066f7a8c82571d2603f3bf786a09c37a"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-10-18",
+        "assetName":  "CodeCodex-plugin-notebook-preview-1.0.1.js",
+        "path":  "plugins/file-preview/notebook-preview/CodeCodex-plugin-notebook-preview-1.0.1.js",
+        "size":  210257,
+        "sha256":  "b6264078fae002f7a7210775296118dbf3ce618979b64892e9bdea4454a05599"
+    },
+    {
+        "releaseTag":  "v0.3.96",
+        "assetName":  "CodeCodex-plugin-model-preview-1.0.0.js",
+        "path":  "plugins/file-preview/model-preview/CodeCodex-plugin-model-preview-1.0.0.js",
+        "size":  677208,
+        "sha256":  "c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-ascii-tiles-1.0.8.js",
+        "path":  "plugins/appearance/ascii-tiles/CodeCodex-background-ascii-tiles-1.0.8.js",
+        "size":  47714,
+        "sha256":  "180b2ceaed686d660e118e406680b07c0c6c259051d9573ae079dfbc8307e202"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-background-shallow-ocean-1.0.17.js",
+        "path":  "plugins/appearance/shallow-ocean/CodeCodex-background-shallow-ocean-1.0.17.js",
+        "size":  937136,
+        "sha256":  "1da590e0c8640ca9c60e1223303eab051c0822c12b631084ad41b0bcb97b7278"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-01",
+        "assetName":  "CodeCodex-plugin-multi-account-1.0.65.js",
+        "path":  "plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.65.js",
+        "size":  138016,
+        "sha256":  "5ffec88d8862ed4944ee3b3ca4d59651530562252ef9641dfab56720fc21f86b"
+    },
+    {
+        "assetName":  "CodeCodex-plugin-catalog-0.5.89.json",
+        "path":  "plugins/catalog.json",
+        "size":  28309,
+        "sha256":  "9a6e12067f151ba218eb7d61b83f71195ff25e19b6ed48004000477c547ddcb4"
+    }
 ]

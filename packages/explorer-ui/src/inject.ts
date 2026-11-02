@@ -21,6 +21,7 @@ import {
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { isHomeWorkspaceView } from "./home-view";
 import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground, isNativeLoginView } from "./native-login";
+import {nativeStructureChanged} from './native-structure-changes';
 import { SURFACE_OPACITY_NATIVE_CSS } from "./surface-opacity";
 import {
   clearExplorerDismissalForSession,
@@ -29,9 +30,11 @@ import {
 } from "./session-state";
 
 declare const __CODE_CODEX_VERSION__: string;
+declare const __CODE_CODEX_BUILD_ID__: string;
 
 const UI_VERSION = __CODE_CODEX_VERSION__;
-export const EXPLORER_TAG = `code-codex-v${UI_VERSION.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+const UI_BUILD=typeof __CODE_CODEX_BUILD_ID__==='string'&&/^[a-f0-9]{12}$/.test(__CODE_CODEX_BUILD_ID__)?`-b${__CODE_CODEX_BUILD_ID__}`:'';
+export const EXPLORER_TAG = `code-codex-v${UI_VERSION.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}${UI_BUILD}`;
 const DISMISS_EVENT = "code-codex:dismiss";
 const RESELECTION_LISTENER_STATE = Symbol.for("code-codex:reselection-listener:v1");
 const SHELL_LAYOUT_STYLE_SELECTOR = 'style[data-code-codex-shell-layout="codex-26.715"]';
@@ -700,7 +703,7 @@ function scheduleMountReconciliation(): void {
 
 function installRemountObserver(): void {
   if (remountObserver || !document.documentElement || !remountEnabled) return;
-  remountObserver = new MutationObserver(() => scheduleMountReconciliation());
+  remountObserver = new MutationObserver(records => {if(nativeStructureChanged(records))scheduleMountReconciliation();});
   remountObserver.observe(document.documentElement, {
     childList: true, subtree: true, attributes: true,
     attributeFilter: ["data-app-shell-active-page", "aria-current", "data-sidebar-destination"],

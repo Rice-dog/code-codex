@@ -1,0 +1,27 @@
+{
+  "schema": 2,
+  "compatibilityPolicy": "capabilities",
+  "versionRestricted": false,
+  "referenceBuild": {
+    "version": "26.1023.6123.0",
+    "initial": "./assets/app-initial-b0cd131b9dba.js",
+    "shared": "./assets/app-shared-624e1c099f95.js",
+    "managerExport": "VUn",
+    "senderExport": "aLt",
+    "dispatcherExport": "eLt",
+    "assets": [
+      {
+        "path": "webview/assets/app-shared-624e1c099f95.js",
+        "sha256": "58f2d992ec04418ffbc5bbfb275972883e16bd4f0f50d5e857a3527d3230b3f8"
+      },
+      {
+        "path": "webview/assets/app-initial-b0cd131b9dba.js",
+        "sha256": "8f1b5b9d08afad50c5b2efe4240dcfe6624e787d2b7ae46d0eeb38d18acc9b24"
+      }
+    ]
+  },
+  "requiredRoles": [
+    "conversation-manager",
+    "dispatcher"
+  ]
+}

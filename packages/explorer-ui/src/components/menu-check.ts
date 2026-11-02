@@ -1,0 +1,4 @@
+// Geometry observed in the qualified Codex model menu; shared by owned menus.
+export const NATIVE_CHECK_PATH='M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z';
+export const nativeMenuCheckSvg=`<svg width="17" height="17" viewBox="0 0 17 17" fill="none" aria-hidden="true" focusable="false" style="display:block;flex:none;opacity:.75"><path d="${NATIVE_CHECK_PATH}" fill="currentColor"/></svg>`;
+export const nativeMenuCheckMask=`url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 17 17"><path d="${NATIVE_CHECK_PATH}"/></svg>`)}")`;

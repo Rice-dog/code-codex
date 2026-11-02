@@ -9,9 +9,9 @@ export class PixelSculptRenderer {
  #controls: HTMLElement;
  #runtime: ReturnType<typeof startPixelSculptRuntime>;
  #active = false;
- constructor(layer:HTMLElement,canvas:HTMLCanvasElement,settings:PixelSculptSettings,onError:(message:string|undefined)=>void,persist=true){
+ constructor(layer:HTMLElement,canvas:HTMLCanvasElement,settings:PixelSculptSettings,onError:(message:string|undefined)=>void,persist=true,visualFactory?:unknown){
    this.#controls=document.createElement('div');this.#controls.className='pixel-sculpt-controls';this.#controls.innerHTML=PIXEL_SCULPT_CONTROLS_HTML;
-   this.#runtime=startPixelSculptRuntime(canvas,this.#controls,onError,{persist});this.ready=this.#runtime.ready.then(()=>undefined);this.firstFrame=this.#runtime.firstFrame.then(()=>undefined);
+   this.#runtime=startPixelSculptRuntime(canvas,this.#controls,onError,{persist,visualFactory});this.ready=this.#runtime.ready.then(()=>undefined);this.firstFrame=this.#runtime.firstFrame.then(()=>undefined);
    this.#runtime.setPaused(true);layer.style.backgroundColor='#07070a';
  }
  mountControls(container:HTMLElement,language:'zh'|'en'):void {if(this.#controls.parentElement!==container){container.replaceChildren(this.#controls);}this.#runtime.language(language);}
@@ -25,8 +25,8 @@ export class PixelSculptRenderer {
 
 
 /** An independent, read-only image-library renderer for startup and its preview. */
-export function mountPixelSculptStartupBackground(target: HTMLElement, canvas: HTMLCanvasElement, onError: (message?: string) => void): {ready: Promise<void>;dispose(): void} {
-  const renderer = new PixelSculptRenderer(target, canvas, {paused:false}, message => onError(message), false);
+export function mountPixelSculptStartupBackground(target: HTMLElement, canvas: HTMLCanvasElement, onError: (message?: string) => void, Renderer:typeof PixelSculptRenderer=PixelSculptRenderer): {ready: Promise<void>;dispose(): void} {
+  const renderer = new Renderer(target, canvas, {paused:false}, message => onError(message), false);
   let disposed = false;
   renderer.setActive(true, {paused:false});
   const ready = renderer.ready.then(async () => {

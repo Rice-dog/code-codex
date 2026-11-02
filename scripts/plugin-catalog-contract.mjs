@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import ts from '../packages/explorer-ui/node_modules/typescript/lib/typescript.js';
-const builders=[['background-packages.mjs','appearance','definitions'],['utility-packages.mjs',null,'definitions'],['file-preview-packages.mjs','file-preview','filePreviewDefinitions'],['build-startup-package.mjs','appearance','id'],['build-custom-background.mjs','appearance','id'],['build-ascii-tiles.mjs','appearance','id']];
+const builders=[['background-packages.mjs','appearance','definitions'],['utility-packages.mjs',null,'definitions'],['file-preview-packages.mjs','file-preview','filePreviewDefinitions'],['build-startup-package.mjs','appearance','id'],['build-custom-background.mjs','appearance','id'],['build-ascii-tiles.mjs','appearance','id'],['build-shallow-ocean.mjs','appearance','id']];
 export function declaredPluginCategories(root=resolve(import.meta.dirname,'..')){
  const ids=new Map();
  for(const [file,category,binding]of builders){

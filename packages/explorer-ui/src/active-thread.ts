@@ -9,6 +9,7 @@ import {
   plausibleThreadId,
 } from "./adapters/codex-26.715";
 import { isHomeWorkspaceView } from "./home-view";
+import { nativeStructureChanged } from './native-structure-changes';
 
 const ROUTE_EVENT = "code-codex:route";
 const EXPLICIT_EVENT = "code-codex:thread-change";
@@ -137,7 +138,7 @@ export class ActiveThreadTracker {
     window.addEventListener(ROUTE_EVENT, this.#schedule);
     window.addEventListener(EXPLICIT_EVENT, this.#onExplicit as EventListener);
 
-    this.#observer = new MutationObserver(this.#schedule);
+    this.#observer = new MutationObserver(records => { if(nativeStructureChanged(records))this.#schedule(); });
     this.#observer.observe(document.documentElement, {
       subtree: true,
       childList: true,

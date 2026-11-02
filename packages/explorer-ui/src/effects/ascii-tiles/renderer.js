@@ -10,7 +10,7 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 function glyphAtlas() {
-  const atlas = document.createElement("canvas");
+  const atlas = typeof document.createElement==='function'?document.createElement("canvas"):new OffscreenCanvas(480,48);
   atlas.width = 480;
   atlas.height = 48;
   const context = atlas.getContext("2d");

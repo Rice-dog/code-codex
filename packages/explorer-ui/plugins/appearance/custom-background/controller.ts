@@ -1,3 +1,4 @@
+import {registerVisualSession} from '../../../src/core/background-runtime/visual-session';
 import { customBackgroundPanelMarkup } from './view';
 // custom responsibility; original state keys, defaults and lifecycle retained.
 import { PreviewClockFollower } from "../../../src/core/media/preview-clock";
@@ -8,6 +9,7 @@ import { applyMediaParameters } from './media-presentation';
 
 
 export class CustomBackground {
+ #visualReleases=new WeakMap<object,()=>void>();
  #records:Media[]=[]; #selected=''; #enabled=false; #disposed=false; #page=0;
  #toggling=false; #toggleGeneration=0;
  #layer:HTMLElement|undefined; #media:HTMLVideoElement|HTMLImageElement|undefined; #url:string|undefined;
@@ -109,7 +111,7 @@ export class CustomBackground {
   this.#stopPreviewSync();
   const media=this.#media;this.#media=undefined;this.#activeRecord=undefined;
   if(media instanceof HTMLVideoElement)this.#releaseVideo(media);
-  media?.remove();this.#layer?.remove();this.#layer=undefined;this.#style?.remove();this.#style=undefined;
+  if(media)this.#visualReleases.get(media)?.();media?.remove();this.#layer?.remove();this.#layer=undefined;this.#style?.remove();this.#style=undefined;
   if(!document.querySelector('[data-code-codex-custom-layer]'))document.documentElement.removeAttribute('data-code-codex-custom-background');
   if(this.#url)URL.revokeObjectURL(this.#url);this.#url=undefined;
  }
@@ -117,7 +119,7 @@ export class CustomBackground {
   this.#stopPreviewSync();
   const media=this.#previewMedia;this.#previewMedia=undefined;this.#previewRecord=undefined;
   if(media instanceof HTMLVideoElement)this.#releaseVideo(media);
-  media?.remove();if(this.#previewUrl)URL.revokeObjectURL(this.#previewUrl);this.#previewUrl=undefined;
+  if(media)this.#visualReleases.get(media)?.();media?.remove();if(this.#previewUrl)URL.revokeObjectURL(this.#previewUrl);this.#previewUrl=undefined;
  }
  #current(media:HTMLImageElement|HTMLVideoElement){return !this.#disposed&&(this.#media===media||(this.#previewMedia===media&&!this.#panel.hidden));}
  #play(media:HTMLImageElement|HTMLVideoElement){
@@ -134,6 +136,7 @@ export class CustomBackground {
    const align=()=>{if(this.#current(media)&&this.#previewClock.running)this.#alignPreview();};
    media.onloadedmetadata=align;media.onseeked=align;media.onplaying=align;
   }
+  this.#visualReleases.set(media,registerVisualSession(media,'custom-background','native-media',()=>media instanceof HTMLVideoElement?{kind:'video',paused:media.paused,currentTime:media.currentTime,readyState:media.readyState}:{kind:'image',complete:media.complete}));
   media.src=url;return media;
  }
  #previewClock=new PreviewClockFollower({active:()=>!this.#disposed&&!this.#panel.hidden,background:()=>this.#media,preview:()=>this.#previewMedia,play:video=>this.#play(video),pause:video=>{this.#playAttempts.delete(video);video.pause();},failed:error=>this.#error('CC-BG-PREVIEW-SYNC',error)});

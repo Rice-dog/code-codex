@@ -8,6 +8,7 @@ function Save-CodeCodexInstallReport([string]$Outcome) {
         $null = Assert-CodeCodexRoot $folder
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
         $report=[ordered]@{schema=1;version=$Version;outcome=$Outcome;timeline=@($script:InstallTrace.ToArray());migrationCopied=$script:MigrationCopied;migrationSkipped=$script:MigrationSkipped;rollbackIssues=@($script:CleanupIssues);rollback=$script:RollbackReport;activation=$script:ActivationReport;versionRetention=$script:VersionRetentionReport;retiredStartupCache=$script:RetiredStartupCacheReport;uiLanguage=[ordered]@{requested=$UiLanguage;before=$script:LanguageBefore;committed=$script:LanguageCommitted}}
+        $report.sameVersionPayload = $script:SameVersionPayload
         $path=Join-Path $folder ('install-'+[DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')+'-'+$PID+'.json')
         [IO.File]::WriteAllText($path,($report|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
         Get-ChildItem -LiteralPath $folder -Filter 'install-*.json' -File | Sort-Object Name -Descending | Select-Object -Skip 10 | ForEach-Object { if(-not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)){Remove-Item -LiteralPath $_.FullName -Force} }

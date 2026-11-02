@@ -607,7 +607,7 @@ export class ParticleBackgroundController {
     this.#currentSourceTransform = normalizeParticleImageTransform(transform);
     image.src = nextUrl;
     applyParticleImageTransform(image, this.#currentSourceTransform);
-    const visibleOpacity = this.#settings.showSourceImage ? this.#settings.imageOpacity : 0;
+    const visibleOpacity = this.#settings.showSourceImage ? this.#settings.imageOpacity * particleOpeningImageOpacity(this.#renderer?.openingProgress ?? 1) : 0;
     if (animate && outgoingUrl) {
       this.#previousSourceUrl = outgoingUrl;
       this.#previousSourceTransform = outgoingTransform;
@@ -706,6 +706,10 @@ export class ParticleBackgroundController {
     this.#preparationCache?.invalidate();
     this.#renderer?.dispose();
     if (this.#canvas) {
+      // A transferred canvas belongs to its retired worker. Keep the new visual
+      // instance on a fresh canvas, including the empty-library transition.
+      const replacement=document.createElement('canvas');replacement.className=this.#canvas.className;
+      this.#canvas.replaceWith(replacement);this.#canvas=replacement;
       try {
         this.#renderer = new ParticleImageRenderer(this.#canvas, (message) => {
           this.#error = message;

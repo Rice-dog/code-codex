@@ -1,10 +1,11 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {createServer} from 'node:http';
 import {launchFixture,delay} from './browser-fixture.mjs';
 const root=resolve(import.meta.dirname,'..'),out=resolve(root,'artifacts/menu-session');mkdirSync(out,{recursive:true});
-const version=JSON.parse(readFileSync(resolve(root,'packages/explorer-ui/package.json'),'utf8')).version,tag='code-codex-v'+version.replaceAll('.','-');
+const version=JSON.parse(readFileSync(resolve(root,'packages/explorer-ui/package.json'),'utf8')).version,tag=builtExplorerTag(root);
 let html=readFileSync(resolve(root,'scripts/fixtures/import-home.html'),'utf8').replace('<body>','<body><header style="pointer-events:auto;left:0;z-index:999"><div role="menubar"><button id="application-menu-trigger-file-menu">File</button><button id="application-menu-trigger-help-menu">Help</button></div></header>').replace('__BUNDLE_URL__','/bundle.js');
 html=html.replace(" if(method==='explorer.settings.get'",` if(method==='explorer.login.startup.get')return {supported:true,enabled:false};
  if(method==='explorer.login.startup.set')return {supported:true,enabled:params.enabled};

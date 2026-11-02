@@ -14,7 +14,7 @@ const seam=installedBackgroundFixture(root,['blinking-squares'])+buildSync({stdi
 const dispatcher=`function dispatch(action,{sourceHostId,sourceThreadId}={}){const service=window.fixtureServices.appActions;return service.runInPrimaryWindow({action:action,sourceHostId,sourceThreadId});}`;
 const legacy=`export const namespace={appActions:window.fixtureServices.appActions,clientCoordination:{invalidateQueryCache:async()=>{}}};`;
 const server=createServer((req,res)=>{
- const url=new URL(req.url,'http://fixture'),scenario=url.searchParams.get('case')||'split';
+ const url=new URL(req.url,'http://fixture'),scenario=url.searchParams.get('case')||(url.pathname.startsWith('/app-initial-fixture-')?url.pathname.slice('/app-initial-fixture-'.length,-3):'split');
  if(url.pathname==='/seam.js'){res.setHeader('Content-Type','text/javascript');res.end(seam);return;}
  if(url.pathname.endsWith('.js')){
   res.setHeader('Content-Type','text/javascript');
@@ -28,7 +28,7 @@ const server=createServer((req,res)=>{
  res.setHeader('Content-Type','text/html');
  const split=['split','no-initial','two-modules','reject-set','invalid-response','late'].includes(scenario);
  const link=name=>`<link rel="modulepreload" href="/${name}.js">`;
- res.end(`<!doctype html><html data-theme="light"><head>${scenario==='no-initial'?'':`<link rel="modulepreload" href="/app-initial-fixture.js?case=${scenario}">`}${split&&scenario!=='late'?link('run-app-action-in-primary-window-fixture'):''}${scenario==='two-modules'?link('run-app-action-in-primary-window-second'):''}<style>html,body{margin:0;width:100%;height:100%}</style></head><body><script>
+ res.end(`<!doctype html><html data-theme="light"><head>${scenario==='no-initial'?'':`<link rel="modulepreload" href="/app-initial-fixture-${scenario}.js">`}${split&&scenario!=='late'?link('run-app-action-in-primary-window-fixture'):''}${scenario==='two-modules'?link('run-app-action-in-primary-window-second'):''}<style>html,body{margin:0;width:100%;height:100%}</style></head><body><script>
  window.mode='light';window.calls=[];window.fixtureServices={appActions:{runInPrimaryWindow:async({action})=>{calls.push(action);if(action.type==='app.appearance.set_mode'){if(${JSON.stringify(scenario)}==='reject-set')throw Error('Official setting rejected');mode=action.mode;document.documentElement.dataset.theme=mode==='system'?'light':mode;}return {mode:${JSON.stringify(scenario)}==='invalid-response'?'unsupported':mode};}}};
  </script><script src="/seam.js"></script></body></html>`);
 });
@@ -53,6 +53,10 @@ try{
  check('multiple dispatch functions reject before execution',await ev(`(()=>{function a(action){return fixtureServices.appActions.runInPrimaryWindow({action:action});}function b(action){return fixtureServices.appActions.runInPrimaryWindow({action:action});}try{fixture.selectCodexAppearanceAdapter({a,b});return false;}catch(e){return e.message.includes('CC-APPEARANCE-ADAPTER-002');}})()`));
  await page('late');
  check('missing adapter is not permanently cached',await ev(`(async()=>{try{await fixture.readCodexAppearanceTheme();return false;}catch{}const x=document.createElement('link');x.rel='modulepreload';x.href='/run-app-action-in-primary-window-late.js';document.head.append(x);return (await fixture.readCodexAppearanceTheme())==='light';})()`));
+ await page('late');
+ check('verified module hints recover a role absent from DOM and resource timing',await ev(`(async()=>{window[Symbol.for('code-codex:account-host-profile:v1')]={appearance:['/run-app-action-in-primary-window-late.js']};return (await fixture.readCodexAppearanceTheme())==='light';})()`));
+ check('native role hint and its observed absolute URL count as one module',await ev(`fixture.findCodexAppearanceActionModules().length===1`));
+ check('native hints still reject foreign and query-bearing Appearance URLs',await ev(`(()=>{window[Symbol.for('code-codex:account-host-profile:v1')]={appearance:['https://untrusted.invalid/run-app-action-in-primary-window-foreign.js','/run-app-action-in-primary-window-query.js?x=1']};return fixture.findCodexAppearanceActionModules().every(x=>new URL(x,location.href).origin===location.origin&&!new URL(x,location.href).search);})()`));
  for(const scenario of ['invalid-response','reject-set']){
   await page(scenario);const expression=scenario==='invalid-response'?`fixture.readCodexAppearanceTheme()`:`fixture.writeCodexAppearanceTheme('dark')`;
   check(scenario+' propagates official failure',await ev(`${expression}.then(()=>false,e=>!!e.message)`));

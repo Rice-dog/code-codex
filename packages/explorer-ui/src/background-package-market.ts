@@ -28,6 +28,7 @@ export class BackgroundPackageMarket {
   #card(id:string): HTMLElement | null {
     const info=PLUGIN_PACKAGES.find(p=>p.id===id);
     if(info?.category==='file-preview')return this.root.querySelector(`[data-preview-extension="code-codex.${id}"]`);
+    if(info?.category==='developer-tools'&&id!=='git-history')return this.root.querySelector(`[data-tool-plugin="code-codex.${id}"]`);
     if(id==='git-history')return this.root.querySelector('.git-history-extension');
     const key=id==='surface-opacity'?'surface-opacity':id==='transparent-background'?'transparent-background':id==='codex-startup-transition'?'startup-transition':`${cardIds[id]??id}-background`;
     return this.root.querySelector(`[data-appearance-plugin="code-codex.${key}"]`);

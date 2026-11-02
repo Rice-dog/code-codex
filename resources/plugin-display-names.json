@@ -24,5 +24,7 @@
   "office-preview": "Office Preview",
   "notebook-preview": "Jupyter Notebook Preview",
   "model-preview": "3D Model Preview",
-  "ascii-tiles": "ASCII Tiles Background"
+  "ascii-tiles": "ASCII Tiles Background",
+  "shallow-ocean": "Shallow Ocean Letters Background",
+  "multi-account": "Multi-account Tasks"
 }

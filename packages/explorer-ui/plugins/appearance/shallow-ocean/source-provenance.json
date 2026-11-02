@@ -1,0 +1,33 @@
+{
+  "sourceFolder": "E:\\Python_Project\\codecodex-plugin\\shallow ocean2",
+  "attribution": "Public prompt reference: Ocean Shallows by @Vib3Coded. User regenerated, debugged and extended with AI; no original author code or assets used.",
+  "originalHashes": {
+    "audio-engine.js": "acea54fb0c77c2e19801fabcdb4a8ec29de0c9b67bbad3f05ca04f1145d96737",
+    "background.json": "4c15270af42da904a8c53cb60a285526aa726821f69dbf7a68268fc27c6f229c",
+    "drift-duo.js": "1b134ce984bbc3d08b4b18823defb72a8729990cc689ad0415e8fcaa3c73e57a",
+    "index.html": "da7580364441e2baefc11dd8815f7da8bc1dc0278e8a9a0fa804820db71ffab6",
+    "marine-life.js": "d9df6816fbc51322ac0e5f28147fed6d8c3901981054e9fe00511fb9ef349add",
+    "meteor-event.js": "9e0c02cdef8347410357e9b808f3a2cd0e8eeaa2b64f1e8a8eb09eef9e9d5c22",
+    "object-occlusion.js": "04c3cbbb41069f558b9d438020ac0b8b087759473bb170dc0028f791eea173f4",
+    "opening-animation.js": "2ad82b630283217064ede931477699f0f6567f38e4496ce73d1e967cf9257866",
+    "package.json": "99e8e301037cbdf35335fe52d2f9d91c5d2aa4f65b5aa702e41b8d073ce44ccd",
+    "penguin-ice.js": "2c001f745a2b69103c9e146d9b81c11fdb302d48606ddaa2b9f685b81b204fc4",
+    "README.md": "ddd7ee43920272fc38bde57a659056ec05d54260877966130463aba797e8ed13",
+    "reef-ecosystem.js": "420eff2de5bf3b2540d6db9b445f7be28ca3f1297ca17cebe2f3752482d8dd14",
+    "server.mjs": "22f248a9044d654bdb927b5802b2468d11d076ca41fbddc290d8a74b876d5968",
+    "visitors.js": "7f8d9cc80a56b9e99b179b5b3cc971e91ac48031971e39c6faa6e234a55778ff",
+    "water-seabed.js": "3ab9ff2df83d1b845b8ef17cbda9ef752b4c310a9c0ce4d53b07412402bd8fd7"
+  },
+  "adaptation": "Scoped lexical installers; host owns DOM/lifecycle/input/persistence. Original shader/ecosystem/water functions preserved. Host panel uses offline PNGs generated once from original dock model renderer; no hidden runtime thumbnail pass. Fixed180second hierarchical event scheduler replaces original shuffle/cooldown/frequency. Horizontal host dock and scoped natural-start hooks support a separately persisted host encounter collection; inclusion filters preserve tier probabilities. Performance adaptation adds frame/pixel/shadow/particle budgets and future migration density; original60Hz water integration, event probability and user creature counts preserved. Coral/grass live rebaking debounced120ms. Original independent folder unchanged. Global host parameter reset restores default resident population; clear-all stores normalized defaultCreaturesEnabled=0 and zero resident counts. Rain controls, shortcut, particle geometry and audio channel removed; storm encounter retained. All quality tiers target60FPS and vary only pixel/detail budgets; deferred drawing-buffer size commits immediately precede full rendering to avoid a cleared frame on quality/viewport changes. Bounded presentation diagnostics record resize cause and frame intervals.",
+  "thumbnailDerivation": {
+    "generator": "scripts/generate-ocean-thumbnails.mjs",
+    "modelFunction": "source/reef-ecosystem.js: renderAllDockThumbnails",
+    "dimensions": [
+      192,
+      136
+    ],
+    "species": 10,
+    "output": "src/effects/shallow-ocean/thumbnails.json",
+    "originalFolderModified": false
+  }
+}

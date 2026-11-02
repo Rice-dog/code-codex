@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.5.40-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.5.89-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,7 +28,7 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前版本 **v0.5.40** 汇总自上一公开软件版本 v0.5.21 以来的改进：明确授权的启动恢复、慢启动等待、独立桌面入口、顶部菜单与开机自启、完整卸载流程、插件名称汉化，以及 Particle Image 自动轮换修复。匹配插件缓存继续复用。背景启用已适配官方拆分后的外观接口，可自动应用所需主题并在停用后恢复，无需先手动选择深色。完整累计更新及验证边界见 [发布说明](releases/README.md)。
+当前版本 **v0.5.89** 汇总自上一公开软件版本 **v0.5.40** 以来的改进：新增“浅海来信”、统一背景绘图隔离、开场动画和画质档位、插件置顶快捷入口，以及更完整的界面透明度控制。多账号任务暂时隐藏并整体停用，保留实现和已有数据供后续恢复。完整累计更新及验证边界见 [发布说明](releases/README.md)。
 
 有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。
 
@@ -44,15 +44,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.5.40-x64-setup.exe`
-- 备选：`CodeCodex-0.5.40-x64.msi`
-- 便携包：`CodeCodex-0.5.40-x64.zip`
+- 推荐：`CodeCodex-0.5.89-x64-setup.exe`
+- 备选：`CodeCodex-0.5.89-x64.msi`
+- 便携包：`CodeCodex-0.5.89-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.5.40-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.5.89-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -67,7 +67,7 @@ v0.5.21 及更早公开版采用找不到原生入口时才创建独立入口的
 
 ### 集中目录与自定义安装
 
-EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.5.40-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
+EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.5.89-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
 
 - `versions/`：不可变程序版本；`integration/`：快捷方式与安装事务。
 - `data/`：文件树设置、插件参数与用户图片/视频；官方 Codex 账号、聊天、项目文件仍由官方客户端管理。
@@ -109,14 +109,14 @@ EXE 成功安装后保留当前版本与实际上一版，安全清理更旧的�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.5.40
+./scripts/package.ps1 -Version 0.5.89
 ```
 
 生成结果会写入 `releases/`。
 
 ## 所有插件按需下载
 
-Preview Market 中的 **25 个插件全部独立下载**：Appearance 14 个、File Preview 10 个、Tools 1 个。核心安装包保留文件树、基础文本预览与编辑、市场和设置框架、权限检查与运行日志；插件的实际渲染、预览、启动播放器和工具实现不再内置。
+Preview Market 中展示 **27 个独立下载插件**：Appearance 16 个、File Preview 10 个、Tools 1 个。另保留的 Multi-account Tasks 当前隐藏且整体停用，不提供账号选择、额度查询或自动续接；既有数据和偏好不删除。核心安装包保留文件树、基础文本预览与编辑、市场和设置框架、权限检查与运行日志；插件的实际渲染、预览、启动播放器和工具实现不再内置。
 
 打开 Preview Market，先点击 **Download**；下载和校验完成后点击 **Enable**，即可在当前 Codex 窗口使用，无需重启。下载不会自动启用插件或打开设置。参数按钮在完整插件包可用后使用；UI Surface Opacity 仍要求先实际启用一个背景插件。
 
@@ -184,13 +184,13 @@ Code-Codex 文件。本地维护构建卸载时同时删除自建的受管 `Code
 
 - Preview Market 分为 Appearance、File Preview 和 Tools 三类，打开时默认显示 Appearance。
 - File Preview 可独立下载并启用 Markdown、CSV、图表、图片、视频、PDF、音频、Jupyter Notebook、Office 和 3D 模型预览；所有处理都在本地完成。
-- Appearance 包含十种动态背景、Custom Background、Transparent Background、UI Surface Opacity 和 Codex Startup Transition，均先下载再启用。
+- Appearance 包含十二种动态背景、Custom Background、Transparent Background、UI Surface Opacity 和 Codex Startup Transition，均先下载再启用。
 - Tools 中的 Git History 下载启用后，以只读方式显示当前分支、提交记录、变更文件和带颜色的逐文件 diff，不执行仓库写入操作。
 
 ### 更新与兼容
 
 - 点击文件树底部的版本号，或在 Code-Codex 菜单中选择 **Check for Updates…**，可通过 GitHub 检查最新发布的稳定版本。
-- Codex Startup Transition 可选择视频或全部十种动态背景作为启动动画，包括使用本地图片库的 Particle Image 和 Pixel Sculpt；背景至少展示四秒，准备就绪后按设定时间淡出。
+- Codex Startup Transition 可选择视频或 13 种背景来源，包括浅海来信、ASCII Tiles、Custom Background、Particle Image 和 Pixel Sculpt；来源副本独立于普通背景，等待真实首帧和原生界面就绪后按设置退场。
 - 启动失败时显示具体失败阶段、稳定支持代码和处理建议，并可复制或打开本地脱敏诊断报告。
 - Codex 软件包版本仅作为诊断信息；未来版本不再受固定版本白名单限制，而是通过实时协议和 DOM 结构检查。
 
@@ -210,6 +210,13 @@ Notebook、Office 文档和 glTF 3D 模型预览，所有预览处理都在用�
 适配/重置视图、参考网格和动画控制。
 
 ### 外观插件
+
+“浅海来信”提供可交互水面、十种海洋生物模型、横向生物选择栏、自动/低/中/高画质档位及随机海洋奇遇。收集全部奇遇后可筛选后续事件；整体重置恢复默认参数和居民，清除生物是独立操作。它也可用作启动背景。
+
+Canvas 背景统一使用独立 Worker，发光地平线使用浏览器合成动画，Custom Background 保留原图片/视频播放，减少官方菜单和按钮造成的绘图阻塞。GPU、驱动和输入交付仍共享系统资源，不保证任意设备始终满帧。黑洞整体淡入，像素雕塑用方块落定开场，粒子图像修复源图闪现并加入渐入。
+
+置顶插件会出现在文件树底栏，可直接打开对应参数；UI Surface Opacity 可同时调节市场和参数面板，并覆盖变更卡片、文件树图标及新对话工作区栏等底板。
+
 
 ![Code-Codex 粒子图像背景外观插件](docs/screenshots/particle-image-background.png)
 

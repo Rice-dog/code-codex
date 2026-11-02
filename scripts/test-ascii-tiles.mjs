@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import {measureAsciiInteraction} from './ascii-interaction-probe.mjs';
 import {DEFAULTS} from '../packages/explorer-ui/src/effects/ascii-tiles/options.mjs';
 import {assertCatalogMatchesDeclarations} from './plugin-catalog-contract.mjs';
@@ -11,7 +12,7 @@ import {launchFixture,delay} from './browser-fixture.mjs';
 const root=resolve(import.meta.dirname,'..'),ui=resolve(root,'packages/explorer-ui');
 const catalog=JSON.parse(readFileSync(resolve(ui,'dist/plugins/catalog.json'),'utf8'));
 const version=JSON.parse(readFileSync(resolve(ui,'package.json'),'utf8')).version;
-const tag='code-codex-v'+version.replaceAll('.','-');
+const tag=builtExplorerTag(root);
 const directory=resolve(ui,'dist/plugins');
 for(const p of catalog){for(const asset of [p,...p.resources]){const b=readFileSync(pluginAssetPath(directory,p,asset));assert.equal(b.length,asset.size);assert.equal(createHash('sha256').update(b).digest('hex'),asset.sha256);assert.ok(asset.size<=4*1024*1024);}}
 assertCatalogMatchesDeclarations(catalog,root);assert.ok(readFileSync(resolve(ui,'dist/startup-early.js')).length<40*1024);
@@ -75,7 +76,7 @@ try{
  await e(`for(const i of ${s}.querySelectorAll('[data-ascii-reset]'))i.click()`);
  await check('All group resets restore the complete tuned defaults',`(()=>{const expected=${JSON.stringify({...DEFAULTS,paused:false})},actual=JSON.parse(localStorage.getItem('code-codex:ascii-tiles-background:v1'));return Object.entries(expected).every(([k,v])=>actual[k]===v);})()`);
  await e(`window.localeService=window[Symbol.for('code-codex:language-service:v1')];localeService.applyLanguage({schema:1,locale:'zh-CN',revision:100,source:'menu'})`);await delay(100);
- await check('Chinese labels/actions and English plugin name',`${button}.textContent==='停用'&&${s}.querySelector('[data-ascii-label="waveHeight"]').textContent==='波纹高度'&&${card}.querySelector('h4').textContent==='ASCII Tiles Background'`);
+ await check('Chinese labels/actions and translated plugin name',`${button}.textContent==='停用'&&${s}.querySelector('[data-ascii-label="waveHeight"]').textContent==='波纹高度'&&${card}.querySelector('h4').textContent==='字符玻璃砖'`);
  await e(`localeService.applyLanguage({schema:1,locale:'en',revision:101,source:'menu'})`);await delay(100);
  await browser.command('Page.captureScreenshot',{format:'png'}).then(image=>writeFileSync(resolve(output,'panel-en.png'),Buffer.from(image.data,'base64')));
  await e(`window.restoreExtension=asciiContext.getExtension('WEBGL_lose_context');restoreExtension.loseContext()`);await delay(150);await e(`restoreExtension.restoreContext()`);await delay(800);

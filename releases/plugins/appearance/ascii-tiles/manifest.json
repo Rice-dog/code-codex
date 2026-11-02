@@ -3,16 +3,16 @@
   "name": "ASCII Tiles Background",
   "category": "appearance",
   "api": 1,
-  "version": "1.0.7",
-  "releaseTag": "v0.5.15",
+  "version": "1.0.8",
+  "releaseTag": "plugin-assets-2026-11-01",
   "capabilities": [
     "background",
     "preview"
   ],
-  "asset": "CodeCodex-background-ascii-tiles-1.0.7.js",
-  "relativePath": "CodeCodex-background-ascii-tiles-1.0.7.js",
-  "size": 25486,
-  "sha256": "0fb2418cb92a1cf81724f10034881dcafae0e0d6de01d6ef620d1db47869d8da",
+  "asset": "CodeCodex-background-ascii-tiles-1.0.8.js",
+  "relativePath": "CodeCodex-background-ascii-tiles-1.0.8.js",
+  "size": 47714,
+  "sha256": "180b2ceaed686d660e118e406680b07c0c6c259051d9573ae079dfbc8307e202",
   "resources": [],
   "source": "https://github.com/Rice-dog/code-codex"
 }

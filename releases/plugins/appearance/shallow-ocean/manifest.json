@@ -1,0 +1,18 @@
+{
+  "id": "shallow-ocean",
+  "name": "Shallow Ocean Letters Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.17",
+  "releaseTag": "plugin-assets-2026-11-01",
+  "capabilities": [
+    "background",
+    "preview"
+  ],
+  "asset": "CodeCodex-background-shallow-ocean-1.0.17.js",
+  "relativePath": "CodeCodex-background-shallow-ocean-1.0.17.js",
+  "size": 937136,
+  "sha256": "1da590e0c8640ca9c60e1223303eab051c0822c12b631084ad41b0bcb97b7278",
+  "resources": [],
+  "source": "https://github.com/Rice-dog/code-codex"
+}

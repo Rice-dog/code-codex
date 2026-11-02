@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -5,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const root = resolve(import.meta.dirname, '..');
-const tag = 'code-codex-v' + JSON.parse(readFileSync(join(root, 'packages/explorer-ui/package.json'), 'utf8')).version.replaceAll('.', '-');
+const tag = builtExplorerTag(root);
 const home = `<div id="home" data-app-shell-active-page="true" style="display:contents"><div class="_Workspace_new"><header><span data-app-shell-titlebar-content>Home title</span></header><div class="_MainContentClip_new"><main data-app-shell-main-surface="default"><div class="_WorkspaceContent_new"><div data-app-shell-workspace-layout="split"><article data-response-annotation-conversation="thread_home_001">Conversation</article><div data-above-composer-conversation-id="thread_home_001"><textarea>Native draft</textarea></div></div></div></main></div></div></div>`;
 const setup = `
 const calls=[];const listeners=new Set();let changed=false;

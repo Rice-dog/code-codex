@@ -21,7 +21,7 @@ consent. Upgrades preserve the choice; uninstall removes the entry. See
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.5.40-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.5.89-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -41,7 +41,7 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Current release **v0.5.40** includes all retained changes since v0.5.21: consent-based startup recovery, delayed native-page waiting, independent desktop entries, native-style menus/login startup, uninstall lifecycle fixes, localized plugin names and Particle Image rotation recovery. Matching plugin caches remain reusable. Background Enable now adapts to the split official Appearance module, applies the required theme automatically and restores the prior preference on Disable. See the [release notes](releases/README.md) for the full scope and validation limits.
+Current release **v0.5.89** includes all retained changes since the previous public software release, **v0.5.40**: Shallow Ocean Letters, isolated background rendering, opening animations and quality modes, pinned-plugin shortcuts, and broader UI opacity controls. Multi-account Tasks is temporarily hidden and suspended; its implementation and existing data are retained for future restoration. See the [release notes](releases/README.md) for the cumulative scope and verification limits.
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
 
@@ -57,15 +57,15 @@ Download the installer from [latest GitHub Release](https://github.com/Rice-dog/
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.5.40-x64-setup.exe`
-- Alternative: `CodeCodex-0.5.40-x64.msi`
-- Portable package: `CodeCodex-0.5.40-x64.zip`
+- Recommended: `CodeCodex-0.5.89-x64-setup.exe`
+- Alternative: `CodeCodex-0.5.89-x64.msi`
+- Portable package: `CodeCodex-0.5.89-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.5.40-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.5.89-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -110,14 +110,14 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.5.40
+./scripts/package.ps1 -Version 0.5.89
 ```
 
 The generated packages are written to `releases/`.
 
 ## Download all plugins on demand
 
-**All 25 Preview Market plugins are separate downloads**: 14 Appearance plugins, 10 File Preview plugins and one Tools plugin. The core retains the file tree, basic text preview and editing, market and settings framework, permission checks and runtime logs. Actual plugin rendering, format viewers, the startup player and tool implementations are no longer embedded.
+**27 visible Preview Market plugins are separate downloads**:16 Appearance plugins,10 File Preview plugins and one Tools plugin. Multi-account Tasks is retained but hidden and suspended; it starts no selector, quota/assets reads or automatic continuation. Existing account data and preferences remain intact. The core retains the file tree, basic text preview and editing, market and settings framework, permission checks and runtime logs. Actual plugin rendering, format viewers, the startup player and tool implementations are no longer embedded.
 
 In Preview Market, click **Download**, then **Enable** after download and verification complete. The current Codex window can use the plugin immediately, without restarting. Downloading does not automatically enable it or open settings. Configuration is available after the complete package is installed; UI Surface Opacity still requires an actually enabled background.
 
@@ -188,13 +188,13 @@ Welcome preselects Chinese or English from the system language. After installati
 
 - Preview Market groups plugins into Appearance, File Preview, and Tools, and opens on Appearance by default.
 - File Preview independently downloads and enables Markdown, CSV, diagram, image, video, PDF, audio, Jupyter Notebook, Office, and 3D model previews, with all processing performed locally.
-- Appearance includes ten dynamic backgrounds, Transparent Background, UI Surface Opacity and Codex Startup Transition, each downloaded before activation.
+- Appearance includes twelve dynamic backgrounds, Custom Background, Transparent Background, UI Surface Opacity and Codex Startup Transition, each downloaded before activation.
 - Once downloaded and enabled, Git History under Tools shows the current branch, commits, changed files, and colored per-file diffs in read-only mode without repository write operations.
 
 ### Updates and Compatibility
 
 - Click the version number at the bottom of the file tree or choose **Check for Updates…** from the Code-Codex menu to check GitHub for the latest published stable release.
-- Codex Startup Transition supports video or any of the ten dynamic backgrounds, including Particle Image and Pixel Sculpt with their local image libraries. Backgrounds display for at least four seconds, then fade after Codex is ready.
+- Codex Startup Transition supports video or13 background sources, including Shallow Ocean Letters, ASCII Tiles, Custom Background, Particle Image and Pixel Sculpt. Independent copies wait for actual first-frame/native readiness and follow the saved exit settings.
 - Startup failures show the exact failing stage, a stable support code, a suggested action, and buttons to copy or open a redacted local diagnostic report.
 - Codex package versions are diagnostic only; future versions proceed through live protocol and DOM qualification instead of a fixed version allowlist.
 
@@ -216,6 +216,13 @@ The 3D Model Preview plugin provides an interactive view for `.gltf` and `.glb`
 files with orbit, pan, zoom, fit/reset, reference-grid, and animation controls.
 
 ### Appearance Plugins
+
+Shallow Ocean Letters provides interactive water, ten marine model types, a horizontal creature dock, Auto/Low/Medium/High quality modes and collectible random encounters. Finding all encounters unlocks inclusion filters. Reset restores default parameters/residents; Clear marine life is separate. Ocean is also available as a startup source.
+
+Canvas backgrounds use isolated Workers, Glow Horizon uses browser-composited motion, and Custom Background retains native image/video playback. This reduces drawing stalls caused by official menus/buttons; GPU, driver and input delivery remain shared, so no universal frame-rate guarantee is made. Black Hole fades in, Pixel Sculpt opens with falling blocks, and Particle Image avoids source-image flashes and reveals its particles smoothly.
+
+Pinned plugins appear in the file-tree footer and open their settings directly. UI Surface Opacity can adjust the market and parameter panels together and covers change cards, tree icons and the new-chat workspace bar. Multi-account Tasks is currently hidden and fully suspended, with existing implementation/data retained.
+
 
 ![Code-Codex Particle Image Background appearance plugin](docs/screenshots/particle-image-background.png)
 
@@ -328,7 +335,7 @@ Generated build folders such as `target/`, `node_modules/`, `dist/`, and
 
 ## Centralized storage
 
-The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.5.40-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.5.89-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
 
 Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
 

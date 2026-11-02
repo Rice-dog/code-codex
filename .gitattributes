@@ -4,3 +4,9 @@ THIRD_PARTY_LICENSES.txt -text -whitespace
 # Downloadable plugin assets are verified by their exact SHA-256 bytes.
 # Preserve generated bundles, shader text and upstream notices on all platforms.
 releases/plugins/** -text -whitespace
+
+# Frozen per-package legal banners are embedded verbatim into pinned assets.
+resources/plugin-banners/** -text -whitespace
+
+# Preserve the supplied scene's intentional source formatting.
+packages/explorer-ui/plugins/appearance/shallow-ocean/source/reef-ecosystem.js -whitespace

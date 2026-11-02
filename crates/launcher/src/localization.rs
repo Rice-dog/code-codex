@@ -111,6 +111,19 @@ pub(crate) fn text(original: &str) -> String {
         .join("\n")
 }
 
+// PowerShell recognizes ASCII and typographic single quotes as delimiters.
+// Doubling each delimiter preserves catalog text as literal data.
+fn powershell_single_quoted_content(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        escaped.push(ch);
+        if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+            escaped.push(ch);
+        }
+    }
+    escaped
+}
+
 /// Localize only constant WinForms .Text assignments, never script protocol/log tokens.
 pub(crate) fn dialog_script(source: &str) -> String {
     if locale() == Locale::English {
@@ -134,8 +147,8 @@ pub(crate) fn dialog_script(source: &str) -> String {
                 .map(|(original, translated)| {
                     format!(
                         "$script:guidanceTranslations.Add('{}','{}')",
-                        original.replace('\'', "''"),
-                        translated.replace('\'', "''")
+                        powershell_single_quoted_content(original),
+                        powershell_single_quoted_content(translated)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -148,8 +161,8 @@ pub(crate) fn dialog_script(source: &str) -> String {
                 if original.contains(['\n', '\r']) {
                     continue;
                 }
-                let original = original.replace('\'', "''");
-                let translated = translated.replace('\'', "''");
+                let original = powershell_single_quoted_content(original);
+                let translated = powershell_single_quoted_content(translated);
                 result = result.replace(
                     &format!(".Text = '{original}'"),
                     &format!(".Text = '{translated}'"),
@@ -163,6 +176,35 @@ pub(crate) fn dialog_script(source: &str) -> String {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
+    #[test]
+    fn powershell_catalog_literals_escape_all_single_quote_forms() {
+        assert_eq!(powershell_single_quoted_content("a'b‘c’d‚e‛f"), "a''b‘‘c’’d‚‚e‛‛f");
+        assert_eq!(powershell_single_quoted_content("$name `value “text”\n下一行"), "$name `value “text”\n下一行");
+    }
+    #[cfg(windows)]
+    #[test]
+    fn complete_chinese_dialog_parses_and_quote_data_roundtrips() {
+        let directory = tempfile::tempdir().unwrap();
+        let dialog = directory.path().join("localized.ps1");
+        let probe = directory.path().join("probe.ps1");
+        set_session(Locale::Chinese);
+        let localized = dialog_script(include_str!("startup_dialog.ps1"));
+        set_session(Locale::English);
+        let mut dialog_bytes = vec![0xef, 0xbb, 0xbf];
+        dialog_bytes.extend_from_slice(localized.as_bytes());
+        std::fs::write(&dialog, dialog_bytes).unwrap();
+        let value = "a'b‘c’d‚e‛f $name `value “text”\n下一行";
+        let literal = powershell_single_quoted_content(value);
+        let expected = value.encode_utf16().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+        let script = format!("param([string]$Path)\n$tokens=$null;$errors=$null\n$null=[Management.Automation.Language.Parser]::ParseFile($Path,[ref]$tokens,[ref]$errors)\nif($errors.Count){{throw ($errors.Message -join ';')}}\n$value='{literal}'\n$expected=-join ([char[]]@({expected}))\nif($value -cne $expected){{throw 'Catalog literal roundtrip failed'}}\n");
+        let mut bytes = vec![0xef, 0xbb, 0xbf];
+        bytes.extend_from_slice(script.as_bytes());
+        std::fs::write(&probe, bytes).unwrap();
+        let output = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-File"])
+            .arg(&probe).arg(&dialog).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
     #[test]
     fn ordinary_recovery_guidance_localizes_without_changing_protocol_or_evidence() {
         const HELP: &str =

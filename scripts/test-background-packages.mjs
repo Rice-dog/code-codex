@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import {assertCatalogMatchesDeclarations} from './plugin-catalog-contract.mjs';
 import {pluginAssetPath,verifiedPluginSources} from './plugin-package-files.mjs';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import {launchFixture,delay} from './browser-fixture.mjs';
 const root=resolve(import.meta.dirname,'..'),ui=resolve(root,'packages/explorer-ui');
 const catalog=JSON.parse(readFileSync(resolve(ui,'dist/plugins/catalog.json'),'utf8'));
 const version=JSON.parse(readFileSync(resolve(ui,'package.json'),'utf8')).version;
-const tag='code-codex-v'+version.replaceAll('.','-');
+const tag=builtExplorerTag(root);
 const directory=resolve(ui,'dist/plugins');
 for(const p of catalog){for(const asset of [p,...p.resources]){const b=readFileSync(pluginAssetPath(directory,p,asset));assert.equal(b.length,asset.size);assert.equal(createHash('sha256').update(b).digest('hex'),asset.sha256);assert.ok(asset.size<=4*1024*1024);}}
 assertCatalogMatchesDeclarations(catalog,root);assert.ok(readFileSync(resolve(ui,'dist/startup-early.js')).length<40*1024);

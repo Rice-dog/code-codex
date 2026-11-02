@@ -25,8 +25,8 @@ export const filePreviewDefinitions = [
 export async function buildFilePreviewPackages(root,options,outputRoot=resolve(root,'dist/plugins')) {
  const catalog=[];
  const notices=await readFile(resolve(root,'../..','THIRD_PARTY_NOTICES_EN.md'),'utf8');
- const banner=`/*! Code-Codex first-party file preview package.\nSource: https://github.com/Rice-dog/code-codex\n${notices.replaceAll('*/','* /')}\n*/`;
  for(const[id,name,hostId]of filePreviewDefinitions){
+    const banner=await readFile(resolve(root,'../../resources/plugin-banners',id+'.txt'),'utf8');
   const version=sourcePackage(id).version;
   const directory=resolve(outputRoot,'file-preview',id);
   await mkdir(directory,{recursive:true});

@@ -44,6 +44,7 @@ impl BridgeHandler for NativeBridge {
         let result = async {
             self.ensure_epoch(epoch)?;
             match request.method.as_str() {
+                "explorer.accounts.request"=>self.account_request(request.params,epoch).await,
                 "explorer.storage.request" => {
                   let context=crate::renderer_storage::request_context(&request.params);
                   crate::renderer_storage::request(request.params).map_err(|e| {

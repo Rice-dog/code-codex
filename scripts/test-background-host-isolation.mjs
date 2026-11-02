@@ -1,0 +1,17 @@
+import {build} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
+import {launchFixture} from './browser-fixture.mjs';
+import {createServer} from 'node:http';
+import assert from 'node:assert/strict';
+const source=(await build({stdin:{contents:`import {visualState,visualPayload,viewportState} from './core/background-runtime/protocol';import {nativeStructureChanged} from './native-structure-changes';import {observeNativeLogin} from './native-login-observation';window.subject={visualState,visualPayload,viewportState,nativeStructureChanged,observeNativeLogin};`,resolveDir:'packages/explorer-ui/src',loader:'ts'},bundle:true,write:false})).outputFiles[0].text;
+const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><nav data-app-navigation-rail><button>Home</button></nav><main></main><div id="menu" role="menu"></div><div data-code-codex-owned id="owned"></div><script>'+source+'</script>');});await new Promise(r=>server.listen(0,'127.0.0.1',r));const b=await launchFixture(`http://127.0.0.1:${server.address().port}`);let result;
+try{result=await b.evaluate(`(()=>{const s=subject,checks=[];const reject=(name,fn)=>{let rejected=false;try{fn()}catch{rejected=true;}if(!rejected)throw Error(name);checks.push(name);};
+ for(const key of ['token','refreshToken','authorization','cookie','bridge','history','conversation','source','url','path','constructor'])reject('reject '+key,()=>s.visualState({[key]:1}));
+ reject('nonfinite state',()=>s.visualState({x:Infinity}));reject('excessive string',()=>s.visualState('x'.repeat(1025)));reject('bulk budget',()=>s.visualPayload(new Uint8Array(32*1024*1024+1)));reject('aggregate metadata',()=>s.visualPayload(Array(100).fill('x'.repeat(1024))));
+ const v=s.viewportState({width:8000,height:8000,left:0,top:0},3);if(v.width*v.height*v.dpr*v.dpr>16777217)throw Error('pixel budget');checks.push('physical pixel budget');
+ const records=[];const observer=new MutationObserver(()=>{});observer.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true});
+ document.getElementById('menu').innerHTML='<button role="menuitem">Model</button>';document.getElementById('owned').innerHTML='<main><article data-thread-id="plugin-content"></article></main>';
+ if(s.nativeStructureChanged(observer.takeRecords()))throw Error('unrelated native/owned menu invalidated routing');checks.push('menus and owned content do not invalidate routing');
+ const main=document.querySelector('main');main.dataset.threadId='actual-thread';if(!s.nativeStructureChanged(observer.takeRecords()))throw Error('thread identity missed');checks.push('thread identity invalidates');
+ let calls=0;const original=getComputedStyle;window.getComputedStyle=(...args)=>{calls++;return original(...args);};s.observeNativeLogin();const initial=calls;
+ for(let i=0;i<100;i++){document.getElementById('menu').innerHTML='<button>Model '+i+'</button>';s.observeNativeLogin();}if(calls!==initial)throw Error('unrelated menu flushed shell style '+calls);checks.push('100 menu refreshes reuse shell visibility');
+ document.querySelector('nav').style.display='none';s.observeNativeLogin();if(calls===initial)throw Error('relevant visibility not invalidated');checks.push('shell visibility changes invalidate cache');window.getComputedStyle=original;observer.disconnect();return {passed:true,checks,initialStyleReads:initial,unrelatedAdditionalStyleReads:0};})()`);assert(result.passed);console.log(JSON.stringify(result));}finally{await b.close();server.close();}

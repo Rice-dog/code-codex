@@ -1,3 +1,5 @@
+import {workerGLProbe} from './worker-gl-probe.mjs';
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import {pluginAssetPath} from './plugin-package-files.mjs';
 import { installedBackgroundFixture } from './background-package-fixture.mjs';
 import assert from 'node:assert/strict';
@@ -31,7 +33,7 @@ assert.equal(earlyBundle.toString('utf8').split(earlyGate).length, 2, 'actual ea
 const earlyFixture = installedBackgroundFixture(root) + earlyBundle.toString('utf8').replace(earlyGate, 'window===window.top');
 const version = bundle.toString('utf8').match(/current version v(\d+\.\d+\.\d+)/)?.[1];
 assert.ok(version, 'production bundle version found');
-const tag = `code-codex-v${version.replaceAll('.', '-')}`;
+const tag = builtExplorerTag(root);
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const seamEntry = `import { STARTUP_BACKGROUNDS, mountStartupBackground } from './startup-background';
 import { mountStartupTransition } from './startup-transition';
@@ -49,7 +51,8 @@ const seam = buildSync({
 }).outputFiles[0].text;
 writeFileSync(join(directory, 'source-entry.txt'), seamEntry);
 const home = `<nav data-app-navigation-rail="true"><button data-sidebar-destination="builtin:home" aria-current="page">Home</button></nav><button hidden data-app-shell-sidebar-trigger></button><div data-app-shell-workspace-row="true"><aside class="app-shell-left-panel"><div class="sidebar-navigation"><button data-app-action-sidebar-thread-active="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-kind="local" data-app-action-sidebar-thread-id="local:thread_image_background_fixture">Fixture project</button></div></aside><div data-app-shell-active-page="true" style="display:contents"><div class="_Workspace_fixture" data-app-shell-page-surface="true"><header data-app-shell-titlebar="true"><span data-app-shell-titlebar-content>Fixture conversation</span></header><div class="_MainContentClip_fixture"><main data-app-shell-main-surface="default"><div class="_WorkspaceContent_fixture"><article data-response-annotation-conversation="thread_image_background_fixture">Fixture contents</article><div data-thread-scroll-footer="true"><div data-above-composer-conversation-id="thread_image_background_fixture"></div><form data-codex-composer><textarea aria-label="Message"></textarea><button>Send</button></form></div></div></main></div></div></div></div>`;
-const instrumentation = `
+const instrumentation = `${workerGLProbe}
+
 window.fixtureErrors=[];window.fixtureDraws={};window.fixtureUniforms={};window.fixtureURLs=new Set();window.fixtureErrorsBySource={};window.fixturePixelSamples={};
 addEventListener('error',e=>fixtureErrors.push(e.message));addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
 const createURL=URL.createObjectURL.bind(URL),revokeURL=URL.revokeObjectURL.bind(URL);
@@ -120,7 +123,8 @@ try{
   check('optimized default preserves the original flower image composition',provenance,provenance.startup.width===512&&provenance.startup.height===512&&provenance.meanRGBError<15);
   const seeded=await evaluate('fixtureStorageSnapshot()');
   const catalog=await evaluate('imageStartupFixture.STARTUP_BACKGROUNDS');
-  check('startup catalog contains ten unique sources including both image backgrounds',catalog,catalog.length===10&&new Set(catalog.map(([id])=>id)).size===10&&['particle-image','pixel-sculpt'].every(id=>catalog.some(([value])=>id===value)));
+  const expectedSourceIds=[...packageCatalog.filter(p=>p.capabilities.includes('background')&&p.capabilities.includes('startup')).map(p=>p.id),'ascii-tiles'];
+  check('startup catalog includes all declared sources and the legacy ASCII startup factory',catalog,new Set(catalog.map(([id])=>id)).size===expectedSourceIds.length&&expectedSourceIds.every(id=>catalog.some(([value])=>id===value)));
   for(const id of ['particle-image','pixel-sculpt']){
     await evaluate(`(()=>{const target=document.createElement('div');target.className='test-source';target.dataset.fixtureCase=${JSON.stringify(id)};document.body.append(target);window.fixtureTarget=target;window.sourceErrors=[];window.renderer=imageStartupFixture.mountStartupBackground(target,${JSON.stringify(id)},message=>{if(message)sourceErrors.push(message)});window.sourceReady=false;window.sourceError=null;window.sourceDrawsAtReady=0;Promise.resolve(renderer.ready).then(()=>{sourceDrawsAtReady=fixtureDraws[${JSON.stringify(id)}]??0;sourceReady=true},error=>sourceError=String(error));window.immediateSourceState={ready:sourceReady,draws:fixtureDraws[${JSON.stringify(id)}]??0,error:sourceError}})()`);
     const immediate=await evaluate('immediateSourceState');
@@ -171,8 +175,9 @@ try{
   await navigate('/ui');
   const shadow=`document.querySelector('${tag}').shadowRoot`;
   await evaluate(`(()=>{const e=document.querySelector('${tag}');e.openPreviewMarket();${shadow}.querySelector('[data-appearance-plugin="code-codex.startup-transition"]').scrollIntoView({block:'center'});${shadow}.querySelector('.startupTransition-settings-trigger').click()})()`);await delay(250);
-  const market=await evaluate(`(()=>{const s=${shadow};return {market:[...s.querySelectorAll('[data-appearance-plugin] h4')].map(e=>e.textContent).filter(name=>name.endsWith(' Background')&&name!=='Transparent Background'&&name!=='Custom Background'),options:[...s.querySelector('#cle-startupTransition-background').options].map(o=>({id:o.value,name:o.textContent}))}})()`);
-  check('real startup selector matches every startup-capable Preview Market background (Custom has no startup capability)',market,market.market.length===10&&market.options.length===10&&market.market.every(name=>market.options.some(option=>option.name===name)));
+  const expectedSourceNames=packageCatalog.filter(p=>expectedSourceIds.includes(p.id)).map(p=>p.name);
+  const market=await evaluate(`(()=>{const s=${shadow};return {market:[...s.querySelectorAll('[data-appearance-plugin] h4')].map(e=>e.textContent).filter(name=>name.endsWith(' Background')&&name!=='Transparent Background'),options:[...s.querySelector('#cle-startupTransition-background').options].map(o=>({id:o.value,name:o.textContent}))}})()`);
+  check('real startup selector matches current declared and legacy ASCII sources including Custom',market,market.options.length===expectedSourceIds.length&&expectedSourceNames.every(name=>market.market.includes(name))&&expectedSourceIds.every(id=>market.options.some(option=>option.id===id))&&market.options.every(option=>market.market.includes(option.name)));
   const uiSettingsBefore=await evaluate('fixtureStorageSnapshot()');
   for(const id of ['particle-image','pixel-sculpt']){
     await evaluate(`(()=>{const s=${shadow},source=s.querySelector('#cle-startupTransition-source'),select=s.querySelector('#cle-startupTransition-background');source.value='background';source.dispatchEvent(new Event('change',{bubbles:true}));select.value=${JSON.stringify(id)};select.dispatchEvent(new Event('change',{bubbles:true}))})()`);await delay(1500);
@@ -237,7 +242,7 @@ try{
   check('corrupt Particle image reports decoding failure and releases startup',corrupt,corrupt.settled&&!corrupt.controller&&!corrupt.host&&!corrupt.held&&corrupt.urls===0&&corrupt.failures.some(e=>e.action==='background renderer'&&e.details.reason));
   await errors('corrupt media');
   await navigate('/bare');
-  await evaluate(`(()=>{const context=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl2'?null:context.call(this,type,...args)};localStorage.setItem('code-codex:startup-transition:v1',JSON.stringify({enabled:true,source:'background',backgroundId:'pixel-sculpt'}));window.gpuDone=false;window.gpuController=null;imageStartupFixture.startEarlyStartupTransition().then(c=>{gpuController=c;gpuDone=true},()=>gpuDone=true)})()`);
+  await evaluate(`(()=>{const context=HTMLCanvasElement.prototype.getContext;window.fixtureBlockWebgl2=true;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl2'?null:context.call(this,type,...args)};localStorage.setItem('code-codex:startup-transition:v1',JSON.stringify({enabled:true,source:'background',backgroundId:'pixel-sculpt'}));window.gpuDone=false;window.gpuController=null;imageStartupFixture.startEarlyStartupTransition().then(c=>{gpuController=c;gpuDone=true},()=>gpuDone=true)})()`);
   for(let i=0;i<100&&!(await evaluate('gpuDone'));i++)await delay(50);
   const gpu=await evaluate(`({settled:gpuDone,controller:!!gpuController,host:!!document.querySelector('body>.code-codex-startup-host'),held:window[Symbol.for('code-codex:background-startup-hold:v1')]?.active,failures:(window[Symbol.for('code-codex:runtime-events:v1')]?.events??[]).filter(e=>e.outcome==='failed')})`);
   check('Pixel unsupported WebGL2 reports failure and cannot trap startup',gpu,gpu.settled&&!gpu.controller&&!gpu.host&&!gpu.held&&gpu.failures.some(e=>e.action==='background renderer'&&e.details.reason));

@@ -8,7 +8,7 @@ $source = [IO.File]::ReadAllText((Join-Path $repo 'installer/Finalize-Uninstall.
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Finalizer syntax invalid'}
-$required=@('Get-CodeCodexVersionedRootLaunchers','Test-CodeCodexApplicationFiles','Test-CodeCodexRemovalComplete','Remove-CodeCodexEmptyRoot','Remove-CodeCodexApplicationFiles','Remove-SafeTree','Assert-AllowedUninstallPath','Test-ReparsePoint','Get-ExistingItem','Remove-ReparsePoint')
+$required=@('Get-CodeCodexVersionedRootLaunchers','Test-CodeCodexApplicationFiles','Test-CodeCodexRemovalComplete','Remove-CodeCodexEmptyRoot','Remove-CodeCodexAccountCredentials','Remove-CodeCodexApplicationFiles','Remove-SafeTree','Assert-AllowedUninstallPath','Test-ReparsePoint','Get-ExistingItem','Remove-ReparsePoint')
 foreach($name in $required){
  $node=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true)|Where-Object Name -eq $name
  if(@($node).Count -ne 1){throw "Missing/duplicate function $name"}

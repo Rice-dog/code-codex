@@ -7,7 +7,9 @@ export const MASK_REGIONS = [
   {key:"navigation", zh:"最左侧导航栏", en:"Navigation rail", value:66},
   {key:"sidebar", zh:"任务与项目选择栏", en:"Tasks and projects", value:66},
   {key:"tree", zh:"文件树", en:"File tree", value:68},
+  {key:"market", zh:"插件市场与面板", en:"Plugin market and panels", value:85},
   {key:"conversation", zh:"对话区", en:"Conversation", value:58},
+  {key:"changes", zh:"文件改动卡片", en:"File change cards", value:85},
   {key:"preview", zh:"文件预览区", en:"File preview", value:58},
   {key:"tabs", zh:"顶部菜单栏", en:"Top menu bar", value:78},
   {key:"composer", zh:"消息输入框", en:"Message composer", value:86},
@@ -42,6 +44,8 @@ export class SurfaceOpacityPlugin {
   #observer: MutationObserver | undefined;
   #styleObserver:MutationObserver|undefined;
   #styleFrame:number|undefined;
+  #previewHosts=new Set<Element>();
+  #styledPreviews=new WeakSet<ShadowRoot>();
   #bound = false;
   #ownsPresentation = false;
   constructor(private readonly shadow: ShadowRoot, private readonly text: (zh:string,en:string)=>string, private readonly notice:(message:string)=>void) {}
@@ -78,7 +82,11 @@ export class SurfaceOpacityPlugin {
     this.#observer?.disconnect();
     this.#observer=new MutationObserver(()=>this.render());
     this.#observer.observe(document.documentElement,{attributes:true,attributeFilter:BACKGROUND_ATTRIBUTES});
-    this.#styleObserver?.disconnect();this.#styleObserver=new MutationObserver(()=>{if(this.#styleFrame!==undefined)return;this.#styleFrame=requestAnimationFrame(()=>{this.#styleFrame=undefined;this.#installStyles();});});
+    this.#styleObserver?.disconnect();this.#styleObserver=new MutationObserver(records=>{
+      for(const record of records)for(const node of record.addedNodes)this.#findPreviews(node);
+      if(!this.#previewHosts.size||this.#styleFrame!==undefined)return;
+      this.#styleFrame=requestAnimationFrame(()=>{this.#styleFrame=undefined;this.#flushPreviews();});
+    });
     this.#styleObserver.observe(document.body,{childList:true,subtree:true});
     this.render();
   }
@@ -86,7 +94,20 @@ export class SurfaceOpacityPlugin {
     const add=(root:Document|ShadowRoot,key:string,text:string)=>{let style=root.querySelector<HTMLStyleElement>('style[data-code-codex-plugin-style="'+key+'"]');if(!style){style=document.createElement('style');style.dataset.codeCodexPluginStyle=key;(root instanceof Document?root.head:root).append(style);}if(style.textContent!==text)style.textContent=text;};
     add(document,'surface-opacity-native',SURFACE_OPACITY_NATIVE_CSS);
     add(this.shadow,'surface-opacity-tree',SURFACE_OPACITY_TREE_CSS);
-    for(const el of document.querySelectorAll('*'))if(el.localName.startsWith('code-codex-main-preview-')&&el.shadowRoot)add(el.shadowRoot,'surface-opacity-preview',SURFACE_OPACITY_PREVIEW_CSS);
+    this.#findPreviews(document.body);this.#flushPreviews();
+  }
+  #findPreviews(node:Node):void{
+    if(!(node instanceof Element))return;
+    const inspect=(el:Element)=>{if(el.localName.startsWith('code-codex-main-preview-')&&(!el.shadowRoot||!this.#styledPreviews.has(el.shadowRoot)))this.#previewHosts.add(el);};
+    inspect(node);for(const child of node.querySelectorAll('*'))inspect(child);
+  }
+  #flushPreviews():void{
+    for(const el of this.#previewHosts){const root=el.shadowRoot;if(!el.isConnected||!root||this.#styledPreviews.has(root))continue;
+      let style=root.querySelector<HTMLStyleElement>('style[data-code-codex-plugin-style="surface-opacity-preview"]');
+      if(!style){style=document.createElement('style');style.dataset.codeCodexPluginStyle='surface-opacity-preview';root.append(style);}
+      if(style.textContent!==SURFACE_OPACITY_PREVIEW_CSS)style.textContent=SURFACE_OPACITY_PREVIEW_CSS;
+      this.#styledPreviews.add(root);
+    }this.#previewHosts.clear();
   }
   #save():void {
     sessionPreferences={enabled:this.#preferences.enabled,values:{...this.#preferences.values}};
@@ -132,13 +153,34 @@ export class SurfaceOpacityPlugin {
   }
   containsEvent(event:Event):boolean {return event.composedPath().includes(this.#element('.surface-opacity-panel'))||event.composedPath().includes(this.#element('.surface-opacity-settings-trigger'));}
   close():void {const panel=this.#element('.surface-opacity-panel');if(panel.matches(':popover-open'))panel.hidePopover();}
-  stop():void {this.close();this.#observer?.disconnect();this.#observer=undefined;this.#styleObserver?.disconnect();this.#styleObserver=undefined;if(this.#styleFrame!==undefined)cancelAnimationFrame(this.#styleFrame);this.#styleFrame=undefined;if(this.#ownsPresentation){document.documentElement.removeAttribute(ACTIVE_ATTRIBUTE);for(const r of MASK_REGIONS)document.documentElement.style.removeProperty('--code-codex-mask-'+r.key);this.#ownsPresentation=false;}}
+  stop():void {this.close();this.#observer?.disconnect();this.#observer=undefined;this.#styleObserver?.disconnect();this.#styleObserver=undefined;if(this.#styleFrame!==undefined)cancelAnimationFrame(this.#styleFrame);this.#styleFrame=undefined;this.#previewHosts.clear();if(this.#ownsPresentation){document.documentElement.removeAttribute(ACTIVE_ATTRIBUTE);for(const r of MASK_REGIONS)document.documentElement.style.removeProperty('--code-codex-mask-'+r.key);this.#ownsPresentation=false;}}
 }
 
 export const SURFACE_OPACITY_NATIVE_CSS = `
 html[data-code-codex-ui-mask-active] body nav[data-app-navigation-rail] { background-color:rgba(16,17,20,var(--code-codex-mask-navigation)) !important; }
 html[data-code-codex-ui-mask-active][data-code-codex-ui-mask-active] body :is(aside.app-shell-left-panel,aside[data-testid="app-shell-floating-left-panel"]) { background-color:rgba(16,17,20,var(--code-codex-mask-sidebar)) !important; }
 html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) { background-color:rgba(11,12,15,var(--code-codex-mask-conversation)) !important; }
+/* Native turn-diff cards own one background, independently of conversation.
+ * Match the observed semantic group token, not localized titles or hashes.
+ * File rows and expanded diff backings must not compound the card alpha.
+ * Icon tiles share this single backing; glyphs, actions and focus stay native. */
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) {
+  background-color:color-mix(in srgb,var(--color-surface-elevated-secondary,rgb(30,31,35)) calc(var(--code-codex-mask-changes) * 100%),transparent) !important;
+  background-image:none !important;
+}
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) > [class*="--codex-diffs-surface-override:"] {
+  --codex-diffs-surface-override:transparent !important;
+}
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [class~="group/turn-diff-header"] > span > span[class~="size-10"]:has(> svg) {
+  background-color:transparent !important;
+  background-image:none !important;
+}
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) [class~="group/turn-diff-file-row"] > .contents > button {
+  background-color:transparent !important;
+}
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) [class~="group/turn-diff-file-row"] > .contents > button:hover {
+  background-color:color-mix(in srgb,var(--color-background-primary-ghost-hover,rgba(128,128,128,.12)) 60%,transparent) !important;
+}
 /* Conversation already has one continuous mask. Native scroll-edge helpers
  * otherwise add an opaque theme surface/gradient over it, even at zero.
  * Keep their geometry and hit testing, but let the conversation mask paint
@@ -182,11 +224,35 @@ html[data-code-codex-ui-mask-active] body :is(
   [data-composer-layout]:not([data-composer-utility-bar-variant="home"]),
   [data-composer-utility-bar-variant="home"] [class*="ComposerLayoutBody"]
 ) { background-color:rgba(30,31,35,var(--code-codex-mask-composer)) !important; }
+/* Home places its project/location rail above and outside the input layout.
+ * Paint its independent backing once, sharing the existing composer alpha. */
+html[data-code-codex-ui-mask-active] body [data-composer-placement="home"] [data-composer-utility-rail][data-composer-rail-placement="above"][data-composer-rail-contained] {
+  background-color:rgba(30,31,35,var(--code-codex-mask-composer)) !important;
+  background-image:none !important;
+}
 html[data-code-codex-ui-mask-active] body [data-code-codex-login-surface] { background-color:rgba(11,12,15,var(--code-codex-mask-login)) !important; }
 `;
 
 export const SURFACE_OPACITY_TREE_CSS = `
+/* Each market or settings popover paints one mask. Nested structural backings
+ * reveal it instead of multiplying alpha; foreground and controls stay native.
+ * Extra active-attribute specificity beats the host's background-plugin rules. */
+:host-context(html[data-code-codex-ui-mask-active][data-code-codex-ui-mask-active]) :is(.preview-market-popover,.particle-settings-panel),
+:host-context(html[data-code-codex-ui-mask-active][data-code-codex-ui-mask-active]) .preview-market-popover::after,
+:host-context(html[data-code-codex-ui-mask-active][data-code-codex-ui-mask-active]) .particle-settings-panel::before {
+  background-color:color-mix(in srgb,var(--cle-paper-raised) calc(var(--code-codex-mask-market) * 100%),transparent) !important;
+  background-image:none !important;
+}
+:host-context(html[data-code-codex-ui-mask-active][data-code-codex-ui-mask-active]) .preview-market-popover :is(.preview-extension,.preview-market-header,.preview-market-list),
+:host-context(html[data-code-codex-ui-mask-active][data-code-codex-ui-mask-active]) .particle-settings-panel :is(.particle-settings-header,.particle-settings-scroll,.particle-settings-group,.ocean-creature-card,.accounts-connection) {
+  background-color:transparent !important;
+  background-image:none !important;
+}
 :host-context(html[data-code-codex-ui-mask-active]) .frame { background-color:rgba(16,17,20,var(--code-codex-mask-tree)) !important; }
+/* Folder status backing inherits the frame's single tree alpha; preserve the SVG. */
+:host([data-state="no-project"]):host-context(html[data-code-codex-ui-mask-active]) .state-mark,
+:host([data-state="empty"]):host-context(html[data-code-codex-ui-mask-active]) .state-mark { background-color:transparent !important; background-image:none !important; }
+
 :host-context(html[data-code-codex-ui-mask-active]) :is(.masthead,.statusbar,.file-search-toolbar,.tree-shell,.file-filter) { background-color:transparent !important; }
 .surface-opacity-row { grid-template-columns:minmax(92px,1fr) minmax(60px,1fr) 42px 24px; }
 .surface-opacity-row button {border:1px solid var(--cle-rule);border-radius:4px;background:var(--cle-paper);color:var(--cle-ink);height:24px;padding:0;cursor:pointer;font:inherit;}

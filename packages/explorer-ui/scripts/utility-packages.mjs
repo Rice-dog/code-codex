@@ -6,6 +6,7 @@ import {resolve} from 'node:path';
 
 export async function buildUtilityPackages(root,options,outputRoot=resolve(root,'dist/plugins')){
   const definitions=[
+    ['multi-account','Multi-account Tasks','developer-tools','multi-account-runtime'],
     ['surface-opacity','UI Surface Opacity','appearance','surface-opacity-runtime'],
     ['transparent-background','Transparent Background','appearance','transparent-background-runtime'],
     ['git-history','Git History','developer-tools','git-history-runtime'],

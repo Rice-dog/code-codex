@@ -1,5 +1,6 @@
 import { getLocale, selectLanguage, subscribeLanguage, translate, t } from './i18n';
 import { icons } from './icons';
+import {nativeMenuCheckSvg} from './components/menu-check';
 import type { LoginStartupActions } from './contracts/login-startup';
 import { LoginStartupController } from './features/startup/login-startup';
 
@@ -105,7 +106,8 @@ ${MENU_POPUP_SELECTOR} > [data-code-codex-login-startup] {
   justify-content: space-between;
   gap: 16px;
 }
-[data-code-codex-menu-check] { margin-inline-start: auto; font: inherit; }
+[data-code-codex-menu-check] { display:inline-flex; align-items:center; flex:none; width:17px; height:17px; margin-inline-start:auto; }
+[data-code-codex-application-menu-popup] > button[role="menuitemradio"] { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 [data-code-codex-menu-check][hidden] { display: none; }
 ${MENU_POPUP_SELECTOR} > button:disabled { opacity: .6; cursor: default; }
 [data-code-codex-submenu-chevron] {
@@ -270,7 +272,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     for(const [item,key] of [[marketItem,'menu.market'],[runtimeItem,'menu.runtime'],[installationItem,'menu.installation'],[updateItem,'menu.updates'],[repositoryItem,'menu.repository'],[uninstallItem,'menu.uninstall']] as const)item.textContent=t(key);
     languageLabel.textContent=t('menu.language');
     languagePopup.setAttribute('aria-label',t('menu.language'));
-    for(const button of languageOptions){const checked=button.dataset.locale===getLocale();button.setAttribute('aria-checked',String(checked));button.textContent=(checked?'✓  ':'　 ')+button.dataset.languageLabel;}
+    for(const button of languageOptions){const checked=button.dataset.locale===getLocale();button.setAttribute('aria-checked',String(checked));const label=document.createElement('span');label.textContent=button.dataset.languageLabel!;const check=document.createElement('span');check.dataset.codeCodexMenuCheck='true';check.setAttribute('aria-hidden','true');check.innerHTML=nativeMenuCheckSvg;check.style.visibility=checked?'visible':'hidden';button.replaceChildren(label,check);}
   };
   const unsubscribe=subscribeLanguage(()=>{updateText();position();});
   const closeSub=()=>{languagePopup.hidden=true;languageItem.setAttribute('aria-expanded','false');};

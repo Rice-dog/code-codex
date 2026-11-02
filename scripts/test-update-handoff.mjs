@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createServer} from 'node:http';
@@ -26,7 +27,7 @@ const server=createServer((req,res)=>{
  res.end(html);
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;const checks=[];
-const shell=`document.querySelector('code-codex-v${version.replaceAll('.','-')}').shadowRoot`;
+const shell=`document.querySelector('${builtExplorerTag(root)}').shadowRoot`;
 const e=s=>browser.evaluate(s),wait=async(s,label)=>{for(let i=0;i<500;i++){try{if(await e(s))return}catch{}await delay(35)}throw Error(label)};
 const notice=`${shell}.querySelector('.action-notice')`;
 async function open(mode){await browser.command('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/?case=${mode}`});await wait(`${shell}.querySelector('.status-code').dataset.updateState==='updateAvailable'`,'update available');await e(`${shell}.querySelector('.status-code').click();${shell}.querySelector('.update-install').click()`);}
