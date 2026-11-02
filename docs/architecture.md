@@ -20,7 +20,6 @@ The application composition wires capabilities together. Feature controllers own
 | Plugin panel exclusion | `src/core/lifecycle/panel-coordinator.ts` | Close-by-owner callbacks; no sibling controller objects |
 | Per-plugin settings and media | `src/features/plugin-settings/`, `plugins/appearance/custom-background/` | Own state, shared markup/styles and host appearance commands |
 | Native protocol, authorization and process lifecycle | `crates/cdp-client/`, `crates/launcher/src/bridge/`, launcher platform/app modules | Existing API1/RPC/authentication, path and size budgets remain authoritative |
-| Optional multi-account execution | `src/features/accounts/`, `src/host/bridge/accounts.ts`, `crates/launcher/src/accounts/` | Temporarily suspended by core availability policy: no runtime/selector/queries/continuation. Retained capability-qualified native adapters keep owner-scoped credentials and one official history per conversation. See [retained implementation](multi-account.md). |
 | Plugin distribution | `resources/plugin-definitions.json`, `resources/plugin-distribution.lock.json` | Application version never supplies an unchanged plugin's URL |
 | Install/remove workers | `installer/src/` and `scripts/generate-installer.mjs` | Edit templates, generate standalone workers, verify protocol and storage boundaries |
 
