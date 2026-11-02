@@ -2,13 +2,15 @@ import {parameterLanguage,subscribeLanguage} from '../i18n';
 import {runtimeEvent} from '../runtime-events';
 
 export const PLUGIN_PINS_KEY='code-codex:plugin-pins:v1';
-const changed='code-codex:plugin-pins-changed';
+export const PLUGIN_PINS_CHANGED='code-codex:plugin-pins-changed';
+const changed=PLUGIN_PINS_CHANGED;
 const icon='<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M5 2h6l-1 4 2 3v1H4V9l2-3zM8 10v4"/></svg>';
 export function normalizePluginPins(raw:unknown):string[]{
  if(!Array.isArray(raw))return [];
  return [...new Set(raw.filter((x):x is string=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,79}$/.test(x)))].slice(0,128);
 }
-function read():string[]{try{return normalizePluginPins(JSON.parse(localStorage.getItem(PLUGIN_PINS_KEY)??'[]'));}catch{return [];}}
+export function readPluginPins():string[]{try{return normalizePluginPins(JSON.parse(localStorage.getItem(PLUGIN_PINS_KEY)??'[]'));}catch{return [];}}
+const read=readPluginPins;
 
 /** Reorder existing nodes per category. No download, enabled-state or renderer ownership. */
 export function attachPluginPins(root:ShadowRoot):()=>void {

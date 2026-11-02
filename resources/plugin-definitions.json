@@ -6,8 +6,8 @@
       "name": "Glow Horizon Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.0",
-      "releaseTag": "v0.3.96",
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -19,8 +19,8 @@
       "name": "Black Hole Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.0",
-      "releaseTag": "v0.3.96",
+      "version": "1.0.6",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -32,8 +32,8 @@
       "name": "Heavenly Cloud Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.0",
-      "releaseTag": "v0.3.96",
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -45,8 +45,8 @@
       "name": "Aurora Ionosphere Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.0",
-      "releaseTag": "v0.3.96",
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -58,8 +58,8 @@
       "name": "Milky Way Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.0",
-      "releaseTag": "v0.3.96",
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -71,8 +71,8 @@
       "name": "Layered Mountain Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.0",
-      "releaseTag": "v0.3.96",
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -84,8 +84,8 @@
       "name": "Cloud Train Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.0",
-      "releaseTag": "v0.3.96",
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -97,8 +97,8 @@
       "name": "Blinking Squares Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.0",
-      "releaseTag": "v0.3.96",
+      "version": "1.0.1",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -110,8 +110,8 @@
       "name": "Particle Image Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.3",
-      "releaseTag": "plugin-assets-2026-10-18",
+      "version": "1.0.5",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -123,8 +123,8 @@
       "name": "Pixel Sculpt Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.10",
-      "releaseTag": "plugin-assets-2026-10-18",
+      "version": "1.0.13",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "startup",
@@ -136,8 +136,8 @@
       "name": "Custom Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.10",
-      "releaseTag": "v0.5.19",
+      "version": "1.0.11",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "local-media",
@@ -151,8 +151,8 @@
       "name": "UI Surface Opacity",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.6",
-      "releaseTag": "v0.5.18",
+      "version": "1.0.12",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "appearance"
       ]
@@ -184,8 +184,8 @@
       "name": "Codex Startup Transition",
       "category": "appearance",
       "api": 1,
-      "version": "1.1.27",
-      "releaseTag": "v0.5.19",
+      "version": "1.1.32",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "startup",
         "preview",
@@ -307,11 +307,34 @@
       "name": "ASCII Tiles Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.7",
-      "releaseTag": "v0.5.15",
+      "version": "1.0.8",
+      "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
         "preview"
+      ]
+    },
+    {
+      "id": "shallow-ocean",
+      "name": "Shallow Ocean Letters Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.17",
+      "releaseTag": "plugin-assets-2026-11-01",
+      "capabilities": [
+        "background",
+        "preview"
+      ]
+    },
+    {
+      "id": "multi-account",
+      "name": "Multi-account Tasks",
+      "category": "developer-tools",
+      "api": 1,
+      "version": "1.0.65",
+      "releaseTag": "plugin-assets-2026-11-01",
+      "capabilities": [
+        "developer-tools"
       ]
     }
   ]

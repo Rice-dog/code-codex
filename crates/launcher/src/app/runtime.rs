@@ -563,6 +563,9 @@ pub(super) async fn attach(args: AttachArgs) -> Result<(), AppError> {
 }
 
 pub(super) async fn activate(args: ActivateArgs) -> Result<(), AppError> {
+    if crate::activation_lifetime::delegate_if_job_owned(args.activation_worker).await? {
+        return Ok(());
+    }
     record_startup_event(
         "discovery",
         "finding official Codex installation for activation",
@@ -789,6 +792,7 @@ pub(super) async fn supervise(
     cancellation: CancellationToken,
 ) -> Result<(), AppError> {
     let mut options = SupervisorOptions::for_endpoint(endpoint);
+    bridge.connect_accounts(endpoint);
     options.target_filter.allow_any_page = allow_any_page;
     options.idle_policy = idle_policy;
     options.startup_timeout = startup_timeout_for_idle_policy(idle_policy);

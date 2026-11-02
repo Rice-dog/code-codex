@@ -27,7 +27,7 @@ export async function launchFixture(url){
     await delay(50);
   }
   if(!loaded){await command('Browser.close').catch(()=>{});socket.close();if(process.exitCode===null)process.kill();throw Error('Fixture navigation did not finish: '+expected);}
-  return {pid:process.pid,command,async evaluate(expression){const r=await command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;},async close(){
+  return {pid:process.pid,command,onEvent(listener){const handler=e=>{const m=JSON.parse(e.data);if(m.method)listener(m);};socket.addEventListener('message',handler);return ()=>socket.removeEventListener('message',handler);},async evaluate(expression){const r=await command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;},async close(){
     await command('Browser.close').catch(()=>{});socket.close();
     if(process.exitCode===null)process.kill();
     for(let i=0;i<40&&process.exitCode===null;i++)await delay(50);

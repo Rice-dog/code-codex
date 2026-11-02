@@ -122,6 +122,8 @@ export class PixelSculptBackgroundController {
       document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
       document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, "#02090d");
       this.#renderer.setActive(true, this.#settings);
+      this.#renderer.resumeOpening();
+      await this.#renderer.firstFrame;
       if (this.#disposed || generation !== this.#generation) return;
       this.#enabled = true;
       this.#observeCodexTheme();

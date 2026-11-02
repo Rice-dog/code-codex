@@ -9,6 +9,7 @@ function state(): HoldState {
   return (shared[KEY] ??= { active: false, layers: new Set(), next: -1, pending: new Map(), painted: new WeakSet(), openings: new WeakMap() }) as HoldState;
 }
 function layerOf(target: Element): Element | null { return target.closest('[data-code-codex-particle-layer]'); }
+export function backgroundStartupHeld(target:Element):boolean{return !!layerOf(target)&&state().active;}
 
 /** Applies only to the main background, never the splash or settings preview. */
 export function registerBackgroundOpening(target: Element, opening: Opening): void {
@@ -22,6 +23,7 @@ export function setStartupBackgroundHold(active: boolean): void {
   const s = state();
   if (s.active === active) return;
   s.active = active;
+  window.dispatchEvent(new Event('code-codex:background-hold-changed'));
   runtimeEvent('background-opening', 'startup hold', active ? 'started' : 'released', { pendingFrames: s.pending.size });
   if (active) { s.painted = new WeakSet(); return; }
   const layers = new Set([...s.layers, ...[...s.pending.values()].map(p => p.layer)]);

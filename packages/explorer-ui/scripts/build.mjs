@@ -4,7 +4,7 @@ import {checkCatalogs} from '../../../scripts/check-i18n.mjs';
 checkCatalogs();
 import { build, context } from "esbuild";
 import { createHash } from "node:crypto";
-import { mkdir, copyFile, readFile, writeFile } from "node:fs/promises";
+import { mkdir, copyFile, readFile, writeFile, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,7 +68,10 @@ const options = {
   charset: "utf8",
   legalComments: "none",
   logLevel: "info",
-  plugins: [browserStreamShim],
+  plugins: [browserStreamShim, {
+    name: 'normalized-shader-text',
+    setup(builder) { builder.onLoad({filter:/\.(frag|vert|glsl)$/},async args=>({contents:(await readFile(args.path,'utf8')).replaceAll('\r\n','\n'),loader:'text'})); },
+  }],
   define: {
     __CODE_CODEX_VERSION__: JSON.stringify(uiManifest.version),
     __CODE_CODEX_PPT_WORKER_SOURCE__: JSON.stringify(legacyPowerPointWorker),
@@ -113,6 +116,14 @@ for(const plugin of currentCatalog){const key=`plugin.name.${plugin.id}`;if(disp
 // Define optional example data only for the core, after pinned plugins and early loader.
 // Object-valued defines can perturb minifier identifiers even in unrelated builds.
 options.define.__CODE_CODEX_STARTUP_EXAMPLES__ = JSON.stringify(JSON.parse(await readFile(resolve(root,"../../resources/startup-examples/catalog.json"),"utf8")));
+// Same product version can contain a new UI build. Custom elements cannot be
+// redefined, so use a content identity without changing the visible version.
+const uiIdentity=createHash('sha256').update(JSON.stringify(pluginCatalog));
+async function hashUiTree(directory){for(const item of (await readdir(directory,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){const path=resolve(directory,item.name);if(item.isDirectory())await hashUiTree(path);else{uiIdentity.update(path.slice(root.length));uiIdentity.update(await readFile(path));}}}
+await hashUiTree(resolve(root,'src'));uiIdentity.update(await readFile(fileURLToPath(import.meta.url)));
+const uiBuildId=uiIdentity.digest('hex').slice(0,12);
+options.define.__CODE_CODEX_BUILD_ID__=JSON.stringify(uiBuildId);
+await writeFile(resolve(root,'dist/ui-build.json'),JSON.stringify({version:uiManifest.version,buildId:uiBuildId})+'\n');
 if (watch) {
   const injector = await context({
     ...options,

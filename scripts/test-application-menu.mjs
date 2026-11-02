@@ -38,7 +38,7 @@ try{
  await check('Left arrow returns to last native menu',`popup.hidden&&help.getAttribute('aria-expanded')==='true'`);
  await ev(`closeNative();trigger.click();${settle}`);
  await check('Default off; refresh never registers startup',`item.getAttribute('aria-checked')==='false'&&!item.disabled&&fixture.writes.length===0`);
- await check('Checkbox has a normal right-side check and no leading spacer',`item.getAttribute('role')==='menuitemcheckbox'&&item.lastElementChild.dataset.codeCodexMenuCheck==='true'&&item.lastElementChild.textContent==='✓'&&item.lastElementChild.hidden&&item.firstElementChild.textContent==='Start Code-Codex when I sign in'&&item.firstElementChild.getBoundingClientRect().left===popup.firstElementChild.getBoundingClientRect().left+16`);
+ await check('Checkbox has a normal right-side check and no leading spacer',`item.getAttribute('role')==='menuitemcheckbox'&&item.lastElementChild.dataset.codeCodexMenuCheck==='true'&&item.lastElementChild.querySelector('svg')?.getAttribute('viewBox')==='0 0 17 17'&&item.lastElementChild.hidden&&item.firstElementChild.textContent==='Start Code-Codex when I sign in'&&item.firstElementChild.getBoundingClientRect().left===popup.firstElementChild.getBoundingClientRect().left+16`);
  await ev(`item.click();${settle}`);await wait(`!!document.querySelector('[data-code-codex-application-dialog]')`);
  await check('English title/body/buttons replace browser origin UI',`(()=>{const d=document.querySelector('[data-code-codex-application-dialog]'),s=d.querySelector('[data-code-codex-dialog-content]').shadowRoot;return d.open&&d.getAttribute('aria-label')==='Enable Code-Codex login startup?'&&s.querySelector('p').textContent==='When enabled, signing in to Windows will automatically start Codex through Code-Codex. This will not close the Codex session currently running.'&&s.querySelector('[data-accept]').textContent==='OK'&&s.activeElement===s.querySelector('[data-cancel]')&&!s.textContent.includes('app://')})()`);
  await ev(`window.hostReset=document.createElement('style');hostReset.textContent='dialog{position:fixed;inset:0;margin:0}';document.head.append(hostReset)`);
@@ -46,6 +46,22 @@ try{
  await browser.command('Emulation.setDeviceMetricsOverride',{width:640,height:480,deviceScaleFactor:1,mobile:false});
  await check('Open dialog stays centered when viewport is resized',`(()=>{const r=document.querySelector('[data-code-codex-application-dialog]').getBoundingClientRect();return Math.abs(r.left+r.width/2-innerWidth/2)<1&&Math.abs(r.top+r.height/2-innerHeight/2)<1&&r.left>=16&&r.top>=16})()`);
  await browser.command('Emulation.clearDeviceMetricsOverride');
+ await ev(`window.dialogContrast=()=>{const d=document.querySelector('[data-code-codex-application-dialog]'),s=d.querySelector('[data-code-codex-dialog-content]').shadowRoot;const rgb=c=>c.match(/[\\d.]+/g).slice(0,3).map(Number);const lum=c=>rgb(c).map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4}).reduce((v,x,i)=>v+x*[.2126,.7152,.0722][i],0);const contrast=(a,b)=>{const x=lum(a),y=lum(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)};const bg=getComputedStyle(d).backgroundColor;return [...s.querySelectorAll('h2,p,button')].every(e=>{const css=getComputedStyle(e);return css.opacity==='1'&&contrast(css.color,e.tagName==='BUTTON'?css.backgroundColor:bg)>=4.5})};document.documentElement.dataset.theme='dark';document.documentElement.style.cssText='color-scheme:dark;--color-text:#fff;--color-border:#ffffff15';document.body.dataset.codeCodexParticleBackground='true';${settle}`);
+ await check('Dark background with missing host surface token keeps all dialog text at WCAG AA contrast',`dialogContrast()`);
+ await shot('confirm-dark-en');await ev(`setLocale('zh-CN');${settle}`);
+ await check('Dark Chinese confirmation remains readable and localized',`dialogContrast()&&document.querySelector('[data-code-codex-application-dialog]').lang==='zh-CN'`);
+ await shot('confirm-dark-zh');await ev(`document.documentElement.dataset.theme='light';document.documentElement.style.cssText='color-scheme:light;--color-text:#fff;--color-background-primary:#111';${settle}`);
+ await check('Open dialog follows light theme without mixing unrelated host foreground/background tokens',`dialogContrast()&&getComputedStyle(document.querySelector('[data-code-codex-application-dialog]')).colorScheme==='light'`);
+ await ev(`delete document.documentElement.dataset.theme;document.documentElement.className='electron-dark';${settle}`);
+ await check('Electron dark class takes precedence over stale light color-scheme',`dialogContrast()&&getComputedStyle(document.querySelector('[data-code-codex-application-dialog]')).colorScheme==='dark'`);
+ await ev(`document.documentElement.className='light';${settle}`);
+ await check('Explicit light class updates the same open modal',`dialogContrast()&&getComputedStyle(document.querySelector('[data-code-codex-application-dialog]')).colorScheme==='light'`);
+ await ev(`document.documentElement.className='';document.documentElement.style.cssText='color-scheme:normal';`);
+ await browser.command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});await ev(settle);
+ await check('System dark preference is used when host has no explicit theme',`dialogContrast()&&getComputedStyle(document.querySelector('[data-code-codex-application-dialog]')).colorScheme==='dark'`);
+ await browser.command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});await ev(settle);
+ await check('System preference change recolors an already-open modal',`dialogContrast()&&getComputedStyle(document.querySelector('[data-code-codex-application-dialog]')).colorScheme==='light'`);
+ await ev(`document.documentElement.style.cssText='';delete document.body.dataset.codeCodexParticleBackground;setLocale('en');${settle}`);
  await shot('confirm-en');await answer(false);
  await check('Cancel leaves OS state untouched',`fixture.writes.length===0&&!fixture.enabled&&!item.disabled`);
  await ev(`setLocale('zh-CN');item.click();${settle}`);
@@ -81,6 +97,10 @@ try{
  await check('Escape/cancel resolves without write',`!document.querySelector('[data-code-codex-application-dialog]')&&!fixture.enabled`);
  await check('Opening confirmation closes the menu before modal focus changes',`popup.hidden&&trigger.getAttribute('aria-expanded')==='false'`);
  await ev(`window.readsBefore=fixture.writes.length;reconcile();`);
+ await ev(`trigger.click();document.querySelector('[data-code-codex-language-trigger]').dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));${settle}`);
+ await check('Language options place the native check at the far right',`(()=>{const p=document.querySelector('#code-codex-language-popup'),b=p.querySelector('[aria-checked=true]'),check=b.lastElementChild,svg=check.querySelector('svg'),label=b.firstElementChild;return !p.hidden&&svg?.getAttribute('viewBox')==='0 0 17 17'&&check.getBoundingClientRect().left>label.getBoundingClientRect().right&&!b.textContent.includes('✓');})()`);
+ await check('Autostart and language checks share the exact native path',`item.lastElementChild.querySelector('path').getAttribute('d')===document.querySelector('#code-codex-language-popup [aria-checked=true] path').getAttribute('d')`);
+ await ev(`trigger.click();`);
  await check('Reconcile keeps one menu instance',`document.querySelectorAll('#code-codex-application-menu-trigger').length===1&&fixture.writes.length===readsBefore`);
  writeFileSync(resolve(out,'result.json'),JSON.stringify({passed:true,checks},null,2));console.log(`Application menu: ${checks.length} browser checks passed; no OS state changed`);
 }finally{await browser.close();await new Promise(r=>server.close(r));}

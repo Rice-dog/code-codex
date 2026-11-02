@@ -1,5 +1,6 @@
 import type { LoginStartupActions, LoginStartupStatus } from '../../contracts/login-startup';
 import { t } from '../../i18n';
+import {nativeMenuCheckSvg} from '../../components/menu-check';
 import { ApplicationDialog } from '../../components/application-dialog';
 
 /** Owns the menu control only; no optimistic OS state or reconnect write replay. */
@@ -17,7 +18,7 @@ export class LoginStartupController {
     button.dataset.codeCodexLoginStartup = 'true';
     this.check.dataset.codeCodexMenuCheck = 'true';
     this.check.setAttribute('aria-hidden', 'true');
-    this.check.textContent = '✓';
+    this.check.innerHTML = nativeMenuCheckSvg;
     button.append(this.label, this.check);
     this.render();
   }
@@ -28,7 +29,7 @@ export class LoginStartupController {
     this.button.setAttribute('aria-checked', String(this.state?.enabled ?? false));
     this.button.setAttribute('aria-busy', String(this.pending));
     this.button.disabled = this.pending || (!this.failed && (!this.state || !this.state.supported));
-    this.button.title = t(this.failed ? 'loginStartup.failed' : this.state?.supported ? 'loginStartup.hint' : 'loginStartup.unavailable');
+    this.button.removeAttribute('title');
   }
 
   private accept(value: LoginStartupStatus): void {

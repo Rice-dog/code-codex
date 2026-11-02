@@ -1,53 +1,43 @@
-# Code-Codex v0.5.40
+# Code-Codex v0.5.89
 
-本次软件更新覆盖上一公开软件版本 **v0.5.21 → v0.5.40** 的全部保留变更，包括 PR66、PR67 及其后续修正。期间本地测试版本不另算公开软件更新。
-
-本版替代已撤回公开发布的 v0.5.39，并合入官方外观接口兼容修复；累计更新范围仍为 v0.5.21 → v0.5.40。
+本次软件更新覆盖上一公开软件版本 **v0.5.40 → v0.5.89** 的全部保留改动；期间本地保存和测试版本合并到本次发布，不单独视作公开更新。[完整源码比较](https://github.com/Rice-dog/code-codex/compare/v0.5.40...v0.5.89)。
 
 ## 简体中文
 
-- **背景直接启用与主题兼容**：适配官方将外观操作拆到独立模块后的结构；兼容原组合接口，按唯一受支持接口自动读取/切换主题。无需先手动设置深色，停用恢复原偏好。多候选或未知接口保持拒绝并保留具体原因，移除无效的通用重启建议；插件资源身份不变。
-- **原版已运行时的恢复**：继续使用同一个启动诊断窗口，直接显示完整的“关闭并重新启动 / 取消”操作。默认取消，确认后窗口立即隐藏；按保留的进程身份请求正常退出，再检查后继进程、页面及 Bridge 就绪。可记住自动重启选择，也可撤销；开启开机自启不会自动授予关闭会话的权限。
-- **慢启动与动画等待**：正常较慢启动不再被独立的 90 秒恢复计时器误报。首次主页面尚未挂载时，超过 120 秒观察门槛继续等待，不再仅因时间流逝关闭客户端。过长的启动动画让出原生界面；它不会伪造就绪、修改网络设置或自动重试关闭操作。真正的身份、安全和启动失败仍保留诊断。
-- **进程检错与诊断**：改进既有进程查询、退出收尾及过期快照竞争的处理，保留同代句柄、完整快照和总预算约束；明确区分尚未就绪、实际退出、查询失败和页面资格失败。技术原因、错误码与原始日志保留英文，普通操作说明随界面语言显示。
-- **安装与桌面入口**：始终创建独立的 Code-Codex 桌面快捷方式；找到原生 Codex 快捷方式时继续支持接管及卸载恢复。没有原生桌面图标也能使用独立入口，有效受管记录中的入口丢失可修复。
-- **顶部菜单与开机自启**：菜单选中高亮、已展开时悬停切换更接近原生行为；开机自启使用右侧标准勾选和居中的简洁中英确认框。菜单 Bridge 独立于文件树生命周期，隐藏文件树后仍可操作自启和卸载入口。
-- **卸载流程**：顶部 Code-Codex 菜单可直接打开现有卸载向导。修正从运行中的菜单启动卸载时的进程链处理，保护暂存向导、worker 和完成页 UI，按用户选择保留或删除设置、插件和素材。
-- **插件显示与图片轮换**：26 款插件名称随全局中英文显示；避免旧语言服务在热升级后覆盖新目录。修复 Particle Image 自动图片轮换与外观操作共享忙碌状态的问题，启用、导入或删除后的轮换能够恢复。
-- **升级与缓存**：26 个插件的独立版本、固定资源地址及资源字节保持不变；校验匹配的下载缓存可复用。EXE 更新沿用原安装目录，并保留设置、用户素材和匹配插件，无需先卸载；MSI 所有权安装继续走 Windows Installer 路径。
+- **浅海来信**：新增本地 WebGL 海洋背景，包含交互水波、十种海洋生物模型和横向生物选择栏。支持默认居民、整体参数重置、单独清除生物、随机海洋奇遇及收集后的事件筛选；陨石事件中各生物落水后立即恢复游动。提供自动、低、中、高画质，调节细节和像素负担，继续以60 FPS为绘图目标，不以降低目标帧率替代降画质。
+- **背景绘图隔离**：11种 Canvas 背景迁入各自 Worker；发光地平线使用浏览器合成动画，Custom Background 保留原始图片/视频播放。减少打开模型、权限、账号等官方菜单时的绘图阻塞。有界消息队列、实际首帧确认、暂停/恢复、取消与资源释放共用统一生命周期；GPU、驱动和输入交付仍共享，不承诺所有设备绝对互不影响。
+- **开场与启动来源**：浅海分阶段淡入、标题与镜头移动，开场中鼠标仍可产生水波；修复开场前海面闪现。粒子图像避免完整源图闪现并柔和显现；黑洞整体淡入；像素雕塑采用方块落定开场且重新启用可重播。启动动画可选13种背景来源，新增浅海，并保留ASCII、Custom、本地图库等独立只读副本；覆盖释放后普通背景再继续。
+- **透明度与布局**：UI Surface Opacity 扩展到变更文件卡片和图标、文件树/新对话文件图标、新对话工作区栏；一个参数联动插件市场与参数面板的底色。浅海参数采用横向紧凑布局，生物在同一行，减少遮挡与冗余描述。正常文字、控件和确认框的可读性边界保留。
+- **置顶快捷入口**：置顶插件会在市场按钮与版本号之间显示原图标；跨分类直接定位并打开对应参数，不自动启用插件。窄幅使用更多菜单，取消置顶即时同步；隐藏插件不生成快捷入口。
+- **同版本更新与宿主恢复**：内部构建标识区分同一应用版本的不同字节，避免热更新仍挂载旧界面。安装增加同版本核心备份、完整性复核与冲突时保守回滚；保留设置、用户素材和匹配缓存。改善登录页面/工作区及文件树恢复、版本反馈和启动覆盖的退场处理。官方接口按能力/响应合同检测，保留兼容分支；未知或缺失能力隔离具体功能，不靠单个官方版本白名单放行。
+- **多账号任务暂时停用**：本轮保留开发中的源码、精确插件包、既有账号数据与偏好，但从市场和快捷入口隐藏，且不加载/启动运行时。账号选择、额度/积分/重置卡查询、切换和自动续接均不运行。旧连接待活动任务结束后安全释放、恢复原生默认连接；不强停或重放任务。这不是本次可用的公开功能，恢复另行发布。
+- **资源与诊断**：市场展示27项插件（Appearance16、File Preview10、Tools1）；保留的多账号包不计入可用入口。更新后的背景/播放器/透明度资源按精确版本、大小和SHA核验，未变媒体及插件缓存继续复用。16项新脚本发布到独立资源Release；透明度脚本仅迁移分发tag，代码字节/插件版本不变。错误及过程日志保持英文，并提供更具体的阶段、关联编号、等待与未知结果信息；不记录认证令牌或对话正文。
 
 ### 安装与验证范围
 
-优先下载 `CodeCodex-0.5.40-x64-setup.exe`；另提供 MSI、ZIP、独立卸载程序、插件目录和 SHA256 清单。插件实际代码及媒体继续按目录中锁定的既有资源 tag 下载，不随软件版本统一改地址。
+推荐 `CodeCodex-0.5.89-x64-setup.exe`；另提供 MSI、ZIP、独立卸载程序、插件目录和SHA256清单。已有安装可沿原目录更新，保留设置、原素材和完整匹配的插件缓存。启动只读取已下载校验的依赖，缺包不阻塞官方启动；不会预下载所有插件。
 
-维护基线已执行原生 CDP/恢复、菜单、语言升级、安装器与卸载生命周期等回归；此前 627 项本机 Rust 测试通过、5 项按条件忽略，来自串行工作区执行及解除窗口遮挡后的单项补测，不冒称本次重新执行一次全量工作区测试。CI 与真实宿主安装/热激活分别核对，安装包和下载附件核验大小、SHA、版本字段及内嵌内容。测试替身不代表所有真实客户端和系统环境均已验证。
+本地完成了当前版本的安装、文件/版本/缓存校验和实际原生接管验证；最近两项功能的91项专项覆盖暂停组合、活动任务交接、快捷导航及真实Worker/WebGL启动、开场、暂停与清理。此前背景、透明度、登录与安装检查按对应改动执行，CI另行复核；历史结果不冒充本次重新执行的全平台测试。旧主线程绘图探针不能用于证明Worker已停止或未绘图。
 
-实际 Windows 登录自启且未开代理的冷启动、所有历史版本逐一原地升级、完整 MSI 升级事务及其他 GPU/Windows 环境尚未全面实测。此前官方页面迟迟未挂载的具体网络原因仍未证明；本次改进等待和诊断机制，不承诺解决所有网络或官方客户端初始化问题。
-
-本次外观修复另外通过 24 项适配回归；真实官方客户端从浅色直接点击启用“闪烁方块”和“像素雕塑”，自动切换深色、显示背景，停用恢复原主题，重复启用通过。网络下载超时和另一条间歇 Bridge 超时不属于这项主题修复，不据此声称已解决。
+本版仍为社区预览软件。所有GPU/官方客户端版本、长时间压力、实际Windows登录冷启动和完整MSI升级/卸载矩阵尚未全面覆盖；60 FPS是目标，非设备性能保证。暂停的账号实现不保证或提供当前可用的多账号服务。
 
 ## English
 
-This software release includes all retained changes from the previous public software release, **v0.5.21 to v0.5.40**, including PR66, PR67 and the subsequent maintainer corrections. Intermediate local test builds are not separate public software releases.
+This release includes all retained changes from the previous public software release, **v0.5.40 to v0.5.89**. Intermediate local checkpoints/test versions are consolidated here rather than treated as separate public updates. [Full source comparison](https://github.com/Rice-dog/code-codex/compare/v0.5.40...v0.5.89).
 
-This release replaces the withdrawn public v0.5.39 and incorporates the official Appearance compatibility fix; the cumulative baseline remains v0.5.21.
+- **Shallow Ocean Letters:** Adds a local WebGL ocean with interactive ripples, ten marine model types and a horizontal creature dock. Default residents, global parameter reset, separate population clearing, random encounters and post-collection inclusion filters are supported. Each resident resumes swimming on its own meteor-event water landing. Auto/Low/Medium/High quality adjust detail and pixel workload while retaining a60 FPS target; quality reduction does not substitute a lower target frame rate.
+- **Isolated drawing:** Eleven Canvas backgrounds render in their own Workers; Glow Horizon uses browser-composited animation, and Custom Background keeps original image/video playback. This reduces drawing stalls when official model, permission/account and other controls open. Bounded queues, actual-first-frame readiness, pause/resume, cancellation and disposal share a lifecycle. GPU, drivers and input delivery remain shared; universal zero interference is not promised.
+- **Openings and startup sources:** Ocean fades in, displays its title and moves its camera in stages, with mouse ripples available during the opening and no pre-opening ocean flash. Particle Image avoids showing the full source image and reveals its particles smoothly. Black Hole fades in as a whole; Pixel Sculpt opens with settling blocks and replays on re-enable. Startup Transition offers13 background sources, now including Ocean, with independent read-only ASCII/Custom/local-gallery copies; normal backgrounds resume after the overlay releases.
+- **Opacity and layout:** UI Surface Opacity now covers changed-file cards/icons, tree/new-chat file icons and the new-chat workspace strip. One setting jointly adjusts market and parameter-panel backgrounds. Ocean uses a compact horizontal panel with its creature models on one row. Ordinary content/control readability and confirmation-dialog boundaries remain.
+- **Pinned shortcuts:** Pinned plugins reuse their icons between the market button and version. Shortcuts locate the correct category and open settings without enabling a plugin. Narrow layouts use an overflow menu; unpinning updates immediately, and hidden plugins produce no shortcut.
+- **Same-version updates and host recovery:** Content build identities distinguish different bytes of the same application version so hot updates mount the new UI. Installation backs up same-version core payloads, verifies integrity and conservatively rolls back conflicting changes, while preserving settings/media/matching caches. Login/workspace/tree recovery, version feedback and overlay exit behavior improve. Official interfaces are qualified by bounded capability/response contracts, with compatibility branches and per-feature isolation rather than a single official-build allowlist.
+- **Multi-account Tasks is suspended:** Retains development source, the exact plugin package and existing account data/preferences, but hides market/shortcut entries and does not load/start its runtime. Account selection, quota/credit/reset reads, switching and automatic continuation do not run. Old connections retire safely after active work and restore native default endpoints without stopping/replaying tasks. This is not an available public feature in this release; restoration requires a later update.
+- **Resources and diagnostics:** The market exposes27 plugins (16 Appearance,10 File Preview,1 Tools); the retained account package is excluded from available entries. Exact version/size/SHA checks protect updated backgrounds/player/opacity scripts while unchanged media/plugin caches remain reusable. Sixteen new scripts use a separate asset Release; opacity only changes its distribution tag, not its bytes or plugin version. English diagnostics distinguish stages, correlation IDs, waits and unknown outcomes without logging credentials or conversation text.
 
-- **Direct background activation and theme compatibility:** Adapts to the official Appearance action moving into a separate module while retaining the older combined interface. A unique supported adapter reads/applies the required theme automatically; users need not select Dark first, and Disable restores the original preference. Ambiguous/unknown interfaces remain rejected with their cause retained. Removes ineffective generic restart advice without changing plugin asset identities.
-- **Recovery when stock Codex is already running:** The shared diagnostic initially presents the complete Close and restart / Cancel controls. Cancellation is the default; an explicit restart immediately hides the window, requests graceful exit using the retained process identity, then checks the successor, renderer and Bridge readiness. Remembered restart consent is revocable and independent of login startup.
-- **Slow startup and animation waiting:** The independent 90-second recovery timer no longer reports healthy delayed startup as failure. An owned launch keeps waiting for an initially unmounted native page beyond its 120-second observation threshold without terminating Codex merely because time elapsed. A prolonged animation yields to the native interface without inferring readiness, changing network settings or automatically repeating a close request. Genuine identity, security and launch failures remain diagnosable.
-- **Process inspection and diagnostics:** Improves existing-instance inspection, teardown and stale-snapshot races while retaining same-generation handles, complete snapshots and total budgets. Separates pending readiness, actual exit, query failures and renderer qualification. Technical reasons, support codes and raw logs remain English; ordinary guidance follows the selected UI language.
-- **Installation and desktop entry:** Always creates an independent Code-Codex desktop shortcut, alongside takeover/restoration of an available original shortcut. A stock desktop icon is no longer required for the independent entry, and missing managed entries can be repaired.
-- **Top menu and login startup:** Adds native-style selection highlighting and hover switching, a standard right-aligned check and a centered concise bilingual confirmation. The menu Bridge survives file-tree dismissal, preserving login-startup and uninstall actions.
-- **Uninstall lifecycle:** The top menu opens the existing uninstall wizard. Corrects process-chain selection when uninstall starts from a running session, protecting the staged wizard, worker and completion UI while respecting the user's data-retention choice.
-- **Plugin labels and image rotation:** Localizes all 26 plugin display names with the global language and prevents an old injected language service from replacing the upgraded catalog. Fixes Particle Image auto-rotation sharing the appearance busy state, including resumption after enable, import and deletion.
-- **Upgrade and cache reuse:** Retains all 26 independent plugin versions, pinned asset addresses and resource bytes. Matching verified caches remain reusable. EXE updates reuse the installation root and preserve settings, user media and matching plugins; MSI-owned installations retain the Windows Installer path.
+### Installation and validation scope
 
-### Installation and verification scope
+Prefer `CodeCodex-0.5.89-x64-setup.exe`; MSI, ZIP, standalone uninstaller, plugin catalog and SHA256 manifest are also supplied. Updates reuse the installation root and preserve settings, original media and matching complete plugin caches. Startup reads only downloaded, verified dependencies; missing optional packages do not block official startup, and installation does not pre-download every plugin.
 
-Prefer `CodeCodex-0.5.40-x64-setup.exe`; MSI, ZIP, a standalone uninstaller, plugin catalog and SHA256 manifest are also provided. Plugin code/media continue using their existing exact catalog tags rather than being repointed to the software version.
+Local checks verified installation, files/versions/caches and actual native handoff. The latest two features have91 targeted checks covering suspension composition, active-task handoff, shortcut navigation and real Worker/WebGL startup/opening/hold/disposal. Earlier background, opacity, login and installer tests apply to their respective changes; CI is checked separately. Historical results are not presented as a fresh all-platform run, and legacy main-thread probes cannot establish Worker drawing or suspension.
 
-The maintenance baseline exercised native CDP/recovery, menus, localization, installer and uninstall lifecycle regressions. Its earlier 627 local Rust passes and 5 conditional ignores combine a serial workspace run with a follow-up of the previously occluded interactive test; they are not represented as a fresh complete workspace run for this publication. CI, actual host installation/hot activation and package/download integrity are verified separately. Fixtures are not evidence that every client/system configuration works.
-
-A real Windows-login startup with no proxy, every historical in-place upgrade, a full MSI upgrade transaction and other GPU/Windows environments have not all been exercised. The network cause of the earlier unmounted official page remains unproven; these changes improve waiting and diagnostics rather than guaranteeing all network or official-client initialization failures are resolved.
-
-The Appearance repair additionally passed 24 adapter regressions. In the actual official client, a single Enable click from Light activated Blinking Squares and Pixel Sculpt with automatic Dark application, and Disable restored the original preference; repeated enable passed. Download timeouts and an independent intermittent Bridge timeout are separate from this theme repair and are not claimed fixed.
+This remains community preview software. All GPUs/official-client builds, long stress runs, real Windows-login cold startup and full MSI upgrade/uninstall matrices have not been exhaustively exercised.60 FPS is a target, not a hardware guarantee. The suspended account implementation does not provide a currently available multi-account service.

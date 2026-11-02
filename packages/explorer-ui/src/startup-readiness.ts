@@ -1,26 +1,23 @@
 import { runtimeEvent } from './runtime-events';
 import type { StartupTransitionController } from './startup-transition';
+import { observeNativeLogin, paintedNativeElement, activeNativeElement } from './native-login-observation';
 
 const READINESS_MONITOR = Symbol.for('code-codex:startup-readiness-monitor:v1');
 const STABLE_MS = 1000;
 const MAX_FRAME_GAP_MS = 80;
 
-function visible(element: Element | null): element is HTMLElement {
-  if (!(element instanceof HTMLElement)) return false;
-  const rect = element.getBoundingClientRect();
-  const style = getComputedStyle(element);
-  return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-}
-
-function nativeContent(): { painted: boolean; kind: string; shell: boolean } {
-  const login = document.querySelector('div.flex.h-full.w-full.items-center.justify-center.overflow-hidden.bg-surface');
-  if (visible(login) && visible(login.querySelector('button:not(:disabled)'))) return { painted: true, kind: 'sign-in', shell: true };
-  const main = document.querySelector('main:is(.main-surface, [data-app-shell-main-surface="default"])');
-  const navigation = document.querySelector('nav[data-app-navigation-rail], [data-app-shell-sidebar-trigger], aside.app-shell-left-panel');
-  const shell = visible(main) && !!navigation;
+function nativeContent() {
+  const login = observeNativeLogin();
+  const loginEvidence = { loginLayout: login.layout, loginCandidates: login.candidates,
+    loginControls: login.controls, loginEnabledControls: login.enabledControls, loginReason: login.reason };
+  if (login.surface) return { painted: !!login.control, kind: 'sign-in', shell: false, ...loginEvidence };
+  const mains = [...document.querySelectorAll('main:is(.main-surface, [data-app-shell-main-surface="default"])')].filter(paintedNativeElement);
+  const main = mains.length === 1 ? mains[0] : undefined;
+  const navigation = [...document.querySelectorAll('nav[data-app-navigation-rail], [data-app-shell-sidebar-trigger], aside.app-shell-left-panel')].some(activeNativeElement);
+  const shell = !!main && navigation;
   const content = main?.querySelector('form, [data-composer-layout], [contenteditable="true"], [data-response-annotation-conversation], [data-app-action-timeline-scroll]');
   const busy = main?.querySelector('[data-app-startup-loading], [data-app-shell-loading], [data-app-initializing="true"]');
-  return { painted: shell && visible(content ?? null) && !busy, kind: 'main-content', shell };
+  return { painted: shell && paintedNativeElement(content ?? null) && !busy, kind: 'main-content', shell, ...loginEvidence };
 }
 
 export function startupContentVisible(): boolean { return nativeContent().painted; }
@@ -72,11 +69,13 @@ export function monitorStartupReadiness(controller: StartupTransitionController)
     const candidate = document.visibilityState === 'visible' && document.readyState === 'complete'
       && (content.painted || contentFallback);
     if (candidate) candidateSince ??= now; else candidateSince = undefined;
-    const currentState = `${content.painted}:${candidate}`;
+    const currentState = `${content.painted}:${candidate}:${content.loginLayout}:${content.loginReason}`;
     if (currentState !== lastState) {
       runtimeEvent('startup-animation', 'readiness evidence', 'changed', {
         elapsedMs: Math.round(elapsed), contentVisible: content.painted, contentKind: content.kind,
         documentState: document.readyState, documentVisible: document.visibilityState === 'visible',
+        loginLayout: content.loginLayout, loginCandidates: content.loginCandidates,
+        loginControls: content.loginControls, loginEnabledControls: content.loginEnabledControls, loginReason: content.loginReason,
       });
       lastState = currentState;
     }
@@ -102,6 +101,7 @@ export function monitorStartupReadiness(controller: StartupTransitionController)
         runtimeEvent('startup-animation', 'readiness stability', 'passed', {
           elapsedMs: Math.round(elapsed), stableMs: Math.round(now - stableSince), frames, resets,
           maxFrameGapMs: Math.round(maxGap), fallbackUsed: fallbackReported, contentKind: content.kind,
+          loginLayout: content.loginLayout,
         });
         dispose(); controller.signalReady(); return;
       }
@@ -118,6 +118,8 @@ export function monitorStartupReadiness(controller: StartupTransitionController)
       runtimeEvent('startup-animation', 'readiness monitor', 'waiting', {
         elapsedMs: Math.round(elapsed), contentVisible: content.painted, frames, resets,
         stableMs: stableSince === undefined ? 0 : Math.round(now - stableSince), maxFrameGapMs: Math.round(maxGap),
+        contentKind: content.kind, loginLayout: content.loginLayout, loginCandidates: content.loginCandidates,
+        loginEnabledControls: content.loginEnabledControls, loginReason: content.loginReason,
       });
       nextReport = now + 5000;
     }

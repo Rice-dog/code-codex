@@ -154,7 +154,7 @@ impl AppServerSource {
 pub struct AppServerLaunch {
     executable: PathBuf,
     #[cfg(windows)]
-    _stage: Option<StagedAppServer>,
+    _stage: Option<std::sync::Arc<StagedAppServer>>,
 }
 
 impl AppServerLaunch {
@@ -194,6 +194,7 @@ impl AppServerLaunch {
 #[derive(Debug)]
 struct StagedAppServer {
     executable_handle: Option<File>,
+    companions: Vec<File>,
     executable_acl_handle: Option<File>,
     directory_handle: Option<File>,
     ancestry_handles: Vec<File>,
@@ -208,6 +209,7 @@ impl Drop for StagedAppServer {
         // ACL handle on partial-stage failures, then release the locked parent
         // before asking TempDir to remove the tree.
         self.executable_handle.take();
+        self.companions.clear();
         if let Some(handle) = self.executable_acl_handle.as_mut() {
             let _ = set_protected_dacl(handle, "D:P(A;;FA;;;AU)(A;;FA;;;SY)(A;;FA;;;BA)");
         }
@@ -718,7 +720,15 @@ pub fn prepare_app_server_launch(
         AppServerSourceKind::PackagedOfficial => {
             #[cfg(windows)]
             {
-                stage_packaged_app_server(&source.executable)
+                static RUNTIMES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Weak<StagedAppServer>>>> = std::sync::LazyLock::new(Default::default);
+                let mut runtimes = RUNTIMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(stage) = runtimes.get(&source.executable).and_then(std::sync::Weak::upgrade) {
+                    let executable = stage.directory.as_ref().ok_or(DiscoveryError::AppServerNotFound)?.path().join("codex.exe");
+                    return Ok(AppServerLaunch { executable, _stage: Some(stage) });
+                }
+                let launch = stage_packaged_app_server(&source.executable)?;
+                if let Some(stage) = &launch._stage { runtimes.insert(source.executable, std::sync::Arc::downgrade(stage)); }
+                Ok(launch)
             }
             #[cfg(not(windows))]
             {
@@ -882,29 +892,13 @@ fn validated_stale_stage(path: &Path) -> bool {
     if !path.is_dir() || is_reparse_point(path).unwrap_or(true) {
         return false;
     }
-    let Ok(mut entries) = std::fs::read_dir(path) else {
-        return false;
-    };
-    let Some(entry) = entries.next() else {
-        return true;
-    };
-    let Ok(entry) = entry else {
-        return false;
-    };
-    if entries.next().is_some()
-        || !entry
-            .file_name()
-            .to_string_lossy()
-            .eq_ignore_ascii_case("codex.exe")
-    {
-        return false;
-    }
-    let Ok(file_type) = entry.file_type() else {
-        return false;
-    };
-    file_type.is_file()
-        && !file_type.is_symlink()
-        && !is_reparse_point(&entry.path()).unwrap_or(true)
+    let Ok(entries) = std::fs::read_dir(path) else { return false; };
+    entries.take(16).all(|entry| entry.is_ok_and(|entry| {
+        let name = entry.file_name();
+        let allowed = name == "codex.exe" || RUNTIME_COMPANIONS.iter().any(|n| name == *n);
+        allowed && entry.file_type().is_ok_and(|t| t.is_file() && !t.is_symlink())
+            && !is_reparse_point(&entry.path()).unwrap_or(true)
+    }))
 }
 
 #[cfg(windows)]
@@ -999,6 +993,34 @@ fn same_file_identity(left: &File, right: &File) -> Result<bool, DiscoveryError>
 }
 
 #[cfg(windows)]
+const RUNTIME_COMPANIONS: &[&str] = &[
+    "codex-code-mode-host.exe", "codex-command-runner.exe",
+    "codex-windows-sandbox-service.exe", "codex-windows-sandbox-setup.exe",
+];
+
+#[cfg(windows)]
+fn stage_companion(source: &Path, target: &Path) -> Result<File, DiscoveryError> {
+    let fail = |_| DiscoveryError::AppServerNotFound;
+    if is_reparse_point(source)? { return Err(DiscoveryError::AppServerNotFound); }
+    let mut input = OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(source).map_err(fail)?;
+    let mut output = OpenOptions::new().read(true).write(true).create_new(true).share_mode(FILE_SHARE_READ).open(target).map_err(fail)?;
+    let mut acl = OpenOptions::new().read(true).access_mode(READ_CONTROL | WRITE_DAC).share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE).open(target).map_err(fail)?;
+    std::io::copy(&mut input, &mut output).map_err(fail)?;
+    output.sync_all().map_err(fail)?;
+    input.seek(SeekFrom::Start(0)).map_err(fail)?;
+    let expected = sha256_reader(&mut input)?;
+    deny_staged_executable_mutation(&mut acl)?;
+    drop(output);
+    let result = OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(target).map_err(fail);
+    // Restore crash cleanup even on a failed final open. A retained handle
+    // and subsequently locked parent prevent mutation for the live lifetime.
+    set_protected_dacl(&mut acl, "D:P(A;;FA;;;AU)(A;;FA;;;SY)(A;;FA;;;BA)")?;
+    let mut retained = result?;
+    if is_reparse_point(target)? || sha256_reader(&mut retained)? != expected { return Err(DiscoveryError::AppServerNotFound); }
+    Ok(retained)
+}
+
+#[cfg(windows)]
 fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, DiscoveryError> {
     let official = canonical_executable(official).map_err(|error| {
         DiscoveryError::AppServerNotFound
@@ -1028,8 +1050,8 @@ fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, Discove
     // exists yet; after this handle opens, delete sharing is denied.
     let mut directory_handle = bind_locked_stage_directory(directory.path(), true)?;
 
-    // Create the sole child with a non-replaceable writable handle. Applying
-    // the directory DACL immediately afterward closes child creation, and the
+    // Create the primary image with a non-replaceable writable handle. Applying
+    // the directory DACL after verified companions closes child creation, and the
     // bounded enumeration fails closed if anything won the short interval.
     let mut executable_handle = OpenOptions::new()
         .read(true)
@@ -1052,11 +1074,19 @@ fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, Discove
                 .context("stage_packaged_app_server", format!("cause={error}"))
         })?;
     deny_staged_executable_mutation(&mut executable_acl_handle)?;
+    let mut companions = Vec::new();
+    for name in RUNTIME_COMPANIONS {
+        let source = official.parent().ok_or(DiscoveryError::AppServerNotFound)?.join(name);
+        if source.exists() {
+            companions.push(stage_companion(&source, &directory.path().join(name))?);
+        }
+    }
     deny_stage_child_creation(&mut directory_handle)?;
     ensure_stage_contains_only_executable(directory.path(), &executable)?;
 
     let mut stage = StagedAppServer {
         executable_handle: None,
+        companions,
         executable_acl_handle: Some(executable_acl_handle),
         directory_handle: Some(directory_handle),
         ancestry_handles,
@@ -1135,14 +1165,14 @@ fn stage_packaged_app_server(official: &Path) -> Result<AppServerLaunch, Discove
     }
     stage.executable_handle = Some(spawn_path_handle);
 
-    // The locked directory intentionally has no adjacent DLLs and cannot gain
+    // The locked directory contains only verified package executables and cannot gain
     // an `<exe>.local` redirect while the process lives. The launch command
     // also uses this directory as CWD and limits PATH to Known Folder API
     // Windows/system directories, so OS imports resolve through
     // KnownDLLs/system locations rather than user-writable search locations.
     Ok(AppServerLaunch {
         executable,
-        _stage: Some(stage),
+        _stage: Some(std::sync::Arc::new(stage)),
     })
 }
 
@@ -1194,32 +1224,7 @@ fn ensure_stage_contains_only_executable(
     directory: &Path,
     executable: &Path,
 ) -> Result<(), DiscoveryError> {
-    let mut entries = std::fs::read_dir(directory).map_err(|error| {
-        DiscoveryError::AppServerNotFound.context(
-            "ensure_stage_contains_only_executable",
-            format!("cause={error}"),
-        )
-    })?;
-    let entry = entries
-        .next()
-        .transpose()
-        .map_err(|error| {
-            DiscoveryError::AppServerNotFound.context(
-                "ensure_stage_contains_only_executable",
-                format!("cause={error}"),
-            )
-        })?
-        .ok_or(DiscoveryError::AppServerNotFound)?;
-    if entry.path() != executable || entries.next().is_some() {
-        return Err(DiscoveryError::AppServerNotFound);
-    }
-    let file_type = entry.file_type().map_err(|error| {
-        DiscoveryError::AppServerNotFound.context(
-            "ensure_stage_contains_only_executable",
-            format!("cause={error}"),
-        )
-    })?;
-    if !file_type.is_file() || file_type.is_symlink() {
+    if !executable.is_file() || !validated_stale_stage(directory) {
         return Err(DiscoveryError::AppServerNotFound);
     }
     Ok(())
@@ -1354,6 +1359,23 @@ mod tests {
             package_full_name: format!("{name}_26.917.6896.0_x64__2p2nqsd0c76g0"),
             application_executable: None,
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn companion_runtime_is_verified_locked_and_shared() {
+        let source=tempfile::tempdir().unwrap();
+        let exe=source.path().join("codex.exe");std::fs::write(&exe,b"official-test-main").unwrap();
+        for name in RUNTIME_COMPANIONS { std::fs::write(source.path().join(name),name.as_bytes()).unwrap(); }
+        let first=prepare_app_server_launch(AppServerSource{executable:exe.clone(),kind:AppServerSourceKind::PackagedOfficial}).unwrap();
+        let second=prepare_app_server_launch(AppServerSource{executable:exe,kind:AppServerSourceKind::PackagedOfficial}).unwrap();
+        assert_eq!(first.executable(),second.executable());
+        let dir=first.executable().parent().unwrap().to_path_buf();
+        for name in RUNTIME_COMPANIONS {
+            let path=dir.join(name);assert_eq!(std::fs::read(&path).unwrap(),name.as_bytes());
+            assert!(OpenOptions::new().write(true).open(path).is_err());
+        }
+        drop(first);assert!(dir.exists());drop(second);assert!(!dir.exists());
     }
 
     #[cfg(windows)]
@@ -1739,7 +1761,7 @@ mod tests {
         let official = source_directory.path().join("codex.exe");
         std::fs::write(&official, b"official app server").expect("official executable");
         let mut launch = stage_packaged_app_server(&official).expect("stage");
-        let mut stage = launch._stage.take().expect("staged guard");
+        let mut stage = std::sync::Arc::try_unwrap(launch._stage.take().expect("staged guard")).expect("sole stage owner");
         stage.executable_handle.take();
         stage.executable_acl_handle.take();
         stage.directory_handle.take();

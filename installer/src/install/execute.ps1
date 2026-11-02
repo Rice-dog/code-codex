@@ -1,4 +1,5 @@
 $script:CreatedVersionRoot = $false
+$script:SameVersionPayload = $null
 $script:InstallCommitted = $false
 $script:ActivationReport = [ordered]@{outcome='not-run';code='CC-INSTALL-ACTIVATE-000'}
 $script:RollbackReport = [ordered]@{outcome='not-needed';issues=@()}
@@ -176,15 +177,8 @@ if (Test-Path -LiteralPath $VersionRoot) {
     if (-not $versionItem.PSIsContainer -or (Test-ReparsePoint $versionItem)) {
         throw "The release path must be a regular directory: $VersionRoot"
     }
-    foreach ($pair in @(
-        @($SourceBinary, (Join-Path $VersionRoot "code-codex.exe")),
-        @($SourceRuntimeLauncher, (Join-Path $VersionRoot "CodeCodex.exe"))
-    )) {
-        if (-not (Test-Path -LiteralPath $pair[1] -PathType Leaf) -or
-            (Get-Sha256Hash $pair[0]) -ne (Get-Sha256Hash $pair[1])) {
-            throw "CC-INSTALL-VERSION-CONFLICT-001: Version $Version is already installed with a different payload. Use a new release version."
-        }
-    }
+    Update-CodeCodexSameVersionPayload $InstallRoot $Version $SourceBinary $SourceRuntimeLauncher
+    Trace-Install 'Same-version payload' $script:SameVersionPayload.outcome
 }
 else {
     Publish-CodeCodexProgress 74 "Installing application files" "Copying the Code-Codex binaries into the version folder."
@@ -340,6 +334,13 @@ try {
             if ($log -and $log.Length -le 5MB) {
                 foreach ($line in @(Get-Content -LiteralPath $log.FullName -Tail 160 -ErrorAction SilentlyContinue)) {
                     try { $event=$line|ConvertFrom-Json -ErrorAction Stop } catch { continue }
+                    if ($event.source -eq 'launcher' -and $event.action -eq 'activation lifetime' -and $event.outcome -eq 'delegated' -and $event.details.version -eq $Version -and [int]$event.details.pid -gt 0) {
+                        $worker=[Diagnostics.Process]::GetProcessById([int]$event.details.pid)
+                        if (-not [string]::Equals($worker.MainModule.FileName,$installedCommandLine,[StringComparison]::OrdinalIgnoreCase) -or $worker.StartTime.ToUniversalTime() -lt $activation.StartTime.ToUniversalTime().AddSeconds(-1)) { throw 'CC-ACTIVATE-LIFETIME-004: The delegated activation identity did not match the installed executable.' }
+                        $script:ActivationReport.proxyPid=$activation.Id;$activation=$worker;$script:ActivationReport.pid=$worker.Id
+                        $script:ActivationReport.delegated=$true
+                        break
+                    }
                     if ($event.source -eq 'launcher' -and $event.action -eq 'live activation' -and $event.outcome -eq 'skipped' -and $event.details.version -eq $Version) {
                         $script:ActivationReport.outcome=$event.details.reason;$script:ActivationReport.code=$event.details.code;break
                     }
@@ -377,6 +378,8 @@ catch {
     $failedOperation=[ordered]@{stage=$script:InstallStage;operation=$script:InstallOperation;target=$script:InstallTarget;attempt=$script:InstallAttempt}
     $rollbackIssues = @($script:CleanupIssues)
     if (-not $script:InstallCommitted) {
+        try { Restore-CodeCodexSameVersionPayload }
+        catch { $rollbackIssues += (New-CodeCodexRollbackIssue 'same-version payload rollback failed' $_) }
         if ($script:StorageSnapshotTaken) {
             try {
                 if ($null -ne $StorageMarkerBefore) { Write-AtomicText $StorageMarkerPath $StorageMarkerBefore }

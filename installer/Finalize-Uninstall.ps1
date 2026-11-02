@@ -15,6 +15,58 @@ param(
 # Generated from resources/i18n by scripts/check-i18n.mjs --write.
 $script:RemovalUiText = @'
 {
+  "add account": "添加账号",
+  "authorize": "授权登录",
+  "checking the next account’s quota…": "正在检查下一个账号的额度…",
+  "continue with the next account when quota runs out": "额度耗尽后使用下一个账号继续",
+  "continuing the unfinished task…": "正在继续未完成的任务…",
+  "preparing the next account…": "正在准备下一个账号…",
+  "each conversation keeps its selection. finish or stop the current response before switching.": "每个对话分别记住选择；回复结束或确认停止后才能切换。",
+  "wait for the current response to finish or stop.": "请等待本次回复结束或停止。",
+  "cancel sign-in": "取消授权",
+  "developer tools": "开发工具",
+  "stale task state cleared": "已清理残留状态",
+  "no running tasks": "当前没有运行中的任务",
+  "task still running": "任务仍在运行",
+  "login valid": "登录正常",
+  "signed out": "登录已失效",
+  "checking…": "正在检查…",
+  "connecting…": "连接中…",
+  "connected accounts": "已连接账号",
+  "current codex account": "当前 Codex 账号",
+  "disable": "停用",
+  "disabled": "已停用",
+  "no connected accounts yet.": "尚未添加账号。",
+  "enable": "启用",
+  "enabled": "已启用",
+  "choose an execution account beside the model selector.": "在模型选项旁选择执行账号。",
+  "host owner: {owner}": "主界面账号：{owner}",
+  "connection name": "账号备注",
+  "account options": "账号操作",
+  "preparing account and tools": "正在准备账号与工具",
+  "cached · updated {time}": "缓存 · 更新于 {time}",
+  "full": "完整",
+  "refreshing quota…": "正在刷新额度…",
+  "updated {time}": "更新于 {time}",
+  "check task": "检查任务状态",
+  "check sign-in": "检查登录",
+  "remaining: 5 hours {five}; weekly {weekly}": "剩余额度：5 小时 {five}；每周 {weekly}",
+  "disconnect": "断开连接",
+  "resets {time}": "{time} 恢复",
+  "reset time unknown": "恢复时间未知",
+  "select account": "选择账号",
+  "account": "执行账号",
+  "signed in": "已登录",
+  "checking conversation…": "正在检查对话…",
+  "connecting account…": "正在连接账号…",
+  "preparing conversation…": "正在准备对话…",
+  "finishing switch…": "正在完成切换…",
+  "applying permissions…": "正在应用权限…",
+  "waiting to prepare…": "正在等待准备…",
+  "preparing tools…": "正在准备工具…",
+  "today": "今天",
+  "not authorized": "尚未授权",
+  "weekly": "周",
   "new name": "新名称",
   "code-codex is disconnected.": "Code-Codex 已断开连接。",
   "the item could not be changed because windows denied access.": "Windows 拒绝访问，无法修改项目。",
@@ -110,14 +162,17 @@ $script:RemovalUiText = @'
   "milky way background": "流动星河",
   "3d model preview": "3D 模型预览",
   "layered mountain background": "层叠山峦",
+  "multi-account tasks": "多账号任务",
   "jupyter notebook preview": "Jupyter 笔记本预览",
   "office preview": "Office 文档预览",
   "particle image background": "粒子图像",
   "pdf preview": "PDF 预览",
   "pixel sculpt background": "像素浮雕",
+  "shallow ocean letters background": "浅海来信",
   "ui surface opacity": "界面透明度",
   "transparent background": "透明背景",
   "video preview": "视频预览",
+  "more pinned plugins": "更多置顶插件",
   "{rows} {rowlabel} · {columns} {columnlabel} · comma-delimited": "{rows} {rowLabel} · {columns} {columnLabel} · 逗号分隔",
   "draw.io · {pages} {pagelabel} · local renderer": "Draw.io · {pages} 个{pageLabel} · 本地渲染",
   "{meshes} {meshlabel} · {resources} local {resourcelabel}{animations}": "{meshes} 个{meshLabel} · {resources} 个本地{resourceLabel}{animations}",
@@ -147,7 +202,6 @@ $script:RemovalUiText = @'
   "recovering codex startup": "恢复 Codex 启动",
   "copy the diagnostic report and inspect the last completed stage. a running process alone is not readiness.": "请复制诊断报告并检查最后完成的阶段。仅有进程运行，不能视为启动完成。",
   "startup recovery could not obtain complete process and port evidence": "启动恢复未能取得完整的进程和端口信息",
-  "full": "完整",
   "language preference is unavailable. using the system display language.": "无法读取语言设置，暂用系统显示语言。",
   "no codex renderer target was found": "未找到 Codex 渲染页面",
   "forward drift": "前进速度",
@@ -435,7 +489,6 @@ $script:RemovalUiText = @'
   "upward travel": "上滑位移",
   "square opacity": "方块不透明度",
   "particle count": "粒子数量",
-  "enable": "启用",
   "balanced": "均衡",
   "this diagram file has no content.": "此图表文件没有内容。",
   "base color": "基础颜色",
@@ -550,7 +603,6 @@ $script:RemovalUiText = @'
   "curtain samples": "光幕采样",
   "file preview": "文件预览",
   "code-codex was installed successfully. use the desktop shortcut to start.": "Code-Codex 已安装成功。请使用桌面快捷方式启动。",
-  "connecting…": "连接中…",
   "orbit drift": "轨道漂移",
   "separate": "分离",
   "close glow horizon settings": "关闭发光地平线设置",
@@ -562,7 +614,6 @@ $script:RemovalUiText = @'
   "video appearance": "视频外观",
   "settings": "设置",
   "luminance": "亮度",
-  "disabled": "已停用",
   "code-codex is disconnected": "Code-Codex 已断开连接",
   "{name} changes in commit {hash}": "{name} 在提交 {hash} 中的更改",
   "the debugging endpoint reported too many targets": "调试端点报告的目标过多",
@@ -611,7 +662,6 @@ $script:RemovalUiText = @'
   "csv preview: {name}": "CSV 预览：{name}",
   "clip end": "片段结束",
   "yes": "是",
-  "developer tools": "开发工具",
   "toggle code minimap": "切换代码缩略图",
   "code-codex could not initialize heavenly cloud background": "Code-Codex 无法初始化 Heavenly Cloud Background",
   "turbulence": "湍流扰动",
@@ -657,7 +707,6 @@ $script:RemovalUiText = @'
   "code-codex setup": "Code-Codex 安装",
   "{name} rendered draw.io page: {page}": "{name} 的 Draw.io 渲染页面：{page}",
   "repair the official codex desktop app in windows settings, then start code-codex again.": "请在 Windows 设置中修复官方 Codex Desktop，然后重新启动 Code-Codex。",
-  "enabled": "已启用",
   "the app server process could not be started": "无法启动应用服务器进程",
   "aurora intensity": "极光强度",
   "restart codex desktop through code-codex.": "请通过 Code-Codex 重启 Codex Desktop。",
@@ -797,7 +846,6 @@ $script:RemovalUiText = @'
   "distance": "距离",
   "markdown cell {index}": "Markdown 单元格 {index}",
   "interaction": "交互",
-  "disable": "停用",
   "language text is unavailable.": "无法显示此语言文本。",
   "clip range could not be saved": "无法保存裁剪范围",
   "the selected codex executable could not be validated": "无法验证所选 Codex 程序",
@@ -1009,7 +1057,6 @@ $script:RemovalUiText = @'
   "animation": "动画",
   "blue": "蓝光",
   "brightness": "画面亮度",
-  "checking…": "正在检查…",
   "glow horizon settings": "发光地平线设置",
   "preparing the windows 10 window compatibility patch": "正在准备 Windows 10 窗口兼容修补",
   "image limit: 32 png/jpeg/webp files, 30 mb each, 256 mb total.": "最多32张PNG/JPEG/WebP图片，单张30 MB，总计256 MB。",
@@ -1499,8 +1546,76 @@ function Remove-CodeCodexEmptyRoot([string]$Root) {
         }
     }
 }
+function Remove-CodeCodexAccountCredentials([string]$Root) {
+    $full = Assert-CodeCodexRoot $Root -Owned
+    $accounts = Join-Path $full 'data\accounts'
+    if (-not (Test-Path -LiteralPath $accounts)) { return }
+    # Only the connection homes under this verified application root are eligible.
+    # Never enumerate or read Windows credential values, or the official profile.
+    foreach ($part in @('data','data\accounts')) {
+        $item = Get-Item -LiteralPath (Join-Path $full $part) -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Account credential cleanup rejected a redirected directory.' }
+    }
+    if (-not ('CodeCodexAccountCredentialCleanup' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Security.Cryptography;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class CodeCodexAccountCredentialCleanup {
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    private static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    private static extern uint GetFinalPathNameByHandleW(SafeFileHandle file,StringBuilder path,uint length,uint flags);
+    [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    private static extern bool CredDeleteW(string target,uint kind,uint flags);
+    public static string Target(string home,string root) {
+        using(var handle=CreateFileW(home,0,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero)) {
+            if(handle.IsInvalid)throw new IOException("Opening the owned account home failed.",Marshal.GetLastWin32Error());
+            var path=new StringBuilder(32768);
+            var length=GetFinalPathNameByHandleW(handle,path,(uint)path.Capacity,0);
+            if(length==0||length>=path.Capacity)throw new IOException("Resolving the owned account home failed.");
+            var canonical=path.ToString();
+            var expected="\\\\?\\"+Path.GetFullPath(home).TrimEnd('\\');
+            var boundary="\\\\?\\"+Path.GetFullPath(root).TrimEnd('\\')+"\\data\\accounts\\";
+            if(!canonical.Equals(expected,StringComparison.OrdinalIgnoreCase)||!canonical.StartsWith(boundary,StringComparison.OrdinalIgnoreCase))throw new IOException("Account credential home escaped the verified application root.");
+            using(var hash=SHA256.Create()) {
+                var digest=hash.ComputeHash(Encoding.UTF8.GetBytes(path.ToString()));
+                return "cli|"+BitConverter.ToString(digest).Replace("-","").ToLowerInvariant().Substring(0,16)+".Codex Auth";
+            }
+        }
+    }
+    public static void Delete(string home,string root) {
+        var legacy=Target(home,root);
+        var sealedStore="secrets|"+legacy.Substring(4,16)+".codex";
+        foreach(var target in new[]{legacy,sealedStore}) {
+            if(!CredDeleteW(target,1,0)) {
+                var code=Marshal.GetLastWin32Error();
+                if(code!=1168)throw new IOException("Deleting an owned account credential failed.",code);
+            }
+        }
+    }
+}
+'@
+    }
+    $count = 0
+    foreach ($owner in Get-ChildItem -LiteralPath $accounts -Force) {
+        if ($owner.Name -notmatch '^[a-f0-9]{64}$') { continue }
+        if (-not $owner.PSIsContainer -or ($owner.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Account credential cleanup rejected a redirected owner.' }
+        foreach ($connection in Get-ChildItem -LiteralPath $owner.FullName -Force) {
+            if ($connection.Name -notmatch '^[a-f0-9]{32}$') { continue }
+            if (-not $connection.PSIsContainer -or ($connection.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Account credential cleanup rejected a redirected connection.' }
+            $count++
+            if ($count -gt 4096) { throw 'Account credential cleanup exceeded its bounded home count.' }
+            [CodeCodexAccountCredentialCleanup]::Delete($connection.FullName,$full)
+        }
+    }
+}
 function Remove-CodeCodexApplicationFiles([string]$Root,[switch]$Purge) {
     $full = Assert-CodeCodexRoot $Root -Owned
+    if($Purge){Remove-CodeCodexAccountCredentials $full}
     $names = @($ApplicationEntries) + @(Get-CodeCodexVersionedRootLaunchers $Root)
     if($Purge){$names+=@('data','plugins','logs','temp','backups')}
     foreach($name in $names){

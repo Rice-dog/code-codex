@@ -1,3 +1,4 @@
+import {nativeMenuCheckMask} from '../menu-check';
 export const style6 = String.raw`  .git-history-extension .preview-extension-icon {
     color: var(--cle-added);
     background: color-mix(in srgb, var(--cle-added) 9%, var(--cle-paper));
@@ -1467,8 +1468,9 @@ export const style6 = String.raw`  .git-history-extension .preview-extension-ico
   }
   .status-code[data-feedback="latest"]::after {
     display: block;
-    content: "✓";
-    color: var(--cle-added);
+    content: "";
+    background: var(--cle-added);
+    mask: ${nativeMenuCheckMask} center / contain no-repeat;
   }
   .status-code[data-update-state="updateAvailable"]::after {
     display: block;

@@ -59,8 +59,76 @@ function Remove-CodeCodexEmptyRoot([string]$Root) {
         }
     }
 }
+function Remove-CodeCodexAccountCredentials([string]$Root) {
+    $full = Assert-CodeCodexRoot $Root -Owned
+    $accounts = Join-Path $full 'data\accounts'
+    if (-not (Test-Path -LiteralPath $accounts)) { return }
+    # Only the connection homes under this verified application root are eligible.
+    # Never enumerate or read Windows credential values, or the official profile.
+    foreach ($part in @('data','data\accounts')) {
+        $item = Get-Item -LiteralPath (Join-Path $full $part) -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Account credential cleanup rejected a redirected directory.' }
+    }
+    if (-not ('CodeCodexAccountCredentialCleanup' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Security.Cryptography;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class CodeCodexAccountCredentialCleanup {
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    private static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    private static extern uint GetFinalPathNameByHandleW(SafeFileHandle file,StringBuilder path,uint length,uint flags);
+    [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    private static extern bool CredDeleteW(string target,uint kind,uint flags);
+    public static string Target(string home,string root) {
+        using(var handle=CreateFileW(home,0,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero)) {
+            if(handle.IsInvalid)throw new IOException("Opening the owned account home failed.",Marshal.GetLastWin32Error());
+            var path=new StringBuilder(32768);
+            var length=GetFinalPathNameByHandleW(handle,path,(uint)path.Capacity,0);
+            if(length==0||length>=path.Capacity)throw new IOException("Resolving the owned account home failed.");
+            var canonical=path.ToString();
+            var expected="\\\\?\\"+Path.GetFullPath(home).TrimEnd('\\');
+            var boundary="\\\\?\\"+Path.GetFullPath(root).TrimEnd('\\')+"\\data\\accounts\\";
+            if(!canonical.Equals(expected,StringComparison.OrdinalIgnoreCase)||!canonical.StartsWith(boundary,StringComparison.OrdinalIgnoreCase))throw new IOException("Account credential home escaped the verified application root.");
+            using(var hash=SHA256.Create()) {
+                var digest=hash.ComputeHash(Encoding.UTF8.GetBytes(path.ToString()));
+                return "cli|"+BitConverter.ToString(digest).Replace("-","").ToLowerInvariant().Substring(0,16)+".Codex Auth";
+            }
+        }
+    }
+    public static void Delete(string home,string root) {
+        var legacy=Target(home,root);
+        var sealedStore="secrets|"+legacy.Substring(4,16)+".codex";
+        foreach(var target in new[]{legacy,sealedStore}) {
+            if(!CredDeleteW(target,1,0)) {
+                var code=Marshal.GetLastWin32Error();
+                if(code!=1168)throw new IOException("Deleting an owned account credential failed.",code);
+            }
+        }
+    }
+}
+'@
+    }
+    $count = 0
+    foreach ($owner in Get-ChildItem -LiteralPath $accounts -Force) {
+        if ($owner.Name -notmatch '^[a-f0-9]{64}$') { continue }
+        if (-not $owner.PSIsContainer -or ($owner.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Account credential cleanup rejected a redirected owner.' }
+        foreach ($connection in Get-ChildItem -LiteralPath $owner.FullName -Force) {
+            if ($connection.Name -notmatch '^[a-f0-9]{32}$') { continue }
+            if (-not $connection.PSIsContainer -or ($connection.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Account credential cleanup rejected a redirected connection.' }
+            $count++
+            if ($count -gt 4096) { throw 'Account credential cleanup exceeded its bounded home count.' }
+            [CodeCodexAccountCredentialCleanup]::Delete($connection.FullName,$full)
+        }
+    }
+}
 function Remove-CodeCodexApplicationFiles([string]$Root,[switch]$Purge) {
     $full = Assert-CodeCodexRoot $Root -Owned
+    if($Purge){Remove-CodeCodexAccountCredentials $full}
     $names = @($ApplicationEntries) + @(Get-CodeCodexVersionedRootLaunchers $Root)
     if($Purge){$names+=@('data','plugins','logs','temp','backups')}
     foreach($name in $names){

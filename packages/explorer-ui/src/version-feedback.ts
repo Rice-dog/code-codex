@@ -25,6 +25,7 @@ export class VersionFeedback {
   }
   sync(eligible = this.#eligible): void {
     this.#eligible = eligible;
+    if(!this.#pending&&!this.#phase)return;
     const rect = this.button.getBoundingClientRect();
     const startup = (window as unknown as Record<symbol, { phase?: string }>)[Symbol.for("code-codex:startup-transition:controller:v1")];
     const onScreen = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0

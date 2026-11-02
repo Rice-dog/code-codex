@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -33,8 +34,8 @@ async function shot(name,element){
  const screenshot=await browser.command('Page.captureScreenshot',{format:'png',clip});writeFileSync(resolve(out,name+'.png'),Buffer.from(screenshot.data,'base64'));
 }
 try{
- await wait(`!!document.querySelector('code-codex-v${version.replaceAll('.','-')}')`);
- await ev(`window.h=document.querySelector('code-codex-v${version.replaceAll('.','-')}');window.q=s=>h.shadowRoot.querySelector(s);window.labels=()=>[...h.shadowRoot.querySelectorAll('.context-menu-label')].map(e=>e.textContent);`);
+ await wait(`!!document.querySelector('${builtExplorerTag(root)}')`);
+ await ev(`window.h=document.querySelector('${builtExplorerTag(root)}');window.q=s=>h.shadowRoot.querySelector(s);window.labels=()=>[...h.shadowRoot.querySelectorAll('.context-menu-label')].map(e=>e.textContent);`);
  await wait(`!!q('.tree-row[data-path="New Folder"]')&&!!q('.tree-row[data-path="New File"]')`);
  await delay(200); // Initial settings/watch reconciliation must finish before opening a menu.
  await context('.tree-row[data-path="New Folder"]');

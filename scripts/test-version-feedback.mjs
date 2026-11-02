@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createServer} from 'node:http';
@@ -5,7 +6,7 @@ import {resolve} from 'node:path';
 import {launchFixture,delay} from './browser-fixture.mjs';
 const root=resolve(import.meta.dirname,'..'), ui=resolve(root,'packages/explorer-ui');
 const version=JSON.parse(readFileSync(resolve(ui,'package.json'),'utf8')).version;
-const tag='code-codex-v'+version.replaceAll('.','-');
+const tag=builtExplorerTag(root);
 const output=resolve(root,'artifacts/version-feedback-v'+version);mkdirSync(output,{recursive:true});
 const base=readFileSync(resolve(root,'scripts/fixtures/import-home.html'),'utf8');
 const server=createServer((req,res)=>{
@@ -42,7 +43,7 @@ try{
   await snapshot('update-arrow');
   await e(`${button}.click()`);await check('arrow opens update dialog without another check or installation',`${button}.getAttribute('aria-expanded')==='true' && calls.filter(c=>c.method==='explorer.update.startup').length===1 && !calls.some(c=>c.method==='explorer.update.check'||c.method==='explorer.update.install')`);
   await open('latest');await wait(`${button}?.dataset.feedback==='latest'`,'latest sweep');
-  await check('latest keeps installed version and shows tick briefly',`${button}.textContent==='v${version}' && getComputedStyle(${button},'::after').content.includes('✓')`);
+  await check('latest keeps installed version and shows tick briefly',`${button}.textContent==='v${version}' && getComputedStyle(${button},'::after').display==='block' && getComputedStyle(${button},'::after').maskImage.includes('data:image/svg+xml')`);
   await wait(`!${button}.dataset.feedback`,'tick gone');await check('latest tick clears after feedback',`getComputedStyle(${button},'::after').display==='none'`);
   await e(`document.querySelector('${tag}').setHomeViewActive(false);document.querySelector('${tag}').setHomeViewActive(true)`);await delay(600);
   await check('Home transitions do not start another automatic check',`calls.filter(c=>c.method==='explorer.update.startup').length===1`);

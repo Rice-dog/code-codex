@@ -3,6 +3,7 @@ import { build } from 'esbuild';
 import { readFile, mkdir, writeFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
+import {buildBackgroundWorker} from './build-background-worker.mjs';
 
 export const definitions = [
   ['glow-horizon','Glow Horizon Background','GlowHorizonRenderer'],
@@ -23,8 +24,8 @@ export async function buildBackgroundPackages(root, options, outputRoot=resolve(
   const catalog = [];
   const mediaManifest = JSON.parse(await readFile(resolve(root, 'default-media/manifest.json'), 'utf8'));
   const notices = await readFile(resolve(root, "../..", "THIRD_PARTY_NOTICES_EN.md"), "utf8");
-  const banner = `/*! Code-Codex first-party background package.\nSource: https://github.com/Rice-dog/code-codex\n${notices.replaceAll("*/", "* /")}\n*/`;
   for (const [id, name, renderer] of definitions) {
+    const banner=await readFile(resolve(root,'../../resources/plugin-banners',id+'.txt'),'utf8');
     const images = mediaManifest.plugins[id] ?? [];
     const packageVersion = sourcePackage(id).version;
     const releaseTag=sourcePackage(id).releaseTag;
@@ -51,15 +52,18 @@ export async function buildBackgroundPackages(root, options, outputRoot=resolve(
     }
     const module = id === 'particle-image' ? 'particle-image-startup' : id === 'pixel-sculpt' ? 'pixel-sculpt-renderer' : id === 'blinking-squares' ? 'blinking-squares-host' : 'startup-background-renderers';
     const helpers = id === 'glow-horizon' ? ',populateGlowHorizonLayer,readGlowHorizonBackgroundSettings' : '';
-    const imports = `import {${renderer}${helpers}} from './${module}';`;
+    const isolated=['black-hole','heavenly-cloud','aurora-ionosphere','milky-way','mountain','cloud-train','blinking-squares'].includes(id);
+    const worker=id==='pixel-sculpt'?await buildBackgroundWorker(root,options,'','',`export {pixelMethods as kernelMethods,createPixelKernel as createKernel} from './src/core/background-runtime/pixel-kernel';`):id==='particle-image'?await buildBackgroundWorker(root,options,'','',`export {particleMethods as kernelMethods,createParticleKernel as createKernel} from './src/core/background-runtime/particle-kernel';`):isolated?await buildBackgroundWorker(root,options,id==='blinking-squares'?'src/blinking-squares-kernel.ts':id==='black-hole'?'src/core/background-runtime/black-hole-kernel.ts':`src/${module}.ts`,id==='blinking-squares'?'BlinkingSquaresKernel':renderer):undefined;
+    const workerConstructor=id==='blinking-squares'?`constructor(host,settings,onError){const canvas=document.createElement('canvas');canvas.style.cssText='width:100%;height:100%;display:block';host.append(canvas);super(${JSON.stringify(id)},${JSON.stringify(worker?.source)},host,canvas,settings,onError);}`:`constructor(host,canvas,settings,onError){super(${JSON.stringify(id)},${JSON.stringify(worker?.source)},host,canvas,settings,onError);}`;
+    const imports = id==='pixel-sculpt'?`import {PixelSculptRenderer as PixelHost} from './pixel-sculpt-renderer';import {PixelWorkerRenderer} from './core/background-runtime/pixel-worker-renderer';const PixelSculptRenderer=class extends PixelHost{constructor(layer,canvas,settings,onError,persist=true){super(layer,canvas,settings,onError,persist,(canvas,onError,state,emit)=>new PixelWorkerRenderer(${JSON.stringify(worker.source)},canvas,onError,state,emit));}};`:id==='particle-image'?`import {ParticleWorkerRenderer} from './core/background-runtime/particle-worker-renderer';const ParticleImageRenderer=class extends ParticleWorkerRenderer{constructor(canvas,onError,settings,transition,opening){super(${JSON.stringify(worker.source)},canvas,onError,settings,transition,opening);}};`:id==='black-hole'?`import {BlackHoleWorkerRenderer} from './core/background-runtime/black-hole-worker-renderer';const BlackHoleRenderer=class extends BlackHoleWorkerRenderer{constructor(host,canvas,settings,onError){super(${JSON.stringify(worker.source)},host,canvas,settings,onError);}};`:worker?`import {WorkerBackgroundRenderer} from './core/background-runtime/worker-renderer';const ${renderer}=class extends WorkerBackgroundRenderer{${workerConstructor}};`:`import {${renderer}${helpers}} from './${module}';`;
     let startup;
     let extra = '';
     if (id === 'particle-image') {
       extra = `import {mountParticleImageStartupBackground} from './particle-image-startup';`;
-      startup = 'mountParticleImageStartupBackground(target,onError)';
+      startup = 'mountParticleImageStartupBackground(target,onError,ParticleImageRenderer)';
     } else if (id === 'pixel-sculpt') {
       extra = `import {mountPixelSculptStartupBackground} from './pixel-sculpt-renderer';`;
-      startup = 'mountPixelSculptStartupBackground(target,canvas,onError)';
+      startup = 'mountPixelSculptStartupBackground(target,canvas,onError,PixelSculptRenderer)';
     } else if (id === 'glow-horizon') {
       startup = '(populateGlowHorizonLayer(target,readGlowHorizonBackgroundSettings()),new GlowHorizonRenderer(target,readGlowHorizonBackgroundSettings()))';
     } else {
@@ -73,7 +77,7 @@ export async function buildBackgroundPackages(root, options, outputRoot=resolve(
     let contents = `${imports}${extra}\nconst host=window;const key=Symbol.for('code-codex:background-modules:v1');const registry=host[key]??(host[key]=new Map());const prepareDefaults=${prepare};registry.set(${JSON.stringify(id)},{id:${JSON.stringify(id)},api:1,version:${JSON.stringify(packageVersion)},prepareDefaults,exports:{${renderer}${id === 'glow-horizon' ? ',populateGlowHorizonLayer' : ''}},startup(target,onError){let instance,disposed=false;const ready=Promise.resolve().then(()=>{if(disposed)throw new Error('Startup background preparation was canceled');${needsCanvas ? "const canvas=document.createElement('canvas');canvas.style.cssText='width:100%;height:100%;display:block';target.append(canvas);" : ''}instance=${startup};return instance.ready;});void ready.catch(()=>{});return {ready,dispose(){disposed=true;instance?.dispose();}};}});`;
     if (!images.length) contents = `${imports}${extra}\nconst host=window;const key=Symbol.for('code-codex:background-modules:v1');const registry=host[key]??(host[key]=new Map());registry.set(${JSON.stringify(id)},{id:${JSON.stringify(id)},api:1,version:${JSON.stringify(packageVersion)},exports:{${renderer}${id === 'glow-horizon' ? ',populateGlowHorizonLayer' : ''}},startup(target,onError){${needsCanvas ? "const canvas=document.createElement('canvas');canvas.style.cssText='width:100%;height:100%;display:block';target.append(canvas);" : ''}return ${startup};}});`;
     const asset = `CodeCodex-background-${id}-${packageVersion}.js`;
-    await build({ ...options, banner:{js:banner}, sourcemap:false, metafile:true, stdin: { contents, resolveDir:resolve(root,'src'), sourcefile:`background-${id}.ts`, loader:'ts' }, format:'iife', minify:true, outfile:resolve(pluginDir,asset) }).then(async result => { await writeFile(resolve(pluginDir,`${id}.metafile.json`),JSON.stringify(result.metafile)); });
+    await build({ ...options, banner:{js:banner}, sourcemap:false, metafile:true, stdin: { contents, resolveDir:resolve(root,'src'), sourcefile:`background-${id}.ts`, loader:'ts' }, format:'iife', minify:true, outfile:resolve(pluginDir,asset) }).then(async result => { if(worker)Object.assign(result.metafile.inputs,worker.inputs);await writeFile(resolve(pluginDir,`${id}.metafile.json`),JSON.stringify(result.metafile)); });
     const bytes = await readFile(resolve(pluginDir,asset));
     if (bytes.length > 4 * 1024 * 1024) throw new Error(`Background ${id} exceeds the 4 MiB bounded script channel`);
     const descriptor = { id, name, category:"appearance", api:1, version:packageVersion, releaseTag, size:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex'), asset, relativePath:asset, resources, galleryVersion:mediaManifest.version, defaultImageCount:images.length, capabilities:["background", "startup", "preview"], source:"https://github.com/Rice-dog/code-codex", notices:"THIRD_PARTY_NOTICES_EN.md" };

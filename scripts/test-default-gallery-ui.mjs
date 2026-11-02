@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import {verifiedPluginSources} from './plugin-package-files.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
@@ -15,7 +16,7 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const browser=await launchFixture(`http://127.0.0.1:${server.address().port}/`);
 const evaluate=browser.evaluate;
 const version=JSON.parse(readFileSync(resolve(root,'packages/explorer-ui/package.json'),'utf8')).version;
-const tag='code-codex-v'+version.replaceAll('.','-');
+const tag=builtExplorerTag(root);
 const wait=async(expression)=>{for(let n=0;n<150;n++){if(await evaluate(expression))return;await delay(100)}throw Error('Timed out: '+expression)};
 const report={version,checks:[]};
 try{

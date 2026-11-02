@@ -226,6 +226,28 @@ export default function BlinkingSquares({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    return startBlinkingSquaresKernel(canvas,configRef,setError,onError,onOpeningReady,()=>setRendererEpoch(value=>value+1));
+  }, [rendererEpoch, introKey]);
+
+  return (
+    <div className={className} style={{ position: "absolute", inset: 0, overflow: "hidden", width, height, background: backgroundColor, pointerEvents: "none" }}>
+      <canvas ref={canvasRef} className="code-codex-particle-canvas" style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }} aria-label="Animated directional field of blinking squares" />
+      {children ? <div className="pointer-events-none absolute inset-0">{children}</div> : null}
+      {error ? <div className="absolute inset-0 grid place-items-center bg-black/90 p-8 text-center text-xs tracking-[.16em] text-white/55">{error}</div> : null}
+    </div>
+  );
+}
+
+function directionToNumber(direction: BlinkingSquaresDirection) { return direction === "right" ? 0 : direction === "left" ? 1 : direction === "top" ? 2 : 3; }
+function hexToRgb(color: string): [number, number, number] {
+  const match = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
+  if (!match) return [1, 1, 1];
+  return [parseInt(match[1]!, 16) / 255, parseInt(match[2]!, 16) / 255, parseInt(match[3]!, 16) / 255];
+}
+
+
+/** Shared visual kernel; React owns only its settings and error view. */
+export function startBlinkingSquaresKernel(canvas:HTMLCanvasElement,configRef:{current:RuntimeConfig},setError:(message:string|null)=>void,onError?: (message?:string)=>void,onOpeningReady?: (callback:(()=>void)|undefined)=>void,onRestore?:()=>void){
     const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, powerPreference: "high-performance" });
     if (!gl) { const message = "WebGL2 is not available in this browser."; setError(message); onError?.(message); return; }
     let program: WebGLProgram | null = null;
@@ -472,7 +494,7 @@ export default function BlinkingSquares({
     const cancelHold = (event: PointerEvent) => finishHold(event, false);
     const visibility = () => { pageVisible = !document.hidden; if (pageVisible) start(); else stop(); };
     const lost = (event: Event) => { event.preventDefault(); stop(); const message = "WebGL context lost. Waiting for recovery…"; setError(message); onError?.(message); };
-    const restored = () => setRendererEpoch((value) => value + 1);
+    const restored = () => onRestore?.();
     const resizeObserver = new ResizeObserver(resize);
     onOpeningReady?.(() => { introStartedAt = null; previousTime = performance.now(); });
     const intersectionObserver = new IntersectionObserver(([entry]) => { onScreen = entry?.isIntersecting ?? true; if (onScreen) start(); else stop(); }, { threshold: .01 });
@@ -496,20 +518,4 @@ export default function BlinkingSquares({
       canvas.removeEventListener("webglcontextlost", lost); canvas.removeEventListener("webglcontextrestored", restored);
       if (program) gl.deleteProgram(program); if (vertexArray) gl.deleteVertexArray(vertexArray);
     };
-  }, [rendererEpoch, introKey]);
-
-  return (
-    <div className={className} style={{ position: "absolute", inset: 0, overflow: "hidden", width, height, background: backgroundColor, pointerEvents: "none" }}>
-      <canvas ref={canvasRef} className="code-codex-particle-canvas" style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }} aria-label="Animated directional field of blinking squares" />
-      {children ? <div className="pointer-events-none absolute inset-0">{children}</div> : null}
-      {error ? <div className="absolute inset-0 grid place-items-center bg-black/90 p-8 text-center text-xs tracking-[.16em] text-white/55">{error}</div> : null}
-    </div>
-  );
-}
-
-function directionToNumber(direction: BlinkingSquaresDirection) { return direction === "right" ? 0 : direction === "left" ? 1 : direction === "top" ? 2 : 3; }
-function hexToRgb(color: string): [number, number, number] {
-  const match = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
-  if (!match) return [1, 1, 1];
-  return [parseInt(match[1]!, 16) / 255, parseInt(match[2]!, 16) / 255, parseInt(match[3]!, 16) / 255];
 }

@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import {build} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const root=resolve(import.meta.dirname,'..'),out=resolve(root,'artifacts/account-rpc-observation');await mkdir(out,{recursive:true});
+await build({stdin:{contents:"export {NativeAccountAdapter} from './features/accounts/native-adapter';export {rpcManagerService} from './features/accounts/rpc-observation';",resolveDir:resolve(root,'packages/explorer-ui/src'),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:resolve(out,'fixture.mjs'),plugins:[{name:'thread',setup(b){b.onResolve({filter:/active-thread$/},()=>({path:'thread',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:"export const resolveActiveThread=()=>globalThis.rpcThread??'task';"}));}}]});
+globalThis.window=new EventTarget();
+const {NativeAccountAdapter,rpcManagerService}=await import(pathToFileURL(resolve(out,'fixture.mjs'))),checks=[];
+const quota=(remaining)=>({rateLimits:{limitId:'codex',primary:{usedPercent:100-remaining,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:50,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
+const wait=async p=>{for(let i=0;i<100;i++){if(p())return;await new Promise(r=>setTimeout(r,20));}throw Error('Fixture did not settle');};
+const state={owner:{id:'owner',label:'fixture'},profile:{initial:'./assets/native.js',shared:'./assets/shared.js'},connections:[{id:'B',email:'B@test'}],selected:{task:'B'},sharedConversations:[],activeConversations:[]};
+let callback,admit,notification,disposed=0,active=false,hostQuota=89,childReads=0,hostReads=0;
+const lease=()=>({[Symbol.dispose](){disposed++;}}),manager={dup(){return this},[Symbol.dispose](){disposed++;},registerReplayAdmission(f){admit=f;return Promise.resolve(lease());},subscribe(p){notification=p.listener;return Promise.resolve(lease());},getThreadExecutionState:async()=>({inProgress:active})};
+const registry={dup(){return this},[Symbol.dispose](){disposed++;},subscribe(_host,f){callback=f;queueMicrotask(()=>f({status:'ready',manager}));return Promise.resolve(lease());}};
+const services={appServerManagers:registry,executionHosts:{},clientCoordination:{},appActions:{}};
+assert.equal(rpcManagerService({one:services,alias:services}),registry);checks.push('One concrete trusted service is deduplicated across re-export aliases');
+assert.throws(()=>rpcManagerService({one:services,two:{...services,appServerManagers:{}}}),/AMBIGUOUS/);checks.push('Distinct service candidates are rejected rather than chosen arbitrarily');
+let getter=0;assert.equal(rpcManagerService({trap:{get appServerManagers(){getter++;return registry;}}}),undefined);assert.equal(getter,0);checks.push('Service discovery never invokes namespace object getters');
+const subscribers=new Set(),dispatcher={subscribe(_type,f){subscribers.add(f);return()=>subscribers.delete(f)},dispatchMessage(_type,m){hostReads++;queueMicrotask(()=>{for(const f of subscribers)f({message:{id:m.request.id,result:quota(hostQuota)}})})}};
+const calls=[],request=async p=>{calls.push(p);if(p.action==='info')return structuredClone(state);if(p.action==='usage'){childReads++;return quota(0)}if(p.action==='select'){state.selected[p.conversationId]=p.connectionId;return {}}if(p.action==='release')return {};throw Error('Unexpected action '+p.action);};
+const adapter=new NativeAccountAdapter(request,structuredClone(state),()=>{},async()=>({services,dispatcher}));await adapter.start();
+try{
+ await wait(()=>adapter.usage.remaining('host').fiveHour===89&&adapter.usage.remaining('B').fiveHour===0);
+ assert.equal(adapter.status().selected,'host');assert(adapter.status().sendBlocked);assert.match(adapter.status().recoveryNotice,/ACCOUNT_EXECUTION_UNSUPPORTED/);checks.push('A stale child preference is not presented as the executing identity in RPC mode');
+ await assert.rejects(()=>adapter.select('B'),/ACCOUNT_EXECUTION_UNSUPPORTED/);assert(!calls.some(c=>c.action==='select'||c.action==='shared.prepare'||c.action==='shared.rpc'));checks.push('Unsupported child selection cannot commit a false success or trial inference');
+ await assert.rejects(()=>admit('task'),/ACCOUNT_EXECUTION_UNSUPPORTED/);checks.push('Registered native replay admission rejects an incompatible saved child route');
+ await adapter.select('host');assert.equal(adapter.status().sendBlocked,false);await admit('task');checks.push('Explicit selection of the official identity clears the mismatch without changing official login');
+ const previousChildReads=childReads;notification({method:'account/rateLimits/updated',params:quota(84)});assert.equal(adapter.usage.remaining('host').fiveHour,84);assert.equal(adapter.usage.remaining('B').fiveHour,0);assert.equal(childReads,previousChildReads);checks.push('Live official quota84 replaces stale89 and cannot overwrite the unused child quota');
+ active=true;notification({method:'turn/started',params:{threadId:'task',turn:{id:'one'}}});assert(adapter.status().busy);assert(adapter.canDisable());assert.equal(adapter.handoffStatus().activeTasks,0);checks.push('Actual host activity is visible while read-only observation does not claim ownership of official execution');
+ assert.equal(await adapter.reconcile('host'),'running');await assert.rejects(()=>adapter.reconcile('B'),/ACCOUNT_EXECUTION_UNSUPPORTED/);checks.push('Explicit task status uses actual native RPC activity and never labels an unsupported child executor idle');
+ hostQuota=82;active=false;notification({method:'turn/completed',params:{threadId:'task',turn:{id:'one',status:'completed'}}});await wait(()=>adapter.usage.remaining('host').fiveHour===82);assert.equal(childReads,previousChildReads);assert(adapter.canDisable());checks.push('Native terminal refreshes only the consumed host account, preserving idle child cache');
+ const stable=hostReads;adapter.changed();adapter.changed();await new Promise(r=>setTimeout(r,450));assert.equal(hostReads,stable);checks.push('Idle observation and unchanged UI notifications do not poll cached quota again');
+ callback({status:'disconnected'});assert.equal(adapter.status().supported,false);assert(adapter.status().sendBlocked);checks.push('Service disconnect leaves a specific unavailable state with no fallback identity');
+ callback({status:'ready',manager});await wait(()=>adapter.status().supported);assert.equal(adapter.status().selected,'host');checks.push('A replacement RPC capability is re-owned and revalidated without retaining a stale unavailable state');
+}finally{adapter.endSession();}
+assert(disposed>=5);checks.push('Disposal releases both subscription leases and owned RPC capabilities');
+await writeFile(resolve(out,'result.json'),JSON.stringify({passed:true,checks,scope:'Production adapter and RPC observer with deterministic borrowed-capability service fixture. No real inference, auth, official login or disk settings changes. Child execution through RPC is intentionally unavailable.'},null,2));console.log(JSON.stringify({passed:true,checks}));

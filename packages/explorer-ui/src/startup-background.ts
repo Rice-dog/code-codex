@@ -6,6 +6,7 @@ export const STARTUP_BACKGROUNDS = [
   ['cloud-train','Cloud Train Background'], ['blinking-squares','Blinking Squares Background'],
   ['particle-image','Particle Image Background'], ['pixel-sculpt','Pixel Sculpt Background'],
   ['ascii-tiles','ASCII Tiles Background'], ['custom-background','Custom Background'],
+  ['shallow-ocean','Shallow Ocean Letters Background'],
 ] as const;
 export interface StartupBackgroundRenderer { dispose():void; readonly ready?:Promise<void>; }
 export function mountStartupBackground(target: HTMLElement, id: string, onError: (message?: string)=>void): StartupBackgroundRenderer {return cachedStartupBackground(id,target,onError);}

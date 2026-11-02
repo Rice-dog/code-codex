@@ -12,18 +12,20 @@ export function isCodexRpcNamespace(value: unknown): value is Record<string,unkn
 
 
 function appearanceModuleCandidates(): readonly string[] {
+  const profile=(window as unknown as Record<symbol,{initial?:string;appearance?:string[]}|undefined>)[Symbol.for('code-codex:account-host-profile:v1')];
   const candidates=[
+    ...(profile?.initial?[profile.initial]:[]),...(profile?.appearance??[]),
     ...Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="modulepreload"][href]'),(link) => link.href),
     ...Array.from(document.querySelectorAll<HTMLScriptElement>("script[type=module][src]"),(script) => script.src),
     ...performance.getEntriesByType("resource").map((entry) => entry.name),
   ];
-  return [...new Set(candidates)];
+  return [...new Set(candidates.flatMap(candidate=>{try{return [new URL(candidate,location.href).href];}catch{return [];}}))];
 }
 
 export function findCodexAppInitialModule(): string|undefined {
   return appearanceModuleCandidates().find((candidate) => {
     try {
-      return /\/app-initial-[^/]+\.js$/.test(new URL(candidate,location.href).pathname);
+      const url=new URL(candidate,location.href);return url.protocol===location.protocol&&url.host===location.host&&!url.search&&!url.hash&&/\/app-initial-[A-Za-z0-9_-]+\.js$/.test(url.pathname);
     } catch(__codeCodexCaught) {
       recordCaughtRuntimeError("findCodexAppInitialModule",__codeCodexCaught);
 

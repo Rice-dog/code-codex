@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import {build} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {createServer} from 'node:http';import {resolve} from 'node:path';
+import {launchFixture} from './browser-fixture.mjs';
+const root=resolve(import.meta.dirname,'..'),out=resolve(root,'artifacts/auto-continue-panel');await mkdir(out,{recursive:true});
+const source=`import './core/localization/runtime';import {applyLanguage,localizeOwnedUi} from './i18n';import {multiAccountCardMarkup,multiAccountPanelMarkup} from './multi-account';import {MultiAccountPlugin} from './multi-account-runtime';import {styles} from './styles';
+window.calls=[];window.phase=undefined;window.info={owner:{id:'A',label:'host@example.test'},connections:[{id:'B',email:'child@example.test'}],selected:{},activeConversations:[],profile:{shared:'./assets/fixture.js'}};
+window.adapter={info,usage:{remaining:()=>({fiveHour:75,weekly:50}),resetTimes:()=>({fiveHour:Math.floor(Date.now()/1000)+7200,weekly:Math.floor(Date.now()/1000)+172800}),refresh(){},revision:1},updateInfo(v){this.info=v;},status:()=>({active:true,supported:true,recoveryNotice:window.recoveryNotice}),setEnabled(){},autoStatus:()=>phase,setAutoContinue:v=>calls.push(v)};
+window[Symbol.for('code-codex:multi-account-runtime:v1')]={enabled:true,viewRevision:'account-native-routing-v19',adapter,selector:{update(){},dispose(){}}};
+window[Symbol.for('code-codex:accounts-capability:v1')]={request:async p=>{if(p.action==='info')return info;throw Error('Unsupported fixture action');}};
+window.s=fixture.attachShadow({mode:'open'});s.innerHTML='<style>'+styles+'</style>'+multiAccountCardMarkup()+multiAccountPanelMarkup();window.unlocalize=localizeOwnedUi(s);window.plugin=new MultiAccountPlugin(s,message=>calls.push(message));plugin.start();window.setLanguage=applyLanguage;window.fixtureReady=true;`;
+await build({stdin:{contents:source,loader:'ts',resolveDir:resolve(root,'packages/explorer-ui/src')},bundle:true,format:'iife',outfile:resolve(out,'fixture.js')});
+const html='<!doctype html><style>body{font:14px system-ui}#fixture{display:block;width:340px;margin:32px}</style><div id="fixture"></div><script src="/fixture.js"></script>';
+const server=createServer(async(req,res)=>{res.setHeader('Content-Type',req.url==='/fixture.js'?'application/javascript':'text/html');res.end(req.url==='/fixture.js'?await readFile(resolve(out,'fixture.js')):html);});await new Promise(r=>server.listen(0,'127.0.0.1',r));const b=await launchFixture(`http://127.0.0.1:${server.address().port}`),checks=[];
+const check=async(name,e)=>{assert.equal(await b.evaluate(e),true,name);checks.push(name);};
+const capture=async name=>{const clip=await b.evaluate(`(()=>{const r=s.querySelector('.accounts-panel').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,scale:1};})()`);const r=await b.command('Page.captureScreenshot',{format:'png',clip,captureBeyondViewport:false});await writeFile(resolve(out,name+'.png'),Buffer.from(r.data,'base64'));};
+try{
+ await check('Sliding switch defaults off with native keyboard semantics and a labeled track',`(()=>{const i=s.querySelector('.accounts-auto-continue'),c=getComputedStyle(i),thumb=getComputedStyle(i,'::before');return fixtureReady&&!i.checked&&!i.disabled&&i.getAttribute('role')==='switch'&&c.appearance==='none'&&c.width==='30px'&&c.height==='17px'&&thumb.width==='11px'&&i.closest('label').textContent.includes('Continue');})()`);
+ await check('Pending startup cannot expose an actionable switch before an adapter exists',`(()=>{const state=window[Symbol.for('code-codex:multi-account-runtime:v1')],saved=state.adapter;state.adapter=undefined;state.pending=Promise.resolve();plugin.render();const disabled=s.querySelector('.accounts-auto-continue').disabled;state.adapter=saved;delete state.pending;plugin.render();return disabled&&!s.querySelector('.accounts-auto-continue').disabled&&calls.length===0;})()`);
+ await check('Enabling updates the persisted preference and the document adapter once',`(()=>{s.querySelector('.accounts-auto-continue').click();return localStorage.getItem('code-codex:account-auto-continue:v1')==='true'&&calls.at(-1)===true;})()`);
+ await b.evaluate(`plugin.open();s.querySelector('.accounts-auto-continue').focus()`);
+ await b.command('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
+ await b.command('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});
+ await check('Space toggles the switch and persists its state without a pointer',`!s.querySelector('.accounts-auto-continue').checked&&calls.at(-1)===false`);
+ await b.evaluate(`s.querySelector('.accounts-auto-continue').click()`);
+
+ await check('Panel opens without triggering inference, account change or plugin disable',`s.querySelector('.accounts-panel').matches(':popover-open')&&calls.filter(x=>typeof x==='boolean').length===3&&adapter.info.owner.id==='A'`);
+ await check('Recovery notice uses the existing message region without disabling the plugin or adding controls',`(()=>{window.recoveryNotice='ACCOUNT_PREVIOUS_OUTCOME: conversationId=fixture; reason=turn-without-terminal';plugin.render();const shown=s.querySelector('.accounts-message').textContent===window.recoveryNotice&&!s.querySelector('.accounts-auto-continue').disabled;window.recoveryNotice=undefined;plugin.render();return shown&&s.querySelector('.accounts-message').textContent==='';})()`);
+ await b.evaluate(`phase='checking';plugin.render()`);
+ await check('Checking status is readable and switch remains available to cancel',`s.querySelector('.accounts-message').textContent==='Checking the next account’s quota…'&&!s.querySelector('.accounts-auto-continue').disabled`);
+ await capture('light-checking');
+ await b.evaluate(`setLanguage({schema:1,locale:'zh-CN',revision:1,source:'menu'});phase='preparing';plugin.render()`);
+ await check('Label and preparation phase follow global Chinese language',`s.querySelector('.accounts-auto-row').textContent.includes('额度耗尽')&&s.querySelector('.accounts-message').textContent==='正在准备下一个账号…'`);
+ await b.evaluate(`fixture.style.setProperty('--cle-paper','#242527');fixture.style.setProperty('--cle-paper-raised','#242527');fixture.style.setProperty('--cle-ink','#ededed');fixture.style.setProperty('--cle-muted','#b3b7bd');fixture.style.setProperty('--cle-rule','#444');fixture.style.setProperty('--cle-subtle','#303236');`);
+ await check('Toggle aligns within panel and preserves account quota/reset fields',`(()=>{const p=s.querySelector('.accounts-panel').getBoundingClientRect(),r=s.querySelector('.accounts-auto-row').getBoundingClientRect(),i=s.querySelector('.accounts-auto-continue').getBoundingClientRect();return r.left>=p.left&&i.right<=p.right&&Math.abs(i.y+i.height/2-(r.y+r.height/2))<1&&s.querySelectorAll('.account-quota-reset').length===4;})()`);
+ await capture('dark-preparing');
+ await check('Opt-out reaches the adapter immediately during preparation',`(()=>{s.querySelector('.accounts-auto-continue').click();return calls.at(-1)===false&&localStorage.getItem('code-codex:account-auto-continue:v1')==='false';})()`);
+ await check('Disabled plugin shows the same preference without enabling anything',`(()=>{window[Symbol.for('code-codex:multi-account-runtime:v1')].enabled=false;plugin.render();return s.querySelector('.accounts-auto-continue').disabled&&calls.filter(x=>typeof x==='boolean').length===4;})()`);
+ await b.evaluate(`plugin.stop();unlocalize()`);
+ await check('Disposal closes panel and removes checkbox action listener',`(()=>{const before=calls.length,i=s.querySelector('.accounts-auto-continue');i.disabled=false;i.click();return calls.length===before&&!s.querySelector('.accounts-panel').matches(':popover-open');})()`);
+ await writeFile(resolve(out,'result.json'),JSON.stringify({passed:true,scope:'Production account panel/runtime event binding and shared CSS in real Chromium; adapter/auth/usage ports are fixtures',checks},null,2));console.log(JSON.stringify({passed:true,checks}));
+}finally{await b.close();await new Promise(r=>server.close(r));}

@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import {build} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
+import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {pathToFileURL} from 'node:url';
+const folder=await mkdtemp(join(tmpdir(),'CodeCodex-Account-Session-')),checks=[];
+const tick=()=>new Promise(r=>setTimeout(r,0));
+try{
+ globalThis.window=new EventTarget();globalThis.CustomEvent??=class extends Event{constructor(type,init){super(type);this.detail=init?.detail;}};
+ async function load(source,name,version='0.5.51'){
+  const outfile=join(folder,name+'.mjs');await build({entryPoints:[resolve('packages/explorer-ui/src/'+source)],bundle:true,platform:'node',format:'esm',outfile,define:{__CODE_CODEX_VERSION__:JSON.stringify(version)}});return import(pathToFileURL(outfile));
+ }
+ const {installSessionGuard}=await load('features/accounts/session-guard.ts','guard');
+ const sent=[],native=[];let resolveLogout,ended=0;
+ const dispatcher={dispatchMessage:(...args)=>sent.push(args)};const info={owner:{id:'A'}};
+ const request=p=>{if(p.action==='info')return Promise.resolve(info);native.push(p);return new Promise(r=>resolveLogout=r);};
+ installSessionGuard(dispatcher,info,request,()=>ended++);
+ for(const type of ['visibilitychange','pagehide','beforeunload','offline'])window.dispatchEvent(new Event(type));assert.equal(native.length,0);checks.push('Minimize, close/background and temporary disconnect never revoke accounts');
+ dispatcher.dispatchMessage('mcp-request',{hostId:'local',request:{method:'thread/read'}});assert.equal(sent.length,1);
+ const logout={hostId:'local',request:{method:'account/logout',id:'logout'}};
+ dispatcher.dispatchMessage('mcp-request',logout);dispatcher.dispatchMessage('mcp-request',logout);await tick();assert.equal(native.length,1);assert.equal(sent.length,1);assert.equal(ended,0);
+ resolveLogout({ended:true});await tick();assert.equal(sent.length,2);assert.equal(ended,1);checks.push('Explicit logout revokes children before forwarding the single official logout');
+ let errors=0;window.addEventListener('code-codex:account-session-error',()=>errors++);
+ installSessionGuard(dispatcher,{owner:{id:'C'}},async p=>{if(p.action==='info')return {owner:{id:'C'}};assert.equal(p.owner,'C');throw Error('controlled native failure');},()=>ended++);
+ dispatcher.dispatchMessage('mcp-request',logout);await tick();assert.equal(sent.length,2);assert.equal(errors,1);checks.push('Cleanup failure blocks official forwarding and preserves retryable error; new owner is bound');
+
+ globalThis.window=new EventTarget();let legacyCall,legacyEnd,oldRealCleanups=0,officialLogouts=0,newRealCleanups=0;
+ const oldDispatcher={dispatchMessage(type,message){if(message?.request?.method==='account/logout')void legacyCall({action:'session.end',owner:'stale'}).then(()=>{legacyEnd();officialLogouts++;});}};
+ window[Symbol.for('code-codex:account-session-guard:v1')]={owner:'stale',update(info,call,end){legacyCall=call;legacyEnd=end;}};
+ installSessionGuard(oldDispatcher,{owner:{id:''}},async p=>{if(p.action==='info')return {owner:{id:'fresh'}};assert.equal(p.owner,'fresh');newRealCleanups++;return {ended:true};},()=>{});
+ oldDispatcher.dispatchMessage('mcp-request',logout);await tick();assert.equal(officialLogouts,1);assert.equal(newRealCleanups,1);assert.equal(oldRealCleanups,0);checks.push('Core-level guard binds owner at logout; loaded v1 wrapper cannot duplicate cleanup or use stale owner');
+ const one=await load('core/document-capability-owner.ts','owner51'),old=await load('core/document-capability-owner.ts','owner50','0.5.50');
+ const key=Symbol.for('fixture-slot');one.ownRequestSlot(key,()=>51);const slot=window[key];slot.request=()=>1;assert.equal(slot.request(),51);old.ownRequestSlot(key,()=>50);assert.equal(slot.request(),51);checks.push('Older and unversioned account/menu writes cannot replace a newer request port');
+ let disposed=0,legacyDisposed=0;window[Symbol.for('code-codex:application-connection:v1')]={dispose(){legacyDisposed++;}};
+ let proceed;const pending=one.replaceDocumentConnection(()=>({dispose(){disposed++;}}),()=>new Promise(r=>proceed=r));window[Symbol.for('code-codex:application-connection:v1')].dispose();assert.equal(legacyDisposed,0);assert.equal(await old.replaceDocumentConnection(()=>{throw Error('must not create');}),false);proceed();assert.equal(await pending,true);assert.equal(legacyDisposed,1);window[Symbol.for('code-codex:application-connection:v1')]={dispose(){throw Error('legacy replacement must be ignored');}};window[Symbol.for('code-codex:application-connection:v1')].dispose();assert.equal(disposed,0);checks.push('Legacy supervision cannot dispose a new connection during or after handoff');
+ const ownerKey=Symbol.for('code-codex:document-connection-owner:v2'),previousOwner=window[ownerKey];await assert.rejects(()=>one.replaceDocumentConnection(()=>{throw Error('must not create');},async()=>{throw Error('ACCOUNT_UPGRADE_ACTIVE');}),/ACCOUNT_UPGRADE_ACTIVE/);assert.equal(window[ownerKey],previousOwner);assert.equal(disposed,0);checks.push('Rejected active-task handoff restores the previous document owner and keeps its connection');
+ const {retireLegacyAccountAdapter:retire}=await load('features/accounts/legacy-handoff.ts','handoff');
+ const retireLegacyAccountAdapter=async(...args)=>{const s=window[Symbol.for('code-codex:multi-account-runtime:v1')];if(s?.adapter)window[Symbol.for('code-codex:accounts-capability:v1')]={request:s.adapter.request};return retire(...args);};
+ const state={enabled:true,viewRevision:'account-quota-v3',selector:{dispose(){}}};window[Symbol.for('code-codex:multi-account-runtime:v1')]=state;
+ const history={large:'x'.repeat(2_000_000)};let snapshotAttempts=0,cleanup=0,released=0;
+ const legacyPort=async p=>{if(p.action==='info')return {owner:{id:'A'},selected:{chat:'host'},activeConversations:[]};if(p.action==='release'){released++;return{};}throw Error('unexpected legacy action');};
+ state.adapter={request:async p=>legacyPort(p),canDisable:()=>true,async dispose(){assert(this.canDisable());const value=await this.request({action:'info'});if(value.owner.id==='A'){snapshotAttempts++;JSON.stringify(history);}cleanup++;}};
+ await retireLegacyAccountAdapter();assert.equal(snapshotAttempts,0);assert.equal(released,1);assert.equal(cleanup,1);assert.equal(state.adapter,undefined);assert.equal(history.large.length,2_000_000);checks.push('Idle legacy adapter retires without snapshot or history mutation; running host work no longer bypasses idle checks');
+ state.viewRevision='account-shared-v4';state.adapter={request:async p=>legacyPort(p),canDisable:()=>true,async dispose(){await this.request({action:'release',owner:'A'});cleanup++;}};await retireLegacyAccountAdapter();assert.equal(released,2);assert.equal(cleanup,2);checks.push('Shared-history adapter upgrades release its own lease without a legacy shim');
+ window[Symbol.for('code-codex:accounts-capability:v1')]={request:async p=>legacyPort(p)};delete state.adapter;await retireLegacyAccountAdapter();assert.equal(released,3);delete window[Symbol.for('code-codex:accounts-capability:v1')];checks.push('Disabled plugin still releases its idle native account lease before handoff');
+ const foreign={request:async()=>({owner:{id:'A'},selected:{chat:'B'},activeConversations:['chat']}),canDisable:()=>false,dispose(){throw Error('must not retire');}};state.adapter=foreign;await assert.rejects(retireLegacyAccountAdapter,/UPGRADE_ACTIVE/);assert.equal(state.adapter,foreign);checks.push('Active foreign task prevents legacy retirement');
+ delete state.adapter;let abandoned=true,reconciled=0;
+ window[Symbol.for('code-codex:accounts-capability:v1')]={request:async p=>{if(p.action==='info')return {owner:{id:'A'},activeConversations:abandoned?['same-history']:[],sharedConversations:['same-history']};if(p.action==='shared.reconcile'){reconciled++;abandoned=false;return {reconciled:true,previousOutcome:'unverified'};}if(p.action==='release')return {released:true};throw Error('unexpected action');}};
+ await retireLegacyAccountAdapter();assert.equal(reconciled,1);checks.push('Restarted disabled session reconciles an abandoned shared lock before activation without replaying a task');
+ const releasesBefore=released;state.viewRevision='account-auto-continue-v8';state.adapter={request:async p=>legacyPort(p),canDisable:()=>true,async dispose(){await this.request({action:'release',owner:'A'});}};await retireLegacyAccountAdapter();assert.equal(released,releasesBefore+1);assert.equal(state.adapter,undefined);checks.push('Automatic-continuation revision retires as a shared-history adapter without legacy snapshot shimming');
+ const timeout=Object.assign(Error('Native transport timed out'),{code:'TIMEOUT'});let localRetired=0,recoveryCalls=[];
+ state.viewRevision='account-check-feedback-v10';state.adapter={request:async()=>{throw timeout;},canDisable:()=>false,async dispose(){assert(this.canDisable());assert.notEqual((await this.request({action:'info'})).owner.id,'A');localRetired++;}};
+ const recovery=async p=>{recoveryCalls.push(p.action);if(p.action==='info')return {owner:{id:'A'},activeConversations:[],sharedConversations:[]};throw Error('No release, authentication or inference allowed during transport recovery');};
+ await retireLegacyAccountAdapter(recovery);assert.equal(localRetired,1);assert.deepEqual(recoveryCalls,['info']);assert.equal(state.adapter,undefined);checks.push('Dead old transport retires local hooks only after replacement acquires the exclusive native lease');
+ state.adapter={request:async()=>{throw timeout;},canDisable:()=>false,dispose(){throw Error('Live hooks must survive');}};const retained=state.adapter;
+ await assert.rejects(()=>retireLegacyAccountAdapter(async()=>{throw Error('ACCOUNT_OWNER_BUSY');}),/OWNER_BUSY/);assert.equal(state.adapter,retained);checks.push('A live prior account lease blocks dead-transport recovery and preserves its adapter');
+ await assert.rejects(()=>retireLegacyAccountAdapter(async p=>{if(p.action==='info')return {owner:{id:'A'},activeConversations:['live'],sharedConversations:['live']};throw Error('ACCOUNT_TURN_ACTIVE');}),e=>e.code==='ACCOUNT_UPGRADE_ACTIVE'&&String(e.cause).includes('ACCOUNT_TURN_ACTIVE'));assert.equal(state.adapter,retained);checks.push('Replacement refuses unresolved active journal tasks instead of assuming a timeout means idle');
+ state.adapter={request:async()=>{throw Object.assign(Error('Denied'),{code:'AUTH'});},canDisable:()=>true,dispose(){throw Error('Must not dispose');}};
+ await assert.rejects(()=>retireLegacyAccountAdapter(recovery),/Denied/);assert.equal(localRetired,1);checks.push('Authentication and protocol failures never enter transport timeout recovery');delete state.adapter;
+ const newer=await load('core/document-capability-owner.ts','owner52','0.5.52');const beforeCreate=window[ownerKey];await assert.rejects(()=>newer.replaceDocumentConnection(()=>{throw Error('create failed');}),/create failed/);assert.equal(disposed,0);assert.equal(window[ownerKey],beforeCreate);checks.push('Failed candidate creation retains the old live connection and restores ownership');
+ window[ownerKey]={version:'0.5.51',pending:true,dispose(){disposed++;}};assert.equal(await newer.replaceDocumentConnection(()=>({dispose(){}}),async()=>{},'new-verified',true),true);assert.equal(window[ownerKey].pending,false);assert.equal(window[ownerKey].version,'0.5.52');checks.push('A verified newer transport can recover an abandoned pending claim from an older runtime');
+ console.log(JSON.stringify({passed:true,scope:'production session guard, capability ownership and legacy handoff fixtures',checks}));
+}finally{await rm(folder,{recursive:true,force:true});}

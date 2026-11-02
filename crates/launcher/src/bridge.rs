@@ -149,6 +149,7 @@ pub struct NativeBridge {
 }
 
 struct BridgeInner {
+    accounts: crate::accounts::AccountService,
     resolver: Option<AppServerClient>,
     manual_workspace: Option<Arc<Workspace>>,
     state: StdMutex<BridgeState>,
@@ -189,6 +190,24 @@ struct ActiveContext {
 }
 
 impl NativeBridge {
+    pub fn connect_accounts(&self,endpoint:cdp_client::CdpEndpoint){self.inner.accounts.connect(endpoint);}
+
+    async fn account_request(&self,params:Value,epoch:u64)->Result<Value,BridgeError>{
+        self.ensure_epoch(epoch)?;
+        let params=match self.inner.accounts.decode_payload(params,epoch,||self.ensure_epoch(epoch).is_ok()).await.map_err(BridgeError::from)?{
+            crate::accounts::Decoded::Response(value)=>return Ok(value),
+            crate::accounts::Decoded::Request(value)=>value,
+        };
+        let workspace=if matches!(params["action"].as_str(),Some("shared.prepare"|"native.prepare"|"native.ensure"|"native.detach")) || (matches!(params["action"].as_str(),Some("rpc"|"shared.rpc")) && matches!(params["method"].as_str(),Some("thread/start"|"thread/resume"|"turn/start"))) {
+            let id=params["conversationId"].as_str().ok_or_else(BridgeError::invalid_request)?;
+            let resolver=self.inner.resolver.as_ref().ok_or_else(no_context_error)?;
+            let root=resolver.resolve_thread(id).await.map_err(|_|BridgeError::new("ACCOUNT_WORKSPACE","The native conversation workspace could not be verified."))?.cwd;
+            let root=workspace_service::Workspace::open(&root).map_err(map_workspace_error)?;
+            Some(root.root_path().to_owned())
+        }else{None};
+        self.ensure_epoch(epoch)?;
+        self.inner.accounts.request(params,workspace,||self.ensure_epoch(epoch).is_ok()).await.map_err(Into::into)
+    }
     pub fn new(
         resolver: Option<AppServerClient>,
         manual_workspace: Option<Arc<Workspace>>,
@@ -197,6 +216,7 @@ impl NativeBridge {
     ) -> Self {
         Self {
             inner: Arc::new(BridgeInner {
+                accounts: crate::accounts::AccountService::default(),
                 resolver,
                 manual_workspace,
                 state: StdMutex::new(BridgeState {
@@ -789,6 +809,17 @@ mod tests {
         let bridge = NativeBridge::new(None, Some(workspace), settings_store, Settings::default());
         bridge.initialize_manual().await;
         (directory, bridge)
+    }
+
+    #[tokio::test]
+    async fn native_account_mutations_require_verified_thread_workspace_before_dispatch() {
+        let (_directory, bridge) = manual_bridge().await;
+        for action in ["native.prepare", "native.ensure", "native.detach"] {
+            let missing = bridge.account_request(json!({"action":action}), bridge.lifecycle_epoch()).await.unwrap_err();
+            assert_eq!(missing.code, "INVALID_REQUEST", "{action}");
+            let unavailable = bridge.account_request(json!({"action":action,"conversationId":"fixture-thread","connectionId":"host"}), bridge.lifecycle_epoch()).await.unwrap_err();
+            assert_eq!(unavailable.code, no_context_error().code, "{action} must resolve the native workspace before account execution");
+        }
     }
 
     #[tokio::test]

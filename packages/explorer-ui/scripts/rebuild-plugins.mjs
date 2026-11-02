@@ -1,4 +1,5 @@
 import {buildAsciiTiles} from './build-ascii-tiles.mjs';
+import {buildShallowOcean} from './build-shallow-ocean.mjs';
 import {readFile,writeFile,mkdir,cp,rm} from 'node:fs/promises';
 import {resolve,relative} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -21,6 +22,7 @@ export async function rebuildPlugins(root,options,selection){
  try{
   const catalog=await buildBackgroundPackages(root,options,stage);
   catalog.push(await buildAsciiTiles(root,options,stage));
+  catalog.push(await buildShallowOcean(root,options,stage));
   catalog.push(await buildCustomBackground(root,options,stage));
   catalog.push(...await buildUtilityPackages(root,options,stage));
   catalog.push(await buildStartupPackage(root,options,stage));
@@ -45,7 +47,21 @@ export async function rebuildPlugins(root,options,selection){
    await mkdir(dest,{recursive:true});await cp(folder,dest,{recursive:true});await writeFile(resolve(dest,'manifest.json'),JSON.stringify(p,null,2)+'\n');
   }
   // All artifacts are available before the authoritative identity/catalog changes.
-  const temp=lockPath+'.'+randomUUID()+'.tmp';await writeFile(temp,JSON.stringify({...old,packages:next},null,2)+'\n');
+  // A rebuilt candidate retires only its old exact pending identity. Preserve
+  // unrelated pending assets, and explicitly list new bytes so Candidate mode
+  // cannot silently waive missing, corrupt or mismatched published resources.
+  const assets=next.flatMap(({descriptor:d})=>[d,...d.resources??[]].map(a=>({id:d.id,tag:a.releaseTag??d.releaseTag,name:a.asset,size:a.size,sha256:a.sha256})));
+  const sameAsset=(a,b)=>['id','tag','name','size','sha256'].every(key=>a[key]===b[key]);
+  const pendingPublicationAssets=(old.pendingPublicationAssets??[]).filter(a=>assets.some(b=>sameAsset(a,b)));
+  for(const change of report.filter(r=>r.status==='new-candidate-identity')){
+   const d=next.find(p=>p.descriptor.id===change.id).descriptor;
+   const previous=old.packages.find(p=>p.descriptor.id===change.id)?.descriptor;
+   for(const a of assets.filter(a=>a.id===change.id)){
+    if(a.name!==d.asset&&previous?.resources?.some(r=>r.asset===a.name&&r.size===a.size&&r.sha256===a.sha256&&(r.releaseTag??previous.releaseTag)===a.tag))continue;
+    if(!pendingPublicationAssets.some(b=>sameAsset(a,b)))pendingPublicationAssets.push(a);
+   }
+  }
+  const temp=lockPath+'.'+randomUUID()+'.tmp';await writeFile(temp,JSON.stringify({...old,packages:next,pendingPublicationAssets},null,2)+'\n');
   const {rename}=await import('node:fs/promises');await rename(temp,lockPath);
   await writeFile(resolve(repo,'releases/plugins/catalog.json'),JSON.stringify(next.map(x=>x.descriptor),null,2)+'\n');
   return report;

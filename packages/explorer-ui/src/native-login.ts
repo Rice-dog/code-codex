@@ -1,16 +1,8 @@
-import { activePageElements } from "./adapters/codex-26.715";
-
-// From the official 26.928 desktop LoginRoute. Utility classes and structure
-// survive localization; neither account names nor translated sign-in text is read.
-export const NATIVE_LOGIN_SELECTOR = "div.flex.h-full.w-full.items-center.justify-center.overflow-hidden.bg-surface";
+import { observeNativeLogin } from './native-login-observation';
+export { NATIVE_LOGIN_SELECTOR } from './native-login-observation';
 
 export function nativeLoginSurface(root: ParentNode = document): HTMLElement | null {
-  if (activePageElements(root, 'nav[data-app-navigation-rail], aside.app-shell-left-panel, [data-app-shell-sidebar-trigger]').length) return null;
-  const panels = activePageElements<HTMLElement>(root, NATIVE_LOGIN_SELECTOR).filter(panel =>
-    (panel.classList.contains("pb-6") || panel.classList.contains("pb-12")) &&
-    [...panel.children].some(child => child.classList.contains("w-[340px]") &&
-      child.classList.contains("flex-col") && child.querySelector("button") && child.querySelector("svg")));
-  return panels.length === 1 ? panels[0]! : null;
+  return observeNativeLogin(root).surface;
 }
 
 export function isNativeLoginView(root: ParentNode = document): boolean {

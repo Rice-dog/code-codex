@@ -34,16 +34,18 @@ export function catalogAssets(catalog) {
 }
 
 export function githubRelease(tag) {
-  try {
+  const attempts=[];
+  for(let attempt=1;attempt<=3;attempt++)try {
     const release = JSON.parse(execFileSync('gh', ['api', `repos/${repository}/releases/tags/${tag}`], {
       encoding: 'utf8', timeout: 45000, maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
     }));
-    return { release };
+    attempts.push({attempt,outcome:'received'});
+    return { release,attempts };
   } catch (error) {
     const detail = String(error.stderr || '');
-    if (/HTTP 404/.test(detail)) return { error: 'RELEASE_NOT_FOUND' };
-    if (/HTTP (401|403|429)/.test(detail)) return { error: 'RELEASE_ACCESS_DENIED_OR_RATE_LIMITED' };
-    return { error: 'RELEASE_QUERY_FAILED' };
+    const code=/HTTP 404/.test(detail)?'RELEASE_NOT_FOUND':/HTTP (401|403|429)/.test(detail)?'RELEASE_ACCESS_DENIED_OR_RATE_LIMITED':'RELEASE_QUERY_FAILED';
+    attempts.push({attempt,outcome:'failed',code,timeout:error.code==='ETIMEDOUT'});
+    if(code!=='RELEASE_QUERY_FAILED'||attempt===3)return {error:code,attempts};
   }
 }
 
@@ -84,6 +86,7 @@ export async function checkPublication({ catalog, version, candidate = false, pe
     }
     const lookup = releases.get(asset.tag);
     const r = { ...asset, status: 'failed', code: '' };
+    if(lookup?.attempts)r.lookupAttempts=lookup.attempts;
     if (lookup?.error) r.code = lookup.error;
     else if (!lookup?.release || lookup.release.tag_name !== asset.tag || !Array.isArray(lookup.release.assets)) r.code = 'RELEASE_METADATA_INVALID';
     else if (lookup.release.draft) r.code = 'RELEASE_IS_DRAFT';

@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -17,7 +18,7 @@ async function wait(condition,ms=20000){for(let t=0;t<ms;t+=100){if(await ev(con
 async function check(name,condition){assert(await ev(condition),name);report.checks.push(name);}
 async function snapshot(name){await ev(`q('.startupTransition-library').scrollIntoView({block:'center'})`);await delay(100);const clip=await ev(`(()=>{const r=q('.startupTransition-library').getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,scale:1}})()`);const shot=await browser.command('Page.captureScreenshot',{format:'png',clip});writeFileSync(resolve(out,name),Buffer.from(shot.data,'base64'));}
 try{
- await wait(`!!document.querySelector('code-codex-v${version.replaceAll('.','-')}')`);await ev(`window.h=document.querySelector('code-codex-v${version.replaceAll('.','-')}');window.q=s=>h.shadowRoot.querySelector(s);window.api=window[Symbol.for('code-codex:plugin-modules:v1')].get('codex-startup-transition').exports;`);
+ await wait(`!!document.querySelector('${builtExplorerTag(root)}')`);await ev(`window.h=document.querySelector('${builtExplorerTag(root)}');window.q=s=>h.shadowRoot.querySelector(s);window.api=window[Symbol.for('code-codex:plugin-modules:v1')].get('codex-startup-transition').exports;`);
  await wait(`!!document.querySelector('#code-codex-application-menu-trigger')`);await ev(`document.querySelector('#code-codex-application-menu-trigger').click()`);
  await check('Installation directory menu remains English in a zh-CN host and is present once',`[...document.querySelectorAll('[data-code-codex-application-menu-popup] button')].filter(b=>b.textContent==='Open Installation Folder').length===1`);
  await ev(`[...document.querySelectorAll('[data-code-codex-application-menu-popup] button')].find(b=>b.textContent==='Open Installation Folder').click()`);await wait(`nativeCalls.some(c=>c.method==='explorer.installation.open')`);

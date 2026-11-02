@@ -207,6 +207,10 @@
     {
       "name": "explorer.installation.uninstall",
       "effect": "external-ui"
+    },
+    {
+      "name": "explorer.accounts.request",
+      "effect": "mode-dependent"
     }
   ]
 }

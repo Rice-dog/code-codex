@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -67,8 +68,8 @@ try {
     };
     const check = async (name, expression) => { assert.ok(await ev(expression), `${scenario}: ${name}`); report.checks.push(name); };
     try {
-      await wait(`!!document.querySelector('code-codex-v${version.replaceAll('.', '-')}')`);
-      await ev(`window.h=document.querySelector('code-codex-v${version.replaceAll('.', '-')}');window.q=s=>h.shadowRoot.querySelector(s)`);
+      await wait(`!!document.querySelector('${builtExplorerTag(root)}')`);
+      await ev(`window.h=document.querySelector('${builtExplorerTag(root)}');window.q=s=>h.shadowRoot.querySelector(s)`);
       if (baseline) {
         await wait(`errors.some(e=>e.includes('Codex Startup Transition is not loaded'))`);
         await check('Old core aborts before context/list when optional Startup is absent', `!nativeCalls.some(c=>c.method==='explorer.context'||c.method==='explorer.list')`);
@@ -96,7 +97,7 @@ try {
           await wait(`!q('.startupTransition-settings-trigger').disabled&&!q('.startupTransition-settings-trigger').hidden`);
           await ev(`q('.startupTransition-settings-trigger').click()`);
           await wait(`q('#cle-startupTransition-settings').matches(':popover-open')`);
-          await check('Explicitly registered verified Startup opens its original settings on the same tree', `document.querySelector('code-codex-v${version.replaceAll('.', '-')}')===h&&!!q('.startupTransition-timeline')&&q('#cle-tree').textContent.includes('README.md')&&errors.length===0`);
+          await check('Explicitly registered verified Startup opens its original settings on the same tree', `document.querySelector('${builtExplorerTag(root)}')===h&&!!q('.startupTransition-timeline')&&q('#cle-tree').textContent.includes('README.md')&&errors.length===0`);
           await ev(`q('.startupTransition-close').click()`);
           const shot = await browser.command('Page.captureScreenshot', {format:'png'});
           writeFileSync(resolve(out, 'empty-cache-tree.png'), Buffer.from(shot.data, 'base64'));

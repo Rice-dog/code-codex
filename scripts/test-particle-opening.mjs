@@ -1,3 +1,4 @@
+import {builtExplorerTag} from './ui-build-identity.mjs';
 import { installedBackgroundFixture } from './background-package-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -15,7 +16,7 @@ assert.ok(!existsSync(join(directory,'results.json')),'use a new evidence label'
 mkdirSync(directory,{recursive:true});
 const bundle = installedBackgroundFixture(root) + readFileSync(join(root, 'packages/explorer-ui/dist/explorer.js'),'utf8');
 const version=JSON.parse(readFileSync(join(root,'packages/explorer-ui/package.json'),'utf8')).version;
-const tag=`code-codex-v${version.replaceAll('.','-')}`;
+const tag=builtExplorerTag(root);
 const seam=buildSync({stdin:{contents:`import * as particle from './particle-image-startup'; import * as hold from './background-startup-hold'; window.fixture={...particle,...hold};`,resolveDir:join(root,'packages/explorer-ui/src'),loader:'ts'},bundle:true,write:false,format:'iife',target:'chrome120'}).outputFiles[0].text;
 const report={version,at:new Date().toISOString(),bundleSha256:createHash('sha256').update(bundle).digest('hex'),checks:[],failures:[],limitations:['Isolated production-renderer/UI fixture with software WebGL and repository sample image','No official Codex cold restart, user account changes, or physical-GPU certification']};
 const check=(name,value,passed)=>{report.checks.push({name,value,passed});if(!passed)report.failures.push(name)};
@@ -46,8 +47,12 @@ try{
  const normalized=await ev(`({legacy:fixture.normalizeParticleSettings({particleCount:10000}),bad:fixture.normalizeParticleSettings({introDuration:999,introSpread:-1,introEnabled:'false'}),missing:fixture.normalizeParticleSettings({introDuration:'bad',introSpread:NaN})})`);
  check('legacy settings migrate without dropping saved fields',normalized.legacy,normalized.legacy.introEnabled&&normalized.legacy.introDuration===4&&normalized.legacy.introSpread===1&&normalized.legacy.particleCount===10000);
  check('opening values are bounded and invalid values recover defaults',normalized.bad,normalized.bad.introDuration===12&&normalized.bad.introSpread===.2&&normalized.bad.introEnabled&&normalized.missing.introDuration===4&&normalized.missing.introSpread===1);
+ await ev(`(()=>{const get=WebGLRenderingContext.prototype.getUniformLocation;WebGLRenderingContext.prototype.getUniformLocation=function(program,name){const location=get.call(this,program,name);if(name==='u_introReveal')window.revealProbe={gl:this,program,location};return location;};window.revealValue=()=>revealProbe.gl.getUniform(revealProbe.program,revealProbe.location);})()`);
  await ev(`(async()=>{const blob=await(await fetch('/photo.png')).blob();window.record={id:'fixture',name:'fixture.png',type:'image/png',size:blob.size,createdAt:1,blob,thumbnail:blob,positionX:50,positionY:50,zoom:1};window.cache=new fixture.ParticleImagePreparationCache();window.prepared=await cache.prepare(record,20000);window.settings=fixture.normalizeParticleSettings({particleCount:20000,introDuration:3,particleSize:3,speed:0,noiseStrength:0,cursorInteraction:false});window.progress=[];window.renderer=new fixture.ParticleImageRenderer(document.querySelector('canvas'),m=>errors.push(m),settings,()=>{},p=>progress.push(p));await renderer.setPreparedImage(prepared,record);renderer.setPaused(true);})()`);
  check('first prepared image starts at the gathering pose',await ev('renderer.openingProgress'),await ev('renderer.openingProgress')<.05);
+ check('First particle-bearing GPU draw starts nearly transparent',await ev('revealValue()'),await ev('revealValue()<.1'));
+ await ev('renderer.replayOpening();renderer.setPaused(false)');await sleep(130);await ev('renderer.setPaused(true)');
+ const prelude=await ev('({alpha:revealValue(),progress:renderer.openingProgress})');check('Cloud fades in before the original gathering geometry advances',prelude,prelude.alpha>0&&prelude.alpha<1&&prelude.progress===0);
  await shot('01-scattered');
  await ev('renderer.setPaused(false)');await sleep(900);
  const middle=await ev('renderer.openingProgress');
@@ -73,7 +78,8 @@ try{
  await sleep(250);const held=await ev('renderer.openingProgress');await sleep(350);
  check('normal gathering stays held under startup cover',await ev('renderer.openingProgress'),await ev('renderer.openingProgress')===held&&held<.15);
  await ev('fixture.setStartupBackgroundHold(false)');await sleep(350);
- check('cover release begins the normal opening visibly from its start',await ev('renderer.openingProgress'),await ev('renderer.openingProgress>.02&&renderer.openingProgress<.3'));
+ check('cover release begins with a visible cloud before gathering',await ev('renderer.openingProgress'),await ev('renderer.openingProgress>=0&&renderer.openingProgress<.15&&revealValue()>.9'));
+ await sleep(200);
  await ev(`(async()=>{const transition=renderer.setPreparedImage({...prepared,imageId:'next'},record);renderer.setPaused(true);await transition})()`);
  check('later photo activation does not replay the opening',await ev('renderer.openingProgress'),await ev('renderer.openingProgress>.02'));
  check('renderer fixture has no unhandled errors',await ev('errors'),await ev('errors.length===0'));
@@ -84,6 +90,7 @@ try{
  check('opening controls use bilingual unified panel',await ev(`${shadow}.querySelector('.particle-opening-replay').textContent`),await ev(`${shadow}.querySelectorAll('#cle-particle-settings [id^="cle-particle-intro-"]').length===5`));
  await ev(`${shadow}.querySelector('[data-appearance-plugin="code-codex.particle-image-background"] .preview-extension-action').click()`);
  await wait(`document.documentElement.hasAttribute('data-code-codex-particle-image-background')&&!${shadow}.querySelector('.particle-opening-replay').disabled`,'normal activation');
+ const initialSource=await ev(`Number(document.querySelector('.code-codex-particle-source-current').style.opacity)`);check('Normal activation does not flash the full source photo before gathering',initialSource,initialSource<.02);
  await ev(`if(!${shadow}.querySelector('#cle-particle-settings').matches(':popover-open'))${shadow}.querySelector('[data-appearance-plugin="code-codex.particle-image-background"] .particle-settings-trigger').click()`);
  await ev(`${shadow}.querySelector('.particle-opening-replay').click()`);await sleep(150);
  const source=await ev(`({opacity:Number(document.querySelector('.code-codex-particle-source-current').style.opacity),events:window[Symbol.for('code-codex:runtime-events:v1')].events.filter(e=>e.action==='opening replay').length})`);

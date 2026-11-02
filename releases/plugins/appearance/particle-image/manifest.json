@@ -3,12 +3,12 @@
   "name": "Particle Image Background",
   "category": "appearance",
   "api": 1,
-  "version": "1.0.3",
-  "releaseTag": "plugin-assets-2026-10-18",
-  "size": 82529,
-  "sha256": "a2ded8609f66fb4f188a8406a4fafe83b1c639963a114ebf5e004c590c00ab67",
-  "asset": "CodeCodex-background-particle-image-1.0.3.js",
-  "relativePath": "CodeCodex-background-particle-image-1.0.3.js",
+  "version": "1.0.5",
+  "releaseTag": "plugin-assets-2026-11-01",
+  "size": 147039,
+  "sha256": "e29398439ce983e0ff097d225f4653d2464b09a26efb013f9257ef39d0022788",
+  "asset": "CodeCodex-background-particle-image-1.0.5.js",
+  "relativePath": "CodeCodex-background-particle-image-1.0.5.js",
   "resources": [
     {
       "asset": "CodeCodex-background-particle-image-thumbnail-39894de0da1fa952.png",

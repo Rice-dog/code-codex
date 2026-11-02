@@ -1,0 +1,17 @@
+{
+  "id": "multi-account",
+  "name": "Multi-account Tasks",
+  "category": "developer-tools",
+  "api": 1,
+  "version": "1.0.65",
+  "releaseTag": "plugin-assets-2026-11-01",
+  "asset": "CodeCodex-plugin-multi-account-1.0.65.js",
+  "relativePath": "CodeCodex-plugin-multi-account-1.0.65.js",
+  "size": 138016,
+  "sha256": "5ffec88d8862ed4944ee3b3ca4d59651530562252ef9641dfab56720fc21f86b",
+  "resources": [],
+  "capabilities": [
+    "developer-tools"
+  ],
+  "source": "https://github.com/Rice-dog/code-codex"
+}

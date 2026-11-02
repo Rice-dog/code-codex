@@ -145,6 +145,7 @@ export function readParticleThemeLease(): ParticleThemeLease|undefined {
         ||lease.owner===AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID
         ||lease.owner===MILKY_WAY_BACKGROUND_PLUGIN_ID
         ||lease.owner==="code-codex.ascii-tiles-background"
+        ||lease.owner==="code-codex.shallow-ocean-background"
         ||lease.owner===BLINKING_SQUARES_BACKGROUND_PLUGIN_ID
         ||lease.owner===MOUNTAIN_BACKGROUND_PLUGIN_ID
         ||lease.owner===PIXEL_SCULPT_BACKGROUND_PLUGIN_ID
