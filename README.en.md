@@ -41,7 +41,7 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Current release **v0.5.89** includes all retained changes since the previous public software release, **v0.5.40**: Shallow Ocean Letters, isolated background rendering, opening animations and quality modes, pinned-plugin shortcuts, and broader UI opacity controls. Multi-account Tasks is temporarily hidden and suspended; its implementation and existing data are retained for future restoration. See the [release notes](releases/README.md) for the cumulative scope and verification limits.
+Current release **v0.5.89** includes all retained changes since the previous public software release, **v0.5.40**: Shallow Ocean Letters, isolated background rendering, opening animations and quality modes, pinned-plugin shortcuts, and broader UI opacity controls. See the [release notes](releases/README.md) for the cumulative scope and verification limits.
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
 
@@ -117,7 +117,7 @@ The generated packages are written to `releases/`.
 
 ## Download all plugins on demand
 
-**27 visible Preview Market plugins are separate downloads**:16 Appearance plugins,10 File Preview plugins and one Tools plugin. Multi-account Tasks is retained but hidden and suspended; it starts no selector, quota/assets reads or automatic continuation. Existing account data and preferences remain intact. The core retains the file tree, basic text preview and editing, market and settings framework, permission checks and runtime logs. Actual plugin rendering, format viewers, the startup player and tool implementations are no longer embedded.
+**27 visible Preview Market plugins are separate downloads**:16 Appearance plugins,10 File Preview plugins and one Tools plugin. The core retains the file tree, basic text preview and editing, market and settings framework, permission checks and runtime logs. Actual plugin rendering, format viewers, the startup player and tool implementations are no longer embedded.
 
 In Preview Market, click **Download**, then **Enable** after download and verification complete. The current Codex window can use the plugin immediately, without restarting. Downloading does not automatically enable it or open settings. Configuration is available after the complete package is installed; UI Surface Opacity still requires an actually enabled background.
 
@@ -221,7 +221,7 @@ Shallow Ocean Letters provides interactive water, ten marine model types, a hori
 
 Canvas backgrounds use isolated Workers, Glow Horizon uses browser-composited motion, and Custom Background retains native image/video playback. This reduces drawing stalls caused by official menus/buttons; GPU, driver and input delivery remain shared, so no universal frame-rate guarantee is made. Black Hole fades in, Pixel Sculpt opens with falling blocks, and Particle Image avoids source-image flashes and reveals its particles smoothly.
 
-Pinned plugins appear in the file-tree footer and open their settings directly. UI Surface Opacity can adjust the market and parameter panels together and covers change cards, tree icons and the new-chat workspace bar. Multi-account Tasks is currently hidden and fully suspended, with existing implementation/data retained.
+Pinned plugins appear in the file-tree footer and open their settings directly. UI Surface Opacity can adjust the market and parameter panels together and covers change cards, tree icons and the new-chat workspace bar.
 
 
 ![Code-Codex Particle Image Background appearance plugin](docs/screenshots/particle-image-background.png)
