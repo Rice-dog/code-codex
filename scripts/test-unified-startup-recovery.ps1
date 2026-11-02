@@ -19,17 +19,21 @@ $env:CLE_ERROR_CODE='CC-START-STATE-001';$env:CLE_ERROR_STAGE='Checking the Code
 $factorySource=[IO.File]::ReadAllText((Join-Path $repo 'crates/launcher/src/startup_dialog.ps1'))
 $englishCatalog=Get-Content -LiteralPath (Join-Path $repo 'resources/i18n/en.json') -Raw -Encoding UTF8|ConvertFrom-Json
 $targetCatalog=Get-Content -LiteralPath (Join-Path $repo ("resources/i18n/$Locale.json")) -Raw -Encoding UTF8|ConvertFrom-Json
+function ConvertTo-PowerShellQuotedContent([string]$Text) {
+ foreach($code in @(0x27,0x2018,0x2019,0x201a,0x201b)){$quote=[string][char]$code;$Text=$Text.Replace($quote,($quote+$quote))}
+ return $Text
+}
 if($Locale -eq 'zh-CN') {
  $guidancePairs=New-Object 'Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
  foreach($entry in $englishCatalog.PSObject.Properties){
   if(-not $guidancePairs.ContainsKey([string]$entry.Value)){$guidancePairs.Add([string]$entry.Value,[string]$targetCatalog.($entry.Name))}
  }
  $lines=@('$script:guidanceTranslations=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)')
- foreach($pair in $guidancePairs.GetEnumerator()){$lines+=('$script:guidanceTranslations.Add('''+$pair.Key.Replace("'","''")+''','''+$pair.Value.Replace("'","''")+''')')}
+ foreach($pair in $guidancePairs.GetEnumerator()){$lines+=('$script:guidanceTranslations.Add('''+(ConvertTo-PowerShellQuotedContent $pair.Key)+''','''+(ConvertTo-PowerShellQuotedContent $pair.Value)+''')')}
  $factorySource=$factorySource.Replace('$script:guidanceTranslations=@{} # CODE_CODEX_GUIDANCE_TRANSLATIONS',($lines -join "`n"))
  foreach($entry in $englishCatalog.PSObject.Properties){
   $original=[string]$entry.Value;$translated=[string]$targetCatalog.($entry.Name)
-  if(-not $original.Contains("`n") -and -not $original.Contains("`r")){$factorySource=$factorySource.Replace(".Text = '"+$original.Replace("'","''")+"'",".Text = '"+$translated.Replace("'","''")+"'")}
+  if(-not $original.Contains("`n") -and -not $original.Contains("`r")){$factorySource=$factorySource.Replace(".Text = '"+(ConvertTo-PowerShellQuotedContent $original)+"'",".Text = '"+(ConvertTo-PowerShellQuotedContent $translated)+"'")}
  }
 }
 . ([scriptblock]::Create($factorySource))
