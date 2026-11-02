@@ -16,7 +16,7 @@ export async function retireLegacyAccountAdapter(recovery?:AccountRequest,curren
  // exact old slot too; it must not remain a route around the drain gate.
  if(slot===port&&!port.beginAccountHandoff){
   const wrapped=bindAccountTransport(port,'legacy-captured-endpoint');
-  Object.assign(wrapped,{runtimeVersion:(port as AccountRequest&{runtimeVersion?:string}).runtimeVersion});
+  Object.assign(wrapped,{runtimeVersion:(port as AccountRequest&{runtimeVersion?:string}).runtimeVersion,runtimeSuspended:(port as AccountRequest&{runtimeSuspended?:boolean}).runtimeSuspended===true});
   globals[Symbol.for('code-codex:accounts-capability:v1')].request=wrapped;
   port=wrapped;
  }
@@ -59,7 +59,16 @@ export async function retireLegacyAccountAdapter(recovery?:AccountRequest,curren
    stage='preflight-info';
    try{info=await observe(port);}
    catch(error){
-    if((error as {code?:unknown})?.code==='ACCOUNT_HOST_UNSUPPORTED'&&recovery){
+    if((error as {code?:unknown})?.code==='ACCOUNT_FEATURE_SUSPENDED'&&recovery){
+     // Older compositions can wrap the local rejecting slot without retaining
+     // its marker. Never infer an idle native lease from that error alone.
+     stage='suspended-account-preflight';
+     const suspended=()=>{uninitialized();if(state?.enabled!==false)throw Object.assign(Error('ACCOUNT_UPGRADE_UNVERIFIED: The suspended endpoint has no stable disabled runtime proof. The previous endpoint remains available.'),{code:'ACCOUNT_UPGRADE_UNVERIFIED'});};
+     suspended();await idle(recovery,await recovery<AccountsInfo>({action:'info'}));suspended();
+     if(!port.beginAccountHandoff)throw Object.assign(Error('ACCOUNT_UPGRADE_UNVERIFIED: The suspended wrapper cannot be drained safely.'),{code:'ACCOUNT_UPGRADE_UNVERIFIED'});
+     handoff=await port.beginAccountHandoff();suspended();handoff.seal?.();handoff.release();retired.add(port);released=true;
+     event('retired-suspended',{reason:'wrapped-suspended-slot',exclusiveLeaseVerified:true,nativeLeaseReleased:false,previousEndpointRetired:true,activeTasks:0});
+    }else if((error as {code?:unknown})?.code==='ACCOUNT_HOST_UNSUPPORTED'&&recovery){
      // This exact native error is emitted before owner/credential state is
      // loaded. A successfully qualified service caches that success. It does
      // not mean an existing adapter/lease may be discarded on a generic error.

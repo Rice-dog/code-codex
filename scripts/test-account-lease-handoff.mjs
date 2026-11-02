@@ -172,5 +172,56 @@ function unsupportedFixture(){
  const f=fixture();f.state.viewRevision='account-native-routing-v18';f.state.adapter.diagnostics=()=>({mode:'native-rpc',independentExecution:false,attachedManagers:0});f.state.adapter.handoffStatus=()=>({busy:true,reason:'active-turn',activeTasks:1,autoPending:0});
  await assert.rejects(()=>retireLegacyAccountAdapter(f.next),/ACCOUNT_UPGRADE_ACTIVE/);assert.equal(f.releases,0);checks.push('Read-only migration is refused when native shared execution metadata exists');
 }
-await writeFile(resolve(out,'result.json'),JSON.stringify({passed:true,scope:'Production concrete transport and handoff modules with two exclusive-native-service fixtures; no account inference or process termination',checks},null,2));
+function suspendedFixture(change={}){
+ let calls=0;const failure=Object.assign(Error('Suspended local stub'),{code:'ACCOUNT_FEATURE_SUSPENDED'});
+ const port=bindAccountTransport(async()=>{calls++;throw failure;},'wrapped-suspended');
+ const state={enabled:false,generation:1,...change};window[key]={request:port};window[stateKey]=state;
+ return {port,state,failure,get calls(){return calls;}};
+}
+{
+ for(const change of [{enabled:true},{adapter:{}},{selector:{}}]){
+  const f=suspendedFixture(change);let probes=0;
+  await assert.rejects(()=>retireLegacyAccountAdapter(async()=>{probes++;return{};}),/ACCOUNT_UPGRADE_(UNVERIFIED|ACTIVE)/);
+  assert.equal(probes,0);await assert.rejects(()=>f.port({action:'info'}),e=>e===f.failure);
+ }
+ checks.push('A suspended code alone cannot bypass enabled state, adapter or selector proof; candidate is never probed');
+}
+{
+ for(const code of ['ACCOUNT_OWNER_BUSY','ACCOUNT_TURN_ACTIVE','ACCOUNT_REQUEST_BUSY']){
+  const f=suspendedFixture(),failure=Object.assign(Error('Exclusive candidate refused'),{code});let probes=0;
+  await assert.rejects(()=>retireLegacyAccountAdapter(async()=>{probes++;throw failure;}),e=>e===failure);
+  assert.equal(probes,1);await assert.rejects(()=>f.port({action:'info'}),e=>e===f.failure);
+ }
+ checks.push('Wrapped suspension never steals a busy exclusive owner, active task or queued candidate request');
+}
+{
+ const f=suspendedFixture();let probes=0;
+ await assert.rejects(()=>retireLegacyAccountAdapter(async()=>{probes++;return {owner:{id:'A'},activeConversations:['chat'],sharedConversations:[]};}),/ACCOUNT_UPGRADE_ACTIVE/);
+ assert.equal(probes,2);await assert.rejects(()=>f.port({action:'info'}),e=>e===f.failure);
+ checks.push('Wrapped suspension still requires the exclusive candidate to prove no active native execution');
+}
+{
+ for(const field of ['generation','enabled','adapter','selector']){
+  const f=suspendedFixture(),gate=defer();const job=retireLegacyAccountAdapter(async()=>{await gate.promise;return {owner:{id:'A'},activeConversations:[],sharedConversations:[]};});await tick();
+  if(field==='generation')f.state.generation++;else f.state[field]=field==='enabled'?true:{};
+  gate.resolve();await assert.rejects(()=>job,/ACCOUNT_UPGRADE_UNVERIFIED/);await assert.rejects(()=>f.port({action:'info'}),e=>e===f.failure);
+ }
+ checks.push('Disabled state, generation, adapter and selector are revalidated after the suspended candidate await');
+}
+{
+ const f=suspendedFixture(),gate=defer();let current=true;
+ const job=retireLegacyAccountAdapter(async()=>{await gate.promise;return {owner:{id:'A'},activeConversations:[],sharedConversations:[]};},()=>current);await tick();current=false;gate.resolve();
+ await assert.rejects(()=>job,/ACCOUNT_HANDOFF_YIELDED/);await assert.rejects(()=>f.port({action:'info'}),e=>e===f.failure);
+ checks.push('Cancelled suspended handoff preserves the concrete endpoint and cannot publish stale activation');
+}
+{
+ const f=suspendedFixture();await assert.rejects(()=>retireLegacyAccountAdapter(),e=>e===f.failure);await assert.rejects(()=>f.port({action:'info'}),e=>e===f.failure);
+ checks.push('Missing candidate proof leaves a marker-losing suspended wrapper open instead of assuming native idle');
+}
+{
+ const f=suspendedFixture();const failure=Error('ACCOUNT_FEATURE_SUSPENDED');const port=bindAccountTransport(async()=>{throw failure;},'misleading-text');window[key]={request:port};let probes=0;
+ await assert.rejects(()=>retireLegacyAccountAdapter(async()=>{probes++;}),e=>e===failure);assert.equal(probes,0);
+ checks.push('Suspension message text without its structured code cannot activate the recovery branch');
+}
+await writeFile(resolve(out,'result.json'),JSON.stringify({passed:true,scope:'Production concrete transport and handoff modules with exclusive-native-service fixtures; no account inference or process termination',checks},null,2));
 console.log(JSON.stringify({passed:true,checks}));

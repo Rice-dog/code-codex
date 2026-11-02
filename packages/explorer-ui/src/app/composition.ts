@@ -34,7 +34,7 @@ async function startOwnedApplication(current:()=>boolean): Promise<boolean> {
   // Document-scoped commands must survive dismissal/disposal of the file tree.
   // Replace the previous composition connection on hot activation, never on hover.
   const storageBridge=new ExplorerBridge(bootstrap.token!,bootstrap.binding,bootstrap.receiver,12_000,false);
-  let acquiredAccountOwner:string|undefined;
+  let acquiredAccountOwner:string|undefined,candidateReleaseAttempted=false;
   try{
     // A surviving JS binding/DOM version is not a live native service. Probe the
     // candidate transport before retiring the previous connection or its tasks.
@@ -48,6 +48,7 @@ async function startOwnedApplication(current:()=>boolean): Promise<boolean> {
     if(!await replaceDocumentConnection(()=>({dispose:()=>storageBridge.dispose()}),async()=>{
       await retireLegacyAccountAdapter(recovery,current);
       if(!MULTI_ACCOUNT_AVAILABLE&&acquiredAccountOwner){
+        candidateReleaseAttempted=true;
         await recovery({action:'release',owner:acquiredAccountOwner});acquiredAccountOwner=undefined;
       }
       if(!current())throw Error('CC-START-HANDOFF-RETIRED: A newer activation owns startup.');
@@ -55,7 +56,7 @@ async function startOwnedApplication(current:()=>boolean): Promise<boolean> {
   }catch(error){
     // A cancelled candidate can already own an idle lease after its recovery
     // probe. Release that exact candidate before discarding its only transport.
-    if(acquiredAccountOwner){try{await storageBridge.request('explorer.accounts.request',{action:'release',owner:acquiredAccountOwner},55_000);runtimeEvent('accounts','account.handoff','candidate-released',{nativeBinding:bootstrap.binding,reason:'candidate-not-published',taskSent:false});}catch(cleanup){runtimeEvent('accounts','account.handoff','candidate-release-failed',{nativeBinding:bootstrap.binding,error:String(cleanup),taskSent:false});}}
+    if(acquiredAccountOwner&&!candidateReleaseAttempted){try{await storageBridge.request('explorer.accounts.request',{action:'release',owner:acquiredAccountOwner},55_000);runtimeEvent('accounts','account.handoff','candidate-released',{nativeBinding:bootstrap.binding,reason:'candidate-not-published',taskSent:false});}catch(cleanup){runtimeEvent('accounts','account.handoff','candidate-release-failed',{nativeBinding:bootstrap.binding,error:String(cleanup),taskSent:false});}}
     storageBridge.dispose();runtimeEvent('startup','document handoff','failed',{reason:String(error),previousConnectionRetained:true});throw error;
   }
   storageBridge.connectServices();

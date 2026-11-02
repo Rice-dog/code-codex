@@ -27,4 +27,15 @@ window[Symbol.for('code-codex:accounts-capability:v1')].request=Object.assign(ol
 window[Symbol.for('code-codex:multi-account-runtime:v1')]={enabled:true,generation:1,adapter:{request:old,handoffStatus:()=>({busy:false}),canDisable:()=>true,dispose:async()=>{retired++;}},selector:{dispose(){selector++;}}};
 api.startApplication();await wait(3);assert.equal(released,1);assert.equal(retired,1);assert.equal(selector,1);assert.equal(fixture.calls.filter(([,a])=>a==='release').length,1);assert(!window[Symbol.for('code-codex:multi-account-runtime:v1')].adapter);assert.equal(JSON.stringify([...saved]),baseline);checks.push('Idle legacy adapter/selector retire once and replacement cleanup lease releases, without changing saved settings');
 window[Symbol.for('code-codex:application-startup:v1')].cancel();
+// Earlier compositions can wrap the suspended local stub and lose its marker.
+// It must not deadlock future hot upgrades or be mistaken for a native lease.
+const capKey=Symbol.for('code-codex:accounts-capability:v1'),stateKey=Symbol.for('code-codex:multi-account-runtime:v1');
+const suspended=window[capKey].request,wrapped=Object.assign(api.bindAccountTransport(suspended,'legacy-captured-endpoint'),{runtimeVersion:'0.5.89'});
+window[capKey].request=wrapped;const beforeRecovery=fixture.calls.length;
+api.startApplication();await wait(4);
+assert.equal(window[capKey].request.runtimeSuspended,true);assert.equal(window[stateKey].enabled,false);
+assert.deepEqual(fixture.calls.slice(beforeRecovery).filter(([,a])=>a).map(([,a])=>a),['info','release']);
+await assert.rejects(()=>wrapped({action:'info'}),e=>e.code==='ACCOUNT_TRANSPORT_RETIRED');
+assert.equal(JSON.stringify([...saved]),baseline);checks.push('Marker-losing suspended wrapper retires only after exclusive idle candidate proof; candidate lease releases and real composition publishes without account feature activation');
+window[Symbol.for('code-codex:application-startup:v1')].cancel();
 await writeFile(resolve(out,'result.json'),JSON.stringify({passed:true,checks,scope:'Production composition, facade, handoff, guard and transport; fixture native operations only, no real account or settings changes.'},null,2));console.log(JSON.stringify({passed:true,checks}));

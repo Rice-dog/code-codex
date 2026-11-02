@@ -2,26 +2,26 @@
     {
         "assetName":  "CodeCodex-0.5.89-x64-setup.exe",
         "path":  "CodeCodex-0.5.89-x64-setup.exe",
-        "size":  16561207,
-        "sha256":  "ee9229d1085487801404f0fa6a9b22cea0c8b17caa58b1ab1a7bb6036777f466"
+        "size":  16562567,
+        "sha256":  "f6be3c226c40911a0c8dfe8fc84b831860e812b6ee3f3204ec9bfa423fdbacb2"
     },
     {
         "assetName":  "CodeCodex-0.5.89-x64.msi",
         "path":  "CodeCodex-0.5.89-x64.msi",
         "size":  11800576,
-        "sha256":  "d99f03e75bcaba6adeeb26aa4e634bb78615d62a4c86f3bdac652e2df771543f"
+        "sha256":  "87ae103580de3a914988a391bb2fc8ef79e326f951bb58b4af3ea1e0008ebb2d"
     },
     {
         "assetName":  "CodeCodex-0.5.89-x64.zip",
         "path":  "CodeCodex-0.5.89-x64.zip",
-        "size":  13788191,
-        "sha256":  "1c0c22491334508f54194c580f3b3d778f01e71c491cfd9db88cd43a925d3069"
+        "size":  13789551,
+        "sha256":  "3891ed04a2be8dae736c219368f0586650f401cce6cee7bf13d9703aaf56887c"
     },
     {
         "assetName":  "Uninstall-CodeCodex.exe",
         "path":  "Uninstall-CodeCodex.exe",
         "size":  2720768,
-        "sha256":  "4ed3b848474d84d254cbcd8526fc6f385c377dc335e895dbb358f2aa90b5cddd"
+        "sha256":  "5f76877e8d5ed5f67a5fe30cfbdf9db131442d58e0f205c82df8b7088b3e145e"
     },
     {
         "releaseTag":  "plugin-assets-2026-11-01",
@@ -206,7 +206,7 @@
         "sha256":  "bff2200553a94731d78d1e1fe63c00cd5fb6e9e83c2d0872890ded60378dbe4d"
     },
     {
-        "releaseTag":  "v0.5.89",
+        "releaseTag":  "plugin-assets-2026-11-01",
         "assetName":  "CodeCodex-plugin-surface-opacity-1.0.12.js",
         "path":  "plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.12.js",
         "size":  17347,
@@ -341,7 +341,7 @@
     {
         "assetName":  "CodeCodex-plugin-catalog-0.5.89.json",
         "path":  "plugins/catalog.json",
-        "size":  28309,
-        "sha256":  "9a6e12067f151ba218eb7d61b83f71195ff25e19b6ed48004000477c547ddcb4"
+        "size":  28326,
+        "sha256":  "c095b64fcca388b6c72b6a49cb73c1f7fcc7b6967f3a9feb8fbee0a27eae7ecd"
     }
 ]
