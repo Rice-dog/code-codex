@@ -1823,7 +1823,30 @@ function Set-UninstallProgress(
         if ([string]::IsNullOrWhiteSpace($env:CLE_PROGRESS_STATE_PATH)) { throw 'Shared uninstall progress channel is missing.' }
         $message = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Stage+"`n"+$Detail))
         $kind = if ($Indeterminate) { 'marquee' } else { 'progress' }
-        [IO.File]::WriteAllText($env:CLE_PROGRESS_STATE_PATH,([DateTime]::UtcNow.Ticks.ToString()+'|'+$kind+'|'+$Value+'|'+$message),[Text.UTF8Encoding]::new($false))
+        $command = [DateTime]::UtcNow.Ticks.ToString()+'|'+$kind+'|'+$Value+'|'+$message
+        $started = [Diagnostics.Stopwatch]::StartNew()
+        for ($attempt = 1; $attempt -le 8; $attempt++) {
+            try {
+                [IO.File]::WriteAllText($env:CLE_PROGRESS_STATE_PATH,$command,[Text.UTF8Encoding]::new($false))
+                if ($attempt -gt 1) {
+                    [Console]::Out.WriteLine("CC-UNINSTALL-PROGRESS-000: stage=shared-state; outcome=recovered; value=$Value; attempts=$attempt; elapsedMs=$($started.ElapsedMilliseconds)")
+                }
+                return
+            }
+            catch {
+                $failure = $_.Exception
+                while ($failure.InnerException) { $failure = $failure.InnerException }
+                $nativeCode = $failure.HResult -band 0xffff
+                if ($nativeCode -in @(32,33) -and $attempt -lt 8) {
+                    Start-Sleep -Milliseconds 25
+                    continue
+                }
+                # Progress is advisory. A display-channel failure must never
+                # turn completed deletion into exit 3 or mask a removal error.
+                [Console]::Error.WriteLine("CC-UNINSTALL-PROGRESS-001: stage=shared-state; outcome=not-delivered; value=$Value; attempts=$attempt; elapsedMs=$($started.ElapsedMilliseconds); win32=$nativeCode; removalOutcome=unchanged; reason=$($failure.Message)")
+                return
+            }
+        }
         return
     }
     if ($null -eq $Dialog) { return }
