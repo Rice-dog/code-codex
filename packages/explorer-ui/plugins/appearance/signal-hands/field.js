@@ -304,13 +304,13 @@ function makeGlyphStream(f,col,first,end) {
     const i=onHand ? row*f.cols+col : row<first ? before[n] : after[row-end];
     if(i<0) continue;
     const glyph=onHand ? f.chars[i] : f.ambientChars[i];
-    const level=onHand ? clamp(f.levels[i]*.45+10,10,23) : 8;
+    const level=onHand ? clamp(f.levels[i]*.48+13,13,27) : 8;
     f.drawGlyph(pen,glyph,level,f.dx/2,(n+.5)*f.dy,true);
   }
   pen.restore();
   // Tint the sampled letters only, then lay them on the field's base colour.
   pen.globalCompositeOperation='source-atop';
-  pen.fillStyle='rgba(68,153,135,.46)';
+  pen.fillStyle='rgba(96,177,161,.58)';
   pen.fillRect(0,0,width,height);
   pen.globalCompositeOperation='destination-over';
   pen.fillStyle=BACKGROUND;
@@ -348,7 +348,7 @@ function handStreams(f) {
 function drawScrollFlow(ctx,f,flow,strength,pose) {
   const age=clamp((flow.time-flow.lastInput)/FLOW_LIFE_MS,0,1);
   const enter=clamp((flow.time-flow.started)/125,0,1);
-  const gain=.78*strength*enter*(1-age*age)*Math.min(1,Math.sqrt(flow.energy)*1.7);
+  const gain=.96*strength*enter*(1-age*age)*Math.min(1,Math.sqrt(flow.energy)*1.7);
   if(gain<.006) return;
   const streams=f.scrollStreams ??= handStreams(f);
   ctx.save();
@@ -358,7 +358,7 @@ function drawScrollFlow(ctx,f,flow,strength,pose) {
     const travel=flow.rows*s.speed;
     const offset=(((-travel)%s.count)+s.count)%s.count;
     const texel=s.strip.height/(2*s.count);
-    const pulse=.68+.32*Math.sin(s.phase+travel*.18);
+    const pulse=.76+.24*Math.sin(s.phase+travel*.18);
     function band(row,rows,weight) {
       if(!rows) return;
       const sourceRow=(offset+row)%s.count;
