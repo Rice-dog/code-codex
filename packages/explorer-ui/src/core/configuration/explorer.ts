@@ -143,6 +143,7 @@ export const BLINKING_SQUARES_BACKGROUND_PLUGIN_ID="code-codex.blinking-squares-
 export const APPEARANCE_PLUGIN_IDS=new Set([
   "code-codex.ascii-tiles-background",
   "code-codex.shallow-ocean-background",
+  "code-codex.signal-hands-background",
   TRANSPARENT_BACKGROUND_PLUGIN_ID,
   PARTICLE_BACKGROUND_PLUGIN_ID,
   BLACK_HOLE_BACKGROUND_PLUGIN_ID,

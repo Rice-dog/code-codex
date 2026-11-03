@@ -217,6 +217,10 @@ files with orbit, pan, zoom, fit/reset, reference-grid, and animation controls.
 
 ### Appearance Plugins
 
+Signal Between draws two hands in text. As you scroll a conversation, faint columns of characters flow through the hands in the same direction, then fade when you stop. Its settings let you change the pointer effect or turn the scroll effect off by setting its strength to zero.
+
+![Signal Between: two hands made of characters during a scroll gesture](docs/screenshots/signal-hands.webp)
+
 Shallow Ocean Letters provides interactive water, ten marine model types, a horizontal creature dock, Auto/Low/Medium/High quality modes and collectible random encounters. Finding all encounters unlocks inclusion filters. Reset restores default parameters/residents; Clear marine life is separate. Ocean is also available as a startup source.
 
 Canvas backgrounds use isolated Workers, Glow Horizon uses browser-composited motion, and Custom Background retains native image/video playback. This reduces drawing stalls caused by official menus/buttons; GPU, driver and input delivery remain shared, so no universal frame-rate guarantee is made. Black Hole fades in, Pixel Sculpt opens with falling blocks, and Particle Image avoids source-image flashes and reveals its particles smoothly.

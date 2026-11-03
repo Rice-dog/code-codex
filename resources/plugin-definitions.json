@@ -327,6 +327,18 @@
       ]
     },
     {
+      "id": "signal-hands",
+      "name": "Signal Between",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.3",
+      "releaseTag": "plugin-assets-2026-11-03",
+      "capabilities": [
+        "background",
+        "preview"
+      ]
+    },
+    {
       "id": "multi-account",
       "name": "Multi-account Tasks",
       "category": "developer-tools",
