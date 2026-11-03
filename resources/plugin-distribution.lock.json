@@ -2669,16 +2669,16 @@
         "name": "Signal Between",
         "category": "appearance",
         "api": 1,
-        "version": "1.0.1",
+        "version": "1.0.2",
         "releaseTag": "plugin-assets-2026-11-03",
         "capabilities": [
           "background",
           "preview"
         ],
-        "asset": "CodeCodex-background-signal-hands-1.0.1.js",
-        "relativePath": "CodeCodex-background-signal-hands-1.0.1.js",
-        "size": 178940,
-        "sha256": "4e16469e9df7838757af0ddb522015a492743c89f482c2ab54efa8c425b7862f",
+        "asset": "CodeCodex-background-signal-hands-1.0.2.js",
+        "relativePath": "CodeCodex-background-signal-hands-1.0.2.js",
+        "size": 179212,
+        "sha256": "0cdedd067c7e04e2790baa2dab7936cd74f62c8cae322b0f6ba5f1f7610c7084",
         "resources": [],
         "source": "https://github.com/Rice-dog/code-codex"
       },
@@ -2698,7 +2698,7 @@
         "plugins/appearance/signal-hands/canvas-environment.ts": "5c14c214aad21b822374b3b7bf3d137a768f5e4b05b613f2b0847981692b6d65",
         "src/core/background-runtime/kernel-events.ts": "319635ca7e994873c261a9e9286687ff2b7dca6a3b538bb95b4fcfded44c38e8",
         "plugins/appearance/signal-hands/hands.webp": "062d57e83e4a6974b535c1ea0ff16eb17db3dacdcbfa908f167ea97033862e1a",
-        "plugins/appearance/signal-hands/field.js": "86304441e4f9a77d99f1f5714078ad8f860964664bec17ec6d25859accdf61bd",
+        "plugins/appearance/signal-hands/field.js": "0295ba1aca20c3a76935382f3c8684aaca5fcabf207eda986f9cbd67e1d1acb0",
         "plugins/appearance/signal-hands/kernel.js": "3126a5531ee30f68cbfcb6d21fe9864aa4800fe1494ac4f36dd35bfe9ad3c56b",
         "src/core/background-runtime/worker-entry.ts": "f2b166dc0f0189b61d82ab3b94565c42ff003a1411657b12c6a05025ba30b74c",
         "scripts/build-signal-hands.mjs": "d6c472949bc1d596331c71ea919502bd398805e762222c705a1dd470100c9ded",
@@ -2714,7 +2714,7 @@
       },
       "inputFormat": "lf-v1",
       "buildMetadata": {
-        "definition": "8de6a85beff093716e9870be0a5e95480d1d474258d180903da4db63a7873dba",
+        "definition": "6d344495d1ae1ab704c14f6ebe856ce2275326bc3d37e819758fc139f605e016",
         "compiler": "0.25.12"
       },
       "artifactRoot": "releases/plugins/appearance/signal-hands"
@@ -2724,9 +2724,9 @@
     {
       "id": "signal-hands",
       "tag": "plugin-assets-2026-11-03",
-      "name": "CodeCodex-background-signal-hands-1.0.1.js",
-      "size": 178940,
-      "sha256": "4e16469e9df7838757af0ddb522015a492743c89f482c2ab54efa8c425b7862f"
+      "name": "CodeCodex-background-signal-hands-1.0.2.js",
+      "size": 179212,
+      "sha256": "0cdedd067c7e04e2790baa2dab7936cd74f62c8cae322b0f6ba5f1f7610c7084"
     }
   ]
 }

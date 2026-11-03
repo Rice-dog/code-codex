@@ -270,7 +270,8 @@ function advanceFlow(flow, now) {
   flow.time=now;
 }
 // A stream is a narrow slice of the actual hand, with a few nearby ambient
-// characters folded into its fringe. Its texture travels with the hand pose.
+// characters folded into its fringe. Sample the resting artwork; streams live
+// in background coordinates even while a hand opens, bends, or moves away.
 function makeGlyphStream(f,col,first,end) {
   function fringe(row,step) {
     const glyphs=[];
@@ -298,7 +299,16 @@ function makeGlyphStream(f,col,first,end) {
   const pen=strip.getContext('2d');
   pen.save();
   pen.scale(width/f.dx,height/(count*f.dy));
+  let remaining=0, packetLength=0;
   for(let n=0;n<count;n++){
+    // Give each little group of letters its own length and breathing space.
+    if(remaining===0){
+      packetLength=2+Math.floor(5*hash(col,first+n,302));
+      remaining=packetLength+1+Math.floor(4*hash(col,first+n,303));
+    }
+    remaining--;
+    const within=packetLength-1-remaining;
+    pen.globalAlpha=within<0 ? .09 : .55+.45*Math.sin(Math.PI*(within+.5)/packetLength);
     const row=first+n-before.length;
     const onHand=row>=first && row<end;
     const i=onHand ? row*f.cols+col : row<first ? before[n] : after[row-end];
@@ -308,33 +318,36 @@ function makeGlyphStream(f,col,first,end) {
     f.drawGlyph(pen,glyph,level,f.dx/2,(n+.5)*f.dy,true);
   }
   pen.restore();
-  // Tint the sampled letters only, then lay them on the field's base colour.
+  // Keep the gaps transparent so a moving finger can pass behind a stream.
   pen.globalCompositeOperation='source-atop';
   pen.fillStyle='rgba(96,177,161,.58)';
-  pen.fillRect(0,0,width,height);
-  pen.globalCompositeOperation='destination-over';
-  pen.fillStyle=BACKGROUND;
   pen.fillRect(0,0,width,height);
   pen.globalCompositeOperation='source-over';
   pen.drawImage(strip,0,0,width,height,0,height,width,height);
   return {strip,count,top:first-before.length,before:before.length,body:end-first,
-    after:after.length,x:col*f.dx,left:(col+.5)*f.dx<f.focusX,
-    phase:hash(col,first,217)*TAU,speed:.38+.21*hash(col,end,218)};
+    after:after.length,x:col*f.dx,
+    phase:hash(col,first,217)*TAU,speed:.28+.52*hash(col,end,218),
+    delay:100*hash(col,first,304), period:5+8*hash(col,end,305)};
 }
 
 function handStreams(f) {
   const streams=[];
-  // Pick one occupied column per small group across the entire artwork,
-  // including the fingers by the centre. Empty space creates no column.
-  for(let start=1;start<f.cols;start+=10){
+  // Alternate occasional close pairs with quiet stretches, sampling only
+  // columns containing the original artwork. This runs once per field size.
+  let paired=false;
+  for(let start=1;start<f.cols;){
+    const nextToPrevious=!paired && hash(start,f.cols,306)<.42;
+    const stride=nextToPrevious ? 3+Math.floor(3*hash(start,1,307)) : 8+Math.floor(10*hash(start,1,308));
+    paired=nextToPrevious;
     let bestCol=start,bestScore=0;
-    const endCol=Math.min(f.cols,start+7);
+    const endCol=Math.min(f.cols,start+Math.min(5,stride-1));
     for(let col=start;col<endCol;col++){
       let occupied=0;
       for(let row=0;row<f.rows;row++) if(f.levels[row*f.cols+col]>=0) occupied++;
       const score=occupied*(.80+.20*hash(col,1,217));
       if(score>bestScore){bestScore=score;bestCol=col;}
     }
+    start+=stride;
     let first=0;
     for(let row=0;row<=f.rows;row++){
       if(row<f.rows && f.levels[row*f.cols+bestCol]>=0) continue;
@@ -345,20 +358,23 @@ function handStreams(f) {
   return streams;
 }
 
-function drawScrollFlow(ctx,f,flow,strength,pose) {
+function drawScrollFlow(ctx,f,flow,strength) {
   const age=clamp((flow.time-flow.lastInput)/FLOW_LIFE_MS,0,1);
-  const enter=clamp((flow.time-flow.started)/125,0,1);
-  const gain=.96*strength*enter*(1-age*age)*Math.min(1,Math.sqrt(flow.energy)*1.7);
+  const gain=.96*strength*(1-age*age)*Math.min(1,Math.sqrt(flow.energy)*1.7);
   if(gain<.006) return;
   const streams=f.scrollStreams ??= handStreams(f);
   ctx.save();
   for(const s of streams){
-    const x=s.x+(s.left?pose.lx:pose.rx);
-    const y=s.top*f.dy+(s.left?pose.ly:pose.ry);
-    const travel=flow.rows*s.speed;
+    const x=s.x, y=s.top*f.dy;
+    const enter=clamp((flow.time-flow.started-s.delay)/120,0,1);
+    if(!enter) continue;
+    const distance=flow.rows*s.speed;
+    // Modulate the speed without reversing it mid-gesture. The derivative
+    // stays positive, so reversing the wheel retraces the current sequence.
+    const travel=distance+.26*s.period*(Math.sin(s.phase+distance/s.period)-Math.sin(s.phase));
     const offset=(((-travel)%s.count)+s.count)%s.count;
     const texel=s.strip.height/(2*s.count);
-    const pulse=.76+.24*Math.sin(s.phase+travel*.18);
+    const pulse=enter*(.72+.28*Math.sin(s.phase+travel*.22+flow.started*.002));
     function band(row,rows,weight) {
       if(!rows) return;
       const sourceRow=(offset+row)%s.count;
@@ -408,7 +424,7 @@ function drawField(ctx, field, phase, wakes, rings, reading, stage, cursor=null,
 
   if (wakes.length) drawDisturbedRegion(ctx,f,pose,phase,wakes);
   for (const ring of rings) drawRing(ctx,f,pose,phase,ring);
-  if (flow) drawScrollFlow(ctx,f,flow,flowStrength,pose);
+  if (flow) drawScrollFlow(ctx,f,flow,flowStrength);
   const radius = clamp(width*.042, 19, 68);
   const contact = Math.exp(-2.7*Math.abs(stage-.5));
   const breath = contact*(.76 + .16*Math.sin(theta))*(1 - wheelBend*.48);
