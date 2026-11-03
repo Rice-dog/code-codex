@@ -1,5 +1,8 @@
 # Preserve upstream legal texts byte-for-byte, including original spacing.
 THIRD_PARTY_LICENSES.txt -text -whitespace
+# Plugin build locks fingerprint this notice as raw bytes on every platform.
+THIRD_PARTY_NOTICES_EN.md text eol=lf
+packages/explorer-ui/plugins/appearance/signal-hands/*.md text eol=lf
 
 # Downloadable plugin assets are verified by their exact SHA-256 bytes.
 # Preserve generated bundles, shader text and upstream notices on all platforms.

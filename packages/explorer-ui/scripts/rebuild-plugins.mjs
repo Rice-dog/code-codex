@@ -1,5 +1,6 @@
 import {buildAsciiTiles} from './build-ascii-tiles.mjs';
 import {buildShallowOcean} from './build-shallow-ocean.mjs';
+import {buildSignalHands} from './build-signal-hands.mjs';
 import {readFile,writeFile,mkdir,cp,rm} from 'node:fs/promises';
 import {resolve,relative} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -23,6 +24,7 @@ export async function rebuildPlugins(root,options,selection){
   const catalog=await buildBackgroundPackages(root,options,stage);
   catalog.push(await buildAsciiTiles(root,options,stage));
   catalog.push(await buildShallowOcean(root,options,stage));
+  catalog.push(await buildSignalHands(root,options,stage));
   catalog.push(await buildCustomBackground(root,options,stage));
   catalog.push(...await buildUtilityPackages(root,options,stage));
   catalog.push(await buildStartupPackage(root,options,stage));

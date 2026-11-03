@@ -119,6 +119,7 @@
   "plugin.name.notebook-preview": "Jupyter Notebook Preview",
   "plugin.name.model-preview": "3D Model Preview",
   "plugin.name.ascii-tiles": "ASCII Tiles Background",
+  "plugin.name.signal-hands": "Signal Between",
   "plugin.name.shallow-ocean": "Shallow Ocean Letters Background",
   "plugin.name.multi-account": "Multi-account Tasks",
   "plugins.morePinned": "More pinned plugins"

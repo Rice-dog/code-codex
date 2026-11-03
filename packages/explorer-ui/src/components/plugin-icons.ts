@@ -1,5 +1,6 @@
 /** Market-only artwork. Kept outside downloadable renderers and their input closures. */
 const glyphs = {
+  'signal-hands': '<path d="m1 10 3-3 3 1M15 5l-3 3-3-1M1 13l2-2m10-8 2-2"/><circle cx="8" cy="7.5" r=".65"/>',
   'multi-account':'<circle cx="5" cy="4.5" r="2"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M1.5 13v-1.5a3.5 3.5 0 0 1 7 0V13m2-4a3 3 0 0 1 4 3v1M6 13h5m-1.5-1.5L11 13l-1.5 1.5"/>',
   'custom-background': '<rect x="2" y="2.5" width="12" height="11" rx="2"/><circle cx="5.5" cy="6" r="1"/><path d="m3 12 3.5-3.5 2 2L11 8l2 2.5"/>',
   'shallow-ocean': '<path d="M1.5 5.5c2-3 4 3 6 0s4 3 6 0M1.5 10.5c2-3 4 3 6 0s4 3 6 0M8 2v1M12 12.5v1.5"/>',
