@@ -330,31 +330,42 @@ function makeGlyphStream(f,col,first,end) {
     delay:100*hash(col,first,304), period:5+8*hash(col,end,305)};
 }
 
-function handStreams(f) {
+function handStreams(f,gesture) {
   const streams=[];
-  // Alternate occasional close pairs with quiet stretches, sampling only
-  // columns containing the original artwork. This runs once per field size.
+  const previous=f.streamColumns;
+  const columns=new Map();
+  // Keep the broader clusters, but pick fresh lanes as each gesture begins.
+  // Reuse strips on shared lanes; retain only the current selection.
   let paired=false;
   for(let start=1;start<f.cols;){
     const nextToPrevious=!paired && hash(start,f.cols,306)<.42;
     const stride=nextToPrevious ? 3+Math.floor(3*hash(start,1,307)) : 8+Math.floor(10*hash(start,1,308));
     paired=nextToPrevious;
     let bestCol=start,bestScore=0;
-    const endCol=Math.min(f.cols,start+Math.min(5,stride-1));
+    const endCol=Math.min(f.cols,start+Math.min(7,stride-1));
+    const fixed=hash(start,f.cols,309)<.25;
     for(let col=start;col<endCol;col++){
       let occupied=0;
       for(let row=0;row<f.rows;row++) if(f.levels[row*f.cols+col]>=0) occupied++;
-      const score=occupied*(.80+.20*hash(col,1,217));
+      const weight=fixed ? .80+.20*hash(col,1,217) : .45+.55*hash(col,gesture,310);
+      const score=occupied*weight*(!fixed && previous?.has(col) ? .55 : 1);
       if(score>bestScore){bestScore=score;bestCol=col;}
     }
     start+=stride;
-    let first=0;
-    for(let row=0;row<=f.rows;row++){
-      if(row<f.rows && f.levels[row*f.cols+bestCol]>=0) continue;
-      if(row-first>=3) streams.push(makeGlyphStream(f,bestCol,first,row));
-      first=row+1;
+    if(!bestScore) continue;
+    let strips=previous?.get(bestCol);
+    if(!strips){
+      strips=[];
+      let first=0;
+      for(let row=0;row<=f.rows;row++){
+        if(row<f.rows && f.levels[row*f.cols+bestCol]>=0) continue;
+        if(row-first>=3) strips.push(makeGlyphStream(f,bestCol,first,row));
+        first=row+1;
+      }
     }
+    if(strips.length){columns.set(bestCol,strips);streams.push(...strips);}
   }
+  f.streamColumns=columns;
   return streams;
 }
 
@@ -362,7 +373,11 @@ function drawScrollFlow(ctx,f,flow,strength) {
   const age=clamp((flow.time-flow.lastInput)/FLOW_LIFE_MS,0,1);
   const gain=.96*strength*(1-age*age)*Math.min(1,Math.sqrt(flow.energy)*1.7);
   if(gain<.006) return;
-  const streams=f.scrollStreams ??= handStreams(f);
+  if(f.streamGesture!==flow.gesture){
+    f.scrollStreams=handStreams(f,flow.gesture);
+    f.streamGesture=flow.gesture;
+  }
+  const streams=f.scrollStreams;
   ctx.save();
   for(const s of streams){
     const x=s.x, y=s.top*f.dy;
@@ -584,7 +599,7 @@ export function mount(canvas, image, options = {}) {
   let pointerMode = POINTER_MODES.has(options.pointerMode) ? options.pointerMode : 'brush';
   let pointerStrength = Number.isFinite(options.pointerStrength) ? clamp(options.pointerStrength,0,1) : DEFAULT_POINTER_STRENGTH;
   let flowStrength = Number.isFinite(options.flowStrength) ? clamp(options.flowStrength,0,1) : DEFAULT_FLOW_STRENGTH;
-  let flow=null;
+  let flow=null, gestureSequence=0;
   let magnet = null;
   const knots = [];
   const trails=[], ripples=[];
@@ -629,7 +644,7 @@ export function mount(canvas, image, options = {}) {
     const amount = Math.min(Math.abs(deltaCssPixels)/120, 1);
     if (flowStrength>0) {
       if (!flow || now-flow.lastInput>=FLOW_LIFE_MS) {
-        flow={rows:0,direction,energy:0,time:now,started:now,lastInput:now};
+        flow={gesture:++gestureSequence,rows:0,direction,energy:0,time:now,started:now,lastInput:now};
       } else {
         advanceFlow(flow,now);
       }
