@@ -414,6 +414,16 @@ function Write-UiMarker([string]$Path, [string]$Content) {
         $backup=$Path+'.previous'; [IO.File]::Replace($candidate,$Path,$backup); [IO.File]::Delete($backup)
     } else { [IO.File]::Move($candidate,$Path) }
 }
+function Read-UiProgressState([string]$Path) {
+    $sharing = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+    $stream = [IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,$sharing)
+    try {
+        $reader = [IO.StreamReader]::new($stream,[Text.Encoding]::UTF8,$true)
+        try { return $reader.ReadToEnd() }
+        finally { $reader.Dispose() }
+    }
+    finally { $stream.Dispose() }
+}
 trap {
     $chain=@(); $exception=$_.Exception
     while ($exception -and $chain.Count -lt 8) { $chain += @{type=$exception.GetType().FullName;hresult=$exception.HResult;message=$exception.Message};$exception=$exception.InnerException }
@@ -994,7 +1004,7 @@ $timer.Add_Tick({
     }
 
     try {
-        $command = [IO.File]::ReadAllText($env:CLE_PROGRESS_STATE_PATH)
+        $command = Read-UiProgressState $env:CLE_PROGRESS_STATE_PATH
         if ($command -ne $script:lastCommand) {
             $parts = $command -split '\|', 4
             if ($parts.Length -eq 4 -and $parts[1] -eq 'close') {
