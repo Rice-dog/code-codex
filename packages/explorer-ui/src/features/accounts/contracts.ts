@@ -4,6 +4,7 @@ export interface AccountsInfo {
  owner:{id:string;label:string;plan?:string|null};
  profile:{version:string;initial:string;shared:string;managerExport:string;senderExport:string;dispatcherExport:string};
  connections:AccountConnection[];selected:Record<string,string>;activeConversations:string[];sharedConversations?:string[];
+ followLogout?:boolean;primarySwitch?:{state:string;targetEmail?:string;authorizationRequired?:boolean}|null;
  nativeRouting?:boolean;nativeRoutes?:Record<string,string>;
 }
 export interface WorkerEvent {sequence:number;message:{id?:number|string;method:string;params:Record<string,unknown>};}

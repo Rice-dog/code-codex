@@ -43,19 +43,31 @@ async fn native(endpoint: CdpEndpoint, params: Value) -> Result<Value> {
     let expression = include_str!("native_route.js")
         .replace("__PARAMS__", &params.to_string())
         .replace("__PROFILE__", &host::profile().to_string());
-    let value = match host::evaluate_budget(endpoint, &expression, Duration::from_secs(55)).await {
+    let budget = if params["mode"] == "switch" { 105 } else { 55 };
+    let value = match host::evaluate_budget(endpoint, &expression, Duration::from_secs(budget)).await {
         Ok(value)=>value,
-        Err(error)=>{operation.finish("failed",json!({"stage":"native-route-evaluate","errorCode":error.code,"taskSent":false,"endpointOutcome":"unverified"}));return Err(error);}
+        Err(error)=>{
+            operation.finish("failed",json!({"stage":"native-route-evaluate","errorCode":error.code,"taskSent":false,"endpointOutcome":"unverified"}));
+            if params["mode"] == "switch" {
+                return Err(AccountError::new("ACCOUNT_NATIVE_RECOVERY_PENDING",format!("Native routing observation ended before subscription recovery was verified. stage=native-route-evaluate; originalCode={}; endpointOutcome=unverified; no inference was sent. Verify the original conversation before retrying.",error.code)));
+            }
+            return Err(error);
+        }
     };
     if let Some(failure) = value.get("failure") {
         operation.finish("failed",json!({"stage":failure["stage"],"errorCode":failure["code"],"backendReopened":failure["switched"],"diagnostics":value["diagnostics"],"taskSent":false}));
-        let code = failure["code"].as_str().unwrap_or("ACCOUNT_NATIVE_ROUTE");
+        let code = if failure["switched"] != true && value["diagnostics"]["subscriptionTouched"] == true && value["diagnostics"]["originalSubscriptionRestored"] != true {
+            "ACCOUNT_NATIVE_RECOVERY_PENDING"
+        } else {failure["code"].as_str().unwrap_or("ACCOUNT_NATIVE_ROUTE")};
         return Err(AccountError::new(
             code,
             format!(
-                "Native account routing failed. stage={}; backendReopened={}; reason={}; no inference request was sent. Re-select the account after the current operation finishes.",
+                "Native account routing failed. stage={}; backendReopened={}; subscriptionTouched={}; originalSubscriptionRestored={}; recovery={}; reason={}; no inference request was sent. Re-select the account after the current operation finishes.",
                 failure["stage"].as_str().unwrap_or("unknown"),
                 failure["switched"] == true,
+                value["diagnostics"]["subscriptionTouched"] == true,
+                value["diagnostics"]["originalSubscriptionRestored"] == true,
+                value["diagnostics"]["subscriptionRecovery"].as_str().unwrap_or("unknown"),
                 failure["reason"].as_str().unwrap_or("unknown")
             ),
         ));
@@ -164,6 +176,7 @@ async fn prepare(
     current: &impl Fn() -> bool,
 ) -> Result<Value> {
     let _operation=tokio::time::timeout(Duration::from_secs(15),service.native_route_lock.lock()).await.map_err(|_|AccountError::new("ACCOUNT_REQUEST_BUSY","Native account preparation is already running. stage=native-route-lock; timeoutMs=15000; no inference was sent."))?;
+    super::primary::guard(&super::owner_root(&owner.id)?,owner,"native.prepare")?;
     if !current() || progress.is_cancelled() {
         return Err(stale());
     }
@@ -282,6 +295,12 @@ async fn prepare(
  }.await;
     // The loaded actor kept its original endpoint. A second transition would
     // repeat the same unload wait and can obscure the first concrete failure.
+    if commit.as_ref().err().is_some_and(|e|e.code == "ACCOUNT_NATIVE_RECOVERY_PENDING") {
+        progress.step("native-original-subscription-unverified",json!({"recoveryState":"pending","taskSent":false}));
+        // Keep pending recovery evidence and do not race a still-running
+        // renderer transition with a second unsubscribe/rollback operation.
+        return commit;
+    }
     if commit.as_ref().err().is_some_and(|e|e.message.contains("backendReopened=false;")) {
         save_route_state(&root,&epoch,&thread,previous_mode.as_deref())?;
         progress.step("native-original-route-retained",json!({"previousRoutePresent":prior.is_some(),"taskSent":false}));

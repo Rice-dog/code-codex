@@ -288,7 +288,7 @@ pub(super) async fn prepare(state:&mut OwnerState,root:&Path,endpoint:CdpEndpoin
                 })?;
             progress.step("credential-worker-start",json!({"reused":state.workers.get(selected).is_some_and(|w|!w.is_dead())}));
             let account = super::get_worker(state, root, selected).await?;
-            (root.join(selected), email, Some(account))
+            (super::retention::home(root,selected)?, email, Some(account))
         };
         progress.step("credential-export",json!({"source":if selected=="host"{"official-file"}else{"managed-backend"}}));
         let auth = if let Some(account) = &source.2 {

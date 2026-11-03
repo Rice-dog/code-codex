@@ -1,2 +1,2 @@
-/** Temporary product availability; saved user intent and package data stay intact. */
-export const MULTI_ACCOUNT_AVAILABLE = false;
+/** Product availability; saved user intent and package data remain independent. */
+export const MULTI_ACCOUNT_AVAILABLE = true;

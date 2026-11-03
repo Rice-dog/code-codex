@@ -12,12 +12,12 @@
  const pins=window[slot]??(window[slot]=new Map());
  const release=pin=>{if(!pin)return;pin.valid=false;for(const value of pin.owned)try{value[Symbol.dispose]?.()}catch{}};
  const started=performance.now(),timeline=[];
- let phase='native-route-open',switched=false,pendingPin,previous,subscriptionRemoved=false;
+ let phase='native-route-open',switched=false,pendingPin,previous,subscriptionTouched=false,before,settings,permissions;
  const step=(name,details={})=>{phase=name;if(timeline.length<24)timeline.push({stage:name,elapsedMs:Math.round(performance.now()-started),...details});};
  const loaded=async id=>{
   let cursor;const seen=new Set();
   for(let page=0;page<64;page++){
-   const value=await manager.sendRequest('thread/loaded/list',{limit:256,...(cursor?{cursor}:{})});
+   const value=await manager.sendRequest('thread/loaded/list',{limit:256,...(cursor?{cursor}:{})},{timeoutMs:8000});
    if(!Array.isArray(value?.data)||value.data.some(v=>typeof v!=='string')||value.nextCursor!=null&&typeof value.nextCursor!=='string')throw Error('ACCOUNT_NATIVE_LOADED_PROTOCOL');
    if(value.data.includes(id))return true;
    if(!value.nextCursor)return false;
@@ -34,6 +34,18 @@
   }
   pin.preparing=false;pin.valid=true;pins.set(id,pin);pendingPin=undefined;
  };
+ const pathKey=v=>{if(typeof v!=='string')return '';if(v.startsWith(String.fromCharCode(92,92,63,92)))v=v.slice(4);return v.replaceAll(String.fromCharCode(92),'/').replace(/\/+$/,'').toLowerCase();};
+ const verifyHistory=(resumed,id)=>{
+  if(resumed?.thread?.id!==id)throw Error('ACCOUNT_NATIVE_THREAD_ID');
+  if(pathKey(resumed.thread.path)!==pathKey(before.path))throw Error('ACCOUNT_NATIVE_HISTORY_PATH');
+  if(pathKey(resumed.thread.cwd)!==pathKey(before.cwd))throw Error('ACCOUNT_WORKSPACE_CHANGED');
+  if(resumed.modelProvider!=='openai')throw Error('ACCOUNT_NATIVE_PROVIDER');
+ };
+ const restoreView=async(resumed,id)=>{
+  const roots=permissions?.runtimeWorkspaceRoots?.filter(v=>typeof v==='string')??[before.cwd];
+  const result=await manager.resumeConversation({conversationId:id,workspaceRoots:roots.length?roots:[before.cwd],model:resumed.model??null,reasoningEffort:resumed.reasoningEffort??null,serviceTier:resumed.serviceTier??null,collaborationMode:resumed.collaborationMode??null,preserveServerConfiguration:true});
+  if(result?.status&&result.status!=='ready')throw Error('ACCOUNT_NATIVE_VIEW_NOT_READY');
+ };
  try{
   opened=service.open('local');const update=await opened;
   if(update.status!=='ready')throw Error('ACCOUNT_RPC_UNAVAILABLE');
@@ -49,11 +61,11 @@
   if(params.mode==='check')return {ready:reusable,inProgress:state.inProgress,routed:!!previous?.baseUrl,recoveryPending:!!previous&&!previous.valid,diagnostics:{stage:'native-route-check',pinPresent:!!previous,pinValid:previous?.valid===true,bindingMatches:previous?.binding===params.binding,resumeVerified:reusable}};
   if(state.inProgress)throw Error('ACCOUNT_TURN_ACTIVE');
   step('native-route-metadata');
-  const before=(await manager.sendRequest('thread/read',{threadId:id,includeTurns:false})).thread;
+  before=(await manager.sendRequest('thread/read',{threadId:id,includeTurns:false},{timeoutMs:8000})).thread;
   const metadata=await manager.getCachedConversationMetadata(id);
   if(metadata?.modelProvider&&metadata.modelProvider!=='openai')throw Error('ACCOUNT_NATIVE_PROVIDER');
   if(reusable)return {ready:true,id,path:before.path,cwd:before.cwd,permissionsPreserved:true,reusedNativeExecution:true};
-  const permissions=await manager.getCurrentPermissions(id),settings={threadId:id};
+  permissions=await manager.getCurrentPermissions(id);settings={threadId:id};
   for(const key of ['approvalPolicy','approvalsReviewer'])if(permissions?.[key]!=null)settings[key]=permissions[key];
   if(typeof permissions?.activePermissionProfile?.id==='string')settings.permissions=permissions.activePermissionProfile.id;
   else if(permissions?.sandboxPolicy)settings.sandboxPolicy=permissions.sandboxPolicy;
@@ -62,11 +74,14 @@
   // unsubscribe removes a subscription; current official hosts retain the actor.
   release(previous);
   step('native-route-unsubscribe');
-  const unsubscribed=await manager.sendRequest('thread/unsubscribe',{threadId:id});
-  if(unsubscribed?.status!=='unsubscribed')throw Error('ACCOUNT_NATIVE_UNSUBSCRIBE');
-  subscriptionRemoved=true;
-  step('native-route-unload');
-  const deadline=performance.now()+Math.max(50,Math.min(params.unloadTimeoutMs??8000,8000));let checks=0;
+  subscriptionTouched=true;
+  const unsubscribed=await manager.sendRequest('thread/unsubscribe',{threadId:id},{timeoutMs:8000});
+  if(!['unsubscribed','notSubscribed','notLoaded'].includes(unsubscribed?.status))throw Error('ACCOUNT_NATIVE_UNSUBSCRIBE_PROTOCOL');
+  // Official unsubscribe is idempotent, not an unload acknowledgement. A thread
+  // loaded with the host default can retain its actor for a full minute.
+  const waitMs=Math.max(50,Math.min(params.unloadTimeoutMs??70000,70000));
+  step('native-route-unload',{unsubscribeStatus:unsubscribed.status,timeoutMs:waitMs});
+  const deadline=performance.now()+waitMs;let checks=0;
   while(await loaded(id)){
    checks++;
    if(performance.now()>=deadline){step('native-route-unload',{loaded:true,checks});throw Error('ACCOUNT_NATIVE_UNLOAD_PENDING');}
@@ -75,19 +90,14 @@
   }
   step('native-route-unloaded',{loaded:false,checks});
   switched=true;step('native-route-resume');
-  const resumed=await manager.sendRequest('thread/resume',{threadId:id,excludeTurns:true,cwd:before.cwd,config:{thread_unload_delay_secs:0,...(params.baseUrl?{openai_base_url:params.baseUrl}:{})}});
-  const pathKey=v=>{if(typeof v!=='string')return '';if(v.startsWith(String.fromCharCode(92,92,63,92)))v=v.slice(4);return v.replaceAll(String.fromCharCode(92),'/').replace(/\/+$/,'').toLowerCase();};
-  if(resumed?.thread?.id!==id)throw Error('ACCOUNT_NATIVE_THREAD_ID');
-  if(pathKey(resumed.thread.path)!==pathKey(before.path))throw Error('ACCOUNT_NATIVE_HISTORY_PATH');
-  if(pathKey(resumed.thread.cwd)!==pathKey(before.cwd))throw Error('ACCOUNT_WORKSPACE_CHANGED');
-  if(resumed.modelProvider!=='openai')throw Error('ACCOUNT_NATIVE_PROVIDER');
+  const resumed=await manager.sendRequest('thread/resume',{threadId:id,excludeTurns:true,cwd:before.cwd,config:{thread_unload_delay_secs:0,...(params.baseUrl?{openai_base_url:params.baseUrl}:{})}},{timeoutMs:8000});
+  verifyHistory(resumed,id);
   step('native-route-permissions');
   if(Object.keys(settings).length>1){const {threadId:_,...patch}=settings;await manager.updateThreadPermissions(id,patch);}
   step('native-route-cache');
   // Backend closed/resumed notifications and canonical reads remain native.
   // This does not replace the conversation store or inject assistant messages.
-  const roots=permissions?.runtimeWorkspaceRoots?.filter(v=>typeof v==='string')??[before.cwd];
-  await manager.resumeConversation({conversationId:id,workspaceRoots:roots.length?roots:[before.cwd],model:resumed.model??null,reasoningEffort:resumed.reasoningEffort??null,serviceTier:resumed.serviceTier??null,collaborationMode:resumed.collaborationMode??null,preserveServerConfiguration:true});
+  await restoreView(resumed,id);
   const afterPermissions=await manager.getCurrentPermissions(id);
   if(settings.permissions&&afterPermissions?.activePermissionProfile?.id!==settings.permissions)throw Error('ACCOUNT_PERMISSIONS_CHANGED');
   if(params.baseUrl)await pinRoute(id,params.baseUrl,params.binding);
@@ -95,19 +105,24 @@
   step('native-route-verified',{coldResume:true,defaultEndpoint:!params.baseUrl});
   return {ready:true,id,path:before.path,resumedPath:resumed.thread.path,cwd:before.cwd,permissionsPreserved:true,diagnostics:{timeline,coldResume:true}};
  }catch(error){
-  const failedStage=phase;let originalSubscriptionRestored=false;
+  const failedStage=phase;let originalSubscriptionRestored=false,subscriptionRecovery='not-required';
   // The actor is unchanged when unload wasn't confirmed. Reattach that same
   // endpoint, preserving its listener and identity; never claim the new target.
-  if(subscriptionRemoved&&!switched&&previous?.baseUrl&&manager){
+  if(subscriptionTouched&&!switched&&before&&manager){
    try{
     step('native-route-preserve-original');
-    await manager.sendRequest('thread/resume',{threadId:params.threadId,excludeTurns:true,config:{openai_base_url:previous.baseUrl,thread_unload_delay_secs:0}});
-    await pinRoute(params.threadId,previous.baseUrl,previous.binding);
+    const restored=await manager.sendRequest('thread/resume',{threadId:params.threadId,excludeTurns:true,cwd:before.cwd,config:{thread_unload_delay_secs:0,...(previous?.baseUrl?{openai_base_url:previous.baseUrl}:{})}},{timeoutMs:8000});
+    verifyHistory(restored,params.threadId);
+    await restoreView(restored,params.threadId);
+    if(previous?.baseUrl)await pinRoute(params.threadId,previous.baseUrl,previous.binding);
+    else pins.delete(params.threadId);
     originalSubscriptionRestored=true;
-   }catch{step('native-route-original-subscription-unverified');}
+    subscriptionRecovery='verified';
+    step('native-route-original-subscription-restored',{defaultEndpoint:!previous?.baseUrl});
+   }catch(recovery){subscriptionRecovery=String(recovery?.message??'Unknown restoration failure').match(/^ACCOUNT_[A-Z_]+$/)?.[0]??'ACCOUNT_NATIVE_RECOVERY_UNVERIFIED';step('native-route-original-subscription-unverified',{code:subscriptionRecovery});}
   }
   const reason=String(error?.message??'Unknown native route failure').replace(/https?:\/\/[^\s"']+/g,'<url>').replace(/Bearer\s+[^\s]+/gi,'Bearer <credential>').replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g,'<credential>').slice(0,512);
-  return {failure:{code:reason.match(/^ACCOUNT_[A-Z_]+$/)?.[0]??'ACCOUNT_NATIVE_ROUTE',stage:failedStage,switched,reason},diagnostics:{timeline,previousPinRetained:!!previous,originalSubscriptionRestored,previousEndpointReleased:false}};
+  return {failure:{code:reason.match(/^ACCOUNT_[A-Z_]+$/)?.[0]??'ACCOUNT_NATIVE_ROUTE',stage:failedStage,switched,reason},diagnostics:{timeline,previousPinRetained:!!previous,subscriptionTouched,originalSubscriptionRestored,subscriptionRecovery,previousEndpointReleased:false}};
  }
  finally{release(pendingPin);manager?.[Symbol.dispose]();opened?.[Symbol.dispose]?.();service[Symbol.dispose]();}
 })()

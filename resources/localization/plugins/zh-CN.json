@@ -55,5 +55,11 @@
   "accounts.check.signedOut": "登录已失效",
   "accounts.check.idle": "当前没有运行中的任务",
   "accounts.check.cleared": "已清理残留状态",
-  "accounts.check.running": "任务仍在运行"
+  "accounts.check.running": "任务仍在运行",
+  "accounts.followLogout": "子账号随主账号退出",
+  "accounts.makePrimary": "设为主账号",
+  "accounts.primaryTitle": "切换主账号",
+  "accounts.primaryConfirm": "即将打开官方授权页，请使用所选账号完成授权。原主账号将保留为子账号。请先结束所有任务；核验官方实际登录身份后才完成切换。",
+  "accounts.primaryWaiting": "请在官方授权页完成 {email} 的登录。原主账号授权已保留。",
+  "accounts.primaryCancel": "取消主账号授权"
 }

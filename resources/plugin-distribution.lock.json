@@ -2603,12 +2603,12 @@
         "name": "Multi-account Tasks",
         "category": "developer-tools",
         "api": 1,
-        "version": "1.0.65",
-        "releaseTag": "plugin-assets-2026-11-01",
-        "asset": "CodeCodex-plugin-multi-account-1.0.65.js",
-        "relativePath": "CodeCodex-plugin-multi-account-1.0.65.js",
-        "size": 138016,
-        "sha256": "5ffec88d8862ed4944ee3b3ca4d59651530562252ef9641dfab56720fc21f86b",
+        "version": "1.0.66",
+        "releaseTag": "plugin-assets-2026-11-02",
+        "asset": "CodeCodex-plugin-multi-account-1.0.66.js",
+        "relativePath": "CodeCodex-plugin-multi-account-1.0.66.js",
+        "size": 145217,
+        "sha256": "1a511e9711996e30de8282560649abc5aec581dd0708cabb841a3be6e2f5cb92",
         "resources": [],
         "capabilities": [
           "developer-tools"
@@ -2625,11 +2625,11 @@
         "src/features/accounts/assets-model.ts": "109c99bae03480729b98fed7176a031c86a8eeecca06fb5c944453221e6fe9a5",
         "src/features/accounts/asset-controls.ts": "0bbe76aad92a8c37901d8089270264e45bbcf9cd86bbedb6a9d9ae5d07311211",
         "src/features/accounts/quota-view.ts": "5708210fd57261553f8e6f8b50e398c676879ab5b371491992fee6e80922403b",
-        "src/features/accounts/account-list.ts": "cd290d0743077110c9a5c6e897a31677ccf6f5e58288bc4d91db327b8e0c87e6",
+        "src/features/accounts/account-list.ts": "4931b0c742477de7ce372d7e3e7c148a3d4ee8fa49c0e8a5325d100031bc9855",
         "src/core/document-capability-owner.ts": "ea29bc918041b1a32e7fe3654f500e261a452034ab825382f14bad3db8934b9d",
         "src/features/accounts/transport.ts": "6928c2fc5ec99263cb5f1eb37aeb4ea3971b58bfc652391c9ca080e8a7cbbdec",
-        "src/host/bridge/accounts.ts": "2582b5089c949754536c4691cce76c771da6a9768089c217006fa3c3cc935f91",
-        "src/features/accounts/contracts.ts": "325685ec4841107cd3a2d14d948fbd19dc73607734e81e0c4142baabace943c5",
+        "src/host/bridge/accounts.ts": "70b0fd32687aa4232c498179ef527946ce610d4940739e341f10553fc0b63b14",
+        "src/features/accounts/contracts.ts": "2f2156629fc605ec31158428bcb97cb1dbe8607289878a1890cf0267fcac9011",
         "src/components/menu-check.ts": "e5c7298d8edb995affb67c0fbcd791d6ac50b8b0fe82e358393f5bc2ce8db0fa",
         "src/adapters/codex-26.715.ts": "8ef8ed3a30821be2dc43a3832559b2891f27befeb3d90f1a57228e6db2525670",
         "src/features/accounts/composer-selector.ts": "9285fabcc7b23ce92c6f4072defb0eb2963242fad2db7791bb86b4b97ed1b995",
@@ -2646,8 +2646,9 @@
         "src/features/accounts/auto-continue.ts": "25b81ce243e1419940a5d3fdba3faa5607cf5a915a24bc01ae35ba798dfb15bd",
         "src/features/accounts/stream-recovery.ts": "03261f031573391754bd456d1e76f832c44951a30988230c983a84273f05ec5e",
         "src/features/accounts/rpc-observation.ts": "dcf096d41764829b5b01d56a2ef8180cbcae6976005f4acd25157cfbdb6c6da9",
-        "src/features/accounts/native-adapter.ts": "0c54b6aebe7783ae6cd4f68e67df4164e1223337de8a42e61c7704b236a59199",
-        "src/multi-account-runtime.ts": "0b0ac98d2c1a19140bc691b975f8fe3eb44363f536005c7bf042dc789d3ab61b",
+        "src/features/accounts/native-adapter.ts": "fc416c7b34011e15ccdece1c719e30051cde33a1af1c17e07f3f0521cf987fee",
+        "src/components/application-dialog.ts": "30d7674bbde26d94bc2e994a780e4871ef2706484f6c9e702e37012669361c43",
+        "src/multi-account-runtime.ts": "c0ce27b52e93c44671db466043f7d485c1bd32cb38818cb961ffc1773e1dc520",
         "scripts/utility-packages.mjs": "5486dceccd9e1e03e48101873e4fd3b583a4a4b3185342c3e906b83d2c9e5a3e",
         "scripts/build.mjs": "9fd94f2b13e355bb05022114f4ab964cc4d50e609d069dab9416280635af5f19",
         "scripts/rebuild-plugins.mjs": "f092a2e634074928162bad289ff81510a6ac8c10bebdc6829f6898dccd0ef179",
@@ -2658,11 +2659,19 @@
       },
       "inputFormat": "lf-v1",
       "buildMetadata": {
-        "definition": "3a693b8b38a1bf05710375c4689c67153d9bdbbd73ed115f4d732f968712d7d9",
+        "definition": "c1f2a0bed96090888d27098744d21f06b66db8694f1f630d207b9686937ba6ce",
         "compiler": "0.25.12"
       },
       "artifactRoot": "releases/plugins/developer-tools/multi-account"
     }
   ],
-  "pendingPublicationAssets": []
+  "pendingPublicationAssets": [
+    {
+      "id": "multi-account",
+      "tag": "plugin-assets-2026-11-02",
+      "name": "CodeCodex-plugin-multi-account-1.0.66.js",
+      "size": 145217,
+      "sha256": "1a511e9711996e30de8282560649abc5aec581dd0708cabb841a3be6e2f5cb92"
+    }
+  ]
 }

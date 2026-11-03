@@ -4,6 +4,7 @@ import {requestAccounts,accountRequestSnapshot} from './host/bridge/accounts';
 import {ComposerAccountSelector} from './features/accounts/composer-selector';
 import {NativeAccountAdapter} from './features/accounts/native-adapter';
 import {ACCOUNT_ENABLED_KEY,ACCOUNT_AUTO_CONTINUE_KEY,ACCOUNT_UI_CHANGED,type AccountsInfo} from './features/accounts/contracts';
+import {ApplicationDialog} from './components/application-dialog';
 import {runtimeEvent} from './runtime-events';
 
 // Document ownership is independent of the market/file-tree panel's lifetime.
@@ -18,6 +19,9 @@ export class MultiAccountPlugin {
  #abort:AbortController|undefined;
  #unsubscribe?:()=>void;
  #busy=false;
+ #knownInfo?:AccountsInfo;
+ #primaryStarting=false;
+ #dialog=new ApplicationDialog();
  #list:AccountList|undefined;
  #refreshing=false;
  #refreshTimer?:ReturnType<typeof setInterval>;
@@ -40,9 +44,20 @@ export class MultiAccountPlugin {
   this.#el('.accounts-enable').addEventListener('click',()=>void this.#toggle().catch(this.#error),options);
   this.#el('.accounts-settings-trigger').addEventListener('click',()=>this.open(),options);
   this.#el<HTMLInputElement>('.accounts-auto-continue')?.addEventListener('change',event=>{const enabled=(event.currentTarget as HTMLInputElement).checked;try{localStorage.setItem(ACCOUNT_AUTO_CONTINUE_KEY,String(enabled));session().adapter?.setAutoContinue(enabled);this.render();}catch(error){this.#error(error);}},options);
+  this.#el<HTMLInputElement>('.accounts-follow-logout')?.addEventListener('change',()=>void this.#policy().catch(this.#error),options);
+  this.#el('.accounts-primary-cancel')?.addEventListener('click',()=>void this.#cancelPrimary().catch(this.#error),options);
   this.#el('.accounts-close').addEventListener('click',()=>{this.close();this.#el('.accounts-settings-trigger').focus();},options);
   this.#el('.accounts-panel').addEventListener('keydown',event=>{if(event.key==='Escape'){event.stopPropagation();this.close();this.#el('.accounts-settings-trigger').focus();}},options);
   this.#list=new AccountList(this.shadow,this.#el('.accounts-list'),async(action,id)=>{try{return await (action==='add'?this.#add():this.#action(action,id));}catch(error){this.#error(error);if(action==='verify'||action==='reconcile')throw error;}});
+  const fence=(event:Event)=>{
+   if(!this.#primaryStarting&&(session().adapter?.info??this.#knownInfo)?.primarySwitch?.state!=='pending')return;
+   const target=event.target as Element;
+   if(event.type==='click'&&!target?.closest?.('button[data-testid=send-button],button[aria-label="Send message"],button[aria-label="Send"],button[aria-label="发送消息"],button[aria-label="发送"]'))return;
+   if(event instanceof KeyboardEvent&&(event.key!=='Enter'||event.shiftKey||event.isComposing||!target?.closest?.('[contenteditable=true],textarea')))return;
+   if(event.type==='submit'&&!target?.querySelector?.('[contenteditable=true],textarea'))return;
+   event.preventDefault();event.stopImmediatePropagation();this.notice('ACCOUNT_PRIMARY_PENDING: Complete or cancel the primary-account authorization before sending. No turn was sent.');
+  };
+  for(const type of ['click','keydown','submit'])document.addEventListener(type,fence,{...options,capture:true});
   window.addEventListener(ACCOUNT_UI_CHANGED,()=>this.render(),options);
   // A same-version document may reuse this panel/controller. Native publication
   // must wake it directly; background renderer intervals can be suspended.
@@ -64,7 +79,7 @@ export class MultiAccountPlugin {
   this.#unsubscribe=subscribeLanguage(()=>this.render());
   this.#installStyles();
   if(typeof ResizeObserver==='function'){this.#panelResize=new ResizeObserver(()=>this.#position());this.#panelResize.observe(this.#el('.accounts-panel'));}
-  this.#refreshTimer=setInterval(()=>{if(!this.#busy&&!this.#refreshing&&Date.now()>=this.#nextQueryAt&&(session().enabled||this.#el('.accounts-panel').matches(':popover-open')))void this.#refresh().catch(this.#error);},5000);
+  this.#refreshTimer=setInterval(()=>{if(!this.#busy&&!this.#refreshing&&Date.now()>=this.#nextQueryAt&&(session().enabled||this.#knownInfo?.primarySwitch?.state==='pending'||this.#el('.accounts-panel').matches(':popover-open')))void this.#refresh().catch(this.#error);},5000);
   if(session().enabled)void this.#enable().catch(this.#error);
   this.render();
 
@@ -97,8 +112,9 @@ export class MultiAccountPlugin {
  }
  async #refresh():Promise<void>{
   if(this.#refreshing)return;this.#refreshing=true;const epoch=this.#epoch,generation=session().generation??0,operationId=++this.#operation,started=performance.now(),refreshEpoch=++this.#refreshEpoch;
-  try{const state=session(),info=await requestAccounts<AccountsInfo>({action:'info'});this.#check(epoch,generation);
+  try{const state=session(),info=await requestAccounts<AccountsInfo>({action:'info'});this.#check(epoch,generation);this.#knownInfo=info;
    if(state.adapter&&state.adapter.info.owner.id!==info.owner.id){state.adapter.endSession();state.selector?.dispose();delete state.adapter;delete state.selector;}
+   if(!state.enabled)state.adapter?.updateInfo(info);
    if(state.enabled){if(!state.adapter||!state.adapter.status().supported||!state.adapter.status().active)await this.#enable(info);else state.adapter.updateInfo(info);}
    this.#check(epoch,generation);if(this.#queryError&&state.error===this.#queryError)state.error=undefined;this.#queryError=undefined;this.#queryFailures=0;this.#nextQueryAt=0;
    runtimeEvent('accounts','account.query','confirmed',{operationId,stage:'info',durationMs:Math.round(performance.now()-started),taskSent:false});this.render();
@@ -113,29 +129,43 @@ export class MultiAccountPlugin {
   finally{this.#busy=false;this.render();}
   await this.#action('login',id);
  }
+ async #policy():Promise<void>{
+  const toggle=this.#el<HTMLInputElement>('.accounts-follow-logout'),info=session().adapter?.info??this.#knownInfo;if(!info)return;
+  const value=toggle.checked;this.#busy=true;this.render();
+  try{await requestAccounts({action:'session.policy',owner:info.owner.id,followLogout:value});info.followLogout=value;await this.#refresh();}finally{this.#busy=false;this.render();}
+ }
+ async #cancelPrimary():Promise<void>{const info=session().adapter?.info??this.#knownInfo;if(!info)return;await requestAccounts({action:'primary.cancel',owner:info.owner.id});await this.#refresh();}
  async #action(action:string,id:string):Promise<AccountCheckResult|void>{
   if(this.#busy)throw Error('ACCOUNT_QUERY_BUSY: Wait for the pending account action.');this.#busy=true;session().error=undefined;this.render();
-  const epoch=this.#epoch,generation=session().generation??0,adapter=session().adapter;
+  const epoch=this.#epoch,generation=session().generation??0,adapter=session().adapter,info=adapter?.info??this.#knownInfo;
+  if(!info){this.#busy=false;throw Error('ACCOUNT_CONNECTION: Connected account information is unavailable.');}
   const check=()=>{this.#check(epoch,generation);if(session().adapter!==adapter)throw Error('ACCOUNT_QUERY_STALE: The queried account runtime was replaced.');};
   try{let feedback:AccountCheckResult|undefined;
-   if(action==='reconcile')feedback=await session().adapter!.reconcile(id);
-   else{const result=await requestAccounts<{signedIn?:boolean}>({action,owner:session().adapter!.info.owner.id,connectionId:id});if(action==='verify')feedback=result.signedIn?'signedIn':'signedOut';}
+   if(action==='primary.start'){
+    if(!await this.#dialog.confirm(t('accounts.primaryTitle')+' · '+(info.connections.find(c=>c.id===id)?.email??''),'accounts.primaryConfirm'))return;
+    check();this.#primaryStarting=true;if(adapter?.status().busy)throw Error('ACCOUNT_TURN_ACTIVE: Finish all tasks before changing the primary account.');
+    await requestAccounts({action,owner:info.owner.id,connectionId:id});await this.#refresh();return;
+   }
+   if(action==='reconcile'){if(adapter)feedback=await adapter.reconcile(id);else{await requestAccounts({action:'reconcile',owner:info.owner.id,connectionId:id});feedback='idle';}}
+   else{const result=await requestAccounts<{signedIn?:boolean}>({action,owner:info.owner.id,connectionId:id});if(action==='verify')feedback=result.signedIn?'signedIn':'signedOut';}
    check();if(['verify','login','remove'].includes(action))adapter?.usage.invalidate(id);await this.#refresh();check();return feedback;
   }
-  finally{this.#busy=false;this.render();}
+  finally{this.#primaryStarting=false;this.#busy=false;this.render();}
  }
  render():void{
   if(!this.#abort)return;
-  const state=session(),adapter=state.adapter,info=adapter?.info,ready=state.enabled&&!!adapter?.status().active&&!!adapter.status().supported;
+  const state=session(),adapter=state.adapter,info=adapter?.info??this.#knownInfo,ready=state.enabled&&!!adapter?.status().active&&!!adapter.status().supported;
   const text=(selector:string,value:string)=>{const node=this.#el(selector);if(node.textContent!==value)node.textContent=value;};
   const button=this.#el<HTMLButtonElement>('.accounts-enable'),caption=t(state.enabled?'accounts.disable':'accounts.enable');if(button.textContent!==caption)button.textContent=caption;const pressed=String(state.enabled);if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);if(button.disabled!==(this.#busy||!!state.pending))button.disabled=this.#busy||!!state.pending;
   text('.accounts-status',state.enabled?(ready?t('accounts.enabled'):state.error?'ACCOUNT_STARTUP_UNAVAILABLE':t('accounts.connecting')):t('accounts.disabled'));
   text('[data-tool-plugin="code-codex.multi-account"] h4',t('plugin.name.multi-account'));
   const auto=adapter?.autoStatus(),toggle=this.#el<HTMLInputElement>('.accounts-auto-continue');
   if(toggle){toggle.checked=localStorage.getItem(ACCOUNT_AUTO_CONTINUE_KEY)==='true';toggle.disabled=!state.enabled||!!state.pending||!adapter;}
-  text('.accounts-message',state.error??adapter?.status().recoveryNotice??(state.pending?t('accounts.connecting'):auto?t(auto==='checking'?'accounts.autoChecking':auto==='preparing'?'accounts.autoPreparing':'accounts.autoContinuing'):''));
+  const follow=this.#el<HTMLInputElement>('.accounts-follow-logout');if(follow){follow.checked=info?.followLogout!==false;follow.disabled=this.#busy||!!state.pending||!info;}
+  const primary=info?.primarySwitch,waiting=primary?.state==='pending';this.#el('.accounts-primary-cancel').hidden=!waiting;
+  text('.accounts-message',state.error??(waiting?t('accounts.primaryWaiting',{email:primary?.targetEmail??''}):primary?.state==='mismatch'?'ACCOUNT_PRIMARY_IDENTITY_MISMATCH: The official login does not match the selected account. The former primary authorization was preserved; select it to recover.':undefined)??adapter?.status().recoveryNotice??(state.pending?t('accounts.connecting'):auto?t(auto==='checking'?'accounts.autoChecking':auto==='preparing'?'accounts.autoPreparing':'accounts.autoContinuing'):''));
   const open=this.#el('.accounts-panel').matches(':popover-open');
-  if(open)this.#list?.render(info,this.#busy||!!state.pending,adapter?.usage);
+  if(open)this.#list?.render(info,this.#busy||!!state.pending||waiting,adapter?.usage);
   if(ready&&open&&info)adapter?.usage.refresh(['host',...info.connections.filter(c=>c.email).map(c=>c.id)]);
  }
  open():void{
@@ -153,9 +183,9 @@ export class MultiAccountPlugin {
  }
  close():void{this.#list?.close();const panel=this.#el('.accounts-panel');if(panel.matches(':popover-open'))panel.hidePopover();this.#el('.accounts-settings-trigger').setAttribute('aria-expanded','false');}
  containsEvent(event:Event):boolean{return event.composedPath().some(n=>n instanceof HTMLElement&&n.hasAttribute('data-account-assets-dialog'))|| event.composedPath().includes(this.#el('.accounts-panel'))||event.composedPath().includes(this.#el('.accounts-settings-trigger'))||!!this.#list?.containsEvent(event);}
- stop():void{this.#epoch++;this.#refreshEpoch++;this.#refreshing=false;this.close();clearInterval(this.#refreshTimer);this.#panelResize?.disconnect();this.#panelResize=undefined;this.#list?.dispose();this.#list=undefined;this.#abort?.abort();this.#abort=undefined;this.#unsubscribe?.();}
+ stop():void{this.#dialog.dispose();this.#epoch++;this.#refreshEpoch++;this.#refreshing=false;this.close();clearInterval(this.#refreshTimer);this.#panelResize?.disconnect();this.#panelResize=undefined;this.#list?.dispose();this.#list=undefined;this.#abort?.abort();this.#abort=undefined;this.#unsubscribe?.();}
  #installStyles():void{
   if(this.shadow.querySelector('[data-account-styles]'))return;
-  const style=element('style');style.dataset.accountStyles='';style.textContent=accountListCss+'.accounts-auto-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px}.accounts-auto-row span{min-width:0}.accounts-auto-row input{appearance:none;position:relative;flex:none;margin:0;width:30px;height:17px;border:1px solid var(--cle-rule-strong);border-radius:999px;background:var(--cle-hover);cursor:pointer}.accounts-auto-row input::before{content:"";position:absolute;width:11px;height:11px;left:2px;top:2px;border-radius:50%;background:var(--cle-muted);transition:transform 120ms ease}.accounts-auto-row input:checked{background:var(--cle-signal)}.accounts-auto-row input:checked::before{transform:translateX(13px);background:#fff}.accounts-auto-row input:focus-visible{outline:2px solid var(--cle-focus);outline-offset:2px}.accounts-auto-row input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.accounts-auto-row input::before{transition:none}}';this.shadow.append(style);
+  const style=element('style');style.dataset.accountStyles='';style.textContent=accountListCss+'.accounts-global-controls{margin-top:16px;padding-top:12px;border-top:1px solid var(--cle-rule)}.accounts-connections-group{margin-bottom:0}.accounts-auto-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px}.accounts-auto-row span{min-width:0}.accounts-auto-row input{appearance:none;position:relative;flex:none;margin:0;width:30px;height:17px;border:1px solid var(--cle-rule-strong);border-radius:999px;background:var(--cle-hover);cursor:pointer}.accounts-auto-row input::before{content:"";position:absolute;width:11px;height:11px;left:2px;top:2px;border-radius:50%;background:var(--cle-muted);transition:transform 120ms ease}.accounts-auto-row input:checked{background:var(--cle-signal)}.accounts-auto-row input:checked::before{transform:translateX(13px);background:#fff}.accounts-auto-row input:focus-visible{outline:2px solid var(--cle-focus);outline-offset:2px}.accounts-auto-row input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.accounts-auto-row input::before{transition:none}}';this.shadow.append(style);
  }
 }

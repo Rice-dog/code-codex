@@ -23,10 +23,11 @@ fn same_session(s:&OwnerState,snapshot:&Snapshot)->bool {
 }
 pub(super) async fn read(service:&AccountService,snapshot:Snapshot,root:&Path,endpoint:CdpEndpoint,owner:&host::Owner,p:&Value,current:impl Fn()->bool)->Result<Value>{
     let started=Instant::now();let verify=p["action"]=="verify";
+    super::primary::refresh_status(endpoint,root,owner).await?;
     let mut spawned=false;
     let worker=if let Some(w)=&snapshot.worker {Some(w.clone())}else if verify {
-        let home=root.join(snapshot.id.as_ref().ok_or_else(stale)?);super::directory(&home)?;
-        spawned=true;Some(Worker::spawn(&home).await?)
+        let home=super::retention::home(root,snapshot.id.as_ref().ok_or_else(stale)?)?;super::directory(&home)?;
+        let lease=super::retention::home_lease(root,&home)?;spawned=true;let worker=Worker::spawn(&home).await?;worker.retain_home_lease(lease);Some(worker)
     }else{None};
     let result:Result<Value>=async {
         let account=if let Some(w)=&worker {Some(w.request("account/read",json!({"refreshToken":false})).await?)}else{None};
@@ -51,7 +52,7 @@ pub(super) async fn read(service:&AccountService,snapshot:Snapshot,root:&Path,en
             }
         }
         if verify {let a=&account.as_ref().ok_or_else(stale)?["account"];Ok(json!({"signedIn":a["type"]=="chatgpt","email":a["email"],"plan":a["planType"]}))}
-        else {Ok(json!({"owner":{"id":owner.id,"label":owner.label,"plan":owner.plan},"profile":host::profile(),"connections":state.registry.connections,"selected":state.registry.selected,"activeConversations":state.active.keys().collect::<Vec<_>>(),"sharedConversations":state.registry.shared.keys().collect::<Vec<_>>(),"nativeRouting":true,"nativeRoutes":service.relays.owned(&owner.id).iter().map(|r|(&r.thread,r.connection())).collect::<std::collections::HashMap<_,_>>()}))}
+        else {Ok(json!({"owner":{"id":owner.id,"label":owner.label,"plan":owner.plan},"profile":host::profile(),"connections":state.registry.connections,"selected":state.registry.selected,"activeConversations":state.active.keys().collect::<Vec<_>>(),"sharedConversations":state.registry.shared.keys().collect::<Vec<_>>(),"followLogout":super::retention::follows(root)?,"primarySwitch":super::primary::status(root,owner)?,"nativeRouting":true,"nativeRoutes":service.relays.owned(&owner.id).iter().map(|r|(&r.thread,r.connection())).collect::<std::collections::HashMap<_,_>>()}))}
     }.await;
     if result.is_err() && spawned {if let Some(w)=worker {w.stop().await;}}
     crate::runtime_log::record("accounts","account.query",if result.is_ok(){"confirmed"}else{"failed"},json!({"action":p["action"],"stage":"read-without-registry-lock","durationMs":started.elapsed().as_millis(),"errorCode":result.as_ref().err().map(|e|e.code.as_str()),"taskSent":false}));

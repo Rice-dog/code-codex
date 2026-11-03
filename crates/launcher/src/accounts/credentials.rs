@@ -143,6 +143,57 @@ fn targets(home: &Path) -> Result<Vec<Vec<u16>>> {
     .map(|v| v.encode_utf16().chain(Some(0)).collect())
     .collect())
 }
+/// Copy only managed auth material to a fresh native child home. Rebind the
+/// encrypted store's Windows key to that exact home; never export to renderer.
+pub(super) fn snapshot_managed(source:&Path,destination:&Path)->Result<()> {
+    if destination.exists(){return Err(AccountError::new("ACCOUNT_PRIMARY_BACKUP","The credential snapshot requires a fresh private directory. No existing authorization was changed."))}
+    workspace_service::application_paths::validate_directory_path(source).map_err(|_|AccountError::protocol("Primary credential source is redirected."))?;
+    super::directory(destination)?;
+    #[cfg(windows)] {
+        use std::os::windows::fs::OpenOptionsExt;
+        let mut handle=std::fs::OpenOptions::new().read(true).access_mode(0x00020000|0x00040000).custom_flags(0x02000000).open(destination).map_err(|_|AccountError::new("ACCOUNT_PRIMARY_BACKUP","The credential snapshot ACL could not be opened."))?;
+        let descriptor:windows_permissions::LocalBox<windows_permissions::SecurityDescriptor>="D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)".parse().map_err(|_|AccountError::protocol("The credential snapshot ACL is unavailable."))?;
+        windows_permissions::wrappers::SetSecurityInfo(&mut handle,windows_permissions::constants::SeObjectType::SE_FILE_OBJECT,windows_permissions::constants::SecurityInformation::Dacl|windows_permissions::constants::SecurityInformation::ProtectedDacl,None,None,descriptor.dacl(),None).map_err(|_|AccountError::new("ACCOUNT_PRIMARY_BACKUP","The credential snapshot could not be restricted to its owner."))?;
+    }
+    let result=(||{
+        let mut copied=0;
+        for name in ["auth.json","secrets/codex_auth.age"] {
+            let file=source.join(name);if !file.exists(){continue}
+            let m=file.symlink_metadata().map_err(|_|AccountError::protocol("Primary credential metadata unavailable."))?;
+            if !m.is_file()||m.file_type().is_symlink()||m.len()>128*1024{return Err(AccountError::protocol("Primary credential source failed validation."))}
+            workspace_service::application_paths::validate_directory_path(file.parent().unwrap()).map_err(|_|AccountError::protocol("Primary credential directory is redirected."))?;
+            let target=destination.join(name);if target.exists(){return Err(AccountError::protocol("Primary credential snapshot must use a fresh home."))}
+            super::directory(target.parent().unwrap())?;
+            let mut bytes=std::fs::read(file).map_err(|_|AccountError::new("ACCOUNT_PRIMARY_BACKUP","Primary authorization could not be read."))?;
+            let write=std::fs::write(target,&bytes);bytes.fill(0);write.map_err(|_|AccountError::new("ACCOUNT_PRIMARY_BACKUP","Primary authorization could not be preserved."))?;copied+=1;
+        }
+        if copied==0{return Err(AccountError::new("ACCOUNT_PRIMARY_BACKUP","No managed primary authorization is available. The current login was not changed."))}
+        if destination.join("auth.json").exists(){crate::renderer_storage::atomic(&destination.join("managed-auth-source.json"),&json!({"schema":1,"store":"file"})).map_err(|_|AccountError::new("ACCOUNT_PRIMARY_BACKUP","The managed credential storage mode could not be recorded."))?;}
+        #[cfg(windows)] {
+            use windows_sys::Win32::Security::Credentials::{CredReadW,CredWriteW,CredFree,CREDENTIALW};
+            let a=targets(source)?;let b=targets(destination)?;
+            for (source,target) in a.iter().zip(&b) {unsafe{
+                let mut ptr: *mut CREDENTIALW=std::ptr::null_mut();
+                if CredReadW(source.as_ptr(),1,0,&mut ptr)==0 {
+                    if windows_sys::Win32::Foundation::GetLastError()==1168{continue}
+                    return Err(AccountError::new("ACCOUNT_PRIMARY_BACKUP","The native credential key could not be read."))
+                }
+                let mut value=std::ptr::read(ptr);value.TargetName=target.as_ptr() as *mut u16;
+                let written=CredWriteW(&value,0);
+                if value.CredentialBlobSize>0&&!value.CredentialBlob.is_null(){std::slice::from_raw_parts_mut(value.CredentialBlob,value.CredentialBlobSize as usize).fill(0)}
+                CredFree(ptr.cast());
+                if written==0{return Err(AccountError::new("ACCOUNT_PRIMARY_BACKUP","The native credential key could not be preserved."))}
+            }}
+        }
+        Ok(())
+    })();
+    if result.is_err(){let _=delete(destination);}result
+}
+pub(super) fn storage_mode(home:&Path)->Result<&'static str>{
+ let marker=home.join("managed-auth-source.json");if !marker.exists(){return Ok("keyring")}
+ let value=crate::renderer_storage::read_json(&marker,1024).map_err(|_|AccountError::protocol("Managed credential storage marker could not be read."))?;
+ if value["schema"]==1&&value["store"]=="file"{Ok("file")}else{Err(AccountError::protocol("Managed credential storage marker is invalid."))}
+}
 pub fn delete(home: &Path) -> Result<()> {
     workspace_service::application_paths::validate_directory_path(home)
         .map_err(|_| AccountError::protocol("Credential home is redirected."))?;
@@ -183,6 +234,19 @@ pub fn delete(home: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    #[ignore="Explicit local non-mutating primary credential snapshot validation; no inference or official login writes."]
+    async fn managed_primary_snapshot_is_readable_without_changing_the_original(){
+        let source=official_home().unwrap();let temporary=tempfile::tempdir().unwrap();let destination=temporary.path().join("preserved-auth");
+        let before:Vec<_>=["auth.json","secrets/codex_auth.age"].iter().map(|n|{let p=source.join(n);(n.to_string(),std::fs::read(p).ok().map(|b|Sha256::digest(b).to_vec()))}).collect();
+        snapshot_managed(&source,&destination).expect("Native managed credential snapshot failed without changing the primary");
+        let worker=super::super::worker::Worker::spawn(&destination).await.unwrap();
+        let result=worker.request("account/read",json!({"refreshToken":false})).await;
+        worker.stop_checked().await.unwrap();let cleanup=delete(&destination);
+        assert!(cleanup.is_ok(),"Temporary credential cleanup failed");
+        assert!(result.as_ref().ok().is_some_and(|v|v["account"]["type"]=="chatgpt"),"The preserved authorization could not be read by the official backend");
+        for (name,hash) in before{assert_eq!(std::fs::read(source.join(name)).ok().map(|b|Sha256::digest(b).to_vec()),hash,"Original credential storage changed during read-only snapshot validation");}
+    }
     #[tokio::test]
     #[ignore = "Explicit local Windows credential check; emits no credentials or account response."]
     async fn real_credential_authorizes_native_executor_only() {

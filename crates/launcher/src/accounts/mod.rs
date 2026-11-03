@@ -9,6 +9,8 @@ mod policy;
 mod preparation;
 mod preparing;
 mod session;
+mod retention;
+mod primary;
 mod shared;
 mod usage;
 mod queries;
@@ -188,6 +190,7 @@ impl AccountService {
                 "The native host account changed. Refresh the connection list before continuing.",
             ));
         }
+        if matches!(action.as_str(),"primary.start"|"primary.cancel") {return primary::request(self,endpoint,&owner,&params,&current).await;}
         let progress_key = if matches!(action.as_str(),"shared.prepare"|"shared.status"|"native.prepare"|"native.ensure"|"native.detach") {Some(format!("{}:{}",owner.id,identifier(&params,"conversationId")?))}else{None};
         if action=="shared.status" {
             return Ok(self.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(progress_key.as_ref().unwrap()).map(|p|p.snapshot()).unwrap_or(json!({"status":"none"})));
@@ -202,6 +205,8 @@ impl AccountService {
         }else{None};
         let _progress_guard=progress.clone().map(preparation::Guard);
         let root = owner_root(&owner.id)?;
+        primary::guard(&root,&owner,&action)?;
+        if action=="session.end"{primary::request(self,endpoint,&owner,&json!({"action":"primary.cancel"}),&current).await?;}
         if action.starts_with("native.") {if root.join("ended-session.json").exists(){self.relays.close_owner(&owner.id);return Err(AccountError::new("ACCOUNT_OWNER_CHANGED","The official login session ended. No account route was used."));}return native_route::request(self,endpoint,&owner,&params,workspace.as_deref(),progress.as_ref(),current).await;}
         if action=="session.end" || root.join("ended-session.json").exists() {
             let pending:Vec<_>=self.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().filter(|(key,p)|key.starts_with(&format!("{}:",owner.id)) && (p.snapshot()["status"]=="preparing" || p.snapshot()["cleanupConfirmed"]==false)).map(|(_,p)|p.clone()).collect();
@@ -255,7 +260,8 @@ impl AccountService {
                 return Err(AccountError::new("ACCOUNT_RUNTIME_RETIRED","This native account service released its lease and no longer owns the document. stage=post-release-observation; no account was reconnected and no task was sent."));
             }
             let lease = lease(&root)?;
-            let registry = load(&root)?;
+            let mut registry = load(&root)?;
+            retention::attach(&root,&mut registry,&owner.label)?;
             let threads = registry.threads.clone();
             let active = registry.active.clone();
             all.insert(
@@ -278,7 +284,7 @@ impl AccountService {
             .get_mut(&owner.id)
             .ok_or_else(|| AccountError::protocol("Owner state unavailable."))?;
         if root.join("ended-session.json").exists() {
-            session::end(state, &root).await?;
+            session::complete_pending(state, &root).await?;
         }
         preparing::admit(self, &owner.id, &params)?;
         if action=="shared.prepare" {
@@ -292,9 +298,17 @@ impl AccountService {
             return queries::read(self,snapshot,&root,endpoint,&owner,&params,current).await;
         }
         match action.as_str() {
+            "session.policy" => {
+                let value=params["followLogout"].as_bool().ok_or_else(||AccountError::protocol("followLogout must be a boolean."))?;
+                retention::set_follow(&root,value)?;Ok(json!({"followLogout":value}))
+            }
             "session.end" => {
+                drop(all);
+                let _native_guard=native_route::restore(self,endpoint,&owner).await?;
+                let mut all=self.state.lock().await;
+                let state=all.get_mut(&owner.id).ok_or_else(||AccountError::protocol("Account state changed before logout cleanup."))?;
                 self.relays.close_owner(&owner.id);
-                session::end(state, &root).await?;
+                session::end_with_policy(state, &root).await?;
                 Ok(json!({"ended":true}))
             }
             action if action.starts_with("shared.") => {
@@ -486,7 +500,8 @@ impl AccountService {
                     let worker = get_worker(state, &root, &id).await?;
                     worker.request("account/logout", json!({})).await?;
                     worker.stop().await;
-                    credentials::delete(&root.join(&id))?;
+                    credentials::delete(&retention::home(&root,&id)?)?;
+                    retention::forget(&root,&id)?;
                     if state.login.as_ref().is_some_and(|v| v.0 == id) {
                         state.login = None;
                     }
@@ -652,9 +667,11 @@ async fn get_worker(state: &mut OwnerState, root: &Path, id: &str) -> Result<Arc
             ));
         }
     }
-    let home = root.join(id);
+    let home = retention::home(root,id)?;
     directory(&home)?;
+    let authorization_lease=retention::home_lease(root,&home)?;
     let worker = Worker::spawn(&home).await?;
+    worker.retain_home_lease(authorization_lease);
     state.workers.insert(id.into(), worker.clone());
     Ok(worker)
 }
@@ -761,7 +778,9 @@ fn identifier<'a>(p: &'a Value, key: &str) -> Result<&'a str> {
 }
 fn validate_fields(params: &Value, action: &str) -> Result<()> {
     let extra: &[&str] = match action {
-        "info" | "release" | "session.end" => &[],
+        "info" | "release" | "session.end" | "primary.cancel" => &[],
+        "session.policy" => &["followLogout"],
+        "primary.start" => &["connectionId"],
         "shared.prepare" => &["conversationId", "connectionId", "settings"],
         "native.prepare" | "native.ensure" => &["conversationId", "connectionId"],
         "native.detach" => &["conversationId"],

@@ -55,5 +55,11 @@
   "accounts.check.signedOut": "Signed out",
   "accounts.check.idle": "No running tasks",
   "accounts.check.cleared": "Stale task state cleared",
-  "accounts.check.running": "Task still running"
+  "accounts.check.running": "Task still running",
+  "accounts.followLogout": "Sign out child accounts with the primary account",
+  "accounts.makePrimary": "Set as primary account",
+  "accounts.primaryTitle": "Change primary account",
+  "accounts.primaryConfirm": "Open official authorization and sign in with the selected account. The current primary will be preserved as a child account. Finish all tasks first. The switch is complete only after the official account identity is verified.",
+  "accounts.primaryWaiting": "Complete official authorization for {email}. The former primary authorization is preserved.",
+  "accounts.primaryCancel": "Cancel primary-account authorization"
 }

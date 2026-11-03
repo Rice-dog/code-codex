@@ -22,6 +22,7 @@ use tokio::{
 const MAX_MESSAGE: usize = 8 * 1024 * 1024;
 type Reply = oneshot::Sender<Result<Value>>;
 pub struct Worker {
+    retained_home_lease: std::sync::RwLock<Option<Arc<std::fs::File>>>,
     selection:std::sync::RwLock<Option<String>>,
     auth_source: std::sync::RwLock<Option<(std::path::PathBuf, String, bool, Option<Arc<Worker>>)>>,
     writer: Mutex<tokio::process::ChildStdin>,
@@ -34,6 +35,7 @@ pub struct Worker {
     _launch: crate::discovery::AppServerLaunch,
 }
 impl Worker {
+    pub(super) fn retain_home_lease(&self,lease:Option<Arc<std::fs::File>>){*self.retained_home_lease.write().unwrap_or_else(std::sync::PoisonError::into_inner)=lease;}
     pub async fn spawn(home: &Path) -> Result<Arc<Self>> {
         Self::spawn_sqlite(home, &home.join("sqlite")).await
     }
@@ -99,7 +101,7 @@ impl Worker {
                 "--listen",
                 "stdio://",
                 "-c",
-                "cli_auth_credentials_store=\"keyring\"",
+                &format!("cli_auth_credentials_store={}",json!(super::credentials::storage_mode(home)?)),
                 "-c",
                 "analytics.enabled=false",
 
@@ -162,6 +164,7 @@ impl Worker {
             });
         }
         let worker = Arc::new(Self {
+            retained_home_lease:std::sync::RwLock::new(None),
             selection:std::sync::RwLock::new(None),
             auth_source: std::sync::RwLock::new(None),
             writer: Mutex::new(writer),

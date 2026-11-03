@@ -38,14 +38,14 @@ export class AccountList {
  }
  render(info:AccountsInfo|undefined,busy:boolean,usage?:AccountUsageStore):void{
   this.#info=info;this.#busy=busy;
-  const signature=JSON.stringify([info?.owner,info?.connections,info?.activeConversations,getLocale()]);
+  const signature=JSON.stringify([info?.owner,info?.connections,info?.activeConversations,info?.primarySwitch,getLocale()]);
   if(signature===this.#signature){for(const e of this.list.querySelectorAll<HTMLElement>('.account-quota'))updateQuota(e,usage);for(const b of this.list.querySelectorAll<HTMLButtonElement>('button'))b.disabled=busy||b.dataset.accountAction==='add'&&(info?.connections.length??0)>=16;this.#feedback();return;}this.#signature=signature;
   const reopen=this.#menu.matches(':popover-open')?this.#anchor?.dataset.connection:undefined,menuFocus=(this.root.activeElement as HTMLElement|null)?.dataset.accountAction;
   if(this.#menu.matches(':popover-open'))this.#menu.hidePopover();this.#anchor=undefined;this.#menu.replaceChildren();
   const focused=this.root.activeElement as HTMLElement|null,focusAction=focused?.dataset.accountAction,focusId=focused?.dataset.connection;
   this.list.replaceChildren();
   if(info)for(const connection of [{id:'host',email:info.owner.label,label:info.owner.label,plan:info.owner.plan??null},...info.connections]){
-   const host=connection.id==='host',signed=!!connection.email,row=node('article');row.className='accounts-connection';row.dataset.connection=connection.id;row.dataset.host=String(host);row.dataset.signed=String(signed);
+   const host=connection.id==='host',signed=!!connection.email,row=node('article');row.className='accounts-connection';row.dataset.connection=connection.id;row.dataset.host=String(host);row.dataset.signed=String(signed);row.dataset.primaryTarget=String(info.primarySwitch?.state==='pending'&&info.primarySwitch.targetEmail===connection.email);
    const avatar=node('span',[...(connection.email??connection.label)][0]?.toUpperCase()??'•');avatar.className='accounts-avatar';avatar.setAttribute('aria-hidden','true');
    const identity=node('strong',connection.email??t('accounts.unsigned'));identity.className='accounts-identity';
    const dot=node('span');dot.className='accounts-login-dot';dot.setAttribute('role','img');dot.setAttribute('aria-label',t(signed?'accounts.signed':'accounts.unsigned'));
@@ -61,7 +61,7 @@ export class AccountList {
  #open(anchor:HTMLButtonElement,preserve=false):void{
   const menu=this.#menu;if(this.#anchor===anchor&&menu.matches(':popover-open')){this.close();return;}if(!preserve&&this.#anchor?.dataset.connection!==anchor.dataset.connection)this.close();else menu.replaceChildren();
   const connection=this.#info?.connections.find(c=>c.id===anchor.dataset.connection);if(!connection)return;
-  const actions=[['verify','accounts.refresh',icons.refresh],...(!connection.email?[['login','accounts.authorize',icons.link],['login.cancel','accounts.cancelLogin',icons.close]]:[]),['reconcile','accounts.reconcile',icons.preview],['remove','accounts.remove',icons.trash]];
+  const actions=[...(connection.email?[['primary.start','accounts.makePrimary',icons.preview]]:[]),['verify','accounts.refresh',icons.refresh],...(!connection.email?[['login','accounts.authorize',icons.link],['login.cancel','accounts.cancelLogin',icons.close]]:[]),['reconcile','accounts.reconcile',icons.preview],['remove','accounts.remove',icons.trash]];
   for(const [name,label,icon] of actions){const button=node('button');button.type='button';button.setAttribute('role','menuitem');button.dataset.accountAction=name!;button.dataset.connection=connection.id;button.disabled=this.#busy||name!=='reconcile'&&!!this.#info?.activeConversations.length;const glyph=node('span');glyph.innerHTML=icon!;glyph.className='account-check-icon';const text=node('span',t(label!));text.className='account-action-label';button.append(glyph,text);menu.append(button);}
   this.#anchor=anchor;this.#feedback();anchor.setAttribute('aria-expanded','true');menu.showPopover();this.#positionMenu();menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
  }
@@ -84,7 +84,7 @@ export class AccountList {
    b.disabled=this.#busy||!!check?.pending||b.dataset.accountAction!=='reconcile'&&!!this.#info?.activeConversations.length;
    b.dataset.checking=String(!!active&&!!check?.pending);b.setAttribute('aria-busy',String(!!active&&!!check?.pending));
    const label=b.querySelector<HTMLElement>('.account-action-label');
-   if(label){label.setAttribute('aria-live','polite');label.textContent=active?(check!.key==='accounts.check.failed'?'Check failed. Try again.':t(check!.key)):t(b.dataset.accountAction==='verify'?'accounts.refresh':b.dataset.accountAction==='reconcile'?'accounts.reconcile':b.dataset.accountAction==='remove'?'accounts.remove':b.dataset.accountAction==='login'?'accounts.authorize':'accounts.cancelLogin');}
+   if(label){label.setAttribute('aria-live','polite');label.textContent=active?(check!.key==='accounts.check.failed'?'Check failed. Try again.':t(check!.key)):t(b.dataset.accountAction==='primary.start'?'accounts.makePrimary':b.dataset.accountAction==='verify'?'accounts.refresh':b.dataset.accountAction==='reconcile'?'accounts.reconcile':b.dataset.accountAction==='remove'?'accounts.remove':b.dataset.accountAction==='login'?'accounts.authorize':'accounts.cancelLogin');}
   }
  }
  close(restore=false):void{this.#epoch++;clearTimeout(this.#reset);this.#check=undefined;if(this.#menu.matches(':popover-open'))this.#menu.hidePopover();this.#anchor?.setAttribute('aria-expanded','false');if(restore&&this.#anchor?.isConnected)this.#anchor.focus();this.#anchor=undefined;this.#menu.replaceChildren();}
@@ -101,6 +101,7 @@ ${accountQuotaCss}${planBadgeCss}
 .accounts-connection{display:grid;grid-template-columns:30px minmax(0,1fr) 8px 28px;align-items:center;gap:8px;padding:10px 12px}
 .accounts-details{display:grid;gap:3px;min-width:0;padding-inline-end:8px}
 .accounts-identity{display:block;min-width:0;font-size:13px;line-height:20px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.accounts-connection[data-primary-target=true]{background:color-mix(in srgb,var(--cle-signal) 8%,var(--cle-paper))}.accounts-connection[data-primary-target=true] .accounts-login-dot{animation:account-check-spin 900ms linear infinite;border:1px solid transparent;border-top-color:currentColor;background:transparent}
 .accounts-avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--cle-subtle);color:var(--cle-muted);font-size:12px;line-height:1;font-weight:500}
 .accounts-login-dot{width:6px;height:6px;border-radius:50%;background:var(--cle-muted)}
 .accounts-connection[data-signed=true] .accounts-login-dot{background:var(--cle-icon-blue)}
@@ -119,6 +120,7 @@ ${accountQuotaCss}${planBadgeCss}
 .accounts-message{color:var(--cle-ink);overflow-wrap:anywhere}
 .accounts-actions-menu{position:fixed;inset:auto;margin:0;min-width:164px;max-width:calc(100vw - 24px);padding:5px;border:1px solid var(--cle-rule);border-radius:10px;background:var(--cle-paper);color:var(--cle-ink);box-shadow:0 4px 16px #0002}
 .accounts-actions-menu button{display:flex;align-items:center;gap:10px;width:100%;padding:7px 9px;border:0;border-radius:5px;background:transparent;color:inherit;text-align:start;font:inherit;font-size:12px;cursor:pointer}
+.accounts-actions-menu button[data-account-action="primary.start"]{margin-bottom:5px;border-bottom:1px solid var(--cle-rule);border-radius:0;padding-bottom:10px}
 .accounts-actions-menu button:hover,.accounts-actions-menu button:focus-visible{outline:0;background:var(--cle-subtle)}
 .accounts-actions-menu button:disabled{opacity:.45;cursor:default}
 .accounts-actions-menu button[data-checking=true]{opacity:1;color:var(--cle-ink)}
