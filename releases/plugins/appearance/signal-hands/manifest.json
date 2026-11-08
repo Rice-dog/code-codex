@@ -1,0 +1,18 @@
+{
+  "id": "signal-hands",
+  "name": "Signal Between",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.3",
+  "releaseTag": "plugin-assets-2026-11-03",
+  "capabilities": [
+    "background",
+    "preview"
+  ],
+  "asset": "CodeCodex-background-signal-hands-1.0.3.js",
+  "relativePath": "CodeCodex-background-signal-hands-1.0.3.js",
+  "size": 179510,
+  "sha256": "e0e56820f5e808764281350bf0cc832eb59f53964a1eaf3e955c9981a2a3c222",
+  "resources": [],
+  "source": "https://github.com/Rice-dog/code-codex"
+}

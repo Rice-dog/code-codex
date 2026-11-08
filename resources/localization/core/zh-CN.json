@@ -119,6 +119,7 @@
   "plugin.name.notebook-preview": "Jupyter 笔记本预览",
   "plugin.name.model-preview": "3D 模型预览",
   "plugin.name.ascii-tiles": "字符玻璃砖",
+  "plugin.name.signal-hands": "指间信号",
   "plugin.name.shallow-ocean": "浅海来信",
   "plugin.name.multi-account": "多账号任务",
   "plugins.morePinned": "更多置顶插件",

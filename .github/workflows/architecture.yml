@@ -86,6 +86,8 @@ jobs:
       - run: node scripts/test-login-startup.mjs
       - name: Build the full renderer used by menu-session integration
         run: npm --prefix packages/explorer-ui run build
+      - name: Signal Between marketplace and isolated background
+        run: node scripts/test-signal-hands.mjs
       - name: Official Appearance adapters and automatic background theme restoration
         run: node scripts/test-appearance-adapter.mjs
       - run: node scripts/test-initial-startup-overlay.mjs
