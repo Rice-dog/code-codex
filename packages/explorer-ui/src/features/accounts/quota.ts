@@ -1,4 +1,4 @@
-import {projectAssets,assetProjection,emptyAssets,type AccountAssets} from './assets-model';
+import {projectAssets,assetProjection,emptyAssets,resetDefinitelyNotSent,type AccountAssets} from './assets-model';
 export interface QuotaRemaining {fiveHour:number|null;weekly:number|null;}
 /** Unix seconds supplied by the server, independently cached for each window. */
 export interface QuotaResetTimes {fiveHour:number|null;weekly:number|null;}
@@ -48,7 +48,7 @@ export class AccountUsageStore {
  consumeCard(id:string,cardId:string,key:string):Promise<string>{
   if(this.#disposed||!this.assetActions)return Promise.reject(Error('ACCOUNT_ASSET_UNAVAILABLE: Card controls are unavailable.'));
   const identity=id+':'+cardId,prior=this.#redemptions.get(identity);if(prior)return prior;
-  const job=(async()=>{const outcome=await this.assetActions!.consume(id,cardId,key);if(!this.#disposed){if(outcome==='reset'||outcome==='alreadyRedeemed'){this.#assetValues.set(id,{...this.assets(id),availableCount:null,cards:null});this.assetChanged();}try{await this.loadCards(id);}catch(error){this.diagnostic(id,'refresh-failed',{stage:'reset-post-read',outcome,errorCode:'ACCOUNT_ASSET_REFRESH_FAILED'});}}if(outcome==='nothingToReset'||outcome==='noCredit')this.#redemptions.delete(identity);return outcome;})();
+  const job=(async()=>{const outcome=await this.assetActions!.consume(id,cardId,key);if(!this.#disposed){if(outcome==='reset'||outcome==='alreadyRedeemed'){this.#assetValues.set(id,{...this.assets(id),availableCount:null,cards:null});this.assetChanged();}try{await this.loadCards(id);}catch(error){this.diagnostic(id,'refresh-failed',{stage:'reset-post-read',outcome,errorCode:'ACCOUNT_ASSET_REFRESH_FAILED'});}}if(outcome==='nothingToReset'||outcome==='noCredit')this.#redemptions.delete(identity);return outcome;})().catch(error=>{if(resetDefinitelyNotSent(error))this.#redemptions.delete(identity);throw error;});
   // Retain failed/uncertain attempts too. A new click must never mint a new redemption.
   this.#redemptions.set(identity,job);return job;
  }
@@ -67,7 +67,7 @@ export class AccountUsageStore {
  remaining(id:string):QuotaRemaining {const value=this.#values.get(id);return value?.raw?quotaRemaining(value.raw,this.now()):{fiveHour:null,weekly:null};}
  resetTimes(id:string):QuotaResetTimes {const cached=this.#resets.get(id),now=this.now();const valid=(value:number|null|undefined)=>value&&value*1000>now?value:null;return {fiveHour:valid(cached?.fiveHour),weekly:valid(cached?.weekly)};}
  diagnostics(id:string):Readonly<Snapshot>|undefined{return this.#values.get(id);}
- suspend(value:boolean):void{this.#suspended=value;}
+ suspend(value:boolean):void{this.#suspended=value;if(!value)this.#pump();}
  markUsed(id:string):void{this.#inUse.add(id);this.#activeReads.set(id,this.now());}
  observe(id:string,raw:unknown):void{
   if(this.#disposed)return;
@@ -92,10 +92,9 @@ export class AccountUsageStore {
  #presentation(id:string):string{const value=this.#values.get(id);return JSON.stringify([value?.raw,value?.phase,value?.error,value?.lastSuccessAt?Math.floor(value.lastSuccessAt/60000):null,this.#resets.get(id),this.#assetValues.get(id)]);}
  invalidate(id:string):void{this.#inUse.delete(id);this.#activeReads.delete(id);this.#dirty.add(id);const v=this.#values.get(id);if(v?.phase!=='loading'&&v)v.nextRead=0;}
  refresh(ids:readonly string[]):void {
-  if(this.#disposed)return;
+  if(this.#disposed||this.#suspended)return;
   let updated=false;
   for(const id of new Set(ids)){
-   if(this.#suspended&&!this.#inUse.has(id))continue;
    const resetDue=this.#values.get(id)?.phase==='ready'&&(this.#values.get(id)?.nextRead??Infinity)<=this.now();
    if(this.#inUse.has(id)&&!resetDue&&this.now()-(this.#activeReads.get(id)??this.now())<30000)continue;
    const existing=this.#values.get(id);if(existing&&(existing.phase==='loading'||(existing.nextRead>this.now()&&!this.#dirty.has(id)&&!this.#inUse.has(id))))continue;
@@ -106,7 +105,7 @@ export class AccountUsageStore {
   if(updated){this.revision++;this.changed();this.#pump();}
  }
  #pump():void {
-  while(!this.#disposed&&this.#running<2&&this.#queue.length){const id=this.#queue.shift()!,observation=this.#observations.get(id)??0,operationId=++this.#readSequence;this.#running++;
+  while(!this.#disposed&&!this.#suspended&&this.#running<2&&this.#queue.length){const id=this.#queue.shift()!,observation=this.#observations.get(id)??0,operationId=++this.#readSequence;this.#running++;
    this.diagnostic(id,'started',{stage:'quota-read',source:'official-read',operationId,active:this.#inUse.has(id)});
    void this.read(id).then(raw=>{
     if(this.#disposed)return;

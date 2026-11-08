@@ -77,7 +77,10 @@ export const style5 = String.raw`  .preview-extension {
     overflow-wrap: anywhere;
     white-space: normal;
   }
-  .preview-extension-status {
+  .accounts-plugin-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .plugin-beta { font-weight: 500; white-space: nowrap; }
+  .preview-extension-status,
+  .plugin-beta {
     flex: 0 0 auto;
     padding: 1px 5px;
     color: var(--cle-muted);

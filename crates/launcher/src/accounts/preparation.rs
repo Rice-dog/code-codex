@@ -33,6 +33,10 @@ impl Preparation {
     pub fn start()->Self {
         Self(Arc::new(Shared{state:Mutex::new(State{operation:Operation::start("accounts","account.prepare",json!({"workBudgetMs":70000,"totalPrepareBudgetMs":90000,"message":"No inference request is sent during preparation."})),started:Instant::now(),phase:"queued",step:"queued",phase_started:Instant::now(),step_started:Instant::now(),progress:5,status:"preparing",error:None,cleanup:None}),cancelled:std::sync::atomic::AtomicBool::new(false),notify:tokio::sync::Notify::new()}))
     }
+    /// Only wrap read-only/pre-commit work; never abandon an endpoint mutation.
+    pub async fn wait<T>(&self,future:impl std::future::Future<Output=super::Result<T>>)->super::Result<T>{
+        tokio::select!{biased;_=self.cancelled()=>Err(AccountError::new("ACCOUNT_PREPARE_CANCELLED","The owning account operation was cancelled before commit. No turn was sent.")),result=future=>result}
+    }
     pub fn phase(&self,phase:&'static str,progress:u8){
         let mut s=self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let previous=s.phase;let duration=s.phase_started.elapsed().as_millis();

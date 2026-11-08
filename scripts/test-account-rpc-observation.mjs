@@ -9,7 +9,7 @@ globalThis.window=new EventTarget();
 const {NativeAccountAdapter,rpcManagerService}=await import(pathToFileURL(resolve(out,'fixture.mjs'))),checks=[];
 const quota=(remaining)=>({rateLimits:{limitId:'codex',primary:{usedPercent:100-remaining,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:50,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
 const wait=async p=>{for(let i=0;i<100;i++){if(p())return;await new Promise(r=>setTimeout(r,20));}throw Error('Fixture did not settle');};
-const state={owner:{id:'owner',label:'fixture'},profile:{initial:'./assets/native.js',shared:'./assets/shared.js'},connections:[{id:'B',email:'B@test'}],selected:{task:'B'},sharedConversations:[],activeConversations:[]};
+const state={owner:{id:'owner',label:'fixture'},profile:{initial:'./assets/app-initial-fixture.js',shared:'./assets/app-shared-fixture.js'},connections:[{id:'B',email:'B@test'}],selected:{task:'B'},sharedConversations:[],activeConversations:[]};
 let callback,admit,notification,disposed=0,active=false,hostQuota=89,childReads=0,hostReads=0;
 const lease=()=>({[Symbol.dispose](){disposed++;}}),manager={dup(){return this},[Symbol.dispose](){disposed++;},registerReplayAdmission(f){admit=f;return Promise.resolve(lease());},subscribe(p){notification=p.listener;return Promise.resolve(lease());},getThreadExecutionState:async()=>({inProgress:active})};
 const registry={dup(){return this},[Symbol.dispose](){disposed++;},subscribe(_host,f){callback=f;queueMicrotask(()=>f({status:'ready',manager}));return Promise.resolve(lease());}};

@@ -94,7 +94,16 @@ pub(super) fn record_supervisor_progress(progress: Arc<SupervisorProgress>) {
     let observed = progress.clone();
     tokio::spawn(async move {
         let mut previous = String::new();
+        let mut memory_sample:Option<Instant>=None;
         loop {
+            if memory_sample.is_none_or(|at|at.elapsed()>=Duration::from_secs(30)) {
+                memory_sample=Some(Instant::now());
+                #[cfg(windows)] {
+                    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx,MEMORYSTATUSEX};
+                    let mut memory:MEMORYSTATUSEX=unsafe{std::mem::zeroed()};memory.dwLength=std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+                    if unsafe{GlobalMemoryStatusEx(&mut memory)}!=0 {runtime_log::record("launcher","memory budget",if memory.ullAvailPageFile<128*1024*1024{"low"}else{"observed"},json!({"physicalLoadPercent":memory.dwMemoryLoad,"availablePhysicalBytes":memory.ullAvailPhys,"commitLimitBytes":memory.ullTotalPageFile,"availableCommitBytes":memory.ullAvailPageFile,"cause":"not inferred","automaticRepair":false}));}
+                }
+            }
             if crate::startup_recovery_ui::check_readiness_delay() {
                 runtime_log::record(
                     "launcher",
@@ -1173,6 +1182,7 @@ pub(super) fn safe_layout_summary(value: &Value) -> String {
         "appOrigin",
         "legacyShellMatch",
         "workspaceRowPresent",
+        "workspaceContainerMatch",
         "mainContentClip",
         "railBeforeWorkspace",
         "workspaceContainsMain",
@@ -1188,6 +1198,7 @@ pub(super) fn safe_layout_summary(value: &Value) -> String {
         "sidebarTriggerCount",
         "rowMainCount",
         "directRailCount",
+        "outerDirectRailCount",
         "workspaceCount",
         "unifiedTabStripCount",
     ];

@@ -182,3 +182,6 @@ mod tests {
         assert!(parse_worker_reply("ready\nunexpected", false).is_err());
     }
 }
+
+#[cfg(windows)]
+pub(crate) fn close_for_restart(pid:u32,created_ms:u64,image:&Path)->Result<serde_json::Value,String>{windows::operate(pid,created_ms,image,true)}

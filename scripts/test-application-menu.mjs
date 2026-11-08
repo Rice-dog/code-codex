@@ -7,10 +7,10 @@ import {launchFixture,delay} from './browser-fixture.mjs';
 const root=resolve(import.meta.dirname,'..'),ui=resolve(root,'packages/explorer-ui'),out=resolve(root,'artifacts/application-menu');mkdirSync(out,{recursive:true});
 const {build}=createRequire(resolve(ui,'package.json'))('esbuild');
 await build({stdin:{contents:`import './core/localization/runtime';import {reconcileApplicationMenu} from './application-menu';import {applyLanguage} from './i18n';
-window.fixture={enabled:false,supported:true,writes:[],alerts:[],readError:false,writeError:false,defer:false,uninstalls:0};
+window.fixture={enabled:false,supported:true,writes:[],alerts:[],readError:false,writeError:false,defer:false,hostStatus:{latest:{type:"baseline",counts:{pluginDependency:8,needsReview:2}},scan:{status:"complete"}},reportRetries:0,reportOpens:0,statusReads:0,uninstalls:0,restarts:0};
 window.localeRevision=0;window.setLocale=locale=>applyLanguage({schema:1,locale,revision:++window.localeRevision,source:'menu'});setLocale('en');window.alert=text=>fixture.alerts.push(text);window.confirm=()=>{throw Error('Browser confirmation must not be used');};
-window.reconcile=()=>reconcileApplicationMenu({isExplorerVisible:()=>true,toggleExplorer(){},openPreviewMarket(){},checkForUpdates(){},openRuntimeInformation(){},openInstallationFolder(){},openUninstaller:async()=>{fixture.uninstalls++;return{opened:true};},
-getLoginStartup:async()=>{if(fixture.readError)throw Error('fixture read denied');return {supported:fixture.supported,enabled:fixture.enabled};},setLoginStartup:async enabled=>{fixture.writes.push(enabled);if(fixture.writeError)throw Error('fixture write denied');if(fixture.defer)await new Promise(resolve=>fixture.finish=resolve);fixture.enabled=enabled;return {supported:true,enabled};}});reconcile();`,resolveDir:resolve(ui,'src'),loader:'ts'},bundle:true,format:'iife',outfile:resolve(out,'fixture.js')});
+window.reconcile=()=>reconcileApplicationMenu({isExplorerVisible:()=>true,toggleExplorer(){},openPreviewMarket(){},checkForUpdates(){},openRuntimeInformation(){},openInstallationFolder(){},retryHostUpdates:async()=>{fixture.reportRetries++;return {scheduled:true};},hostUpdateStatus:async()=>{fixture.statusReads++;if(fixture.deferStatus)return await new Promise(r=>fixture.resolveStatus=r);if(fixture.statusError)throw Error("read failed");return fixture.hostStatus;},openHostUpdates:async()=>{fixture.reportOpens++;if(fixture.openError)throw Error("open failed");return {opened:true};},restartCodeCodex:async()=>{fixture.restarts++;return{scheduled:true};},openUninstaller:async()=>{fixture.uninstalls++;return{opened:true};},
+getLoginStartup:async()=>{if(fixture.deferRead)await new Promise(resolve=>fixture.finishRead=resolve);if(fixture.readError)throw Error('fixture read denied');return {supported:fixture.supported,enabled:fixture.enabled};},setLoginStartup:async enabled=>{fixture.writes.push(enabled);if(fixture.writeError)throw Error('fixture write denied');if(fixture.defer)await new Promise(resolve=>fixture.finish=resolve);fixture.enabled=enabled;return {supported:true,enabled};}});reconcile();`,resolveDir:resolve(ui,'src'),loader:'ts'},bundle:true,format:'iife',outfile:resolve(out,'fixture.js')});
 const html=`<!doctype html><html><meta charset="utf-8"><style>:root{--color-codex-application-menu-selection:rgb(225,230,235);--color-text:#1a1c1f}body{margin:0;font-family:Segoe UI}header{display:flex;align-items:center;background:#f4f4f4;height:38px}[role=menubar]{display:flex;gap:2px}.native{border:0;border-radius:8px;padding:5px 15px;color:#888;background:transparent;font:14px Segoe UI}.native[data-state=open]{background:var(--color-codex-application-menu-selection);color:var(--color-text)}#application-menu-content{position:fixed;top:38px;left:0;background:#eee;width:220px;height:100px}</style><body><header><div role="menubar"><button class="native" id="application-menu-trigger-file-menu" aria-expanded="false" data-state="closed">File</button><button class="native" id="application-menu-trigger-help-menu" aria-expanded="false" data-state="closed">Help</button></div></header><main>Workspace</main><script>
 window.nativeButtons=[...document.querySelectorAll('[role=menubar] button')];
 window.closeNative=()=>{document.querySelector('#application-menu-content')?.remove();for(const b of nativeButtons){b.dataset.state='closed';b.setAttribute('aria-expanded','false');}};
@@ -38,7 +38,13 @@ try{
  await check('Left arrow returns to last native menu',`popup.hidden&&help.getAttribute('aria-expanded')==='true'`);
  await ev(`closeNative();trigger.click();${settle}`);
  await check('Default off; refresh never registers startup',`item.getAttribute('aria-checked')==='false'&&!item.disabled&&fixture.writes.length===0`);
- await check('Checkbox has a normal right-side check and no leading spacer',`item.getAttribute('role')==='menuitemcheckbox'&&item.lastElementChild.dataset.codeCodexMenuCheck==='true'&&item.lastElementChild.querySelector('svg')?.getAttribute('viewBox')==='0 0 17 17'&&item.lastElementChild.hidden&&item.firstElementChild.textContent==='Start Code-Codex when I sign in'&&item.firstElementChild.getBoundingClientRect().left===popup.firstElementChild.getBoundingClientRect().left+16`);
+ await check('Checkbox has a normal right-side check and no leading spacer',`item.getAttribute('role')==='menuitemcheckbox'&&item.lastElementChild.dataset.codeCodexMenuCheck==='true'&&item.lastElementChild.querySelector('svg')?.getAttribute('viewBox')==='0 0 17 17'&&item.lastElementChild.hidden&&item.firstElementChild.textContent==='Start Code-Codex at login'&&item.firstElementChild.getBoundingClientRect().left===popup.firstElementChild.getBoundingClientRect().left+16`);
+ await ev(`fixture.deferRead=true;trigger.click();trigger.click();`);
+ await check('Slow refresh keeps foreground fully opaque but blocks clicks',`item.disabled&&item.getAttribute('aria-busy')==='true'&&getComputedStyle(item).opacity==='1'`);
+ await ev(`item.click();`);
+ await check('Click during read cannot register startup',`fixture.writes.length===0&&!document.querySelector('[data-code-codex-application-dialog]')`);
+ await ev(`fixture.deferRead=false;fixture.finishRead();${settle}`);
+ await check('Read completion retains the same text opacity',`!item.disabled&&getComputedStyle(item).opacity==='1'&&item.getAttribute('aria-busy')==='false'`);
  await ev(`item.click();${settle}`);await wait(`!!document.querySelector('[data-code-codex-application-dialog]')`);
  await check('English title/body/buttons replace browser origin UI',`(()=>{const d=document.querySelector('[data-code-codex-application-dialog]'),s=d.querySelector('[data-code-codex-dialog-content]').shadowRoot;return d.open&&d.getAttribute('aria-label')==='Enable Code-Codex login startup?'&&s.querySelector('p').textContent==='When enabled, signing in to Windows will automatically start Codex through Code-Codex. This will not close the Codex session currently running.'&&s.querySelector('[data-accept]').textContent==='OK'&&s.activeElement===s.querySelector('[data-cancel]')&&!s.textContent.includes('app://')})()`);
  await ev(`window.hostReset=document.createElement('style');hostReset.textContent='dialog{position:fixed;inset:0;margin:0}';document.head.append(hostReset)`);
@@ -80,12 +86,12 @@ try{
  await ev(`fixture.writeError=false;item.click();${settle}`);
  await check('Uncertain write only allows explicit revoke',`fixture.writes.at(-1)===false&&!fixture.enabled&&!document.querySelector('[data-code-codex-application-dialog]')`);
  await ev(`fixture.readError=true;trigger.click();trigger.click();${settle}`);
- await check('Read failure offers explicit revoke',`!item.disabled&&item.firstElementChild.textContent==='关闭 Code-Codex 登录自启'`);
+ await check('Read failure offers explicit revoke',`!item.disabled&&item.firstElementChild.textContent==='关闭开机自启 Code-Codex'`);
  await ev(`item.click();${settle}`);
  await check('Revoke does not require reading prior state',`fixture.writes.at(-1)===false`);
  await ev(`fixture.readError=false;fixture.supported=false;trigger.click();trigger.click();${settle}`);
  await check('Unsupported installations cannot enable',`item.disabled&&item.getAttribute('aria-checked')==='false'`);
- await ev(`if(popup.hidden)trigger.click();item.previousElementSibling.focus();popup.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));`);
+ await ev(`if(popup.hidden)trigger.click();item.previousElementSibling.previousElementSibling.focus();popup.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));`);
  await check('Keyboard skips unavailable startup item',`document.activeElement===item.nextElementSibling`);
  await ev(`window.u=document.querySelector('[data-code-codex-uninstall]');u.click();${settle}`);
  await check('Uninstall menu opens wizard through one no-argument capability and closes menu',`fixture.uninstalls===1&&popup.hidden&&u.textContent==='卸载 Code-Codex…'`);
@@ -102,5 +108,34 @@ try{
  await check('Autostart and language checks share the exact native path',`item.lastElementChild.querySelector('path').getAttribute('d')===document.querySelector('#code-codex-language-popup [aria-checked=true] path').getAttribute('d')`);
  await ev(`trigger.click();`);
  await check('Reconcile keeps one menu instance',`document.querySelectorAll('#code-codex-application-menu-trigger').length===1&&fixture.writes.length===readsBefore`);
+ await ev(`setLocale('zh-CN');trigger.click();${settle}`);
+ await check('System actions are grouped at bottom in visual and keyboard order',`(()=>{const rows=[...popup.children];const login=popup.querySelector('[data-code-codex-login-startup]'),restart=popup.querySelector('[data-code-codex-restart]'),uninstall=popup.querySelector('[data-code-codex-uninstall]');return login.nextElementSibling===restart&&restart.nextElementSibling===uninstall&&login.previousElementSibling?.getAttribute('role')==='separator'&&rows.at(-1)===uninstall;})()`);
+ await check('Chinese login label puts action before product',`document.querySelector('[data-code-codex-login-startup]').textContent==='开机自启 Code-Codex'`);
+ await check('Restart label follows Chinese',`document.querySelector('[data-code-codex-restart]').textContent==='重启 Code-Codex'`);
+ await ev(`setLocale('en');${settle}`);
+ await check('Restart label follows English',`document.querySelector('[data-code-codex-restart]').textContent==='Restart Code-Codex'`);
+ await ev(`document.querySelector('[data-code-codex-restart]').click();document.querySelector('[data-code-codex-restart]').click();${settle}`);
+ await check('Restart closes menu and schedules once',`fixture.restarts===1&&popup.hidden&&!document.querySelector('[data-code-codex-restart]').disabled`);
+ await ev(`trigger.click();${settle}`);
+ await check('Baseline inventory is not displayed as a broken-update count',`document.querySelector('[data-code-codex-host-updates]').textContent==='Official Codex update report'`);
+ await ev(`trigger.click();fixture.hostStatus.latest.type='update';fixture.hostStatus.latest.counts={pluginDependency:3,needsReview:2};trigger.click();${settle}`);
+ await check('Update menu prioritizes registered dependencies plus unmapped changes',`document.querySelector('[data-code-codex-host-updates]').textContent==='Official Codex update report (5)'&&fixture.statusReads>0`);
+ await check('Report row uses existing menu role and styling without a custom panel',`document.querySelector('[data-code-codex-host-updates]').getAttribute('role')==='menuitem'&&document.querySelector('[data-code-codex-host-updates]').style.length===0`);
+ await ev(`document.querySelector('[data-code-codex-host-updates]').click();document.querySelector('[data-code-codex-host-updates]').click();${settle}`);
+ await check('Report opens once through the fixed native action and closes menu',`fixture.reportOpens===1&&popup.hidden&&!document.querySelector('[data-code-codex-host-updates]').disabled`);
+ await ev(`fixture.hostStatus.scan.status='partial';trigger.click();${settle}`);
+ await check('Incomplete inventory is distinguished from a no-impact result',`document.querySelector('[data-code-codex-host-updates]').title.includes('HOST_UPDATE_INCOMPLETE')`);
+ await ev(`setLocale('zh-CN');trigger.click();trigger.click();${settle}`);
+ await check('Report row follows global Chinese localization',`document.querySelector('[data-code-codex-host-updates]').textContent==='官方 Codex 更新报告 (5)'`);
+ await ev(`trigger.click();fixture.deferStatus=true;trigger.click();${settle}`);
+ await ev(`trigger.click();fixture.resolveStatus({latest:{type:'update',counts:{pluginDependency:999}},scan:{status:'complete'}});fixture.deferStatus=false;${settle}`);
+ await check('Late status cannot update a closed menu or open a report',`popup.hidden&&fixture.reportOpens===1&&!document.querySelector('[data-code-codex-host-updates]').textContent.includes('999')`);
+ await ev(`fixture.statusError=true;trigger.click();${settle}`);
+ await check('Status read failure keeps menu usable with explicit diagnostic',`!popup.hidden&&document.querySelector('[data-code-codex-host-updates]').title.includes('HOST_UPDATE_REPORT')&&!document.querySelector('[data-code-codex-host-updates]').disabled`);
+ await ev(`fixture.openError=true;document.querySelector('[data-code-codex-host-updates]').click();${settle}`);
+ await check('Folder-open failure restores clickable state and reports the error',`fixture.alerts.at(-1).includes('official update report failed')&&!document.querySelector('[data-code-codex-host-updates]').disabled`);
+ await ev(`fixture.statusError=false;fixture.openError=false;trigger.click();document.querySelector('[data-code-codex-host-updates-retry]').click();document.querySelector('[data-code-codex-host-updates-retry]').click();${settle}`);
+ await check('Manual retry uses one fixed action and closes the existing menu',`fixture.reportRetries===1&&popup.hidden&&!document.querySelector('[data-code-codex-host-updates-retry]').disabled`);
+ await check('Manual retry follows global Chinese label and native menu role',`document.querySelector('[data-code-codex-host-updates-retry]').textContent==='重新检测官方 Codex 更新'&&document.querySelector('[data-code-codex-host-updates-retry]').getAttribute('role')==='menuitem'`);
  writeFileSync(resolve(out,'result.json'),JSON.stringify({passed:true,checks},null,2));console.log(`Application menu: ${checks.length} browser checks passed; no OS state changed`);
 }finally{await browser.close();await new Promise(r=>server.close(r));}

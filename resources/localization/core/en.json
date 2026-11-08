@@ -53,8 +53,8 @@
   "language.unavailable": "Language settings are unavailable. Reconnect Code-Codex and retry.",
   "menu.hideTree": "Hide File Tree",
   "menu.installation": "Open Installation Folder",
-  "loginStartup.label": "Start Code-Codex when I sign in",
-  "loginStartup.revoke": "Turn off Code-Codex login startup",
+  "loginStartup.label": "Start Code-Codex at login",
+  "loginStartup.revoke": "Disable login startup for Code-Codex",
   "loginStartup.hint": "Registers Code-Codex for this Windows user only. Windows Startup Apps can also disable it.",
   "loginStartup.confirm": "When enabled, signing in to Windows will automatically start Codex through Code-Codex. This will not close the Codex session currently running.",
   "loginStartup.failed": "Login startup could not be confirmed. Click the menu item to turn it off, or use code-codex login-startup --disable.",
@@ -121,5 +121,9 @@
   "plugin.name.ascii-tiles": "ASCII Tiles Background",
   "plugin.name.shallow-ocean": "Shallow Ocean Letters Background",
   "plugin.name.multi-account": "Multi-account Tasks",
-  "plugins.morePinned": "More pinned plugins"
+  "plugins.morePinned": "More pinned plugins",
+  "plugin.beta": "Beta",
+  "menu.restart": "Restart Code-Codex",
+  "menu.hostUpdates": "Official Codex update report",
+  "menu.hostUpdatesRetry": "Recheck official Codex updates"
 }

@@ -53,8 +53,8 @@
   "language.unavailable": "语言设置不可用，请重新连接 Code-Codex 后重试。",
   "menu.hideTree": "隐藏文件树",
   "menu.installation": "打开安装目录",
-  "loginStartup.label": "Code-Codex 开机自启",
-  "loginStartup.revoke": "关闭 Code-Codex 登录自启",
+  "loginStartup.label": "开机自启 Code-Codex",
+  "loginStartup.revoke": "关闭开机自启 Code-Codex",
   "loginStartup.hint": "仅为当前 Windows 用户注册自启。Windows 的“启动应用”设置也可禁用此项。",
   "loginStartup.confirm": "开启后，登录 Windows 时将自动通过 Code-Codex 启动 Codex。此操作不会关闭当前正在运行的 Codex。",
   "loginStartup.failed": "无法确认登录自启状态。可点击此菜单项关闭，或运行 code-codex login-startup --disable。",
@@ -121,5 +121,9 @@
   "plugin.name.ascii-tiles": "字符玻璃砖",
   "plugin.name.shallow-ocean": "浅海来信",
   "plugin.name.multi-account": "多账号任务",
-  "plugins.morePinned": "更多置顶插件"
+  "plugins.morePinned": "更多置顶插件",
+  "plugin.beta": "测试",
+  "menu.restart": "重启 Code-Codex",
+  "menu.hostUpdates": "官方 Codex 更新报告",
+  "menu.hostUpdatesRetry": "重新检测官方 Codex 更新"
 }

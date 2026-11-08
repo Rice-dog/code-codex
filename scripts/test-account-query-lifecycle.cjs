@@ -41,7 +41,7 @@ async function record(name,fn){const evidence=await fn();checks.push({name,confi
  function lifecycle(initial){
   let interval;class El extends EventTarget{constructor(){super();this.style={};this.dataset={};}getAttribute(){return null;}setAttribute(){}matches(){return false;}focus(){}}
   const elements=new Map(),shadow={host:{tagName:'CODE-CODEX-V0-5-81'},querySelector(k){if(!elements.has(k))elements.set(k,new El());return elements.get(k);},querySelectorAll(){return []},append(){}};
-  const r=realm(runtimeCode,{document:{createElement:()=>new El()},setInterval:fn=>(interval=fn,1),clearInterval(){},innerWidth:1500,innerHeight:1000});
+  const r=realm(runtimeCode,{document:Object.assign(new EventTarget(),{createElement:()=>new El()}),setInterval:fn=>(interval=fn,1),clearInterval(){},innerWidth:1500,innerHeight:1000});
   r.win[Symbol.for('code-codex:language-service:v1')]={getLocale:()=> 'en',subscribeLanguage:()=>()=>{},t:k=>k};
   r.win[Symbol.for('code-codex:multi-account-runtime:v1')]=initial;
   const notices=[],plugin=new r.api.MultiAccountPlugin(shadow,m=>notices.push(m));
@@ -70,7 +70,7 @@ async function record(name,fn){const evidence=await fn();checks.push({name,confi
   const r=lifecycle({enabled:true});transport(r,async()=>structuredClone(info));r.plugin.start();await tick();assert(r.state.adapter);const starts=r.win.starts;
   r.state.adapter=undefined;r.state.selector=undefined;r.state.pending=new Promise(()=>{});transport(r,async()=>structuredClone(info));
   r.win.dispatchEvent(new Event('code-codex:accounts-connected'));await tick();await tick();
-  assert(r.state.adapter);assert.equal(r.state.viewRevision,'account-native-routing-v19');assert.equal(r.win.starts,starts+1);assert.equal(r.state.pending,undefined);r.plugin.stop();
+  assert(r.state.adapter);assert.equal(r.state.viewRevision,'account-native-routing-v23');assert.equal(r.win.starts,starts+1);assert.equal(r.state.pending,undefined);r.plugin.stop();
   return {timerTicks:0,adapterRebound:true,obsoletePendingDiscarded:true};
  });
  await record('A retired cross-version panel cannot eagerly acquire the new native endpoint',async()=>{
@@ -78,6 +78,11 @@ async function record(name,fn){const evidence=await fn();checks.push({name,confi
   r.state.enabled=true;r.win[Symbol.for('code-codex:document-connection-owner:v2')]={version:'0.5.82'};
   r.win.dispatchEvent(new Event('code-codex:accounts-connected'));await tick();assert.equal(calls,0);assert.equal(r.state.adapter,undefined);r.plugin.stop();
   return {oldPanelVersion:'0.5.81',newDocumentVersion:'0.5.82',newEndpointReadsByOldPanel:0};
+ });
+ await record('Panel metadata refreshes coalesce while an action waits for a newer committed snapshot',async()=>{
+  const r=lifecycle({enabled:false});let reads=0,release;
+  transport(r,async()=>{reads++;if(reads===1)return new Promise(resolve=>release=resolve);return {...structuredClone(info),followLogout:false};});r.plugin.start();r.state.enabled=true;r.poll();await tick();r.poll();assert.equal(reads,1);
+  r.plugin.stop();release(structuredClone(info));await tick();assert.equal(r.state.adapter,undefined);return {sameFlightReads:reads,lateStoppedReadCommitted:false};
  });
  const result={at:new Date().toISOString(),sourceVersion:JSON.parse(fs.readFileSync('packages/explorer-ui/package.json','utf8')).version,scope:'Repaired production wrapper, quota cache and lifecycle methods; controlled ports and clock. No official logout, inference, Stop, account selection or history writes.',checks};
  fs.mkdirSync(path.join(root,'artifacts/account-query-lifecycle'),{recursive:true});fs.writeFileSync(path.join(root,'artifacts/account-query-lifecycle/result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));

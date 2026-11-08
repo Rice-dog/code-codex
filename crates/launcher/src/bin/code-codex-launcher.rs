@@ -265,7 +265,7 @@ fn main() -> ExitCode {
                     .lock()
                     .ok()
                     .and_then(|v| v.clone())
-                    .unwrap_or_else(|| fallback_diagnostic(code));
+                    .unwrap_or_else(|| captured_failure_diagnostic(code,&stderr_text));
                 fallback.reason.push_str(&format!(
                     "\nUnstructured captured stderr (bounded and redacted):\n{}\n",
                     redaction::text(&stderr_text)
@@ -583,6 +583,12 @@ fn prune_old_reports(directory: &Path, keep: &Path) {
     }
 }
 
+fn captured_failure_diagnostic(code:Option<i32>,stderr:&str)->StartupDiagnostic {
+    let allocation_failed=stderr.lines().any(|line|line.strip_prefix("memory allocation of ").and_then(|s|s.strip_suffix(" bytes failed")).is_some_and(|n|!n.is_empty()&&n.bytes().all(|b|b.is_ascii_digit())));
+    if allocation_failed {return StartupDiagnostic::new("CC-START-MEMORY-001","Running Code-Codex","Code-Codex could not allocate memory","The runtime reported an allocation failure. System commit exhaustion and a process memory fault are not distinguished by this message; account expiration was not established.","Preserve this report and inspect system memory and commit usage. Close unnecessary memory-heavy applications, then retry Code-Codex. No task or authorization was automatically replayed.");}
+    fallback_diagnostic(code)
+}
+
 fn fallback_diagnostic(code: Option<i32>) -> StartupDiagnostic {
     match code.and_then(|code| u8::try_from(code).ok()) {
         Some(exit_codes::UNSUPPORTED_VERSION) => StartupDiagnostic::new(
@@ -824,6 +830,14 @@ fn path_starts_with(candidate: &Path, root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allocation_failure_is_identified_without_guessing_account_or_system_cause(){
+        let d=captured_failure_diagnostic(Some(-1073740791),"memory allocation of 852480 bytes failed\nnote: RUST_BACKTRACE=1");
+        assert!(format!("{d:?}").contains("CC-START-MEMORY-001"));
+        assert!(format!("{d:?}").contains("not distinguished"));
+        assert!(format!("{:?}",captured_failure_diagnostic(None,"memory allocation of private text bytes failed")).contains("CC-START-UNKNOWN-002"));
+    }
 
     #[test]
     fn streamed_failure_is_available_before_eof_and_preserves_final_copy() {

@@ -41,6 +41,19 @@ const page = (active, id) => `<div class="contents" data-app-shell-active-page="
 fixtures.currentCached = `<main class="bg-surface" hidden></main><button data-app-shell-sidebar-trigger></button><div data-app-shell-workspace-row="true"><aside class="app-shell-left-panel"></aside>${page(true, 'thread_current_001')}${page(false, 'thread_cached_002')}</div>`;
 fixtures.twoActivePages = `<button data-app-shell-sidebar-trigger></button><div data-app-shell-workspace-row="true"><aside class="app-shell-left-panel"></aside>${page(true, 'thread_current_001')}${page(true, 'thread_other_003')}</div>`;
 fixtures.inactiveOnly = `<button data-app-shell-sidebar-trigger></button><div data-app-shell-workspace-row="true"><aside class="app-shell-left-panel"></aside>${page(false, 'thread_cached_002')}</div>`;
+const nestedShell = (content, marker = 'data-app-shell-workspace="true"') => `<button data-app-shell-sidebar-trigger></button><div data-app-shell-workspace-row="true"><div ${marker}>${content}</div></div>`;
+const nestedRail = '<aside class="app-shell-left-panel"></aside>';
+fixtures.currentNested = nestedShell(`<div style="position:absolute;pointer-events:none"></div>${nestedRail}${page(true, 'thread_current_001')}`);
+fixtures.currentNestedCached = nestedShell(`${nestedRail}${page(true, 'thread_current_001')}${page(false, 'thread_cached_002')}`);
+fixtures.nestedNoMarker = nestedShell(`${nestedRail}${page(true, 'thread_current_001')}`, '');
+fixtures.nestedTooDeep = nestedShell(`<div>${nestedRail}${page(true, 'thread_current_001')}</div>`);
+fixtures.nestedWrongOrder = nestedShell(`${page(true, 'thread_current_001')}${nestedRail}`);
+fixtures.nestedDoubleRail = nestedShell(`${nestedRail}${nestedRail}${page(true, 'thread_current_001')}`);
+fixtures.nestedDoubleMain = nestedShell(`${nestedRail}${page(true, 'thread_current_001')}${page(true, 'thread_other_003')}`);
+fixtures.nestedNoClip = nestedShell(`${nestedRail}${page(true, 'thread_current_001').replace('_MainContentClip_gs442_2', 'unrelated')}`);
+fixtures.nestedNoTrigger = fixtures.currentNested.replace('<button data-app-shell-sidebar-trigger></button>', '');
+fixtures.nestedMultipleContainers = `<button data-app-shell-sidebar-trigger></button><div data-app-shell-workspace-row="true"><div data-app-shell-workspace="true">${nestedRail}${page(true, 'thread_current_001')}</div><div data-app-shell-workspace="true"></div></div>`;
+fixtures.nestedOuterAndInnerRail = fixtures.currentNested.replace('<div data-app-shell-workspace="true">', `${nestedRail}<div data-app-shell-workspace="true">`);
 const featureRail = '<nav data-app-navigation-rail="true"><button data-sidebar-destination="builtin:home"></button></nav>';
 const featureShell = '<div data-app-shell-workspace-row="true"><aside class="app-shell-left-panel"></aside><div class="_Workspace_gs442_2"><div class="_MainContentClip_gs442_2"><main data-app-shell-main-surface="default"></main></div></div></div>';
 fixtures.nativeFeature = featureRail + featureShell;
@@ -61,6 +74,7 @@ for (const [name, markup] of Object.entries(fixtures)) {
     .sidebar-navigation, .bg-surface { background: rgb(24,24,24); }
     ._MainContentTopFade_new { background-image: linear-gradient(black,transparent); }
     [data-app-shell-workspace-row] { display: flex; width: 1200px; height: 400px; }
+    [data-app-shell-workspace=true] { display: flex; flex: 1; min-width: 0; }
     ._Workspace_gs442_2 { display: contents; }
     [data-app-shell-active-page=true] { display: contents; }
     [data-app-shell-active-page=false] { display: none; }
@@ -90,7 +104,7 @@ for (const [name, markup] of Object.entries(fixtures)) {
       const treeRect = tree.getBoundingClientRect();
       const mainLeft = main.getBoundingClientRect().left;
       window.treeBetween = treeRect.left >= railRight && mainLeft >= treeRect.right;
-      if (${JSON.stringify(name)} === 'currentCached') {
+      if (['currentCached', 'currentNestedCached'].includes(${JSON.stringify(name)})) {
         window.initialThread = annotationConsensusThreadId();
         const pages = document.querySelectorAll('[data-app-shell-active-page]');
         pages[0].setAttribute('data-app-shell-active-page', 'false');
@@ -130,11 +144,16 @@ for (const [name, markup] of Object.entries(fixtures)) {
     assert.equal(result.diagnostic.rowChildren[1].workspaceClass, false);
     assert.equal(result.diagnostic.mainAncestors.some((ancestor) => ancestor.workspaceClass), true);
   }
-  if (name === "currentCached") {
+  if (name === "currentCached" || name === "currentNestedCached") {
     assert.equal(result.initialThread, 'thread_current_001', 'cached thread annotations must be ignored');
     assert.equal(result.switchPassed, true, 'activity-only page swap must preserve qualification and tree position');
     assert.equal(result.diagnostic.totalMainCount, 2);
     assert.equal(result.diagnostic.inactiveMainCount, 1);
+  }
+  if (name.startsWith('currentNested')) {
+    assert.equal(result.diagnostic.workspaceContainerMatch, true);
+    assert.equal(result.diagnostic.outerDirectRailCount, 0);
+    assert.equal(result.diagnostic.directRailCount, 1);
   }
   assert.equal(result.legacy, name === "old", `${name}: legacy layout`);
   assert.equal(result.current, name.startsWith("current"), `${name}: current layout`);

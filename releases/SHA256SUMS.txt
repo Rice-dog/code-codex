@@ -1,7 +1,7 @@
-84e9156d80dce19193a76737ec2e0c88f057efa2b5e65c7609a4f6b29489dfd5  CodeCodex-0.5.89-x64-setup.exe
-ac74c7c50b11d953e35713905da20ca5b2750eb13ce9544d2e7ac5875cf94fa8  CodeCodex-0.5.89-x64.msi
-b5caa75c346b4ef3b8da3068f23567bc2527ddf31cc532fc3de25e502c7d2e4f  CodeCodex-0.5.89-x64.zip
-2abf059b04a5d009bac82f90e30623382d663cf71364dcb8b4a14c92352098c6  Uninstall-CodeCodex.exe
+6fdfd95993b817f9a2de1f35c7f4566688cc04fd637f7d27bfbc5f9bdfe9e850  CodeCodex-0.6.0-x64-setup.exe
+8a1042f7e252ee024c499b88fce99b687e64ab99512091b993a9fb514a326312  CodeCodex-0.6.0-x64.msi
+803a754edc2965ed9e6e6c067208ddbfe5d79d162b300484834702fb3053257c  CodeCodex-0.6.0-x64.zip
+3515088c7414dc53fb712658bae912a8a0fa69869d68675d89d3776ef4b83fa6  Uninstall-CodeCodex.exe
 4bf3ebba5ac222851e7ba0f4318bd693fdb28109fd06bd4a12da591098b95106  plugins/appearance/glow-horizon/CodeCodex-background-glow-horizon-1.0.1.js
 ac2f4a1b14f21b2c944c1ffbcef01f63e7597cb08bc8721282ba1840f2d282e7  plugins/appearance/black-hole/CodeCodex-background-black-hole-1.0.6.js
 857fea5dd51f9bd4cb78a99e976858500d518855f1a7a3af28daeb00ae9ec864  plugins/appearance/heavenly-cloud/CodeCodex-background-heavenly-cloud-1.0.1.js
@@ -28,7 +28,7 @@ e29398439ce983e0ff097d225f4653d2464b09a26efb013f9257ef39d0022788  plugins/appear
 079ae375628c240b09b908304703c8240745759a9f0fed7d4d15722d42bbeb79  plugins/appearance/pixel-sculpt/media/CodeCodex-background-pixel-sculpt-image-079ae375628c240b.png
 1f1fd702c928e194390aabc7e72bc15753f11517b7e756d1001b0b7f8f7202b0  plugins/appearance/pixel-sculpt/CodeCodex-background-pixel-sculpt-1.0.13.js
 bff2200553a94731d78d1e1fe63c00cd5fb6e9e83c2d0872890ded60378dbe4d  plugins/appearance/custom-background/CodeCodex-background-custom-background-1.0.11.js
-41c6d5139933c31ea989e1120fd5031dd0c6f56a14ffb6aa0500969018ba0dce  plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.12.js
+92e90bc1ccdf98844b756cc5f88022009f0c8b8c5bd0367aac4bedf7767cc797  plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.14.js
 862678f97edda3bb575b20e1c1a66e1dd6e12dabf9eaee30b1ebe8a35758119b  plugins/appearance/transparent-background/CodeCodex-plugin-transparent-background-1.0.0.js
 1fcdf42d099e7159e1cf07517882c6b21ba7e99aa23be9c3c9e0a8fed6ffe77e  plugins/developer-tools/git-history/CodeCodex-plugin-git-history-1.0.0.js
 de094f68fb7db7d744d71704453bd117ea862192884027ea8ff1182a55b1298a  plugins/appearance/codex-startup-transition/CodeCodex-plugin-codex-startup-transition-1.1.32.js
@@ -46,5 +46,5 @@ b6264078fae002f7a7210775296118dbf3ce618979b64892e9bdea4454a05599  plugins/file-p
 c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2  plugins/file-preview/model-preview/CodeCodex-plugin-model-preview-1.0.0.js
 180b2ceaed686d660e118e406680b07c0c6c259051d9573ae079dfbc8307e202  plugins/appearance/ascii-tiles/CodeCodex-background-ascii-tiles-1.0.8.js
 1da590e0c8640ca9c60e1223303eab051c0822c12b631084ad41b0bcb97b7278  plugins/appearance/shallow-ocean/CodeCodex-background-shallow-ocean-1.0.17.js
-5ffec88d8862ed4944ee3b3ca4d59651530562252ef9641dfab56720fc21f86b  plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.65.js
-c095b64fcca388b6c72b6a49cb73c1f7fcc7b6967f3a9feb8fbee0a27eae7ecd  plugins/catalog.json
+6d8889680da4120105ab1a78ac07e350728bb201e9c70db83f27dda0fa83d0aa  plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.92.js
+4f6fbcc65261a25e61fc42967ad3e82c4a18e337132d8fb42d3b5c8d604f2446  plugins/catalog.json

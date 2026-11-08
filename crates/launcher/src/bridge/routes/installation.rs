@@ -46,6 +46,16 @@ fn installed_root() -> io::Result<PathBuf> {
 }
 
 impl NativeBridge {
+    pub(super) async fn installation_restart(&self,params:Value,epoch:u64)->Result<Value,BridgeError>{
+        if !params.as_object().is_some_and(serde_json::Map::is_empty){return Err(BridgeError::invalid_request());}
+        self.ensure_epoch(epoch)?;
+        let root=installed_root().map_err(|e|BridgeError::new("RESTART_INSTALLATION",format!("Restart installation validation failed: {e}")))?;
+        let endpoint=self.inner.accounts.native_endpoint().ok_or_else(||BridgeError::new("RESTART_DISCONNECTED","The native restart endpoint is unavailable."))?;
+        self.ensure_epoch(epoch)?;
+        crate::menu_restart::schedule(endpoint.port(),root,||self.ensure_epoch(epoch).is_ok()).await.map_err(|e|BridgeError::new("RESTART_SCHEDULE",e))?;
+        Ok(json!({"scheduled":true}))
+    }
+
     pub(super) async fn installation_uninstall(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
         if !params.as_object().is_some_and(serde_json::Map::is_empty) {
             return Err(BridgeError::invalid_request());

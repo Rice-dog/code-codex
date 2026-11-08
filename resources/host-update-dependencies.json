@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "revision": 1,
+  "rules": [
+    {"id":"layout","feature":"File tree, workspace mount and composer","sources":["packages/explorer-ui/src/adapters/codex-26.715.ts","packages/explorer-ui/src/inject.ts"],"tests":["scripts/test-codex-layout.mjs","scripts/test-account-selector.mjs"],"tokens":["data-app-shell-workspace","MainContentClip","data-thread-scroll-footer","data-app-shell-main-surface"],"paths":[]},
+    {"id":"accounts","feature":"Account routing, identity and quotas","sources":["resources/account-host-capabilities.js","crates/launcher/src/accounts/host.rs"],"tests":["scripts/test-host-capabilities.mjs","scripts/test-account-native-routing.mjs"],"tokens":["appServerManagers","executionHosts","clientCoordination","account/rateLimits/read","account/read","thread/resume","thread/loaded/list"],"paths":[]},
+    {"id":"models","feature":"Native model picker and API catalogs","sources":["packages/explorer-ui/src/features/accounts/native-model-menu.ts"],"tests":["scripts/test-account-models.mjs"],"tokens":["availableAccessPrograms","model/list","Select model","intelligence-trigger"],"paths":[]},
+    {"id":"appearance","feature":"Backgrounds, surface opacity and theme","sources":["packages/explorer-ui/src/host/appearance/theme-probe.ts","packages/explorer-ui/src/native-background-surfaces.ts"],"tests":["scripts/test-appearance-adapter.mjs","scripts/test-conversation-mask.mjs"],"tokens":["app.appearance.get","app.appearance.set","MainContentTopFade","run-app-action-in-primary-window"],"paths":[]},
+    {"id":"menu","feature":"Application menu and desktop integration","sources":["packages/explorer-ui/src/application-menu.ts"],"tests":["scripts/test-application-menu.mjs"],"tokens":["radix-menubar","application-menu","appActions"],"paths":[]},
+    {"id":"transport","feature":"Bridge, module loading and host runtime","sources":["crates/launcher/src/bootstrap.rs","crates/cdp-client/src/lib.rs"],"tests":["scripts/test-host-capabilities.mjs"],"tokens":["mcp-request","mcp-response","__webpack_require__","app://-"],"paths":["resources/app.asar"]},
+    {"id":"backend","feature":"Native local tools, permissions and protocol","sources":["crates/launcher/src/discovery.rs","crates/launcher/src/accounts/worker.rs"],"tests":["scripts/test-account-admission.mjs"],"tokens":["turn/start","item/commandExecution","sandboxPolicy","approvalPolicy"],"paths":["codex.exe","command-runner","code-mode-host","sandbox"]},
+    {"id":"desktop","feature":"Official executable, launch and package identity","sources":["crates/launcher/src/discovery.rs","crates/launcher/src/process_guard.rs"],"tests":["scripts/test-startup-conflict-native.ps1"],"tokens":[],"paths":["ChatGPT.exe","Codex.exe","AppxManifest.xml","resources/app-update.yml"]}
+  ]
+}

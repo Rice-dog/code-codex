@@ -21,7 +21,7 @@ consent. Upgrades preserve the choice; uninstall removes the entry. See
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.5.89-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.6.0-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -41,7 +41,7 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Current release **v0.5.89** includes all retained changes since the previous public software release, **v0.5.40**: Shallow Ocean Letters, isolated background rendering, opening animations and quality modes, pinned-plugin shortcuts, and broader UI opacity controls. See the [release notes](releases/README.md) for the cumulative scope and verification limits.
+Current release **v0.6.0** includes the retained changes since the previous public software release, **v0.5.89**: current official-client layout compatibility, connection and startup diagnostics, an official-update change ledger, restart and login-startup menu improvements, and corrected plugin resource availability. See the [release notes](releases/README.md) for the cumulative scope and this release's validation limits.
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
 
@@ -57,15 +57,15 @@ Download the installer from [latest GitHub Release](https://github.com/Rice-dog/
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.5.89-x64-setup.exe`
-- Alternative: `CodeCodex-0.5.89-x64.msi`
-- Portable package: `CodeCodex-0.5.89-x64.zip`
+- Recommended: `CodeCodex-0.6.0-x64-setup.exe`
+- Alternative: `CodeCodex-0.6.0-x64.msi`
+- Portable package: `CodeCodex-0.6.0-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.5.89-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.6.0-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -110,7 +110,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.5.89
+./scripts/package.ps1 -Version 0.6.0
 ```
 
 The generated packages are written to `releases/`.
@@ -335,7 +335,7 @@ Generated build folders such as `target/`, `node_modules/`, `dist/`, and
 
 ## Centralized storage
 
-The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.5.89-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.6.0-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
 
 Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
 

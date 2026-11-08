@@ -198,6 +198,9 @@ impl NativeBridge {
             crate::accounts::Decoded::Response(value)=>return Ok(value),
             crate::accounts::Decoded::Request(value)=>value,
         };
+        // draft.commit verifies the newly created actor through the owning GUI's
+        // dispatcher inside accounts::draft. The separate resolver cannot see an
+        // unflushed thread before its first turn, even though the GUI owns it.
         let workspace=if matches!(params["action"].as_str(),Some("shared.prepare"|"native.prepare"|"native.ensure"|"native.detach")) || (matches!(params["action"].as_str(),Some("rpc"|"shared.rpc")) && matches!(params["method"].as_str(),Some("thread/start"|"thread/resume"|"turn/start"))) {
             let id=params["conversationId"].as_str().ok_or_else(BridgeError::invalid_request)?;
             let resolver=self.inner.resolver.as_ref().ok_or_else(no_context_error)?;
@@ -820,6 +823,13 @@ mod tests {
             let unavailable = bridge.account_request(json!({"action":action,"conversationId":"fixture-thread","connectionId":"host"}), bridge.lifecycle_epoch()).await.unwrap_err();
             assert_eq!(unavailable.code, no_context_error().code, "{action} must resolve the native workspace before account execution");
         }
+    }
+
+    #[tokio::test]
+    async fn draft_commit_requires_the_launch_owned_account_host_not_archive_resolver() {
+        let (_directory, bridge) = manual_bridge().await;
+        let error = bridge.account_request(json!({"action":"draft.commit","conversationId":"fresh-thread","token":"synthetic-token"}), bridge.lifecycle_epoch()).await.unwrap_err();
+        assert_eq!(error.code, "ACCOUNT_HOST", "fresh-thread verification must be owned by the qualified account host, not a different app-server's persisted thread list");
     }
 
     #[tokio::test]
@@ -3170,6 +3180,13 @@ mod tests {
         }
         bridge.invalidate_lifecycle();
         assert_eq!(bridge.handle(request_at("explorer.installation.uninstall", json!({}), 0)).await.unwrap_err().code, "CANCELLED");
+    }
+
+    #[tokio::test]
+    async fn restart_menu_rejects_renderer_targets_and_stale_documents(){
+        let (_directory,bridge)=manual_bridge().await;
+        for params in [json!(null),json!([]),json!({"pid":123}),json!({"port":123}),json!({"command":"untrusted"}),json!({"force":true})]{assert_eq!(bridge.handle(request("explorer.installation.restart",params)).await.unwrap_err().code,"INVALID_REQUEST");}
+        bridge.invalidate_lifecycle();assert_eq!(bridge.handle(request_at("explorer.installation.restart",json!({}),0)).await.unwrap_err().code,"CANCELLED");
     }
 
     #[tokio::test]

@@ -9,6 +9,7 @@ pub(super) fn failure_class(value: &Value) -> &'static str {
         Some("invalid_api_key"|"invalid_token"|"token_expired"|"authentication_error")=>"authentication",
         Some("permission_denied"|"access_denied")=>"permission",
         Some("server_error"|"internal_server_error")=>"upstream-server",
+        _ if error["message"].as_str()==Some("The system is currently experiencing high demand and cannot process your request. Your request exceeds the maximum usage size allowed during peak load. For improved capacity reliability, consider switching to Provisioned Throughput.")=>"upstream-peak-capacity",
         _=>"unclassified",
     }
 }
@@ -52,5 +53,11 @@ impl ErrorBody {
         body.observe(&vec![b'x';20000]);assert_eq!(body.bytes.len(),16384);assert_eq!(body.summary()["classificationBodyComplete"],false);
         let mut headers=reqwest::header::HeaderMap::new();headers.insert("x-request-id","request-fixture-1".parse().unwrap());headers.insert("request-id","http://127.0.0.1/private".parse().unwrap());headers.insert("authorization","Bearer secret".parse().unwrap());
         assert_eq!(correlation(&headers),json!({"x-request-id":"request-fixture-1"}));
+    }
+    #[test] fn safe_failure_metadata_survives_the_real_log_redaction_boundary(){
+        let mut error=ErrorBody::default();error.observe(br#"{"error":{"code":"invalid_api_key","message":"private provider detail"}}"#);
+        let value=crate::runtime_log::redaction::value(json!({"routeSource":"api","requestEncoding":"identity","errorSummary":error.summary(),"body":"private provider detail","authorization":"Bearer private"}));
+        assert_eq!(value["routeSource"],"api");assert_eq!(value["errorSummary"]["classification"],"authentication");
+        assert_eq!(value["body"],"[redacted]");assert_eq!(value["authorization"],"[redacted]");assert!(!value.to_string().contains("private provider detail"));
     }
 }

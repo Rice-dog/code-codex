@@ -75,7 +75,7 @@ impl Drop for Transaction {
 }
 pub(super) fn admit(service:&AccountService,owner:&str,p:&Value)->Result<()> {
     let action=p["action"].as_str().unwrap_or("");
-    if matches!(action,"info"|"verify"|"usage"|"session.end"){return Ok(());}
+    if matches!(action,"info"|"verify"|"usage"|"session.end"|"connections.reorder"){return Ok(());}
     let own=p["conversationId"].as_str();let prefix=format!("{owner}:");
     let entries=service.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     for (key,progress) in entries.iter().filter(|(key,_)|key.starts_with(&prefix)){
@@ -153,7 +153,7 @@ fn stale(reason:&str)->AccountError{AccountError::new("ACCOUNT_PREPARE_STALE",fo
     }
     #[test] fn failed_persist_and_removed_connection_cannot_publish_preparation(){
         let mut s=state();let mut p=params();p["connectionId"]=json!("B");
-        s.registry.connections.push(super::super::Connection{id:"B".into(),label:"test".into(),email:Some("test@example.invalid".into()),plan:None});
+        s.registry.connections.push(super::super::Connection{id:"B".into(),label:"test".into(),email:Some("test@example.invalid".into()),plan:None,api:None});
         let mut t=Transaction::capture(&s,&p).unwrap();assert!(t.valid(&s));s.registry.connections.clear();assert!(!t.valid(&s));
         t.working.registry.shared.insert("task".into(),shared::Binding{path:"history".into(),workspace:"workspace".into(),connection:"B".into(),execution:None});
         let file=tempfile::NamedTempFile::new().unwrap();assert!(t.routing(&s,file.path()).is_err());assert!(!s.registry.selected.contains_key("task"));

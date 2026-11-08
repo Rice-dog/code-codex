@@ -12,7 +12,7 @@ const wait=async predicate=>{for(let i=0;i<100;i++){if(predicate())return;await 
 async function fixture(cold=false){
  globalThis.__autoTask='task-one';
  const calls=[],sends=[],notices=[],queues=new Map(),quotas=new Map([['host',quota()],['B',quota()],['C',quota()]]),subscribers=new Set();
- const state={owner:{id:'owner',label:'host@example.test'},profile:{initial:'./assets/fixture.js',shared:'./assets/shared.js',managerExport:'Manager',dispatcherExport:'dispatcher'},connections:[{id:'B',label:'B',email:'B@example.test'},{id:'C',label:'C',email:'C@example.test'}],selected:{},activeConversations:[],sharedConversations:[]};
+ const state={owner:{id:'owner',label:'host@example.test'},profile:{initial:'./assets/app-initial-fixture.js',shared:'./assets/app-shared-fixture.js',managerExport:'Manager',dispatcherExport:'dispatcher'},connections:[{id:'B',label:'B',email:'B@example.test'},{id:'C',label:'C',email:'C@example.test'}],selected:{},activeConversations:[],sharedConversations:[]};
  let turn=0,sequence=0,quotaGate,prepareGate,unknownOutcome=false,rejectSend=false,eventFailure=false;
  const accepted=(id,params,account)=>{if(rejectSend)throw Error('ACCOUNT_OUTCOME_UNKNOWN: Delivery could not be confirmed');const t={id:'turn-'+(++turn),status:'inProgress'};sends.push({id,account,params:structuredClone(params),turnId:t.id});return {turn:t};};
  const request=async p=>{

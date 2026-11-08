@@ -9,7 +9,7 @@ globalThis.window=new EventTarget();
 const {NativeAccountAdapter}=await import(pathToFileURL(resolve(out,'adapter.mjs'))),checks=[];
 async function fixture(){
  const calls=[],notices=[],events=[];let seq=0,turn=0,active=false,gate,reconcileError,eventError,eventGate,exited=false,outcome;
- const state={owner:{id:'owner',label:'fixture'},profile:{initial:'./assets/native.js',shared:'./assets/shared.js',managerExport:'Manager',dispatcherExport:'dispatcher'},connections:[{id:'B',email:'B@test'}],selected:{task:'B'},sharedConversations:['task'],activeConversations:[]};
+ const state={owner:{id:'owner',label:'fixture'},profile:{initial:'./assets/app-initial-fixture.js',shared:'./assets/app-shared-fixture.js',managerExport:'Manager',dispatcherExport:'dispatcher'},connections:[{id:'B',email:'B@test'}],selected:{task:'B'},sharedConversations:['task'],activeConversations:[]};
  const request=async p=>{calls.push(p);if(p.action==='info')return structuredClone(state);if(p.action==='usage')return {};if(p.action==='release')return {};
   if(p.action==='shared.reconcile'){if(gate)await gate;if(reconcileError)throw typeof reconcileError==='string'?Error(reconcileError):reconcileError;if(active)throw Error('ACCOUNT_TURN_ACTIVE: Backend still active');state.activeConversations=[];return {reconciled:true,executorReusable:!exited,...exited?{previousOutcome:'unverified',outcomeReason:'turn-without-terminal',outcomeKey:'fixture-A',previousTurnId:'old-stale',...outcome}:{}};}
   if(p.action==='shared.prepare'){state.selected.task=p.connectionId;exited=false,outcome;return {threadId:'task',cursor:seq};}

@@ -4,7 +4,7 @@ interface Connection { request?: Request }
 const key = Symbol.for('code-codex:application-menu-capability:v1');
 const store = window as unknown as Record<symbol, Connection>;
 const connection = store[key] ??= {};
-const methods = new Set(['explorer.login.startup.get', 'explorer.login.startup.set', 'explorer.installation.uninstall']);
+const methods = new Set(['explorer.host.updates.retry', 'explorer.host.updates.status', 'explorer.host.updates.open', 'explorer.login.startup.get', 'explorer.login.startup.set', 'explorer.installation.uninstall', 'explorer.installation.restart']);
 
 /** Uses the current authenticated document connection without revealing a tree. */
 export function connectApplicationMenu(request: Request): void { ownRequestSlot(key,request); }

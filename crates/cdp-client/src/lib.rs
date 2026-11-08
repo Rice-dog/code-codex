@@ -61,7 +61,7 @@ const MAX_COMPATIBLE_TARGETS: usize = 8;
 const MAX_RECENTLY_QUALIFIED_TARGETS: usize = 8;
 const MAX_REJECTED_EXECUTION_CONTEXTS: usize = 128;
 const REPLAY_WINDOW: usize = 4_096;
-const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const active=root=>[...root.querySelectorAll(s)].filter(e=>!e.closest('[data-app-shell-active-page=\"false\"]'));const m=active(document);const loginPanels=[...document.querySelectorAll('div.flex.h-full.w-full.items-center.justify-center.overflow-hidden.bg-surface')].filter(e=>!e.closest('[data-app-shell-active-page=\"false\"]')&&(e.classList.contains('pb-6')||e.classList.contains('pb-12'))&&[...e.children].some(c=>c.classList.contains('w-[340px]')&&c.classList.contains('flex-col')&&c.querySelector('button')&&c.querySelector('svg')));if(m.length===0&&loginPanels.length===1&&!document.querySelector('nav[data-app-navigation-rail],aside.app-shell-left-panel,[data-app-shell-sidebar-trigger]'))return true;const navs=document.querySelectorAll('nav[data-app-navigation-rail=\"true\"]');const homes=[...document.querySelectorAll('nav[data-app-navigation-rail=\"true\"] [data-sidebar-destination=\"builtin:home\"]')].filter(e=>!e.closest('[data-app-shell-active-page=\"false\"]'));const nativeFeature=navs.length===1&&homes.length===1&&homes[0].getAttribute('aria-current')!=='page';if(m.length!==1||(!document.querySelector('[data-app-shell-sidebar-trigger]')&&!nativeFeature))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=active(shell);if(shellMains.length===1&&shellMains[0]===main)return true;}const row=main.closest('[data-app-shell-workspace-row=\"true\"]');if(!row||active(row).length!==1||!mainParent?.className.includes('MainContentClip'))return false;const children=[...row.children];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.contains(main));return rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0])&&active(workspaces[0]).length===1&&workspaces[0].contains(main)})()";
+const RENDERER_LAYOUT_PROBE: &str = "window===window.top&&location.protocol==='app:'&&location.host==='-'&&(()=>{const s='main.main-surface,main[data-app-shell-main-surface=\"default\"]';const active=root=>[...root.querySelectorAll(s)].filter(e=>!e.closest('[data-app-shell-active-page=\"false\"]'));const m=active(document);const loginPanels=[...document.querySelectorAll('div.flex.h-full.w-full.items-center.justify-center.overflow-hidden.bg-surface')].filter(e=>!e.closest('[data-app-shell-active-page=\"false\"]')&&(e.classList.contains('pb-6')||e.classList.contains('pb-12'))&&[...e.children].some(c=>c.classList.contains('w-[340px]')&&c.classList.contains('flex-col')&&c.querySelector('button')&&c.querySelector('svg')));if(m.length===0&&loginPanels.length===1&&!document.querySelector('nav[data-app-navigation-rail],aside.app-shell-left-panel,[data-app-shell-sidebar-trigger]'))return true;const navs=document.querySelectorAll('nav[data-app-navigation-rail=\"true\"]');const homes=[...document.querySelectorAll('nav[data-app-navigation-rail=\"true\"] [data-sidebar-destination=\"builtin:home\"]')].filter(e=>!e.closest('[data-app-shell-active-page=\"false\"]'));const nativeFeature=navs.length===1&&homes.length===1&&homes[0].getAttribute('aria-current')!=='page';if(m.length!==1||(!document.querySelector('[data-app-shell-sidebar-trigger]')&&!nativeFeature))return false;const main=m[0];const mainParent=main.parentElement;let shell=mainParent;for(let depth=0;shell&&depth<5;depth+=1,shell=shell.parentElement){const asides=shell.querySelectorAll(':scope > aside.app-shell-left-panel');if(asides.length!==1||(shell!==mainParent&&shell!==mainParent?.parentElement))continue;const shellMains=active(shell);if(shellMains.length===1&&shellMains[0]===main)return true;}const row=main.closest('[data-app-shell-workspace-row=\"true\"]');if(!row||active(row).length!==1||row.querySelectorAll('aside.app-shell-left-panel').length!==1||!mainParent?.className.includes('MainContentClip'))return false;let ownerRow=row;const outerChildren=[...row.children];if(!outerChildren.some(child=>child.matches('aside.app-shell-left-panel'))){const containers=outerChildren.filter(child=>child.matches('[data-app-shell-workspace=\"true\"]'));if(containers.length!==1||!containers[0].contains(main))return false;ownerRow=containers[0];}const children=[...ownerRow.children];const rails=children.filter(child=>child.matches('aside.app-shell-left-panel'));const workspaces=children.filter(child=>child.contains(main));return rails.length===1&&workspaces.length===1&&children.indexOf(rails[0])<children.indexOf(workspaces[0])&&active(workspaces[0]).length===1&&workspaces[0].contains(main)})()";
 const DOCUMENT_READY_STATE_PROBE: &str = "document.readyState";
 const INITIAL_RENDERER_QUALIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_RENDERER_QUALIFICATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -160,6 +160,7 @@ mod tests {
         let source = take_verified_plugin_source("explorer.plugins.load", &mut response).unwrap();
         assert!(response["result"].get("verifiedSource").is_none());
         let outbound = OutboundMessage {
+            trace: None,
             trusted_script: Some(source),
             payload: response,
             document_epoch: 7,
@@ -174,6 +175,7 @@ mod tests {
     #[test]
     fn native_plugin_source_is_bounded_without_raising_binding_or_cdp_limits() {
         let outbound = OutboundMessage {
+            trace: None,
             trusted_script: Some(vec!["x".repeat(4 * 1024 * 1024 + 1)]),
             payload: json!({"id":"load","ok":true}),
             document_epoch: 0,
@@ -188,6 +190,7 @@ mod tests {
         let mut response = json!({"id":"media-load","ok":true,"result":{"verifiedSource":["window.defaultOne=true;","window.defaultTwo=true;","window.moduleReady=true;"]}});
         let scripts = take_verified_plugin_source("explorer.plugins.load", &mut response).unwrap();
         let outbound = OutboundMessage {
+            trace: None,
             trusted_script: Some(scripts),
             payload: response,
             document_epoch: 4,
@@ -203,6 +206,7 @@ mod tests {
         assert!(expressions[2].contains(PRIMARY_RECEIVER_NAME));
         assert!(outbound.payload["result"].get("verifiedSource").is_none());
         let excessive = OutboundMessage {
+            trace: None,
             trusted_script: Some(vec![String::new(); 34]),
             payload: json!({}),
             document_epoch: 4,
@@ -2737,6 +2741,8 @@ mod session_delivery;
 use session_delivery::{outbound_expression, outbound_expressions, take_verified_plugin_source};
 #[path = "session/gate.rs"]
 mod session_gate;
+#[path = "session/diagnostics.rs"]
+mod session_diagnostics;
 
 use session_gate::{
     GateState, SecureGate, authorize_binding_request, bounded_binding_payload, dispatch_request,
