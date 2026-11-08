@@ -25,6 +25,7 @@
   "accounts.unsigned": "尚未授权",
   "accounts.reauthorize": "重新登录",
   "accounts.signInRequired": "需要重新登录",
+  "accounts.pendingSignIn": "待登录",
   "accounts.reorderHint": "长按空白处拖动排序，或按 Alt + 上下方向键",
   "accounts.orderSaved": "账号顺序已更新",
   "accounts.authorize": "授权登录",

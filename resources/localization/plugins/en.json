@@ -25,6 +25,7 @@
   "accounts.unsigned": "Not authorized",
   "accounts.reauthorize": "Sign in again",
   "accounts.signInRequired": "Sign-in required",
+  "accounts.pendingSignIn": "Pending sign-in",
   "accounts.reorderHint": "Hold blank space to reorder, or press Alt + Up/Down",
   "accounts.orderSaved": "Account order updated",
   "accounts.authorize": "Authorize",

@@ -12,8 +12,9 @@ import type {PrimarySwitch} from './features/accounts/contracts';
 
 // Document ownership is independent of the market/file-tree panel's lifetime.
 const key=Symbol.for('code-codex:multi-account-runtime:v1');
-interface Session {selector?:ComposerAccountSelector;adapter?:NativeAccountAdapter;enabled:boolean;pending?:Promise<void>;error?:string|undefined;viewRevision?:string;generation?:number;}
+interface Session {selector?:ComposerAccountSelector;selectorRevision?:string;adapter?:NativeAccountAdapter;enabled:boolean;pending?:Promise<void>;error?:string|undefined;viewRevision?:string;generation?:number;}
 const REVISION='account-native-routing-v23';
+const SELECTOR_REVISION='account-composer-quota-v1';
 const session=():Session=>((window as unknown as Record<symbol,Session>)[key]??={enabled:localStorage.getItem(ACCOUNT_ENABLED_KEY)==='true'});
 const emit=()=>window.dispatchEvent(new Event(ACCOUNT_UI_CHANGED));
 const element=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;};
@@ -105,12 +106,18 @@ export class MultiAccountPlugin {
   const pending=(async()=>{
    const info=known??await requestAccounts<AccountsInfo>({action:'info'});this.#check(epoch,generation);
    const status=state.adapter?.status();
-   if(state.adapter&&state.viewRevision===REVISION&&state.adapter.info.owner.id===info.owner.id&&status?.active&&status.supported){state.adapter.setEnabled(true);state.adapter.updateInfo(info);if(!state.selector)state.selector=new ComposerAccountSelector(state.adapter,message=>{state.error=message;emit();});return;}
+   if(state.adapter&&state.viewRevision===REVISION&&state.adapter.info.owner.id===info.owner.id&&status?.active&&status.supported){
+    state.adapter.setEnabled(true);state.adapter.updateInfo(info);
+    // A view-only upgrade reuses the verified adapter/routes. Wait for idle
+    // rather than replacing an in-flight composer preflight or active task.
+    if(!state.selector||state.selectorRevision!==SELECTOR_REVISION&&!status.busy&&!status.preparing){state.selector?.dispose();state.selector=new ComposerAccountSelector(state.adapter,message=>{state.error=message;emit();});state.selectorRevision=SELECTOR_REVISION;}
+    return;
+   }
    // Hot upgrades retain document ownership. Retire only an idle old adapter;
    // disposal refuses an active independent turn and never changes GUI login.
    if(state.adapter){if(state.adapter.info.owner.id!==info.owner.id||!status?.active||!status.supported)state.adapter.endSession();else await state.adapter.dispose();this.#check(epoch,generation);state.selector?.dispose();delete state.selector;delete state.adapter;}
    const adapter=new NativeAccountAdapter(accountRequestSnapshot(),info,message=>{state.error=message;emit();});
-   try{await adapter.start();this.#check(epoch,generation);state.adapter=adapter;state.selector=new ComposerAccountSelector(adapter,message=>{state.error=message;emit();});state.viewRevision=REVISION;state.error=undefined;this.#queryError=undefined;}
+   try{await adapter.start();this.#check(epoch,generation);state.adapter=adapter;state.selector=new ComposerAccountSelector(adapter,message=>{state.error=message;emit();});state.selectorRevision=SELECTOR_REVISION;state.viewRevision=REVISION;state.error=undefined;this.#queryError=undefined;}
    catch(error){adapter.endSession();throw error;}
   })();
   state.pending=pending;
@@ -136,7 +143,7 @@ export class MultiAccountPlugin {
   try{const state=session(),info=await requestAccounts<AccountsInfo>({action:'info'});this.#check(epoch,generation);this.#knownInfo=info;
    if(state.adapter&&state.adapter.info.owner.id!==info.owner.id){state.adapter.endSession();state.selector?.dispose();delete state.adapter;delete state.selector;}
    if(!state.enabled)state.adapter?.updateInfo(info);
-   if(state.enabled){if(!state.adapter||!state.adapter.status().supported||!state.adapter.status().active)await this.#enable(info);else state.adapter.updateInfo(info);}
+   if(state.enabled){const status=state.adapter?.status();if(!state.adapter||!status?.supported||!status.active||state.selectorRevision!==SELECTOR_REVISION&&!status.busy&&!status.preparing)await this.#enable(info);else state.adapter.updateInfo(info);}
    this.#check(epoch,generation);if(this.#queryError&&state.error===this.#queryError)state.error=undefined;this.#queryError=undefined;this.#queryFailures=0;this.#nextQueryAt=0;
    runtimeEvent('accounts','account.query','confirmed',{operationId,stage:'info',durationMs:Math.round(performance.now()-started),taskSent:false});this.render();
   }catch(error){if(this.#current(epoch,generation)){this.#queryError=error instanceof Error?error.message:String(error);const retryMs=Math.min(60000,5000*2**Math.min(4,this.#queryFailures++));this.#nextQueryAt=Date.now()+retryMs;runtimeEvent('accounts','account.query','failed',{operationId,stage:'info',durationMs:Math.round(performance.now()-started),error:String(error),retryMs,taskSent:false});}throw error;}

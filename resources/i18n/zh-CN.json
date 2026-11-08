@@ -45,6 +45,7 @@
   "accounts.makePrimary": "设为主账号",
   "accounts.options": "账号操作",
   "accounts.orderSaved": "账号顺序已更新",
+  "accounts.pendingSignIn": "待登录",
   "accounts.preparing": "正在准备账号与工具",
   "accounts.primaryAuthOpen": "正在打开官方授权页…",
   "accounts.primaryAuthStart": "正在请求官方授权…",

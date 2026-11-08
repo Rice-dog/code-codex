@@ -60,6 +60,7 @@ $script:RemovalUiText = @'
   "set as primary account": "设为主账号",
   "account options": "账号操作",
   "account order updated": "账号顺序已更新",
+  "pending sign-in": "待登录",
   "preparing account and tools": "正在准备账号与工具",
   "opening the official authorization page…": "正在打开官方授权页…",
   "requesting official authorization…": "正在请求官方授权…",

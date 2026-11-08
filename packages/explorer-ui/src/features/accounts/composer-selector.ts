@@ -1,4 +1,5 @@
 import {ConnectionModelSelector} from './model-selector';
+import {NativeComposerQuota} from './native-composer-quota';
 import {planBadge,updatePlanBadge,planBadgeCss} from './plan-badge';
 import {t,getLocale,subscribeLanguage} from '../../i18n';
 import {ACCOUNT_UI_CHANGED} from './contracts';
@@ -33,6 +34,7 @@ export class ComposerAccountSelector {
  #observer:MutationObserver;
  #frame:number|undefined;
  #models:ConnectionModelSelector;
+ #quota:NativeComposerQuota;
  #unsubscribe:()=>void;
  #abort=new AbortController();
  #sendLocks=new Map<HTMLButtonElement,{inert:boolean;aria:string|null}>();
@@ -77,6 +79,7 @@ export class ComposerAccountSelector {
  }
  constructor(private readonly adapter:NativeAccountAdapter,private readonly notice:(message:string)=>void){
   this.#models=new ConnectionModelSelector(adapter,notice);
+  this.#quota=new NativeComposerQuota(adapter,this.requestUpdate);
   this.#unsubscribe=subscribeLanguage(this.requestUpdate);
   const options={capture:true,signal:this.#abort.signal};
   document.addEventListener('click',event=>{const button=(event.target as Element)?.closest?.<HTMLButtonElement>(SEND);if(button&&this.#belongs(button))this.#sendGate(event,button);},options);
@@ -94,6 +97,7 @@ export class ComposerAccountSelector {
     }else for(const node of [...record.addedNodes,...record.removedNodes]){
      if(node===this.#host&&!node.isConnected){discovery=true;continue;}
      if(!(node instanceof Element)||node.matches(OWN))continue;
+     if(this.#quota.observes(node))send=true;
      if(target===this.#container||node===this.#scope||node.contains(this.#scope??null))discovery=true;
      if(node===this.#anchor||node.contains(this.#anchor??null)||node.matches(REASONING+','+COMPOSER+', [data-app-shell-active-page]')||node.querySelector(REASONING+','+COMPOSER))discovery=true;
      if(node.matches(SEND)||node.querySelector(SEND))send=true;
@@ -124,6 +128,7 @@ export class ComposerAccountSelector {
   void this.adapter.prepareSend().then(async()=>{
    if(this.#disposed)return;
    this.update();
+   await this.#quota.ready(button.disabled);
    // Account/model changes can replace native nodes while retaining the draft.
    await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
    if(this.#disposed||epoch!==this.#sendEpoch)return;
@@ -160,12 +165,13 @@ export class ComposerAccountSelector {
     const retained=!anchors.length&&this.#scope?.isConnected&&!this.#scope.closest(EXCLUDED)&&this.#container?.isConnected&&this.#scope.contains(this.#container)&&!this.#container.closest(EXCLUDED)&&this.#mountConversation===status.conversationId;
     if(!retained){
      this.#mount=this.#container=this.#scope=this.#composerRoot=undefined;this.#mountConversation=undefined;
-     this.#models.update(undefined);this.#syncSendLocks(false);this.close();this.#host?.remove();this.#feedback?.remove();return;
+     this.#models.update(undefined);this.#quota.update(undefined);this.#syncSendLocks(false);this.close();this.#host?.remove();this.#feedback?.remove();return;
     }
    }
   }
   const anchor=this.#anchor;
   if(anchor)this.#models.update(anchor);
+  this.#quota.update(anchor??(this.#container?.querySelector(REASONING) as HTMLButtonElement|null)??undefined);
   this.#syncSendLocks(!!status.preparing);
   if(!this.#host){
    const host=this.#host=document.createElement('span');host.dataset.codeCodexAccountSelector='';
@@ -244,5 +250,5 @@ export class ComposerAccountSelector {
   clearTimeout(this.#timer);this.#timer=setTimeout(this.#menuTick,60000-Date.now()%60000+10);
  }
  close():void{clearTimeout(this.#timer);if(this.#popup?.matches(':popover-open'))this.#popup.hidePopover();if(this.#button?.getAttribute('aria-expanded')!=='false')this.#button?.setAttribute('aria-expanded','false');if(this.#button&&this.#button.dataset.state!=='closed')this.#button.dataset.state='closed';}
- dispose():void{this.#models.dispose();this.#syncSendLocks(false);this.#disposed=true;clearTimeout(this.#timer);clearTimeout(this.#feedbackTimer);if(this.#frame!==undefined)cancelAnimationFrame(this.#frame);this.#observer.disconnect();this.#unsubscribe();this.#abort.abort();window.removeEventListener(ACCOUNT_UI_CHANGED,this.requestUpdate);this.close();this.#host?.remove();this.#popup?.remove();this.#style?.remove();this.#feedback?.remove();}
+ dispose():void{this.#quota.dispose();this.#models.dispose();this.#syncSendLocks(false);this.#disposed=true;clearTimeout(this.#timer);clearTimeout(this.#feedbackTimer);if(this.#frame!==undefined)cancelAnimationFrame(this.#frame);this.#observer.disconnect();this.#unsubscribe();this.#abort.abort();window.removeEventListener(ACCOUNT_UI_CHANGED,this.requestUpdate);this.close();this.#host?.remove();this.#popup?.remove();this.#style?.remove();this.#feedback?.remove();}
 }
