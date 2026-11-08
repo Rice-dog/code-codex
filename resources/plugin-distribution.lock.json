@@ -2673,20 +2673,5 @@
       "artifactRoot": "releases/plugins/developer-tools/multi-account"
     }
   ],
-  "pendingPublicationAssets": [
-    {
-      "id": "surface-opacity",
-      "tag": "plugin-assets-2026-11-01",
-      "name": "CodeCodex-plugin-surface-opacity-1.0.14.js",
-      "size": 17959,
-      "sha256": "92e90bc1ccdf98844b756cc5f88022009f0c8b8c5bd0367aac4bedf7767cc797"
-    },
-    {
-      "id": "multi-account",
-      "tag": "plugin-assets-2026-11-02",
-      "name": "CodeCodex-plugin-multi-account-1.0.92.js",
-      "size": 199939,
-      "sha256": "6d8889680da4120105ab1a78ac07e350728bb201e9c70db83f27dda0fa83d0aa"
-    }
-  ]
+  "pendingPublicationAssets": []
 }
