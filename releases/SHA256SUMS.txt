@@ -1,7 +1,7 @@
-6a6bee715b1c0a4fefd97c654f31edeb6f20bbb7bdf62e93ea09da1268d097ff  CodeCodex-0.5.132-x64-setup.exe
-d500ad66ca1537970a4fd08f2ea5360a64b2141ea10ae8124202b8d94894ae08  CodeCodex-0.5.132-x64.msi
-81be98809c15c94d9ddb5f200db3b687e5e9678ebfd07770b64026d99abb89ca  CodeCodex-0.5.132-x64.zip
-33c53f988cc76667bc74e814a394b8c1ecf03bed736e0e107299abe7274d4368  Uninstall-CodeCodex.exe
+6fdfd95993b817f9a2de1f35c7f4566688cc04fd637f7d27bfbc5f9bdfe9e850  CodeCodex-0.6.0-x64-setup.exe
+8a1042f7e252ee024c499b88fce99b687e64ab99512091b993a9fb514a326312  CodeCodex-0.6.0-x64.msi
+803a754edc2965ed9e6e6c067208ddbfe5d79d162b300484834702fb3053257c  CodeCodex-0.6.0-x64.zip
+3515088c7414dc53fb712658bae912a8a0fa69869d68675d89d3776ef4b83fa6  Uninstall-CodeCodex.exe
 4bf3ebba5ac222851e7ba0f4318bd693fdb28109fd06bd4a12da591098b95106  plugins/appearance/glow-horizon/CodeCodex-background-glow-horizon-1.0.1.js
 ac2f4a1b14f21b2c944c1ffbcef01f63e7597cb08bc8721282ba1840f2d282e7  plugins/appearance/black-hole/CodeCodex-background-black-hole-1.0.6.js
 857fea5dd51f9bd4cb78a99e976858500d518855f1a7a3af28daeb00ae9ec864  plugins/appearance/heavenly-cloud/CodeCodex-background-heavenly-cloud-1.0.1.js
