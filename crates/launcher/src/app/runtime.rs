@@ -705,6 +705,7 @@ pub(super) async fn prepare_runtime(
     record_startup_event("UI bundle", "bundle resolved");
     let token = CapabilityToken::generate();
     record_startup_event("UI bootstrap", "building renderer bootstrap");
+    let appearance_modules=crate::bootstrap::appearance_module_hints(installation.map(|v|v.executable.as_path()));
     let bootstrap = build_bootstrap(
         &bundle,
         &token,
@@ -715,6 +716,7 @@ pub(super) async fn prepare_runtime(
         compatible,
         common.workspace.is_some(),
         startup_splash_active,
+        &appearance_modules,
     )?;
     record_startup_event("UI bootstrap", "bootstrap built");
     let navigation_bootstrap = if startup_splash_active {
@@ -728,6 +730,7 @@ pub(super) async fn prepare_runtime(
             compatible,
             common.workspace.is_some(),
             false,
+            &appearance_modules,
         )?)
     } else {
         None
@@ -812,6 +815,7 @@ pub(super) async fn supervise(
             signal_cancellation.cancel();
         }
     });
+    let _update_monitor = crate::host_updates::start(cancellation.clone());
     tracing::info!(event = "explorer_supervisor_started");
     let result = supervisor.run(cancellation).await;
     signal_task.abort();

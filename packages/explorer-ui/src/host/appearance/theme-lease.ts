@@ -1,7 +1,9 @@
+import {loadHostNamespace} from '../../../../../resources/account-host-capabilities.js';
 // controllers responsibility; original state keys, defaults and lifecycle retained.
 import { AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,BLACK_HOLE_BACKGROUND_PLUGIN_ID,BLINKING_SQUARES_BACKGROUND_PLUGIN_ID,CLOUD_TRAIN_BACKGROUND_PLUGIN_ID,GLOW_HORIZON_BACKGROUND_PLUGIN_ID,HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,MILKY_WAY_BACKGROUND_PLUGIN_ID,MOUNTAIN_BACKGROUND_PLUGIN_ID,PARTICLE_BACKGROUND_PLUGIN_ID,PARTICLE_BACKGROUND_THEME_LEASE_KEY,PIXEL_SCULPT_BACKGROUND_PLUGIN_ID } from "../../core/configuration/explorer";
 import { type DarkBackgroundPluginId } from "../../contracts/explorer-model";
-import { findCodexAppInitialModule,findCodexAppearanceActionModules,isCodexRpcNamespace } from "./theme-probe";
+import { findCodexAppInitialModules,findCodexAppearanceActionModules,findCodexNumberedRuntimes,isCodexRpcNamespace } from "./theme-probe";
+import { runtimeEvent } from "../../runtime-events";
 import { recordCaughtRuntimeError } from "../../runtime-operations";
 import {
   isObjectRecord
@@ -72,18 +74,32 @@ export function selectCodexAppearanceAdapter(moduleExports: Record<string,unknow
 }
 
 export async function discoverCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter> {
-  const initial=findCodexAppInitialModule();
-  if(initial) {
-    const adapter=selectCodexAppearanceAdapter(await import(initial) as Record<string,unknown>);
-    if(adapter) return adapter;
-  }
+  const numbered=findCodexNumberedRuntimes();
+  const initial=findCodexAppInitialModules();
   const modules=findCodexAppearanceActionModules();
-  if(modules.length>1) throw new Error("CC-APPEARANCE-ADAPTER-002: Multiple official app-action modules matched; no setting was changed.");
-  if(modules[0]) {
-    const adapter=selectCodexAppearanceAdapter(await import(modules[0]) as Record<string,unknown>);
-    if(adapter) return adapter;
+  const counts={initialCandidates:initial.length,actionCandidates:modules.length,independentHints:!!(window as unknown as Record<symbol,unknown>)[Symbol.for('code-codex:appearance-module-hints:v1')],accountRuntimeRequired:false};
+  runtimeEvent("appearance","adapter discovery","started",{stage:"module-discovery",...counts});
+  if(initial.length>1||modules.length>1) {
+    runtimeEvent("appearance","adapter discovery","failed",{stage:"module-ambiguity",...counts});
+    throw new Error("CC-APPEARANCE-ADAPTER-002: Multiple official Appearance role modules matched. stage=module-ambiguity; no setting was changed.");
   }
-  throw new Error("CC-APPEARANCE-ADAPTER-001: No supported official Appearance interface was found in the loaded modules. Background activation was cancelled without changing the theme.");
+  if(numbered.length>1)throw new Error("CC-APPEARANCE-ADAPTER-002: Multiple official runtimes matched; no setting was changed.");
+  for(const path of numbered){const adapter=selectCodexAppearanceAdapter(await loadHostNamespace(path+'#cc-host=appearance'));if(adapter)return adapter;}
+  let importsFailed=0,unmatchedExports=0;
+  for(const [role,paths] of [["initial",initial],["action",modules]] as const) {
+    for(const path of paths) {
+      let namespace:Record<string,unknown>;
+      try{namespace=await import(path) as Record<string,unknown>;}catch{
+        importsFailed++;runtimeEvent("appearance","adapter discovery","unavailable",{stage:"module-import",role,...counts});continue;
+      }
+      const adapter=selectCodexAppearanceAdapter(namespace);
+      if(adapter){runtimeEvent("appearance","adapter discovery","confirmed",{stage:"export-contract",role,...counts});return adapter;}
+      unmatchedExports++;
+    }
+  }
+  const stage=importsFailed?"module-import":unmatchedExports?"export-contract":"module-discovery";
+  runtimeEvent("appearance","adapter discovery","failed",{stage,importsFailed,unmatchedExports,...counts});
+  throw new Error(`CC-APPEARANCE-ADAPTER-001: No supported official Appearance interface was found. stage=${stage}; initialCandidates=${initial.length}; actionCandidates=${modules.length}; importsFailed=${importsFailed}; unmatchedExports=${unmatchedExports}; accountRuntimeRequired=false; background activation was cancelled without changing the theme.`);
 }
 
 

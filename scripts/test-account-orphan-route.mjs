@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
-const source=await readFile('crates/launcher/src/accounts/native_route.js','utf8');globalThis.window=globalThis;
+const source='(async()=>{'+await readFile('crates/launcher/src/accounts/host_rpc_deadline.js','utf8')+';return await ('+await readFile('crates/launcher/src/accounts/native_route.js','utf8')+');})()';globalThis.window=globalThis;
 const pins=new Map();window[Symbol.for('code-codex:native-account-pins:v1')]=pins;
 let active=false,requests=[],released=0,retained=false,loadedReplies=[],resumeFault=false;
 const lease=()=>({dup(){return this},onRpcBroken(){},[Symbol.dispose](){}});
@@ -18,6 +18,6 @@ requests=[];retained=false;const restored=await run({mode:'switch'});assert.equa
 requests=[];loadedReplies=[{data:['another'],nextCursor:'page2'},{data:['task'],nextCursor:null},{data:[],nextCursor:null}];const prepared=await run({mode:'switch',baseUrl:newUrl});assert.equal(prepared.ready,true);assert.equal(pins.get('task').baseUrl,newUrl);assert.equal(requests.find(r=>r.method==='thread/resume').p.config.thread_unload_delay_secs,0);assert(prepared.diagnostics.timeline.find(v=>v.stage==='native-route-unloaded').checks>0);checks.push('All loaded-list pages are checked and new routes request immediate eligible cleanup without global config edits');
 requests=[];assert.equal((await run({mode:'check',baseUrl:newUrl})).ready,true);assert.equal(requests.length,0);checks.push('Healthy same-generation route remains reusable without history or layout work');
 requests=[];loadedReplies=[{unexpected:[]}];const protocol=await run({mode:'switch'});assert.equal(protocol.failure.code,'ACCOUNT_NATIVE_LOADED_PROTOCOL');assert.equal(pins.get('task').baseUrl,newUrl);checks.push('Missing loaded-state schema fails closed and preserves prior recovery marker');
-requests=[];retained=false;resumeFault=true;const failed=await run({mode:'switch'});assert(failed.failure.switched);assert(pins.has('task'));assert.equal(pins.get('task').valid,false);resumeFault=false;checks.push('Cold resume failure retains invalidated prior endpoint evidence rather than deleting the only recovery marker');
+requests=[];retained=false;resumeFault=true;const failed=await run({mode:'switch'});assert.equal(failed.failure.switched,false);assert.equal(failed.diagnostics.resumeOutcome,'unverified');assert(pins.has('task'));assert.equal(pins.get('task').valid,false);resumeFault=false;checks.push('Unverified cold resume retains invalidated prior endpoint evidence rather than claiming the target reopened');
 const recovered=await run({mode:'switch'});assert(recovered.ready);assert(!pins.has('task'));checks.push('Explicit retry can restore the same history after a failed cold resume without sending inference');
 await mkdir('artifacts/account-orphan-route',{recursive:true});await writeFile('artifacts/account-orphan-route/result.json',JSON.stringify({passed:true,checks},null,2));console.log(JSON.stringify({passed:true,checks}));

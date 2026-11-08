@@ -1836,6 +1836,7 @@ impl AttachedProcess {
     }
 
     pub(crate) fn pid(&self) -> u32 { self.pid }
+    pub(crate) fn created_ms(&self)->u64 { self.created_at.duration_since(UNIX_EPOCH).expect("verified creation time").as_millis() as u64 }
 
     pub(crate) fn verify_listener(&self, port: u16) -> Result<(), ProcessGuardError> {
         self.running()?;

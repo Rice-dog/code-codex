@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
-const source=(await readFile('crates/launcher/src/accounts/host_identity.js','utf8')).replace('await import(__HOST_SHARED__)','__namespace').replace('[__HOST_DISPATCHER__]','["dispatcher"]');
+const source=(await readFile('crates/launcher/src/accounts/host_identity.js','utf8')).replace('await (__HOST_SHARED__.includes("#cc-host=")?loadHostNamespace(__HOST_SHARED__):import(__HOST_SHARED__))','__namespace').replace('[__HOST_DISPATCHER__]','["dispatcher"]');
 const checks=[];
 const success={result:{account:{type:'chatgpt',email:'fixture@example.test'},workspaceRouting:{chatgptAccountId:'fixture-workspace'}}};
 const error=(message,code=-32603)=>({error:{code,message}});

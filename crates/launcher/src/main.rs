@@ -22,6 +22,8 @@ mod runtime_log;
 mod startup_conflict;
 mod startup_recovery_ui;
 mod login_startup;
+mod menu_restart;
+mod host_updates;
 mod startup_diagnostics;
 mod startup_examples;
 mod support_checks;
@@ -87,6 +89,18 @@ enum LogFormat {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Read-only local official-package change ledger and per-user observation task.
+    HostUpdates {
+        #[arg(long)] force: bool,
+        #[arg(long, conflicts_with="unregister")] register: bool,
+        #[arg(long)] unregister: bool,
+    },
+    #[command(hide=true)]
+    MenuRestart {
+        #[arg(long)] port:u16,
+        #[arg(long)] pid:u32,
+        #[arg(long)] created_ms:u64,
+    },
     /// Discover and launch the official Codex Desktop application.
     Run(RunArgs),
     /// Attach to a user-authorized, already-running loopback CDP endpoint.
@@ -299,11 +313,17 @@ async fn main() -> ExitCode {
     if let Some(Commands::StartupRecoveryWindow { pid, created_ms, image, close }) = &cli.command {
         return startup_conflict::window_operation(*pid, *created_ms, image, *close);
     }
+    if let Some(Commands::HostUpdates { force, register, unregister }) = &cli.command {
+        let result = if *register || *unregister { if *register {Err(std::io::Error::other("HOST_UPDATE_STARTUP_ONLY: Periodic registration was retired. Use startup observation or --force."))}else{host_updates::scheduler::configure(false)} } else { host_updates::run(*force) };
+        return match result {Ok(value)=>{println!("{value}");ExitCode::SUCCESS},Err(error)=>{eprintln!("HOST_UPDATE_CHECK: {error}");ExitCode::from(23)}};
+    }
     initialize_logging(cli.log_format);
     let command = cli
         .command
         .unwrap_or_else(|| Commands::Run(default_run_args()));
     let mode = match &command {
+        Commands::HostUpdates {..} => "host-updates",
+        Commands::MenuRestart {..} => "menu-restart",
         Commands::Run(_) => "run",
         Commands::Attach(_) => "attach",
         Commands::Activate(_) => "activate",
@@ -320,6 +340,8 @@ async fn main() -> ExitCode {
     #[cfg(windows)]
     process_preflight::observe_origin(mode);
     let result = match command {
+        Commands::HostUpdates {..} => unreachable!("handled before initialization"),
+        Commands::MenuRestart {port,pid,created_ms} => menu_restart::run(port,pid,created_ms).await.map_err(AppError::StartupConflict),
         Commands::Run(args) => run(args).await,
         Commands::LoginStartup { .. } => unreachable!("handled before initialization"),
         Commands::Attach(args) => attach(args).await,

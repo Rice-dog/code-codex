@@ -1,27 +1,27 @@
 ﻿[
     {
-        "assetName":  "CodeCodex-0.5.92-x64-setup.exe",
-        "path":  "CodeCodex-0.5.92-x64-setup.exe",
-        "size":  16619216,
-        "sha256":  "894cf06010a23ea5ba5bc807d9cd5710a0bb3c2d45f4a15e48a642a121ec6240"
+        "assetName":  "CodeCodex-0.5.132-x64-setup.exe",
+        "path":  "CodeCodex-0.5.132-x64-setup.exe",
+        "size":  17091003,
+        "sha256":  "6a6bee715b1c0a4fefd97c654f31edeb6f20bbb7bdf62e93ea09da1268d097ff"
     },
     {
-        "assetName":  "CodeCodex-0.5.92-x64.msi",
-        "path":  "CodeCodex-0.5.92-x64.msi",
-        "size":  11845632,
-        "sha256":  "0d2fb8dfab0fc701a3f67240ced152a02fabab8fb16922a6d77652e23fffb1c1"
+        "assetName":  "CodeCodex-0.5.132-x64.msi",
+        "path":  "CodeCodex-0.5.132-x64.msi",
+        "size":  12242944,
+        "sha256":  "d500ad66ca1537970a4fd08f2ea5360a64b2141ea10ae8124202b8d94894ae08"
     },
     {
-        "assetName":  "CodeCodex-0.5.92-x64.zip",
-        "path":  "CodeCodex-0.5.92-x64.zip",
-        "size":  13844664,
-        "sha256":  "5935e9f1529c5267122cb6620fb0ad447444623d46de39689c1028f639a1084b"
+        "assetName":  "CodeCodex-0.5.132-x64.zip",
+        "path":  "CodeCodex-0.5.132-x64.zip",
+        "size":  14312355,
+        "sha256":  "81be98809c15c94d9ddb5f200db3b687e5e9678ebfd07770b64026d99abb89ca"
     },
     {
         "assetName":  "Uninstall-CodeCodex.exe",
         "path":  "Uninstall-CodeCodex.exe",
-        "size":  2724352,
-        "sha256":  "a5d11b9a2272568339c075c020944769b9788e87f3fc08cf245e3ccb5d4d2cb6"
+        "size":  2732032,
+        "sha256":  "33c53f988cc76667bc74e814a394b8c1ecf03bed736e0e107299abe7274d4368"
     },
     {
         "releaseTag":  "plugin-assets-2026-11-01",
@@ -207,10 +207,10 @@
     },
     {
         "releaseTag":  "plugin-assets-2026-11-01",
-        "assetName":  "CodeCodex-plugin-surface-opacity-1.0.12.js",
-        "path":  "plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.12.js",
-        "size":  17347,
-        "sha256":  "41c6d5139933c31ea989e1120fd5031dd0c6f56a14ffb6aa0500969018ba0dce"
+        "assetName":  "CodeCodex-plugin-surface-opacity-1.0.14.js",
+        "path":  "plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.14.js",
+        "size":  17959,
+        "sha256":  "92e90bc1ccdf98844b756cc5f88022009f0c8b8c5bd0367aac4bedf7767cc797"
     },
     {
         "releaseTag":  "v0.3.96",
@@ -333,15 +333,15 @@
     },
     {
         "releaseTag":  "plugin-assets-2026-11-02",
-        "assetName":  "CodeCodex-plugin-multi-account-1.0.66.js",
-        "path":  "plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.66.js",
-        "size":  145217,
-        "sha256":  "1a511e9711996e30de8282560649abc5aec581dd0708cabb841a3be6e2f5cb92"
+        "assetName":  "CodeCodex-plugin-multi-account-1.0.92.js",
+        "path":  "plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.92.js",
+        "size":  199939,
+        "sha256":  "6d8889680da4120105ab1a78ac07e350728bb201e9c70db83f27dda0fa83d0aa"
     },
     {
-        "assetName":  "CodeCodex-plugin-catalog-0.5.92.json",
+        "assetName":  "CodeCodex-plugin-catalog-0.5.132.json",
         "path":  "plugins/catalog.json",
         "size":  28326,
-        "sha256":  "054954ef095f3eccb93cb9588c238754cb5fac2119d2a12d9892b3a7db74d541"
+        "sha256":  "4f6fbcc65261a25e61fc42967ad3e82c4a18e337132d8fb42d3b5c8d604f2446"
     }
 ]

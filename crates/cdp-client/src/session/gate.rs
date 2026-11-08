@@ -138,9 +138,11 @@ where
     H: BridgeHandler,
 {
     request.lifecycle_epoch = handler.lifecycle_epoch();
+    let mut trace=super::session_diagnostics::Trace::new(&request.id,&request.method,document_epoch);
     match dispatch_slots.try_acquire_owned() {
         Ok(permit) => {
             handler_tasks.spawn(async move {
+                if let Some(t)=trace.as_mut(){t.phase("handler-entered");}
                 let _permit = permit;
                 let id = request.id.clone();
                 let method = request.method.clone();
@@ -149,8 +151,10 @@ where
                     Err(error) => json!({ "id": id, "ok": false, "error": error }),
                 };
                 let trusted_script = take_verified_plugin_source(&method, &mut response);
+                if let Some(t)=trace.as_mut(){t.handler_result(response["ok"]==true);t.phase("handler-completed");}
                 let _ = outbound_sender
                     .send(OutboundMessage {
+                        trace,
                         trusted_script,
                         payload: response,
                         document_epoch,
@@ -159,6 +163,7 @@ where
             });
         }
         Err(_) => {
+            if let Some(t)=trace.as_mut(){t.finish("dispatch-capacity",true);}
             let response = json!({
                 "id": request.id,
                 "ok": false,
@@ -166,6 +171,7 @@ where
             });
             outbound_sender
                 .try_send(OutboundMessage {
+                    trace:None,
                     trusted_script: None,
                     payload: response,
                     document_epoch,
@@ -213,6 +219,7 @@ where
         )
     } else {
         if pending_requests.len() < MAX_IN_FLIGHT_REQUESTS {
+            if let Some(trace)=super::session_diagnostics::Trace::new(&request.id,&request.method,document_epoch){trace.qualification_wait(pending_requests.len()+1);}
             pending_requests.push_back(request);
         } else {
             observe_rejection(

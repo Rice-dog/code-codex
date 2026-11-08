@@ -187,10 +187,22 @@ html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-sh
  * through them. Do not apply another alpha here: it would compound the mask.
  * The bottom fade may live in an independent sticky scroll spacer rather than
  * inside the footer. Target only decorative helpers in these observed slots,
- * preserving cards and the composer. */
+ * preserving cards and the composer. Support both observed CSS module token
+ * shapes (legacy _name_hash and current name-hash) without pinning hashes.
+ * A newly mounted scroll container can paint before the PiP anchor is attached.
+ * Its semantic container under main must receive the same rule on first paint. */
 html[data-code-codex-ui-mask-active] body main[data-app-shell-main-surface="default"] [class*="MainContentTopFade"],
-html[data-code-codex-ui-mask-active] body [data-pip-anchor-host="codex-main-thread"] .sticky.bottom-0 > .pointer-events-none[class*="_background_"][class*="_fade_"],
-html[data-code-codex-ui-mask-active] body [data-thread-scroll-footer="true"] > [class*="_background_"] {
+html[data-code-codex-ui-mask-active] body :is(
+  [data-pip-anchor-host="codex-main-thread"],
+  :is(main.main-surface,main[data-app-shell-main-surface="default"]) .thread-scroll-container
+) .sticky.bottom-0 > .pointer-events-none:is(
+  [class*="_background_"][class*="_fade_"],
+  :is([class^="background-"],[class*=" background-"]):is([class^="fade-"],[class*=" fade-"])
+),
+html[data-code-codex-ui-mask-active] body [data-thread-scroll-footer="true"] > :is(
+  [class*="_background_"],
+  .pointer-events-none:is([class^="background-"],[class*=" background-"]):is([class^="surface-"],[class*=" surface-"])
+) {
   background-color:transparent !important;
   background-image:none !important;
 }

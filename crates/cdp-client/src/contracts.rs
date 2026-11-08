@@ -185,6 +185,7 @@ pub struct BridgeNotification {
 }
 
 pub(super) struct OutboundMessage {
+    pub(super) trace: Option<super::session_diagnostics::Trace>,
     pub(super) trusted_script: Option<Vec<String>>,
     pub(super) payload: Value,
     pub(super) document_epoch: u64,

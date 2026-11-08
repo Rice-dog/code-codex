@@ -1,10 +1,11 @@
 export type AccountRequest=<T=unknown>(params:Record<string,unknown>)=>Promise<T>;
-export interface AccountConnection {id:string;label:string;email:string|null;plan:string|null;}
+export interface AccountConnection {id:string;label:string;email:string|null;plan:string|null;reauthorizationRequired?:boolean;api?:{baseUrl:string;model:string;models?:string[]};}
+export interface PrimarySwitch {state:string;targetEmail?:string;authorizationRequired?:boolean;operationId?:string;stage?:string;elapsedMs?:number;errorCode?:string|null;formerPrimaryPreserved?:boolean;authorizationRequested?:boolean;recovery?:string|null;}
 export interface AccountsInfo {
  owner:{id:string;label:string;plan?:string|null};
- profile:{version:string;initial:string;shared:string;managerExport:string;senderExport:string;dispatcherExport:string};
+ profile:{actions?:string[];version:string;initial:string;shared:string;managerExport:string;senderExport:string;dispatcherExport:string};
  connections:AccountConnection[];selected:Record<string,string>;activeConversations:string[];sharedConversations?:string[];
- followLogout?:boolean;primarySwitch?:{state:string;targetEmail?:string;authorizationRequired?:boolean}|null;
+ followLogout?:boolean;primarySwitch?:PrimarySwitch|null;
  nativeRouting?:boolean;nativeRoutes?:Record<string,string>;
 }
 export interface WorkerEvent {sequence:number;message:{id?:number|string;method:string;params:Record<string,unknown>};}

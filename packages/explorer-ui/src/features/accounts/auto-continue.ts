@@ -17,11 +17,12 @@ export function quotaEligibility(raw:unknown,model?:string):QuotaEligibility {
 }
 /** One in-memory traversal per user task. No history, credentials or input are retained here. */
 export class AccountContinuationCycle {
- readonly order:readonly string[];
+ order:readonly string[];
  readonly attempted=new Set<string>();
  #index:number;
  cancelled=false;
  constructor(ids:readonly string[],current:string){this.order=[...new Set(ids)].slice(0,128);this.#index=this.order.indexOf(current);if(this.#index<0)throw Error('ACCOUNT_AUTO_ORDER: The current execution account is unavailable.');this.attempted.add(current);}
+ reorder(ids:readonly string[],current:string):void{this.order=[...new Set(ids)].slice(0,128);this.#index=this.order.indexOf(current);}
  next():string|undefined {
   if(this.cancelled)return;
   for(let i=0;i<this.order.length;i++){this.#index=(this.#index+1)%this.order.length;const id=this.order[this.#index]!;if(!this.attempted.has(id)){this.attempted.add(id);return id;}}

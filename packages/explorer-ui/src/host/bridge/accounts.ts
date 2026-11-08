@@ -7,7 +7,7 @@ const capability=()=>((window as unknown as Record<symbol,Capability>)[key]??={}
 export function connectAccounts(request:<T>(method:string,params:Record<string,unknown>,timeout?:number)=>Promise<T>,identity='account-native-endpoint'):void {
  const next=async<T>(params:Record<string,unknown>):Promise<T>=>{
   const bytes=new TextEncoder().encode(JSON.stringify(params));
-  const call=<R>(value:Record<string,unknown>)=>request<R>('explorer.accounts.request',value,['shared.prepare','native.prepare','native.ensure','native.detach','primary.start'].includes(String(value.action))?120_000:55_000);
+  const call=<R>(value:Record<string,unknown>)=>request<R>('explorer.accounts.request',value,['shared.prepare','native.prepare','native.ensure','native.detach','primary.start'].includes(String(value.action))?120_000:value.action==='usage'?65_000:55_000);
   if(bytes.length<48*1024)return call<T>(params);
   if(bytes.length>4*1024*1024)throw Error('ACCOUNT_PAYLOAD_LIMIT: This request exceeds the bounded transfer budget. Conversation history is not transferred by this plugin.');
   const sha256=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');

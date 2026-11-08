@@ -1,0 +1,59 @@
+import {subscribeLanguage,t} from '../../i18n';
+import {icons} from '../../icons';
+import type {AccountConnection} from './contracts';
+
+export interface ApiConnectionInput {label:string;baseUrl:string;model:string;models:string[];apiKey:string;}
+export interface ApiEditorPorts {
+ loadKey:(id:string)=>Promise<{apiKey:string}>;
+ fetchModels:(value:{baseUrl:string;apiKey:string})=>Promise<{models:string[]}>;
+}
+/** Vault values exist only in this editor's transient password field. */
+export class ApiConnectionEditor {
+ #close:(()=>void)|undefined;
+ constructor(private readonly root:ShadowRoot,private readonly ports:ApiEditorPorts){}
+ open(connection:AccountConnection|undefined,save:(value:ApiConnectionInput)=>Promise<void>):void {
+  this.dispose();const previous=this.root.activeElement;
+  const dialog=document.createElement('dialog');dialog.dataset.accountApiEditor='';
+  dialog.innerHTML=`<style>
+  dialog{box-sizing:border-box;position:fixed;inset:50% auto auto 50%;transform:translate(-50%,-50%);margin:0;width:min(440px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:20px;border:1px solid var(--cle-rule,#777);border-radius:12px;background:var(--cle-paper,Canvas);color:var(--cle-ink,CanvasText);font:inherit;font-size:13px;line-height:1.5}dialog::backdrop{background:#0005}h3{font-size:16px;margin:0 0 12px}p{font-size:12px;color:var(--cle-muted,GrayText);margin:0 0 14px}label{display:grid;gap:5px;margin:10px 0}input{box-sizing:border-box;width:100%;min-width:0;padding:8px;border:1px solid var(--cle-rule,#777);border-radius:6px;background:var(--cle-paper,Canvas);color:inherit;font:inherit}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}button{padding:6px 14px;border:1px solid var(--cle-rule,#777);border-radius:6px;background:var(--cle-paper,Canvas);color:inherit;font:inherit;cursor:pointer}button[data-save]{background:var(--cle-signal,#287dba);color:white}input:focus-visible,button:focus-visible{outline:2px solid var(--cle-focus,#287dba);outline-offset:2px}[role=status]{color:var(--cle-ink,CanvasText);overflow-wrap:anywhere}button:disabled{opacity:.5;cursor:default}
+  .model-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;margin-bottom:5px}.model-heading button{padding:4px 9px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.model-box{border:1px solid var(--cle-rule,#777);border-radius:6px;padding:8px}.model-grid{display:flex;flex-wrap:wrap;gap:8px}.model-chip{position:relative;max-width:100%;border:1px solid transparent;border-radius:6px;background:var(--cle-subtle,color-mix(in srgb,currentColor 7%,transparent))}.model-chip[data-selected]{border-color:var(--cle-signal,#287dba)}.model-chip>[data-select-model]{border:0;background:transparent;padding:6px 22px 6px 9px;max-width:100%;overflow-wrap:anywhere;text-align:start}.model-chip>[data-remove-model]{position:absolute;top:-5px;right:-5px;display:grid;place-items:center;width:20px;height:20px;padding:3px;border-radius:50%;background:var(--cle-paper,Canvas);opacity:0;pointer-events:none}.model-chip:hover>[data-remove-model],.model-chip:focus-within>[data-remove-model]{opacity:1;pointer-events:auto}.model-chip svg{display:block;width:12px;height:12px}.model-box input{border:0;padding:6px 2px;margin-top:4px}.model-box input:focus-visible{outline-offset:0}.model-spinner{width:12px;height:12px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:model-fetch-spin .8s linear infinite}.model-spinner[hidden]{display:none}@keyframes model-fetch-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.model-spinner{animation:none}}@media(hover:none){.model-chip>[data-remove-model]{opacity:1;pointer-events:auto}}
+  </style><form><h3 data-title></h3><p data-info></p><label><span data-label="accounts.apiName"></span><input name="label" required maxlength="100" autocomplete="off"></label><label><span data-label="accounts.apiUrl"></span><input name="baseUrl" type="url" required maxlength="2048" placeholder="https://example.com/v1" autocomplete="off"></label><div class="model-heading"><label for="account-api-model" data-label="accounts.apiModel"></label><button type="button" data-fetch><span class="model-spinner" hidden aria-hidden="true"></span><span data-fetch-label></span></button></div><div class="model-box"><div class="model-grid" role="group"></div><input id="account-api-model" name="model" maxlength="160" autocomplete="off" spellcheck="false"></div><label><span data-label="accounts.apiKey"></span><input name="apiKey" type="password" required maxlength="2400" autocomplete="off" spellcheck="false"></label><div role="status" aria-live="polite"></div><footer><button type="button" data-cancel></button><button type="submit" data-save></button></footer></form>`;
+  this.root.append(dialog);const form=dialog.querySelector('form')!;
+  const field=(name:string)=>form.elements.namedItem(name) as HTMLInputElement;
+  const fetchButton=dialog.querySelector<HTMLButtonElement>('[data-fetch]')!,saveButton=dialog.querySelector<HTMLButtonElement>('[data-save]')!,grid=dialog.querySelector<HTMLElement>('.model-grid')!,status=dialog.querySelector<HTMLElement>('[role=status]')!;
+  let models=[...(connection?.api?.models??(connection?.api?[connection.api.model]:[]))],selected=connection?.api?.model??'',busy=false,fetching=false,closed=false,keyEdited=false,requestEpoch=0;
+  field('label').value=connection?.label??'';field('baseUrl').value=connection?.api?.baseUrl??'';
+  const sync=()=>{fetchButton.disabled=busy||fetching||!field('baseUrl').value.trim()||!field('apiKey').value;fetchButton.setAttribute('aria-busy',String(fetching));dialog.querySelector<HTMLElement>('.model-spinner')!.hidden=!fetching;dialog.querySelector('[data-fetch-label]')!.textContent=t(fetching?'accounts.apiFetchingModels':'accounts.apiFetchModels');saveButton.disabled=busy||fetching||!models.length||!field('apiKey').value;field('model').disabled=busy||fetching;for(const b of grid.querySelectorAll<HTMLButtonElement>('button'))b.disabled=busy||fetching;};
+  const renderModels=()=>{
+   grid.replaceChildren();grid.setAttribute('aria-label',t('accounts.apiModel'));
+   for(const id of models){
+    const chip=document.createElement('span');chip.className='model-chip';chip.toggleAttribute('data-selected',id===selected);
+    const button=document.createElement('button');button.type='button';button.dataset.selectModel=id;button.textContent=id;button.setAttribute('aria-pressed',String(id===selected));button.addEventListener('click',()=>{selected=id;renderModels();});
+    const remove=document.createElement('button');remove.type='button';remove.dataset.removeModel=id;remove.setAttribute('aria-label',t('accounts.apiRemoveModel')+' '+id);remove.innerHTML=icons.close;
+    remove.addEventListener('click',()=>{const at=models.indexOf(id);models=models.filter(m=>m!==id);if(selected===id)selected=models[0]??'';renderModels();const next=grid.querySelectorAll<HTMLButtonElement>('[data-select-model]')[Math.min(at,models.length-1)];(next??field('model')).focus();});chip.append(button,remove);grid.append(chip);
+   }sync();
+  };
+  const render=()=>{dialog.querySelector('[data-title]')!.textContent=t(connection?'accounts.apiEdit':'accounts.apiAdd');dialog.setAttribute('aria-label',t(connection?'accounts.apiEdit':'accounts.apiAdd'));dialog.querySelector('[data-info]')!.textContent=t('accounts.apiHistory');for(const e of dialog.querySelectorAll<HTMLElement>('[data-label]'))e.textContent=t(e.dataset.label!);field('model').placeholder=t('accounts.apiAddModel');dialog.querySelector('[data-cancel]')!.textContent=t('dialog.cancel');saveButton.textContent=t('accounts.apiSave');renderModels();};
+  render();const unsubscribe=subscribeLanguage(render);
+  const close=()=>{if(closed)return;closed=true;requestEpoch++;field('apiKey').value='';unsubscribe();if(dialog.open)dialog.close();dialog.remove();this.#close=undefined;if(previous instanceof HTMLElement&&previous.isConnected)previous.focus({preventScroll:true});};this.#close=close;
+  dialog.querySelector('[data-cancel]')!.addEventListener('click',()=>{if(!busy)close();});dialog.addEventListener('cancel',event=>{event.preventDefault();if(!busy)close();});
+  const invalidate=()=>{requestEpoch++;fetching=false;status.textContent='';sync();};field('baseUrl').addEventListener('input',invalidate);field('apiKey').addEventListener('input',()=>{keyEdited=true;invalidate();});
+  const add=()=>{const id=field('model').value.trim();if(!id)return true;if(!/^[a-zA-Z0-9_.:/-]{1,160}$/.test(id)||(!models.includes(id)&&models.length>=256)){status.textContent='ACCOUNT_API_CONFIGURATION: Enter a valid model ID; at most 256 models are supported.';return false;}if(!models.includes(id))models.push(id);selected=selected||id;field('model').value='';status.textContent='';renderModels();return true;};
+  field('model').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();add();}});field('model').addEventListener('change',add);
+  fetchButton.addEventListener('click',()=>{
+   if(fetchButton.disabled)return;const epoch=++requestEpoch;fetching=true;status.textContent='';sync();
+   const value={baseUrl:field('baseUrl').value.trim(),apiKey:field('apiKey').value};
+   void this.ports.fetchModels(value).then(result=>{if(closed||epoch!==requestEpoch)return;
+    if(!Array.isArray(result.models)||!result.models.length||result.models.length>256||result.models.some(m=>typeof m!=='string'||!/^[a-zA-Z0-9_.:/-]{1,160}$/.test(m))||new Set(result.models).size!==result.models.length)throw Error('ACCOUNT_API_MODELS: Invalid model directory. stage=editor-response; the previous model list was retained.');
+    models=[...result.models];if(!models.includes(selected))selected=models[0]!;field('model').value='';renderModels();
+   }).catch(error=>{if(!closed&&epoch===requestEpoch)status.textContent=error instanceof Error?error.message:String(error);}).finally(()=>{value.apiKey='';if(!closed&&epoch===requestEpoch){fetching=false;sync();}});
+  });
+  form.addEventListener('submit',event=>{event.preventDefault();if(busy||fetching||!add()||!models.length||!form.reportValidity())return;busy=true;sync();for(const input of form.querySelectorAll<HTMLInputElement>('input'))input.disabled=true;
+   const value={label:field('label').value.trim(),baseUrl:field('baseUrl').value.trim(),model:selected,models:[...models],apiKey:field('apiKey').value};
+   void save(value).then(close,error=>{if(closed)return;status.textContent=error instanceof Error?error.message:String(error);busy=false;for(const input of form.querySelectorAll<HTMLInputElement>('input'))input.disabled=false;sync();}).finally(()=>{value.apiKey='';});
+  });
+  if(connection){void this.ports.loadKey(connection.id).then(result=>{const key=result.apiKey;result.apiKey='';if(closed||keyEdited)return;field('apiKey').value=key;sync();}).catch(error=>{if(!closed&&!keyEdited)status.textContent=error instanceof Error?error.message:String(error);});}
+  dialog.showModal();field('label').focus();
+ }
+ dispose():void{this.#close?.();}
+}

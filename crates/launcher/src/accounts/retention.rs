@@ -46,7 +46,7 @@ pub(super) fn home_lease(root:&Path,home:&Path)->Result<Option<std::sync::Arc<st
 }
 pub(super) fn remember(root:&Path,connections:&[Connection])->Result<()>{
  let mut s=read(root)?;let owner=root.file_name().and_then(|s|s.to_str()).filter(|v|v.len()==64&&v.bytes().all(|b|b.is_ascii_hexdigit())).ok_or_else(||AccountError::protocol("Invalid retained owner identity."))?;
- for c in connections.iter().filter(|c|c.email.is_some()){
+ for c in connections.iter().filter(|c|c.email.is_some()||c.api.is_some()){
   if let Some(e)=s.entries.iter_mut().find(|e|e.connection.id==c.id){e.connection=c.clone();}
   else if let Some(e)=s.entries.iter_mut().find(|e|e.connection.email.as_ref().zip(c.email.as_ref()).is_some_and(|(a,b)|a.eq_ignore_ascii_case(b))) {*e=Entry{owner:owner.into(),connection:c.clone()};}
   else{s.entries.push(Entry{owner:owner.into(),connection:c.clone()});}
@@ -56,6 +56,7 @@ pub(super) fn remember(root:&Path,connections:&[Connection])->Result<()>{
 pub(super) fn attach(root:&Path,registry:&mut Registry,primary_email:&str)->Result<()> {
  let s=read(root)?;let mut changed=false;
  for e in s.entries {
+  if e.connection.api.is_some(){if !registry.connections.iter().any(|c|c.id==e.connection.id){if registry.connections.len()>=16{return Err(AccountError::new("ACCOUNT_RETENTION_LIMIT","The retained connection list exceeds its limit."));}registry.connections.push(e.connection);changed=true;}continue;}
   let Some(email)=&e.connection.email else{continue};
   if email.eq_ignore_ascii_case(primary_email)||registry.connections.iter().any(|c|c.id==e.connection.id){continue}
   if let Some(index)=registry.connections.iter().position(|c|c.email.as_ref().is_some_and(|v|v.eq_ignore_ascii_case(email))){registry.connections[index]=e.connection;changed=true;continue}
@@ -82,7 +83,7 @@ pub(super) fn clear(root:&Path)->Result<()> {
  }
  #[test] fn retention_preserves_home_across_primary_changes_without_task_state(){
   let dir=tempfile::tempdir().unwrap();let a=dir.path().join("a".repeat(64));let d=dir.path().join("d".repeat(64));std::fs::create_dir_all(&a).unwrap();std::fs::create_dir_all(&d).unwrap();
-  let b=Connection{id:"b".repeat(32),email:Some("b@example.invalid".into()),label:"B".into(),plan:Some("plus".into())};std::fs::create_dir(a.join(&b.id)).unwrap();
+  let b=Connection{id:"b".repeat(32),email:Some("b@example.invalid".into()),label:"B".into(),plan:Some("plus".into()),api:None};std::fs::create_dir(a.join(&b.id)).unwrap();
   assert!(follows(&a).unwrap());set_follow(&a,false).unwrap();remember(&a,&[b.clone()]).unwrap();assert!(!follows(&d).unwrap());let mut registry=Registry{schema:1,..Default::default()};attach(&d,&mut registry,"d@example.invalid").unwrap();assert_eq!(registry.connections.len(),1);assert_eq!(home(&d,&b.id).unwrap(),a.join(&b.id));assert!(registry.active.is_empty()&&registry.selected.is_empty()&&registry.shared.is_empty());
   let mut self_registry=Registry{schema:1,..Default::default()};attach(&d,&mut self_registry,"b@example.invalid").unwrap();assert!(self_registry.connections.is_empty());forget(&d,&b.id).unwrap();let mut none=Registry::default();attach(&d,&mut none,"d@example.invalid").unwrap();assert!(none.connections.is_empty());
  }

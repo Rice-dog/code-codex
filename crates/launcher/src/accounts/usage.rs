@@ -1,5 +1,17 @@
 //! Bounded quota and asset projection. Only reset-card IDs needed for explicit redemption; no auth metadata.
 use serde_json::{Value,json};
+pub(super) fn require_reset(raw:&Value,id:&str,now:i64)->super::Result<()> {
+ let cards=raw["rateLimitResetCredits"]["credits"].as_array();
+ let card=cards.and_then(|rows|rows.iter().find(|c|c["id"]==id));
+ // The official schema allows summary-only or capped lists. The consume RPC
+ // remains authoritative for the exact credit ID and idempotency key.
+ if card.is_none()&&raw["rateLimitResetCredits"]["availableCount"].as_u64().is_some_and(|count|count>cards.map_or(0,|rows|rows.len()) as u64){return Ok(());}
+ let cards=cards.ok_or_else(||super::AccountError::new("ACCOUNT_RESET_DETAILS_UNAVAILABLE","Fresh reset-card details were not returned. Expiration is unknown. No redemption was sent."))?;
+ let card=cards.iter().find(|c|c["id"]==id&&c["status"]=="available").ok_or_else(||super::AccountError::new("ACCOUNT_RESET_UNAVAILABLE","The selected reset is no longer available. No redemption was sent."))?;
+ if card["resetType"]!="codexRateLimits" {return Err(super::AccountError::new("ACCOUNT_RESET_UNSUPPORTED","This reset type is not supported. No redemption was sent."));}
+ if !card["expiresAt"].is_null(){let expiry=card["expiresAt"].as_i64().ok_or_else(||super::AccountError::new("ACCOUNT_RESET_DETAILS_UNAVAILABLE","The reset expiration contract is invalid. No redemption was sent."))?;if expiry<=now{return Err(super::AccountError::new("ACCOUNT_RESET_EXPIRED","The selected reset has expired. No redemption was sent."));}}
+ Ok(())
+}
 pub fn project(raw: &Value) -> Value {
     fn window(raw: &Value) -> Value {
         let valid = raw["usedPercent"].as_f64().is_some_and(|n| n.is_finite() && (0.0..=100.0).contains(&n))
@@ -26,6 +38,17 @@ pub fn project(raw: &Value) -> Value {
 }
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn reset_summary_is_not_an_expired_card_and_validation_is_precise(){
+        assert_eq!(require_reset(&json!({}),"one",100).unwrap_err().code,"ACCOUNT_RESET_DETAILS_UNAVAILABLE");
+        assert!(require_reset(&json!({"rateLimitResetCredits":{"availableCount":2,"credits":null}}),"one",100).is_ok());
+        assert!(require_reset(&json!({"rateLimitResetCredits":{"availableCount":2,"credits":[]}}),"one",100).is_ok());
+        let mut value=json!({"rateLimitResetCredits":{"credits":[{"id":"one","status":"available","resetType":"codexRateLimits"}]}});
+        assert!(require_reset(&value,"one",100).is_ok());
+        assert_eq!(require_reset(&value,"missing",100).unwrap_err().code,"ACCOUNT_RESET_UNAVAILABLE");
+        value["rateLimitResetCredits"]["credits"][0]["expiresAt"]=json!(100);
+        assert_eq!(require_reset(&value,"one",100).unwrap_err().code,"ACCOUNT_RESET_EXPIRED");
+        value["rateLimitResetCredits"]["credits"][0]["expiresAt"]=json!(101);assert!(require_reset(&value,"one",100).is_ok());
+    }
     #[test] fn quota_projection_is_non_secret_and_bounded(){
         let raw=json!({"accountId":"private","rateLimitResetCredits":{"credits":[{"id":"private"}]},"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":2000000000,"token":"private"}}});
         let p=project(&raw);assert_eq!(p["rateLimits"]["primary"]["usedPercent"],100);assert!(!p.to_string().contains("private"));

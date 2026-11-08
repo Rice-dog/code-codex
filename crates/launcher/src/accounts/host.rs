@@ -13,7 +13,7 @@ use tokio_tungstenite::tungstenite::Message;
 /// Fixed native read operations, through the exact qualified dispatcher. Never returns auth tokens.
 pub async fn thread_metadata(endpoint: CdpEndpoint, id: &str) -> Result<Value> {
     let expression = format!(
-        r#"(async()=>{{const m=await import({});const d=m[{}];const id='cc-shared-'+crypto.randomUUID();const r=await new Promise((resolve,reject)=>{{let off;const timer=setTimeout(()=>{{off?.();reject(Error('Thread metadata timed out'));}},8000);off=d.subscribe('mcp-response',e=>{{if(e.message?.id!==id)return;off();clearTimeout(timer);resolve(e.message);}});d.dispatchMessage('mcp-request',{{hostId:'local',request:{{id,method:'thread/read',params:{{threadId:{},includeTurns:false}}}},priority:'interactive',timeoutMs:8000}});}});if(r.error)throw Error('Thread metadata unavailable');const t=r.result.thread;return {{id:t.id,path:t.path,cwd:t.cwd,status:t.status}};}})()"#,
+        r#"(async()=>{{const m=await loadHostNamespace({});const d=m[{}];const id='cc-shared-'+crypto.randomUUID();const r=await new Promise((resolve,reject)=>{{let off;const timer=setTimeout(()=>{{off?.();reject(Error('Thread metadata timed out'));}},8000);off=d.subscribe('mcp-response',e=>{{if(e.message?.id!==id)return;off();clearTimeout(timer);resolve(e.message);}});d.dispatchMessage('mcp-request',{{hostId:'local',request:{{id,method:'thread/read',params:{{threadId:{},includeTurns:false}}}},priority:'interactive',timeoutMs:8000}});}});if(r.error)throw Error('Thread metadata unavailable');const t=r.result.thread;return {{id:t.id,path:t.path,cwd:t.cwd,status:t.status,modelProvider:t.modelProvider}};}})()"#,
         profile()["shared"],profile()["dispatcherExport"],json!(id)
     );
     evaluate(endpoint, &expression).await
@@ -25,10 +25,20 @@ pub(super) async fn lease_generation(endpoint:CdpEndpoint)->Result<Option<String
     Ok(value.as_str().filter(|s|s.len()==64&&s.bytes().all(|c|c.is_ascii_hexdigit())).map(str::to_owned))
 }
 
+fn evaluation_failure(details:&Value)->AccountError {
+    let class=details["exception"]["className"].as_str().filter(|v|matches!(*v,"SyntaxError"|"ReferenceError"|"TypeError"|"RangeError"|"Error"|"DOMException")).unwrap_or("unavailable");
+    let line=details["lineNumber"].as_u64();
+    crate::runtime_log::record("accounts","account.host-evaluation","failed",json!({"stage":"renderer-evaluate","exceptionClass":class,"lineNumber":line,"outcomeVerified":false,"sourceAndMessageCollected":false}));
+    AccountError::new("ACCOUNT_PROTOCOL",format!("Native host evaluation failed. stage=renderer-evaluate; exceptionClass={class}; line={}; operation outcome was not verified.",line.map(|v|v.to_string()).unwrap_or_else(||"unavailable".into())))
+}
+fn module_expression(expression:&str)->String {
+    format!("(async()=>{{{};{};return await ({});}})()",include_str!("host_rpc_deadline.js"),include_str!("../../../../resources/account-host-capabilities.js").replace("export ",""),expression)
+}
 async fn evaluate(endpoint: CdpEndpoint, expression: &str) -> Result<Value> {
     evaluate_budget(endpoint,expression,Duration::from_secs(12)).await
 }
 pub(super) async fn evaluate_budget(endpoint:CdpEndpoint,expression:&str,budget:Duration)->Result<Value>{
+    let expression=module_expression(expression);
     let targets = TargetDiscovery::new()
         .map_err(|_| AccountError::protocol("Host discovery unavailable."))?
         .targets(endpoint)
@@ -56,7 +66,7 @@ pub(super) async fn evaluate_budget(endpoint:CdpEndpoint,expression:&str,budget:
     tokio::time::timeout(budget,async{
         let (mut socket,_)=tokio_tungstenite::connect_async(url.as_str()).await.map_err(|_|AccountError::protocol("Host observation connection failed."))?;
         socket.send(Message::Text(json!({"id":1,"method":"Runtime.evaluate","params":{"expression":expression,"awaitPromise":true,"returnByValue":true}}).to_string().into())).await.map_err(|_|AccountError::protocol("Host observation send failed."))?;
-        while let Some(message)=socket.next().await {let Message::Text(text)=message.map_err(|_|AccountError::protocol("Host observation disconnected."))? else{continue};if text.len()>1024*1024{return Err(AccountError::protocol("Host metadata exceeded its bound."));}let value:Value=serde_json::from_str(&text).map_err(|_|AccountError::protocol("Invalid host metadata."))?;if value["id"]!=1{continue;}if !value["result"]["exceptionDetails"].is_null(){return Err(AccountError::protocol("Native thread metadata could not be verified."));}return Ok(value["result"]["result"]["value"].clone());}Err(AccountError::protocol("Host metadata ended without a result."))
+        while let Some(message)=socket.next().await {let Message::Text(text)=message.map_err(|_|AccountError::protocol("Host observation disconnected."))? else{continue};if text.len()>1024*1024{return Err(AccountError::protocol("Host metadata exceeded its bound."));}let value:Value=serde_json::from_str(&text).map_err(|_|AccountError::protocol("Invalid host metadata."))?;if value["id"]!=1{continue;}if !value["result"]["exceptionDetails"].is_null(){return Err(evaluation_failure(&value["result"]["exceptionDetails"]));}return Ok(value["result"]["result"]["value"].clone());}Err(AccountError::protocol("Host metadata ended without a result."))
     }).await.map_err(|_|AccountError::protocol("Host metadata timed out."))?
 }
 
@@ -78,8 +88,8 @@ pub async fn verify_profile(endpoint:CdpEndpoint)->Result<()> {
  let mut selected=evaluate(endpoint,&expression).await?;
  if let Some(code)=selected["failure"]["code"].as_str(){return Err(AccountError::new(code,selected["failure"]["message"].as_str().unwrap_or("Host capability probe failed before loading account state.")));}
  if selected["compatibility"]!="capabilities" || !selected["managerExport"].is_string() || !selected["dispatcherExport"].is_string(){return Err(AccountError::new("ACCOUNT_HOST_UNSUPPORTED","Required host interfaces are unavailable. stage=capability-probe; accountStateLoaded=false; no task was sent."));}
- selected["appearance"]=manifest["appearance"].clone();selected["fingerprints"]=manifest["fingerprints"].clone();
- let publish=format!("window[Symbol.for('code-codex:account-host-profile:v1')]=Object.freeze({});true",selected);evaluate(endpoint,&publish).await?;
+ if selected["contractRevision"]!=2{selected["appearance"]=manifest["appearance"].clone();selected["actions"]=manifest["actions"].clone();}selected["fingerprints"]=manifest["fingerprints"].clone();
+ let publish=format!("(()=>{{window[Symbol.for('code-codex:account-host-profile:v1')]=Object.freeze({});return true;}})()",selected);evaluate(endpoint,&publish).await?;
  *CURRENT_PROFILE.get_or_init(||std::sync::RwLock::new(Value::Null)).write().unwrap_or_else(std::sync::PoisonError::into_inner)=selected;
  crate::runtime_log::record("accounts","account.compatibility","confirmed",json!({"stage":"capability-probe","observedVersion":manifest["version"],"policy":"capabilities","versionRestricted":false,"accountStateLoaded":false,"taskSent":false}));
  Ok(())
@@ -95,6 +105,7 @@ fn discover_modules()->Result<Value>{
  let header:Value=serde_json::from_slice(&header).map_err(|_|AccountError::protocol("Host bundle metadata is invalid."))?;
  let entries=header["files"]["webview"]["files"]["assets"]["files"].as_object().ok_or_else(||AccountError::protocol("Official host assets are unavailable."))?;
  let appearance:Vec<_>=entries.keys().filter(|n|n.starts_with("run-app-action-in-primary-window-")&&n.ends_with(".js")&&n.bytes().all(|b|b.is_ascii_alphanumeric()||b"-_.".contains(&b))).take(5).map(|n|format!("./assets/{n}")).collect();
+ let actions:Vec<_>=entries.keys().filter(|n|n.starts_with("register-app-actions-")&&n.ends_with(".js")&&n.bytes().all(|b|b.is_ascii_alphanumeric()||b"-_.".contains(&b))).take(5).map(|n|format!("./assets/{n}")).collect();
  let mut initial=Vec::new();let mut shared=Vec::new();let mut fingerprints=serde_json::Map::new();
  for (name,entry) in entries {
   let role=if name.starts_with("app-initial-"){&mut initial}else if name.starts_with("app-shared-"){&mut shared}else{continue};
@@ -107,7 +118,7 @@ fn discover_modules()->Result<Value>{
   let mut data=vec![0u8;size as usize];file.read_exact(&mut data).map_err(|_|AccountError::protocol("Incomplete official module."))?;
   fingerprints.insert(name.clone(),json!(format!("{:x}",Sha256::digest(&data))));role.push(format!("./assets/{name}"));
  }
- Ok(json!({"version":install.version,"initial":initial,"shared":shared,"appearance":appearance,"fingerprints":fingerprints}))
+ Ok(json!({"version":install.version,"initial":initial,"shared":shared,"appearance":appearance,"actions":actions,"fingerprints":fingerprints,"runtimes":crate::bootstrap::read_numbered_host_runtimes(&install.executable.parent().unwrap().join("resources/app.asar")).map_err(|stage|AccountError::new("ACCOUNT_HOST_UNSUPPORTED",format!("Official runtime inventory failed. stage={stage}; accountStateLoaded=false; no task was sent.")))?}))
 }
 
 pub async fn observe(endpoint: CdpEndpoint) -> Result<Owner> {
@@ -146,7 +157,7 @@ pub async fn observe(endpoint: CdpEndpoint) -> Result<Owner> {
                 .map_err(|_| {
                     AccountError::protocol("Connecting the native account observer failed.")
                 })?;
-        let expression = include_str!("host_identity.js").replace("__HOST_SHARED__",&profile()["shared"].to_string()).replace("__HOST_DISPATCHER__",&profile()["dispatcherExport"].to_string());
+        let expression = module_expression(&include_str!("host_identity.js").replace("__HOST_SHARED__",&profile()["shared"].to_string()).replace("__HOST_DISPATCHER__",&profile()["dispatcherExport"].to_string()));
         socket.send(Message::Text(json!({"id":1,"method":"Runtime.evaluate","params":{"expression":expression,"awaitPromise":true,"returnByValue":true}}).to_string().into())).await.map_err(|_|AccountError::protocol("Native account observation could not be sent."))?;
         while let Some(message) = socket.next().await {
             let message = message
@@ -165,10 +176,7 @@ pub async fn observe(endpoint: CdpEndpoint) -> Result<Owner> {
                 continue;
             }
             if !value["result"]["exceptionDetails"].is_null() {
-                return Err(AccountError::new(
-                    "ACCOUNT_HOST_IDENTITY",
-                    "The current native account could not be verified. Sign in and retry.",
-                ));
+                return Err(evaluation_failure(&value["result"]["exceptionDetails"]));
             }
             let account = &value["result"]["result"]["value"];
             if let Some(failure)=account.get("failure") {
@@ -216,4 +224,22 @@ pub async fn observe(endpoint: CdpEndpoint) -> Result<Owner> {
                 "The native host account observation timed out.",
             )
         })?
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    #[test] fn evaluation_errors_report_safe_stage_without_source_or_raw_exception(){
+        let error=super::evaluation_failure(&serde_json::json!({"lineNumber":12,"exception":{"className":"SyntaxError","description":"private source or token must not appear"}}));
+        assert!(error.message.contains("exceptionClass=SyntaxError"));assert!(error.message.contains("line=12"));assert!(!error.message.contains("private"));
+    }
+    #[tokio::test]
+    #[ignore="Explicit real official endpoint; read-only qualification and account identity, no route/auth changes or inference"]
+    async fn actual_official_qualification_and_identity_use_native_evaluation(){
+        let port=std::env::var("CODE_CODEX_HOST_PORT").expect("Explicit verified official debugging port").parse::<u16>().unwrap();
+        let endpoint=cdp_client::CdpEndpoint::loopback(port);
+        super::verify_profile(endpoint).await.unwrap();
+        let owner=super::observe(endpoint).await.unwrap();
+        assert!(!owner.id.is_empty());assert!(!owner.label.is_empty());
+        println!("Native qualification and official identity read confirmed; no credential, route or inference writes.");
+    }
 }

@@ -18,7 +18,6 @@ import {
   qualifiedAppShellForMain,
   qualifiedWorkspaceRowForMain,
 } from "./adapters/codex-26.715";
-import { usesClippedMainLayout } from "./adapters/codex-layout-version";
 import { isHomeWorkspaceView } from "./home-view";
 import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground, isNativeLoginView } from "./native-login";
 import {nativeStructureChanged} from './native-structure-changes';
@@ -79,7 +78,7 @@ ${CURRENT_LAYOUT_EXPLORER_SELECTOR} {
 /* Cached pages can mount while Chromium pauses their animation timeline.
  * Keep the inline tree at its flex position instead of leaving it at the
  * entrance animation's translated, transparent first frame. */
-[data-app-shell-workspace-row="true"]:has(> [data-app-shell-active-page]) > ${CURRENT_LAYOUT_EXPLORER_SELECTOR} {
+:is([data-app-shell-workspace-row="true"], [data-app-shell-workspace="true"]):has(> [data-app-shell-active-page]) > ${CURRENT_LAYOUT_EXPLORER_SELECTOR} {
   animation: none !important;
 }
 
@@ -372,7 +371,7 @@ function qualifiedMainSurface(): HTMLElement | null {
   return main;
 }
 
-function stableInlineMount(mainSurface: HTMLElement | null, codexVersion: string | undefined): MountPoint | null {
+function stableInlineMount(mainSurface: HTMLElement | null): MountPoint | null {
   const explicit = document.querySelector<HTMLElement>("[data-code-codex-mount]");
   if (explicit && isVisibleMount(explicit)) {
     return { parent: explicit, before: null, placement: "inline", strategy: "declared-slot", mainSurface };
@@ -380,9 +379,8 @@ function stableInlineMount(mainSurface: HTMLElement | null, codexVersion: string
 
   const verifiedMain = mainSurface;
   if (verifiedMain) {
-    if (usesClippedMainLayout(codexVersion)) {
-      const current = qualifiedWorkspaceRowForMain(verifiedMain, document);
-      if (!current || !isVisibleMount(current.row) || !isVisibleMount(current.workspace)) return null;
+    const current = qualifiedWorkspaceRowForMain(verifiedMain, document);
+    if (current && isVisibleMount(current.row) && isVisibleMount(current.workspace)) {
       return {
         parent: current.row,
         before: current.workspace,
@@ -432,7 +430,7 @@ function chooseMount(): MountPoint | null {
   const bootstrap = getBootstrapConfig();
   const mainSurface = qualifiedMainSurface();
   if (!bootstrap.forceDrawer && window.innerWidth > 820) {
-    const inline = stableInlineMount(mainSurface, bootstrap.codexVersion ?? bootstrap.version);
+    const inline = stableInlineMount(mainSurface);
     if (inline) return inline;
   }
   return { parent: document.body, before: null, placement: "drawer", strategy: "safe-drawer", mainSurface };
@@ -523,6 +521,10 @@ const applicationMenuActions = {
   setLoginStartup: (enabled: boolean) => {
     return requestApplicationMenu<import('./contracts/login-startup').LoginStartupStatus>('explorer.login.startup.set', { enabled });
   },
+  retryHostUpdates: () => requestApplicationMenu<{scheduled:boolean}>('explorer.host.updates.retry'),
+  hostUpdateStatus: () => requestApplicationMenu<{latest?:{type?:string;counts?:{pluginDependency?:number;needsReview?:number}};scan?:{status?:string}}>('explorer.host.updates.status'),
+  openHostUpdates: () => requestApplicationMenu<{opened:boolean}>('explorer.host.updates.open'),
+  restartCodeCodex: () => requestApplicationMenu<{ scheduled: boolean }>('explorer.installation.restart'),
   openUninstaller: () => requestApplicationMenu<{ opened: boolean }>('explorer.installation.uninstall'),
   openRuntimeInformation: () => { void openRuntimeInformation(); },
   openInstallationFolder: () => {

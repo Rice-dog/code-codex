@@ -72,7 +72,7 @@ mod tests {
         let dir=tempfile::tempdir().unwrap();let a=dir.path().join("a".repeat(64));let d=dir.path().join("d".repeat(64));std::fs::create_dir(&a).unwrap();std::fs::create_dir(&d).unwrap();
         let id="b".repeat(32);let home=a.join(&id);std::fs::create_dir(&home).unwrap();std::fs::write(home.join("auth.json"),"synthetic-authorization").unwrap();
         let mut state=OwnerState{generation:"old".into(),executors:HashMap::new(),workers:HashMap::new(),login:None,threads:HashMap::new(),active:HashMap::new(),cursors:HashMap::new(),registry:super::super::Registry{schema:1,..Default::default()},lease_generation:None,_lease:tempfile::tempfile().unwrap()};
-        state.registry.connections.push(super::super::Connection{id:id.clone(),label:"B".into(),email:Some("b@example.invalid".into()),plan:None});state.registry.selected.insert("old-task".into(),id.clone());state.active.insert("old-task".into(),id.clone());
+        state.registry.connections.push(super::super::Connection{id:id.clone(),label:"B".into(),email:Some("b@example.invalid".into()),plan:None,api:None});state.registry.selected.insert("old-task".into(),id.clone());state.active.insert("old-task".into(),id.clone());
         super::super::retention::set_follow(&a,false).unwrap();
         crate::renderer_storage::atomic(&a.join("ended-session.json"),&serde_json::json!({"schema":1,"explicitLogout":true,"retain":true})).unwrap();
         complete_pending(&mut state,&a).await.unwrap();assert!(home.join("auth.json").exists());assert!(state.registry.connections.is_empty()&&state.active.is_empty()&&state.registry.selected.is_empty());assert!(!a.join("ended-session.json").exists());
@@ -96,6 +96,7 @@ mod tests {
             label: "test".into(),
             email: None,
             plan: None,
+            api: None,
         });
         registry.selected.insert("logical".into(), "host".into());
         save(root, &registry).unwrap();

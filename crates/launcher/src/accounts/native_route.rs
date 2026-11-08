@@ -55,19 +55,26 @@ async fn native(endpoint: CdpEndpoint, params: Value) -> Result<Value> {
         }
     };
     if let Some(failure) = value.get("failure") {
-        operation.finish("failed",json!({"stage":failure["stage"],"errorCode":failure["code"],"backendReopened":failure["switched"],"diagnostics":value["diagnostics"],"taskSent":false}));
-        let code = if failure["switched"] != true && value["diagnostics"]["subscriptionTouched"] == true && value["diagnostics"]["originalSubscriptionRestored"] != true {
+        let diagnostics=&value["diagnostics"];
+        let resume_outcome=match diagnostics["resumeOutcome"].as_str(){
+            Some(outcome @ ("not-requested"|"closing"|"unverified"|"failed"|"accepted"))=>outcome,
+            _=>"unknown",
+        };
+        operation.finish("failed",json!({"stage":failure["stage"],"errorCode":failure["code"],"rpcCode":failure["rpcCode"],"backendReopened":failure["switched"],"diagnostics":diagnostics,"taskSent":false}));
+        let code = if failure["switched"] != true && diagnostics["subscriptionTouched"] == true && diagnostics["originalSubscriptionRestored"] != true && resume_outcome!="failed" {
             "ACCOUNT_NATIVE_RECOVERY_PENDING"
         } else {failure["code"].as_str().unwrap_or("ACCOUNT_NATIVE_ROUTE")};
         return Err(AccountError::new(
             code,
             format!(
-                "Native account routing failed. stage={}; backendReopened={}; subscriptionTouched={}; originalSubscriptionRestored={}; recovery={}; reason={}; no inference request was sent. Re-select the account after the current operation finishes.",
+                "Native account routing failed. stage={}; backendReopened={}; resumeOutcome={}; subscriptionTouched={}; originalSubscriptionRestored={}; recovery={}; rpcCode={}; reason={}; no inference request was sent.",
                 failure["stage"].as_str().unwrap_or("unknown"),
                 failure["switched"] == true,
+                resume_outcome,
                 value["diagnostics"]["subscriptionTouched"] == true,
                 value["diagnostics"]["originalSubscriptionRestored"] == true,
                 value["diagnostics"]["subscriptionRecovery"].as_str().unwrap_or("unknown"),
+                failure["rpcCode"],
                 failure["reason"].as_str().unwrap_or("unknown")
             ),
         ));
@@ -75,18 +82,30 @@ async fn native(endpoint: CdpEndpoint, params: Value) -> Result<Value> {
     operation.finish("confirmed",json!({"stage":"native-route-result","ready":value["ready"],"routed":value["routed"],"inProgress":value["inProgress"],"diagnostics":value["diagnostics"],"taskSent":false}));
     Ok(value)
 }
+pub(super) async fn require_idle(endpoint: CdpEndpoint, thread: &str) -> Result<()> {
+    if native(endpoint, json!({"mode":"state","threadId":thread})).await?["inProgress"] != false {
+        return Err(AccountError::new("ACCOUNT_TURN_ACTIVE", "Finish the active task before changing its model."));
+    }
+    Ok(())
+}
+pub(super) async fn adopt(endpoint:CdpEndpoint,thread:&str,base:&str,api:Option<&super::api::Settings>)->Result<()> {
+    let result=native(endpoint,json!({"mode":"adopt","threadId":thread,"baseUrl":base,"api":api})).await?;
+    if result["ready"]!=true{return Err(AccountError::new("ACCOUNT_DRAFT_ADOPTION","The newly created native account route was not confirmed. No first turn was permitted."));}
+    Ok(())
+}
 pub(super) async fn restore<'a>(
     service: &'a AccountService,
     endpoint: CdpEndpoint,
     owner: &host::Owner,
 ) -> Result<tokio::sync::MutexGuard<'a, ()>> {
     let _operation = service.native_route_lock.lock().await;
+    super::draft::close(service,&owner.id);
     let root=super::owner_root(&owner.id)?;
     let epoch=if service.relays.owned(&owner.id).is_empty(){None}else{Some(host_generation(endpoint).await?)};
     for route in service.relays.owned(&owner.id) {
-        native(endpoint, json!({"mode":"switch","threadId":route.thread})).await?;
-        save_route_state(&root,epoch.as_deref().unwrap(),&route.thread,Some("default"))?;
-        service.relays.replace(&owner.id, &route.thread, None);
+        native(endpoint, json!({"mode":"switch","threadId":route.thread()})).await?;
+        save_route_state(&root,epoch.as_deref().unwrap(),&route.thread(),Some("default"))?;
+        service.relays.replace(&owner.id, &route.thread(), None);
     }
     Ok(_operation)
 }
@@ -126,15 +145,27 @@ pub(super) async fn request(
             }
         }
         if let Some(route) = service.relays.get(&owner.id, &thread) {
-            if route.connection() == selected
-                && native(
+            let settings_match = {
+                let all = service.state.lock().await;
+                let configured = all.get(&owner.id).and_then(|state| state.registry.connections.iter().find(|c| c.id == selected)).and_then(|c| c.api.as_ref());
+                serde_json::to_value(configured).ok() == serde_json::to_value(route.api_settings()).ok()
+            };
+            if route.connection() == selected && settings_match
+                && progress.wait(native(
                     endpoint,
-                    json!({"mode":"check","threadId":thread,"baseUrl":route.base_url}),
-                )
+                    json!({"mode":"check","threadId":thread,"baseUrl":route.base_url,"api":route.api_settings()}),
+                ))
                 .await?["ready"]
                     == true
             {
                 if !current() || host::observe(endpoint).await?.id != owner.id {
+                    return Err(stale());
+                }
+                if let Err(error) = progress.wait(route.probe(false)).await {
+                    progress.finish(Some(&error));
+                    return Err(error);
+                }
+                if !current() || progress.is_cancelled() || host::observe(endpoint).await?.id != owner.id {
                     return Err(stale());
                 }
                 progress.finish(None);
@@ -145,11 +176,11 @@ pub(super) async fn request(
         } else if selected == "host" {
             // A renderer pin can outlive its native owner. An empty new registry
             // does not prove the official conversation uses its default endpoint.
-            let check = native(endpoint, json!({"mode":"check","threadId":thread})).await?;
+            let check = progress.wait(native(endpoint, json!({"mode":"check","threadId":thread}))).await?;
             let history=route_history(&super::owner_root(&owner.id)?,&host_generation(endpoint).await?)?;
             let registered={let all=service.state.lock().await;all.get(&owner.id).is_some_and(|s|s.registry.selected.contains_key(&thread))};
             let recovery_required=matches!(history[&thread].as_str(),Some("relay"|"pending"));
-            if check["routed"] == false&&!recovery_required {
+            if check["routed"] == false&&!recovery_required&&!super::context_handoff::enrolled(&super::owner_root(&owner.id)?,&thread)? {
                 progress.finish(None);
                 return Ok(json!({"ready":true,"selected":"host","threadId":thread}));
             }
@@ -187,7 +218,7 @@ async fn prepare(
         super::text(p, "connectionId")?.to_owned()
     };
     progress.phase("native-history", 15);
-    let metadata = host::thread_metadata(endpoint, &thread).await?;
+    let metadata = progress.wait(host::thread_metadata(endpoint, &thread)).await?;
     let cwd = std::fs::canonicalize(metadata["cwd"].as_str().unwrap_or(""))
         .map_err(|_| AccountError::protocol("The native thread workspace is unavailable."))?;
     if !workspace.is_some_and(|root| same_file::is_same_file(root, &cwd).unwrap_or(false)) {
@@ -196,18 +227,19 @@ async fn prepare(
             "Native account preparation requires the current verified project. No inference was sent.",
         ));
     }
-    if native(endpoint, json!({"mode":"state","threadId":thread})).await?["inProgress"] != false {
+    if progress.wait(native(endpoint, json!({"mode":"state","threadId":thread}))).await?["inProgress"] != false {
         return Err(AccountError::new(
             "ACCOUNT_TURN_ACTIVE",
             "The native task must reach a terminal state before switching.",
         ));
     }
     let root = super::owner_root(&owner.id)?;
-    let (generation, prior_selected, worker, email) = {
+    let (generation, prior_selected, email, api) = {
         let mut all = service.state.lock().await;
         let state = all.get_mut(&owner.id).ok_or_else(stale)?;
         if state.active.contains_key(&thread){return Err(AccountError::new("ACCOUNT_TURN_ACTIVE","A previous account executor still owns this conversation. Check its task status before preparing the native route. No inference was sent."));}
-        let email = if selected == "host" {
+        let api=state.registry.connections.iter().find(|c|c.id==selected).and_then(|c|c.api.clone());
+        let email = if selected == "host" || api.is_some() {
             None
         } else {
             Some(
@@ -225,29 +257,31 @@ async fn prepare(
                     })?,
             )
         };
-        let worker = if selected == "host" {
-            None
-        } else {
-            Some(super::get_worker(state, &root, &selected).await?)
-        };
         (
             state.generation.clone(),
             state.registry.selected.get(&thread).cloned(),
-            worker,
             email,
+            api,
         )
     };
+    let worker=if selected!="host"&&api.is_none(){Some(progress.wait(super::credential_worker::acquire(service,&root,&owner.id,&selected,current)).await?)}else{None};
     progress.phase("credentials", 35);
+    if selected!="host"&&api.is_none()&&super::presentation::reauthorization_required(&root,&selected)? {return Err(AccountError::new("ACCOUNT_AUTH_REQUIRED","This connection requires reauthorization. Check or sign in again before switching; no task was sent."));}
     let prior = service.relays.get(&owner.id, &thread);
-    let credential = match (worker, email) {
+    let portable = api.is_some() || super::context_handoff::enrolled(&root, &thread)?;
+    let mut handoff=if portable {Some(super::context_handoff::Handoff::for_route(super::credentials::official_home()?,std::path::PathBuf::from(metadata["path"].as_str().ok_or_else(||AccountError::protocol("Official context archive path is missing."))?),thread.clone(),&root,api.is_some())?)}else{None};
+    if let Some(source)=handoff.as_mut(){source.verify()?;}
+    let credential = if let Some(settings)=&api {
+        Some(relay::Route::prepare_api(selected.clone(),settings.clone(),super::api::read(&super::retention::home(&root,&selected)?)?)?)
+    }else{match (worker, email) {
         (Some(worker), Some(email)) => {
-            Some(relay::Route::prepare_credential(selected.clone(), worker, email).await?)
+            Some(progress.wait(relay::Route::prepare_credential(selected.clone(), worker, email,Some(progress))).await?)
         }
-        _ if selected == "host" && prior.is_some() && p["action"] != "native.detach" => {
+        _ if selected == "host" && (prior.is_some() || portable) && p["action"] != "native.detach" => {
             Some(relay::Route::prepare_official(owner.label.clone())?)
         }
         _ => None,
-    };
+    }};
     if prior.is_none() && service.relays.owned(&owner.id).len() >= 32 {
         return Err(AccountError::new(
             "ACCOUNT_ROUTE_LIMIT",
@@ -269,16 +303,26 @@ async fn prepare(
     } else {
         None
     });
+    if let Some(route) = &candidate {
+        progress.phase("local-route-probe", 55);
+        progress.wait(route.probe(true)).await?;
+    }
     if !current() || progress.is_cancelled() || host::observe(endpoint).await?.id != owner.id {
         return Err(stale());
     }
     progress.phase("native-transport", 65);
     let epoch=host_generation(endpoint).await?;
     let previous_mode=route_history(&root,&epoch)?[&thread].as_str().map(str::to_owned);
+    if candidate.is_some() && prior.is_none() && previous_mode.is_none() {
+        // Presentation only: no remembered conversion in this official process.
+        // Do not label retries/recovery or another account on a prepared route
+        // as a first switch, and do not alter the native unload protocol.
+        progress.phase("native-first-transport", 65);
+    }
     save_route_state(&root,&epoch,&thread,Some("pending"))?;
     let switch = native(
         endpoint,
-        json!({"mode":"switch","threadId":thread,"baseUrl":candidate.as_ref().map(|r|&r.base_url)}),
+        json!({"mode":"switch","threadId":thread,"baseUrl":candidate.as_ref().map(|r|&r.base_url),"api":api}),
     )
     .await;
     let commit:Result<Value>=async {
@@ -289,8 +333,8 @@ async fn prepare(
   save_route_state(&root,&epoch,&thread,Some(if candidate.is_some(){"relay"}else{"default"}))?;
   let mut all=service.state.lock().await;let state=all.get_mut(&owner.id).ok_or_else(stale)?;
   if state.generation!=generation||state.registry.selected.get(&thread)!=prior_selected.as_ref(){return Err(stale());}
-  let mut registry=state.registry.clone();registry.selected.insert(thread.clone(),selected.clone());super::save(&root,&registry)?;
-  state.registry=registry;if let (Some(route),Some(credential))=(&candidate,&credential){route.commit_credential(credential.clone());}service.relays.replace(&owner.id,&thread,candidate.clone());
+  let mut registry=state.registry.clone();registry.selected.insert(thread.clone(),selected.clone());if let Some(source)=&handoff {source.commit()?;}super::save(&root,&registry)?;
+  state.registry=registry;if let (Some(route),Some(credential))=(&candidate,&credential){if let Some(handoff)=handoff.take(){route.set_handoff(handoff);}route.commit_credential(credential.clone());}service.relays.replace(&owner.id,&thread,candidate.clone());
   Ok(json!({"ready":true,"selected":selected,"threadId":thread,"routed":candidate.is_some(),"permissionsPreserved":result["permissionsPreserved"],"executionMode":"native-relay"}))
  }.await;
     // The loaded actor kept its original endpoint. A second transition would
@@ -301,27 +345,28 @@ async fn prepare(
         // renderer transition with a second unsubscribe/rollback operation.
         return commit;
     }
-    if commit.as_ref().err().is_some_and(|e|e.message.contains("backendReopened=false;")) {
+    if commit.as_ref().err().is_some_and(|e|e.message.contains("backendReopened=false;")&&!e.message.contains("resumeOutcome=failed;")) {
         save_route_state(&root,&epoch,&thread,previous_mode.as_deref())?;
         progress.step("native-original-route-retained",json!({"previousRoutePresent":prior.is_some(),"taskSent":false}));
         return commit;
     }
-    if commit.is_err() {
+    if let Err(original)=&commit {
         progress.step(
             "native-route-rollback",
-            json!({"previousRoutePresent":prior.is_some(),"taskSent":false}),
+            json!({"previousRoutePresent":prior.is_some(),"originalCode":original.code,"taskSent":false}),
         );
         let rollback = native(
             endpoint,
-            json!({"mode":"switch","threadId":thread,"baseUrl":prior.as_ref().map(|r|&r.base_url)}),
+            json!({"mode":"switch","threadId":thread,"baseUrl":prior.as_ref().map(|r|&r.base_url),"api":prior.as_ref().and_then(|r|r.api_settings())}),
         )
         .await;
-        if rollback.is_err() {
+        if let Err(rollback)=rollback {
             return Err(AccountError::new(
                 "ACCOUNT_NATIVE_ROLLBACK",
-                "Native account preparation and restoration failed. stage=native-route-rollback; selection was not committed; no inference was sent. Re-select an account before sending.",
+                format!("Native account preparation and restoration failed. stage=native-route-rollback; originalCode={}; originalFailure=[{}]; restorationCode={}; restorationFailure=[{}]; selection was not committed; no inference was sent.",original.code,original.message,rollback.code,rollback.message),
             ));
         }
+        save_route_state(&root,&epoch,&thread,previous_mode.as_deref())?;
     }
     if commit.is_ok() {
         guard.0 = None;

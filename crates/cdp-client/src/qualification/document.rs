@@ -32,6 +32,8 @@ pub(super) fn layout_observation(value: &Value) -> Value {
         "nativeLoginPage",
         "legacyShellMatch",
         "workspaceRowPresent",
+        "workspaceContainerMatch",
+        "outerDirectRailCount",
         "rowMainCount",
         "mainContentClip",
         "directRailCount",

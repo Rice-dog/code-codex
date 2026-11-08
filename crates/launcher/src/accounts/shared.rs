@@ -292,6 +292,7 @@ pub(super) async fn prepare(state:&mut OwnerState,root:&Path,endpoint:CdpEndpoin
         };
         progress.step("credential-export",json!({"source":if selected=="host"{"official-file"}else{"managed-backend"}}));
         let auth = if let Some(account) = &source.2 {
+            if super::presentation::reauthorization_required(root,selected)?{return Err(AccountError::new("ACCOUNT_AUTH_REQUIRED","This connection requires reauthorization before preparation; no task was sent."));}
             credentials::managed_observed(account, &source.1, Some(progress)).await?
         } else {
             credentials::read(&source.0, &source.1, true)?

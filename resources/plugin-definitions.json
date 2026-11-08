@@ -151,7 +151,7 @@
       "name": "UI Surface Opacity",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.12",
+      "version": "1.0.14",
       "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "appearance"
@@ -331,7 +331,7 @@
       "name": "Multi-account Tasks",
       "category": "developer-tools",
       "api": 1,
-      "version": "1.0.66",
+      "version": "1.0.92",
       "releaseTag": "plugin-assets-2026-11-02",
       "capabilities": [
         "developer-tools"

@@ -250,6 +250,24 @@ function Show-CodeCodexDirectoryChoice([string]$Initial, [bool]$Existing) {
 $ErrorActionPreference = "Stop"
 if (-not $InstallRoot) { $InstallRoot = Get-CodeCodexRegisteredRoot }
 $InstallFullPath = Assert-CodeCodexRoot $InstallRoot -Owned
+
+if (Test-Path -LiteralPath (Join-Path $InstallFullPath 'data/host-updates/scheduler.json')) {
+# Remove only the exact per-installation observer; never remove another user's/foreign task.
+$ledgerHash = [Security.Cryptography.SHA256]::Create()
+try { $ledgerRootHash = ([BitConverter]::ToString($ledgerHash.ComputeHash([Text.Encoding]::UTF8.GetBytes($InstallFullPath.ToLowerInvariant())))).Replace('-','').ToLowerInvariant() } finally { $ledgerHash.Dispose() }
+$ledgerSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$ledgerTaskName='Code-Codex-HostUpdates-'+$ledgerRootHash.Substring(0,16)+'-'+$ledgerSid.Replace('-','_')
+$ledgerService=New-Object -ComObject 'Schedule.Service'
+$ledgerService.Connect()
+$ledgerFolder=$ledgerService.GetFolder('\')
+$ledgerTask=$null
+try {$ledgerTask=$ledgerFolder.GetTask($ledgerTaskName)} catch {if($_.Exception.HResult -ne -2147024894){throw}}
+if($ledgerTask){
+    if($ledgerTask.Definition.RegistrationInfo.Description -ne ('Code-Codex host update ledger '+$ledgerRootHash)){throw 'HOST_UPDATE_TASK_OWNER: A foreign task uses the observer name. No task was removed.'}
+    $ledgerFolder.DeleteTask($ledgerTaskName,0)
+}
+}
+
 function Enter-CodeCodexRemovalWorkingDirectory([string]$Root,[string]$Role) {
     # PowerShell's provider location and the process's Win32 current directory
     # are independent. Both can keep an otherwise empty installation in use.

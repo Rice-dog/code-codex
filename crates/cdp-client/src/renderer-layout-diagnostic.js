@@ -26,7 +26,13 @@
     }
   }
   const row = main?.closest('[data-app-shell-workspace-row="true"]') ?? null;
-  const children = row ? [...row.children] : [];
+  const outerChildren = row ? [...row.children] : [];
+  const outerRails = outerChildren.filter(child => child.matches('aside.app-shell-left-panel'));
+  const containers = outerChildren.filter(child => child.matches('[data-app-shell-workspace="true"]'));
+  const workspaceContainerMatch = outerRails.length === 0 && containers.length === 1 &&
+    !!main && containers[0].contains(main) && row.querySelectorAll('aside.app-shell-left-panel').length === 1;
+  const ownerRow = workspaceContainerMatch ? containers[0] : row;
+  const children = ownerRow ? [...ownerRow.children] : [];
   const rails = children.filter(child => child.matches('aside.app-shell-left-panel'));
   const owners = children.filter(child => child.contains(main));
   const owner = owners.length === 1 ? owners[0] : null;
@@ -72,6 +78,7 @@
   ];
   if (row && !legacy) checks.push(
     { name: 'row_unique_main', expected: 1, actual: rowMainCount },
+    { name: 'row_unique_rail', expected: 1, actual: row.querySelectorAll('aside.app-shell-left-panel').length },
     { name: 'main_content_clip', expected: true, actual: clip },
     { name: 'one_direct_rail', expected: 1, actual: rails.length },
     { name: 'one_main_owner_child', expected: 1, actual: owners.length },
@@ -81,7 +88,7 @@
   const explorer = document.querySelector('[data-code-codex-owned="true"]');
   const explorerStyle = explorer ? getComputedStyle(explorer) : null;
   return {
-    diagnosticVersion: 4,
+    diagnosticVersion: 5,
     topFrame: window === window.top,
     appOrigin: location.protocol === 'app:' && location.host === '-',
     readyState: document.readyState,
@@ -94,6 +101,8 @@
     nativeLoginPage,
     legacyShellMatch: legacy,
     workspaceRowPresent: !!row,
+    workspaceContainerMatch,
+    outerDirectRailCount: outerRails.length,
     rowMainCount,
     mainContentClip: clip,
     directRailCount: rails.length,

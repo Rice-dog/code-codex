@@ -1,5 +1,9 @@
 //! Owner-scoped account connections. Does not alter the official GUI's login.
+mod credential_worker;
+mod operations;
+mod model_catalog;
 mod host;
+mod api;
 mod routing;
 mod environment;
 mod payload;
@@ -15,12 +19,19 @@ mod shared;
 mod usage;
 mod queries;
 mod worker;
+mod backend_diagnostics;
+mod worker_health;
+mod identity;
+mod presentation;
 mod stream;
 mod stopping;
 mod outcome;
 mod relay;
 mod relay_diagnostics;
+mod context_handoff;
+mod official_context;
 mod native_route;
+mod draft;
 use cdp_client::{BridgeError, CdpEndpoint};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -57,6 +68,8 @@ type Result<T> = std::result::Result<T, AccountError>;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Connection {
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    api: Option<api::Settings>,
     id: String,
     label: String,
     email: Option<String>,
@@ -92,9 +105,12 @@ struct OwnerState {
 }
 pub struct AccountService {
     relays: relay::Routes,
+    drafts: draft::Drafts,
     native_route_lock:Mutex<()>,
     retired_owners:std::sync::Mutex<HashMap<String,Option<String>>>,
     preparations: std::sync::Mutex<HashMap<String, preparation::Preparation>>,
+    controls:operations::Controls,
+    worker_starts:credential_worker::Starts,
     payloads: payload::Payloads,
     endpoint: std::sync::RwLock<Option<CdpEndpoint>>,
     qualified: tokio::sync::OnceCell<()>,
@@ -103,9 +119,9 @@ pub struct AccountService {
 impl Default for AccountService {
     fn default() -> Self {
         Self {
-            relays:relay::Routes::default(),native_route_lock:Mutex::new(()),
+            relays:relay::Routes::default(),drafts:Default::default(),native_route_lock:Mutex::new(()),
             retired_owners:std::sync::Mutex::new(Default::default()),
-            preparations: std::sync::Mutex::new(HashMap::new()),
+            preparations: std::sync::Mutex::new(HashMap::new()),controls:Default::default(),worker_starts:Default::default(),
             payloads: payload::Payloads::default(),
             endpoint: std::sync::RwLock::new(None),
             qualified: tokio::sync::OnceCell::new(),
@@ -145,6 +161,7 @@ impl AccountService {
         }
         self.payloads.accept(&owner.id, epoch, &params)
     }
+    pub(crate) fn native_endpoint(&self)->Option<CdpEndpoint>{*self.endpoint.read().unwrap_or_else(std::sync::PoisonError::into_inner)}
     pub fn connect(&self, endpoint: CdpEndpoint) {
         *self
             .endpoint
@@ -190,23 +207,35 @@ impl AccountService {
                 "The native host account changed. Refresh the connection list before continuing.",
             ));
         }
-        if matches!(action.as_str(),"primary.start"|"primary.cancel") {return primary::request(self,endpoint,&owner,&params,&current).await;}
-        let progress_key = if matches!(action.as_str(),"shared.prepare"|"shared.status"|"native.prepare"|"native.ensure"|"native.detach") {Some(format!("{}:{}",owner.id,identifier(&params,"conversationId")?))}else{None};
+        if matches!(action.as_str(),"primary.start"|"primary.cancel"|"primary.status") {return primary::request(self,endpoint,&owner,&params,&current).await;}
+        let client_id=params.get("preparationId").map(|v|v.as_str().filter(|s|s.len()==32&&s.bytes().all(|c|c.is_ascii_hexdigit())).ok_or_else(||AccountError::protocol("Invalid account preparation identity."))).transpose()?;
+        if matches!(action.as_str(),"native.cancel"|"draft.cancel") {if let Some(id)=client_id{let pending=self.controls.cancel(&owner.id,id)?;draft::cancel_preparation(self,&owner.id,id);return Ok(json!({"cancelRequested":pending,"turnInterrupted":false}));}}
+        let progress_key = if matches!(action.as_str(),"shared.prepare"|"shared.status"|"native.prepare"|"native.ensure"|"native.detach"|"native.cancel") {Some(format!("{}:{}",owner.id,identifier(&params,"conversationId")?))}else{None};
+        if action=="native.cancel" {
+            let pending=self.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(progress_key.as_ref().unwrap()).cloned();
+            let requested=pending.as_ref().is_some_and(|p|p.snapshot()["status"]=="preparing");
+            if requested {pending.unwrap().cancel();}
+            crate::runtime_log::record("accounts","account.prepare-cancel","requested",json!({"preparationFound":requested,"turnInterrupted":false,"taskSent":false}));
+            return Ok(json!({"cancelRequested":requested,"turnInterrupted":false}));
+        }
         if action=="shared.status" {
             return Ok(self.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(progress_key.as_ref().unwrap()).map(|p|p.snapshot()).unwrap_or(json!({"status":"none"})));
         }
-        let progress=if matches!(action.as_str(),"shared.prepare"|"native.prepare"|"native.ensure"|"native.detach") {
+        let progress=if matches!(action.as_str(),"shared.prepare"|"native.prepare"|"native.ensure"|"native.detach"|"draft.prepare") {
             let p=preparation::Preparation::start();
+            let key=progress_key.unwrap_or_else(||format!("{}:draft:{}",owner.id,client_id.map(str::to_owned).unwrap_or_else(nonce)));
             let mut entries=self.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if entries.len()>=32 {entries.retain(|_,p|p.snapshot()["status"]=="preparing");}
             if entries.len()>=32 {return Err(AccountError::new("ACCOUNT_BUSY","Too many preparations are pending."));}
-            if entries.get(progress_key.as_ref().unwrap()).is_some_and(|p|p.snapshot()["status"]=="preparing") {return Err(AccountError::new("ACCOUNT_SELECTION_PENDING","This conversation already has a pending preparation."));}
-            entries.insert(progress_key.unwrap(),p.clone());Some(p)
+            if entries.get(&key).is_some_and(|p|p.snapshot()["status"]=="preparing") {return Err(AccountError::new("ACCOUNT_SELECTION_PENDING","This conversation already has a pending preparation."));}
+            if let Some(id)=client_id{self.controls.admit(&owner.id,id,&p)?;}
+            entries.insert(key,p.clone());Some(p)
         }else{None};
         let _progress_guard=progress.clone().map(preparation::Guard);
         let root = owner_root(&owner.id)?;
         primary::guard(&root,&owner,&action)?;
         if action=="session.end"{primary::request(self,endpoint,&owner,&json!({"action":"primary.cancel"}),&current).await?;}
+        if action.starts_with("draft.") {return draft::request(self,endpoint,&owner,&params,progress.as_ref(),current).await;}
         if action.starts_with("native.") {if root.join("ended-session.json").exists(){self.relays.close_owner(&owner.id);return Err(AccountError::new("ACCOUNT_OWNER_CHANGED","The official login session ended. No account route was used."));}return native_route::request(self,endpoint,&owner,&params,workspace.as_deref(),progress.as_ref(),current).await;}
         if action=="session.end" || root.join("ended-session.json").exists() {
             let pending:Vec<_>=self.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().filter(|(key,p)|key.starts_with(&format!("{}:",owner.id)) && (p.snapshot()["status"]=="preparing" || p.snapshot()["cleanupConfirmed"]==false)).map(|(_,p)|p.clone()).collect();
@@ -216,6 +245,7 @@ impl AccountService {
                 while pending.iter().any(|p|p.snapshot()["status"]=="preparing" || p.snapshot()["cleanupConfirmed"]==false) {tokio::time::sleep(std::time::Duration::from_millis(25)).await;}
             }).await.map_err(|_|AccountError::new("ACCOUNT_LOGOUT_PENDING","Cancelled account preparations have not confirmed cleanup. stage=logout-prepare-cleanup; timeoutMs=15000; logout was not forwarded."))?;
         }
+        let _api_edit_guard=if matches!(action.as_str(),"api.add"|"api.update"|"remove") {Some(tokio::time::timeout(std::time::Duration::from_secs(15),self.native_route_lock.lock()).await.map_err(|_|AccountError::new("ACCOUNT_REQUEST_BUSY","A connection transition is already pending. No connection edit was committed."))?)}else{None};
         let queue_started=std::time::Instant::now();
         let observing=matches!(action.as_str(),"shared.events"|"shared.reconcile"|"info"|"verify"|"shared.stop");
         let mut all = if progress.is_some() || observing {
@@ -292,10 +322,49 @@ impl AccountService {
             drop(all);
             return preparing::run(self,transaction,&root,endpoint,&owner,&params,workspace.as_deref(),progress.as_ref().ok_or_else(||AccountError::protocol("Preparation diagnostics unavailable."))?,current).await;
         }
+        if matches!(action.as_str(), "api.models" | "api.model" | "api.catalog") {
+            drop(all);
+            return model_catalog::request(self, endpoint, &owner, &params, current).await;
+        }
+        if action=="api.editor" {
+            let id=identifier(&params,"connectionId")?;
+            if !state.registry.connections.iter().any(|c|c.id==id&&c.api.is_some()){return Err(AccountError::protocol("The API connection is unavailable."));}
+            let key=api::read(&retention::home(&root,id)?)?;
+            if !current(){return Err(AccountError::new("ACCOUNT_STALE_SESSION","The API editor belongs to an inactive document."));}
+            return Ok(json!({"apiKey":key}));
+        }
+        if action=="connections.reorder" {return presentation::reorder(&root,&state.registry.connections,&params["connectionIds"]);}
         if action=="info" || action=="verify" {
             let snapshot=queries::Snapshot::capture(state,&params)?;
             drop(all);
             return queries::read(self,snapshot,&root,endpoint,&owner,&params,current).await;
+        }
+        if matches!(action.as_str(),"api.add"|"api.update") {
+            let label=text(&params,"label")?.trim();
+            if label.is_empty()||label.len()>100||label.chars().any(char::is_control){return Err(AccountError::protocol("Enter a connection name between one and one hundred characters."));}
+            let settings=api::Settings::parse(text(&params,"baseUrl")?,text(&params,"model")?)?.with_models(params.get("models"))?;
+            let updating=action=="api.update";
+            let id=if updating{text(&params,"connectionId")?.to_owned()}else{nonce()};
+            let existing=state.registry.connections.iter().position(|c|c.id==id);
+            if updating&&!existing.is_some_and(|i|state.registry.connections[i].api.is_some()){return Err(AccountError::protocol("The API connection is unavailable."));}
+            if !updating&&state.registry.connections.len()>=16{return Err(AccountError::new("ACCOUNT_LIMIT","At most sixteen connections are supported."));}
+            if self.relays.owned(&owner.id).iter().any(|r|r.connection()==id){return Err(AccountError::new("ACCOUNT_API_IN_USE","Select another connection in every conversation using this API before editing it. No settings were changed."));}
+            let home=retention::home(&root,&id)?;directory(&home)?;
+            let key=params["apiKey"].as_str().unwrap_or("");
+            if key.is_empty()&&!updating{return Err(AccountError::new("ACCOUNT_API_KEY","Enter an API key. No connection was added."));}
+            // Build and validate before writing credentials or public metadata.
+            if !key.is_empty(){api::validate_key(key)?;}else{api::read(&home)?;}
+            let mut registry=state.registry.clone();
+            let connection=Connection{id:id.clone(),label:label.into(),email:None,plan:None,api:Some(settings)};
+            if let Some(i)=existing{registry.connections[i]=connection;}else{registry.connections.push(connection);}
+            if !current(){return Err(AccountError::new("ACCOUNT_STALE_SESSION","The API edit belongs to an inactive document. No connection was saved."));}
+            let old_key=if updating&&!key.is_empty(){api::read(&home).ok()}else{None};
+            if !key.is_empty(){api::store(&home,key)?;}
+            if let Err(error)=save(&root,&registry){
+                let restored=if let Some(old_key)=old_key{api::store(&home,&old_key)}else if !updating||!key.is_empty(){credentials::delete(&home)}else{Ok(())};
+                if restored.is_err(){return Err(AccountError::new("ACCOUNT_API_STORAGE_PENDING","The API metadata write and credential restoration failed. Re-enter this connection before use. No inference was sent."));}return Err(error);
+            }
+            state.registry=registry;return Ok(json!({"id":id,"saved":true}));
         }
         match action.as_str() {
             "session.policy" => {
@@ -337,28 +406,27 @@ impl AccountService {
                             "Authorize this connection before reading its quota.",
                         )
                     })?;
-                let worker = get_worker(state, &root, &id).await?;
-                // A slow read must not hold the account registry mutex and block Send/Stop.
+                // Startup and reads share the connection-local lane, never the registry lock.
                 drop(all);
-                let account = worker
-                    .request("account/read", json!({"refreshToken":false}))
-                    .await?;
-                if account["account"]["type"] != "chatgpt"
-                    || !account["account"]["email"]
-                        .as_str()
-                        .is_some_and(|email| email.eq_ignore_ascii_case(&expected))
+                let observe=async {
+                let worker=credential_worker::acquire(self,&root,&owner.id,&id,&current).await?;
+                // Verify the native backend's current credential without forcing
+                // network workspace discovery for an already fresh identity.
+                let observed=credentials::observe_managed(&worker,&expected,None,presentation::reauthorization_required(&root,&id)?).await;
+                if !current()||host::observe(endpoint).await?.id!=owner.id{return Err(AccountError::new("ACCOUNT_QUERY_STALE","The account owner changed during the quota identity check."))}
                 {
-                    return Err(AccountError::new(
-                        "ACCOUNT_USAGE_IDENTITY",
-                        "The connection identity changed. Verify sign-in before reading quota.",
-                    ));
+                    let all=tokio::time::timeout(std::time::Duration::from_secs(15),self.state.lock()).await.map_err(|_|AccountError::new("ACCOUNT_REQUEST_BUSY","The identity observation could not acquire its account state."))?;
+                    let valid=all.get(&owner.id).is_some_and(|s|s.registry.connections.iter().any(|c|c.id==id&&c.email.as_deref()==Some(&expected)));
+                    if !current()||!valid{return Err(AccountError::new("ACCOUNT_QUERY_STALE","The quota connection changed before its identity observation."))}
+                    presentation::observe(&root,&id,&observed,Some(&expected),&all.get(&owner.id).ok_or_else(||AccountError::protocol("Account state unavailable."))?.registry.connections)?;
                 }
+                let account=observed?;
+                identity::check(&account,Some(&expected))?;
                 let raw = worker.request("account/rateLimits/read", json!({})).await?;
                 let consumed = if action=="reset.consume" {
                     let card=text(&params,"cardId")?;let key=text(&params,"idempotencyKey")?;
                     if card.len()>256||(key.len()!=36||key.chars().enumerate().any(|(i,c)|if matches!(i,8|13|18|23){c!='-'}else{!c.is_ascii_hexdigit()})){return Err(AccountError::protocol("Invalid reset redemption identity."));}
-                    let eligible=raw["rateLimitResetCredits"]["credits"].as_array().is_some_and(|cards|cards.iter().any(|c|c["id"]==card&&c["status"]=="available"&&c["resetType"]=="codexRateLimits"&&(c["expiresAt"].is_null()||c["expiresAt"].as_i64().is_some_and(|v|v>std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64))));
-                    if !eligible{return Err(AccountError::new("ACCOUNT_RESET_UNAVAILABLE","The selected reset is unavailable or expired. No redemption was sent."));}
+                    usage::require_reset(&raw,card,std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)?;
                     if !current()||host::observe(endpoint).await?.id!=owner.id{return Err(AccountError::new("ACCOUNT_STALE_SESSION","The owner changed before reset confirmation. No redemption was sent."));}
                     {
                         let registry=self.state.lock().await;
@@ -377,6 +445,10 @@ impl AccountService {
                     let outcome=value["outcome"].as_str().filter(|s|matches!(*s,"reset"|"alreadyRedeemed"|"nothingToReset"|"noCredit")).ok_or_else(||AccountError::new("ACCOUNT_RESET_OUTCOME_UNKNOWN","The reset outcome could not be verified. Do not submit a new redemption key."))?;
                     Ok(json!({"outcome":outcome}))
                 }else{Ok(usage::project(&raw))}
+                };
+                // A redemption is a write with an unknown-outcome fence; never cancel it
+                // using the read-only observation deadline after it may have been sent.
+                if action=="usage"{tokio::time::timeout(std::time::Duration::from_secs(50),observe).await.map_err(|_|AccountError::new("ACCOUNT_USAGE_TIMEOUT","The account quota observation exceeded its total deadline. Login expiration was not inferred; no task or redemption was sent."))?}else{observe.await}
             }
             "release" => {
                 // Retire only idle per-thread routes, restoring the native default.
@@ -426,6 +498,7 @@ impl AccountService {
                     label: label.into(),
                     email: None,
                     plan: None,
+                    api: None,
                 };
                 state.registry.connections.push(connection);
                 save(&root, &state.registry)?;
@@ -461,7 +534,7 @@ impl AccountService {
                 save(&root, &state.registry)?;
                 Ok(json!({"selected":id}))
             }
-            "login" | "login.cancel" | "verify" | "remove" | "reconcile" => {
+            "login" | "login.cancel" | "remove" | "reconcile" => {
                 let id = text(&params, "connectionId")?.to_string();
                 let index = state
                     .registry
@@ -474,6 +547,13 @@ impl AccountService {
                             "This account connection is unavailable for the current owner.",
                         )
                     })?;
+                if state.registry.connections[index].api.is_some() {
+                    if action!="remove" {return Err(AccountError::new("ACCOUNT_API_ACTION","Official account authorization and quota operations do not apply to an API connection."));}
+                    if self.relays.owned(&owner.id).iter().any(|r|r.connection()==id)||state.active.values().any(|v|v==&id){return Err(AccountError::new("ACCOUNT_API_IN_USE","Select another connection in every conversation using this API before removing it."));}
+                    credentials::delete(&retention::home(&root,&id)?)?;retention::forget(&root,&id)?;
+                    state.registry.connections.remove(index);state.registry.selected.retain(|_,v|v!=&id);save(&root,&state.registry)?;
+                    return Ok(json!({"disconnected":true}));
+                }
                 if action == "remove" {
                     if state.active.values().any(|v| v == &id) {
                         return Err(AccountError::new(
@@ -619,35 +699,6 @@ impl AccountService {
                         state.login = None;
                         result
                     }
-                    "events" => {
-                        let after = params["after"].as_u64().ok_or_else(|| {
-                            AccountError::protocol("An event cursor is required.")
-                        })?;
-                        let result = worker.events(after).await?;
-                        for event in result["events"].as_array().into_iter().flatten() {
-                            let message = &event["message"];
-                            if message["method"] == "turn/completed" {
-                                if let Some(thread) = message["params"]["threadId"].as_str() {
-                                    if let Some((_, logical, _)) = state.threads.get(thread) {
-                                        state.active.remove(logical);
-                                    }
-                                }
-                            }
-                        }
-                        if state.registry.active != state.active {
-                            state.registry.active = state.active.clone();
-                            save(&root, &state.registry)?;
-                        }
-                        state
-                            .cursors
-                            .insert(id, result["cursor"].as_u64().unwrap_or(after));
-                        Ok(result)
-                    }
-                    "reply" => {
-                        worker
-                            .reply(params["id"].clone(), params["result"].clone())
-                            .await
-                    }
                     _ => Err(AccountError::protocol("Unsupported account action.")),
                 }
             }
@@ -656,9 +707,12 @@ impl AccountService {
     }
 }
 async fn get_worker(state: &mut OwnerState, root: &Path, id: &str) -> Result<Arc<Worker>> {
-    if let Some(worker) = state.workers.get(id) {
+    if state.registry.connections.iter().any(|c|c.id==id&&c.api.is_some()){return Err(AccountError::new("ACCOUNT_API_ACTION","An API connection cannot use an official account worker."));}
+    if let Some(worker) = state.workers.get(id).cloned() {
+        let worker=worker.effective()?.unwrap_or(worker);
         if !worker.is_dead() {
-            return Ok(worker.clone());
+            state.workers.insert(id.into(),worker.clone());
+            return Ok(worker);
         }
         if state.active.values().any(|v| v == id) {
             return Err(AccountError::new(
@@ -722,7 +776,7 @@ fn load(root: &Path) -> Result<Registry> {
             .keys()
             .chain(registry.active.keys())
             .any(|id| identifier(&json!({"id":id}), "id").is_err())
-        || registry.connections.iter().any(|c| !valid_id(&c.id))
+        || registry.connections.iter().any(|c| !valid_id(&c.id)||c.api.as_ref().is_some_and(|a|!a.valid()))
     {
         return Err(AccountError::new(
             "ACCOUNT_STORAGE",
@@ -778,13 +832,18 @@ fn identifier<'a>(p: &'a Value, key: &str) -> Result<&'a str> {
 }
 fn validate_fields(params: &Value, action: &str) -> Result<()> {
     let extra: &[&str] = match action {
-        "info" | "release" | "session.end" | "primary.cancel" => &[],
+        "info" | "release" | "session.end" | "primary.cancel" | "primary.status" => &[],
         "session.policy" => &["followLogout"],
+        "connections.reorder" => &["connectionIds"],
         "primary.start" => &["connectionId"],
         "shared.prepare" => &["conversationId", "connectionId", "settings"],
-        "native.prepare" | "native.ensure" => &["conversationId", "connectionId"],
+        "native.prepare" | "native.ensure" => &["conversationId", "connectionId","preparationId"],
         "native.detach" => &["conversationId"],
         "native.status" => &["conversationId"],
+        "native.cancel" => &["conversationId","preparationId"],
+        "draft.prepare" => &["connectionId","cwd","preparationId"],
+        "draft.commit" => &["token","conversationId"],
+        "draft.cancel" => &["token","preparationId"],
         "shared.events" => &["conversationId", "after"],
         "shared.reconcile" | "shared.status" => &["conversationId"],
         "shared.stop" => &["conversationId", "turnId"],
@@ -792,6 +851,11 @@ fn validate_fields(params: &Value, action: &str) -> Result<()> {
         "shared.rpc" => &["conversationId", "method", "params"],
 
         "add" => &["label"],
+        "api.add" => &["label","baseUrl","model","models","apiKey"],
+        "api.update" => &["connectionId","label","baseUrl","model","models","apiKey"],
+        "api.models" | "api.editor" => &["connectionId"],
+        "api.catalog" => &["baseUrl","apiKey"],
+        "api.model" => &["connectionId","model"],
         "select" => &["conversationId", "connectionId"],
         "login" | "verify" | "remove" | "reconcile" | "usage" => &["connectionId"],
         "reset.consume" => &["connectionId", "cardId", "idempotencyKey"],

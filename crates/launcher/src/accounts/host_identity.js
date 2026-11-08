@@ -1,5 +1,5 @@
 (async()=>{
- const namespace=await import(__HOST_SHARED__);const dispatcher=namespace[__HOST_DISPATCHER__];
+ const namespace=await (__HOST_SHARED__.includes("#cc-host=")?loadHostNamespace(__HOST_SHARED__):import(__HOST_SHARED__));const dispatcher=namespace[__HOST_DISPATCHER__];
  const started=Date.now(),deadline=started+8000,steps=[];let attempts=0;
  const reasons=new Map([
   ['workspace routing discovery failed','workspace-routing-discovery-failed'],

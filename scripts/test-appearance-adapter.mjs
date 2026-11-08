@@ -18,6 +18,7 @@ const server=createServer((req,res)=>{
  if(url.pathname==='/seam.js'){res.setHeader('Content-Type','text/javascript');res.end(seam);return;}
  if(url.pathname.endsWith('.js')){
   res.setHeader('Content-Type','text/javascript');
+  if(url.pathname==='/app-initial-import-failure.js'){res.statusCode=404;res.end('unavailable');return;}
   if(url.pathname.includes('run-app-action-in-primary-window-'))res.end(dispatcher+'export{dispatch as differentName,dispatch as alias};');
   else if(scenario==='legacy')res.end(legacy);
   else if(scenario==='initial-dispatch')res.end(dispatcher+'export{dispatch as renamed};');
@@ -57,6 +58,17 @@ try{
  check('verified module hints recover a role absent from DOM and resource timing',await ev(`(async()=>{window[Symbol.for('code-codex:account-host-profile:v1')]={appearance:['/run-app-action-in-primary-window-late.js']};return (await fixture.readCodexAppearanceTheme())==='light';})()`));
  check('native role hint and its observed absolute URL count as one module',await ev(`fixture.findCodexAppearanceActionModules().length===1`));
  check('native hints still reject foreign and query-bearing Appearance URLs',await ev(`(()=>{window[Symbol.for('code-codex:account-host-profile:v1')]={appearance:['https://untrusted.invalid/run-app-action-in-primary-window-foreign.js','/run-app-action-in-primary-window-query.js?x=1']};return fixture.findCodexAppearanceActionModules().every(x=>new URL(x,location.href).origin===location.origin&&!new URL(x,location.href).search);})()`));
+ await page('missing');
+ check('reproduces missing discovery with account feature absent and evicted resource timing',await ev(`(async()=>{document.querySelectorAll('link[rel="modulepreload"]').forEach(e=>e.remove());performance.clearResourceTimings();delete window[Symbol.for('code-codex:account-host-profile:v1')];try{await fixture.readCodexAppearanceTheme();return false;}catch(e){return e.message.includes('stage=module-discovery')&&calls.length===0;}})()`));
+ check('independent native inventory fixes that exact discovery gap without account startup',await ev(`(async()=>{window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:[],appearance:['./run-app-action-in-primary-window-independent.js']};return (await fixture.readCodexAppearanceTheme())==='light'&&!window[Symbol.for('code-codex:account-host-profile:v1')];})()`));
+ check('independent role hints survive resource buffer eviction',await ev(`(async()=>{performance.clearResourceTimings();return !!(await fixture.discoverCodexAppearanceAdapter()).runAction;})()`));
+ check('independent hints reject external query fragment and unrelated roles',await ev(`(()=>{window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:[],appearance:['https://untrusted.invalid/run-app-action-in-primary-window-x.js','/run-app-action-in-primary-window-x.js?bad=1','/run-app-action-in-primary-window-x.js#bad','/unrelated.js']};performance.clearResourceTimings();return fixture.findCodexAppearanceActionModules().length===0;})()`));
+ await page('missing');
+ check('failed legacy import permits independent split-role fallback',await ev(`(async()=>{document.querySelectorAll('link[rel="modulepreload"]').forEach(e=>e.remove());performance.clearResourceTimings();window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:['/app-initial-import-failure.js'],appearance:['/run-app-action-in-primary-window-independent.js']};return (await fixture.readCodexAppearanceTheme())==='light';})()`));
+ await page('missing');
+ check('ambiguous independent role hints reject before any official action',await ev(`(async()=>{window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:[],appearance:['/run-app-action-in-primary-window-a.js','/run-app-action-in-primary-window-b.js']};try{await fixture.readCodexAppearanceTheme();return false;}catch(e){return e.message.includes('CC-APPEARANCE-ADAPTER-002')&&calls.length===0;}})()`));
+ await page('missing');
+ check('unsupported inventory schema cannot authorize module import',await ev(`(async()=>{document.querySelectorAll('link[rel="modulepreload"]').forEach(e=>e.remove());performance.clearResourceTimings();window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:999,initial:[],appearance:['/run-app-action-in-primary-window-a.js']};try{await fixture.readCodexAppearanceTheme();return false;}catch(e){return e.message.includes('CC-APPEARANCE-ADAPTER-001')&&calls.length===0;}})()`));
  for(const scenario of ['invalid-response','reject-set']){
   await page(scenario);const expression=scenario==='invalid-response'?`fixture.readCodexAppearanceTheme()`:`fixture.writeCodexAppearanceTheme('dark')`;
   check(scenario+' propagates official failure',await ev(`${expression}.then(()=>false,e=>!!e.message)`));
@@ -70,5 +82,7 @@ try{
  }
  await page('missing');
  check('failed Enable leaves no theme lease or background and no restart advice',await ev(`(async()=>{fixture.connectBackgroundPackages(async()=>({loaded:true}));const controller=new fixture.BlinkingSquaresBackgroundController();let error;try{await controller.enable();}catch(e){error=e;}const ok=!!error&&!/Restart Codex/.test(error.message)&&error.cause?.message.includes('CC-APPEARANCE-ADAPTER-001')&&!controller.enabled&&!controller.pending&&!fixture.readParticleThemeLease()&&!document.querySelector('[data-code-codex-blinking-squares-layer]');controller.dispose();return ok;})()`));
+ await page('missing');
+ check('real background enable and restore work with account absent and no resource hints',await ev(`(async()=>{document.querySelectorAll('link[rel="modulepreload"]').forEach(e=>e.remove());performance.clearResourceTimings();window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:[],appearance:['/run-app-action-in-primary-window-independent.js']};fixture.connectBackgroundPackages(async()=>({loaded:true}));const controller=new fixture.BlinkingSquaresBackgroundController();try{await controller.enable();const enabled=controller.enabled&&fixture.codexDarkThemeApplied();await controller.disable();return enabled&&mode==='light'&&!fixture.readParticleThemeLease()&&!window[Symbol.for('code-codex:account-host-profile:v1')];}finally{controller.dispose();}})()`));
  console.log('Appearance adapter: '+report.checks.length+' checks passed');
 }catch(error){report.error=String(error);throw error;}finally{writeFileSync(join(directory,'results.json'),JSON.stringify(report,null,2));await browser?.close();server.close();}

@@ -361,6 +361,7 @@ where
     let dispatch_slots = Arc::new(Semaphore::new(MAX_IN_FLIGHT_REQUESTS));
     let mut handler_tasks = JoinSet::new();
     let (outbound_sender, mut outbound_receiver) = mpsc::channel::<OutboundMessage>(256);
+    let mut delivery_acks=super::session_diagnostics::Acks::default();
     let mut document_epoch = 0_u64;
     let mut document_qualified = true;
     let mut pending_requests = VecDeque::new();
@@ -377,6 +378,7 @@ where
     let mut qualification_tick = tokio::time::interval(Duration::from_millis(250));
     qualification_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     qualification_tick.tick().await;
+    let mut last_transport_tick=Instant::now();
     loop {
         tokio::select! {
             () = cancellation.cancelled() => break,
@@ -384,6 +386,11 @@ where
                 let _ = completed;
             }
             _ = qualification_tick.tick() => {
+                let gap=last_transport_tick.elapsed();last_transport_tick=Instant::now();
+                if gap>=Duration::from_secs(2) {
+                    if let Some(observer)=super::DIAGNOSTIC_OBSERVER.get(){observer("cdp-transport","bridge.scheduler","observed",json!({"stage":"session-loop-delay","tickGapMs":gap.as_millis(),"handlerCount":handler_tasks.len(),"outboundQueued":outbound_receiver.len(),"upstreamCauseUnproven":true,"taskReplayed":false}));}
+                }
+                delivery_acks.expire();
                 if execution_context_probe
                     .as_ref()
                     .is_some_and(|(_, _, _, started): &(u64, u64, ContextIngress, Instant)| {
@@ -425,13 +432,16 @@ where
                 }
             }
             outbound = outbound_receiver.recv() => {
-                let Some(outbound) = outbound else { break; };
+                let Some(mut outbound) = outbound else { break; };
+                if let Some(t)=outbound.trace.as_mut(){t.phase("outbound-dequeued");}
                 if !document_qualified
                     || trusted_execution_context.is_none()
                     || outbound.document_epoch != document_epoch
                 {
+                    if let Some(t)=outbound.trace.as_mut(){t.finish("document-epoch-discarded",true);}
                     continue;
                 }
+                if let Some(t)=outbound.trace.as_mut(){t.phase("cdp-write-started");}
                 for expression in outbound_expressions(&outbound, &injection.receiver_name)? {
                 send_command(
                     &mut writer,
@@ -441,6 +451,7 @@ where
                 ).await?;
                 next_id += 1;
                 }
+                if let Some(trace)=outbound.trace.take(){delivery_acks.insert(next_id-1,trace);}
             }
             notification = notifications.recv() => match notification {
                 Ok(notification) => {
@@ -481,6 +492,7 @@ where
                 match incoming {
                     Message::Text(text) => {
                         let message = parse_cdp_message(text.as_ref())?;
+                        if delivery_acks.observe(&message){continue;}
                         if message.get("id").and_then(Value::as_u64) == Some(initial_bootstrap_eval_id) {
                             let succeeded = bootstrap_evaluation_succeeded(&message, initial_bootstrap_eval_id);
                             if let Some(progress) = &progress {

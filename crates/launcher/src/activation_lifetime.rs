@@ -57,7 +57,7 @@ fn quote(argument: &std::ffi::OsStr) -> Result<String, ProcessGuardError> {
 }
 
 #[cfg(windows)]
-async fn broker(exe: &std::path::Path, args: &[std::ffi::OsString]) -> Result<u32, ProcessGuardError> {
+pub(crate) async fn broker(exe: &std::path::Path, args: &[std::ffi::OsString]) -> Result<u32, ProcessGuardError> {
     use base64::Engine;
     let command = std::iter::once(exe.as_os_str()).chain(args.iter().map(|a|a.as_os_str())).map(quote).collect::<Result<Vec<_>,_>>()?.join(" ");
     let literal = command.replace('\'', "''");

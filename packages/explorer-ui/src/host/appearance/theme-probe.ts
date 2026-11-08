@@ -12,8 +12,11 @@ export function isCodexRpcNamespace(value: unknown): value is Record<string,unkn
 
 
 function appearanceModuleCandidates(): readonly string[] {
+  const hints=(window as unknown as Record<symbol,{schema?:number;initial?:unknown;appearance?:unknown}|undefined>)[Symbol.for('code-codex:appearance-module-hints:v1')];
+  const native=hints?.schema===1?[hints.initial,hints.appearance].flatMap(v=>Array.isArray(v)&&v.length<=4?v.filter((x):x is string=>typeof x==='string'&&x.length<=256):[]):[];
   const profile=(window as unknown as Record<symbol,{initial?:string;appearance?:string[]}|undefined>)[Symbol.for('code-codex:account-host-profile:v1')];
   const candidates=[
+    ...native,
     ...(profile?.initial?[profile.initial]:[]),...(profile?.appearance??[]),
     ...Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="modulepreload"][href]'),(link) => link.href),
     ...Array.from(document.querySelectorAll<HTMLScriptElement>("script[type=module][src]"),(script) => script.src),
@@ -23,7 +26,10 @@ function appearanceModuleCandidates(): readonly string[] {
 }
 
 export function findCodexAppInitialModule(): string|undefined {
-  return appearanceModuleCandidates().find((candidate) => {
+  return findCodexAppInitialModules()[0];
+}
+export function findCodexAppInitialModules(): readonly string[] {
+  return appearanceModuleCandidates().filter((candidate) => {
     try {
       const url=new URL(candidate,location.href);return url.protocol===location.protocol&&url.host===location.host&&!url.search&&!url.hash&&/\/app-initial-[A-Za-z0-9_-]+\.js$/.test(url.pathname);
     } catch(__codeCodexCaught) {
@@ -93,4 +99,10 @@ export function waitForCodexDarkTheme(): Promise<void> {
     },CODEX_DARK_APPLY_TIMEOUT_MS);
     check();
   });
+}
+
+export function findCodexNumberedRuntimes():readonly string[]{
+ const hints=(window as unknown as Record<symbol,{schema?:number;runtimes?:unknown}|undefined>)[Symbol.for('code-codex:appearance-module-hints:v1')];
+ const candidates=hints?.schema===1&&Array.isArray(hints.runtimes)&&hints.runtimes.length<=4?hints.runtimes:[];
+ return [...new Set(candidates.filter((v):v is string=>typeof v==='string'&&v.length<=200&&/^\.\/assets\/[0-9]+\.[A-Za-z0-9_-]+\.js$/.test(v)))];
 }

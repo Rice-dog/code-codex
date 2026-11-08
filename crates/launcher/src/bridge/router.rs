@@ -77,6 +77,10 @@ impl BridgeHandler for NativeBridge {
                     #[cfg(not(windows))]
                     { Err(BridgeError::new("UNSUPPORTED","Opening the installation folder is unavailable on this platform.")) }
                 }
+                "explorer.host.updates.retry" => {if !request.params.as_object().is_some_and(serde_json::Map::is_empty){return Err(BridgeError::invalid_request())}self.ensure_epoch(epoch)?;Ok(crate::host_updates::retry())},
+                "explorer.host.updates.status" => {if !request.params.as_object().is_some_and(serde_json::Map::is_empty){return Err(BridgeError::invalid_request())}crate::host_updates::status().map_err(|_|BridgeError::new("HOST_UPDATE_REPORT","The local update status is unavailable."))},
+                "explorer.host.updates.open" => {if !request.params.as_object().is_some_and(serde_json::Map::is_empty){return Err(BridgeError::invalid_request())}self.ensure_epoch(epoch)?;let dir=crate::host_updates::directory().map_err(|_|BridgeError::new("HOST_UPDATE_REPORT","The local update report directory is unavailable."))?;reveal_in_file_explorer(&dir).map_err(|_|BridgeError::new("HOST_UPDATE_REPORT","The local update report directory could not be opened."))?;Ok(json!({"opened":true}))},
+                "explorer.installation.restart" => self.installation_restart(request.params, epoch).await,
                 "explorer.installation.uninstall" => self.installation_uninstall(request.params, epoch).await,
                 "explorer.runtime.list" => {
                     crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))

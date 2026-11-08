@@ -6,11 +6,12 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const root = resolve(import.meta.dirname, '..');
+const nested = process.argv.includes('--nested');
 const tag = builtExplorerTag(root);
 const home = `<div id="home" data-app-shell-active-page="true" style="display:contents"><div class="_Workspace_new"><header><span data-app-shell-titlebar-content>Home title</span></header><div class="_MainContentClip_new"><main data-app-shell-main-surface="default"><div class="_WorkspaceContent_new"><div data-app-shell-workspace-layout="split"><article data-response-annotation-conversation="thread_home_001">Conversation</article><div data-above-composer-conversation-id="thread_home_001"><textarea>Native draft</textarea></div></div></div></main></div></div></div>`;
 const setup = `
 const calls=[];const listeners=new Set();let changed=false;
-window.__CODE_CODEX_BOOTSTRAP__={token:'test',codexVersion:'26.928.2636.0',supported:true};
+window.__CODE_CODEX_BOOTSTRAP__={token:'test',codexVersion:${JSON.stringify(nested ? 'unknown' : '26.928.2636.0')},supported:true};
 window.__codeCodex={subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener);},request:async({method,params})=>{
  calls.push({method,params});
  if(method==='explorer.settings.get'||method==='explorer.settings.set')return {collapsed:false,panelWidth:260};
@@ -34,7 +35,7 @@ try{
  const e=document.querySelector('${tag}'),s=e.shadowRoot;
  let marker=document.querySelector('[data-app-action-sidebar-thread-id]');
  const homeButton=document.querySelector('[data-sidebar-destination="builtin:home"]');
- let row=document.querySelector('[data-app-shell-workspace-row]');
+ let row=document.querySelector(${JSON.stringify(nested ? '[data-app-shell-workspace=true]' : '[data-app-shell-workspace-row]')});
  let feature=document.querySelector('#feature');
  const count=method=>calls.filter(c=>c.method===method).length;
  const selectFeature=destination=>{
@@ -95,7 +96,7 @@ try{
  // no sidebar trigger. Disposal must wait until that React commit is visible.
  selectFeature('settings');
  homeButton.setAttribute('aria-current','page'); // Selection can lag the row replacement.
- const settingsRow=document.createElement('div');settingsRow.dataset.appShellWorkspaceRow='true';
+ const settingsRow=document.createElement('div');settingsRow.dataset[${JSON.stringify(nested ? 'appShellWorkspace' : 'appShellWorkspaceRow')}]='true';
  settingsRow.innerHTML='<aside class="app-shell-left-panel"><div class="sidebar-navigation"><button data-app-action-sidebar-thread-active="false" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-kind="local" data-app-action-sidebar-thread-id="local:thread_home_001">Project</button></div></aside><div id="feature" data-app-shell-active-page="true" style="display:contents"><div class="_Workspace_new"><div class="_MainContentClip_new"><main data-app-shell-main-surface="default"><div data-app-shell-focus-area="main">Native settings</div></main></div></div></div>';
  row.replaceWith(settingsRow);row=settingsRow;feature=row.querySelector('#feature');marker=row.querySelector('[data-app-action-sidebar-thread-id]');
  document.querySelector('[data-app-shell-sidebar-trigger]').remove();
@@ -138,12 +139,12 @@ document.documentElement.dataset.test=JSON.stringify(result);
 })();`;
 const html = `<!doctype html><html data-theme="dark"><head><meta charset="UTF-8"><style>
 *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0}body{font:13px 'Segoe UI';color:#ddd;background:#181818}
-[data-app-shell-workspace-row]{display:flex;width:100%;height:100%}aside{width:200px;flex:none}.sidebar-navigation{background:#181818}
+[data-app-shell-workspace-row],[data-app-shell-workspace]{display:flex;width:100%;height:100%}aside{width:200px;flex:none}.sidebar-navigation{background:#181818}
 ._Workspace_new{display:contents}._MainContentClip_new{display:flex;flex:1;min-width:0}main{position:relative;display:flex;flex-direction:column;flex:1;min-width:0}
 header{position:fixed;top:0;left:200px;right:0;height:52px;pointer-events:none}._WorkspaceContent_new{flex:1;display:flex;min-height:0;padding-top:52px}
 [data-app-shell-workspace-layout]{flex:1;display:flex;flex-direction:column}article{flex:1}textarea{height:90px;width:80%}
 </style></head><body><nav data-app-navigation-rail="true">${['home','automations','library','images'].map(id=>`<button data-sidebar-destination="builtin:${id}" ${id==='home'?'aria-current="page"':''}>${{home:'首页',automations:'任务',library:'资料库',images:'图像'}[id]}</button>`).join('')}</nav><button hidden data-app-shell-sidebar-trigger></button>
-<div data-app-shell-workspace-row="true"><aside class="app-shell-left-panel"><div class="sidebar-navigation"><button data-app-action-sidebar-thread-active="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-kind="local" data-app-action-sidebar-thread-id="local:thread_home_001">Project</button></div></aside>${home}<div id="feature" data-app-shell-active-page="false" style="display:none"><div class="_Workspace_new"><header><span data-app-shell-titlebar-content>Native feature</span></header><div class="_MainContentClip_new"><main data-app-shell-main-surface="default"><button>Native page control</button></main></div></div></div></div>
+<div data-app-shell-workspace-row="true">${nested?'<div data-app-shell-workspace="true">':''}<aside class="app-shell-left-panel"><div class="sidebar-navigation"><button data-app-action-sidebar-thread-active="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-kind="local" data-app-action-sidebar-thread-id="local:thread_home_001">Project</button></div></aside>${home}<div id="feature" data-app-shell-active-page="false" style="display:none"><div class="_Workspace_new"><header><span data-app-shell-titlebar-content>Native feature</span></header><div class="_MainContentClip_new"><main data-app-shell-main-surface="default"><button>Native page control</button></main></div></div></div></div>${nested?'</div>':''}
 <script>${setup}</script><script src="../packages/explorer-ui/dist/explorer.js"></script><script>${checks}</script></body></html>`;
 mkdirSync(join(root, 'artifacts'), {recursive:true});
 const fixture = join(root, 'artifacts/home-view.html');
@@ -177,7 +178,7 @@ try{
  }
  assert.ok(result,'Home fixture completed');
 }finally{await command('Browser.close').catch(()=>{});ws.close();}
-writeFileSync(join(root, 'artifacts/home-view-result.json'), JSON.stringify(result, null, 2));
+writeFileSync(join(root, nested ? 'artifacts/home-view-nested-result.json' : 'artifacts/home-view-result.json'), JSON.stringify(result, null, 2));
 console.log({...result,calls:result.calls.length});
 assert.equal(result.error, undefined);
 for(const key of ['hidden','previewHidden','nativePage','popoverClosed','retainedAway','noReconnect','scrollRetained','draftRetained','expansionRetained','watchRetained','cacheEvictionRetained','nativeRowReplacementRetained','inlineRestored','realProjectSwitch']) assert.equal(result[key],true,key);

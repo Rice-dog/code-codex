@@ -4,6 +4,11 @@ use base64::Engine;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+// Covers relay's 240-second cache plus its 30-second refresh margin.
+const MANAGED_MIN_LIFETIME:u64=300;
+#[cfg(test)]
+#[path="managed_credential_tests.rs"]
+mod managed_credential_tests;
 
 pub fn official_home() -> Result<PathBuf> {
     let root = std::env::var_os("CODEX_HOME")
@@ -75,41 +80,49 @@ pub fn read(home: &Path, email: &str, host: bool) -> Result<Value> {
 }
 
 /// Fixed native-only token export supported by the qualified official app-server.
-/// The account is checked before exporting; neither this response nor the token is queued to renderer.
+/// Native token claims are checked against the saved identity before use.
+/// Neither the backend response nor the token is queued to renderer.
 pub async fn managed(worker: &super::worker::Worker, email: &str) -> Result<Value> {
     managed_observed(worker,email,None).await
 }
+/// Non-secret identity projection from the verified native broker. A known
+/// reauthorization or unfinished login still requires the official observation.
+pub(super) async fn observe_managed(worker:&super::worker::Worker,email:&str,plan:Option<&str>,refresh_required:bool)->Result<Value>{
+    if refresh_required{return worker.request("account/read",json!({"refreshToken":true})).await;}
+    managed(worker,email).await?;
+    Ok(json!({"account":{"type":"chatgpt","email":email,"planType":plan}}))
+}
 pub(super) async fn managed_observed(worker:&super::worker::Worker,email:&str,progress:Option<&super::preparation::Preparation>)->Result<Value>{
+    if let Some(p)=progress {p.step("credential-token-read",json!({"method":"getAuthStatus","refreshToken":false}));}
+    let exported=worker.cached_credential().await?;
+    let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_|AccountError::protocol("The credential observation clock is unavailable."))?.as_secs();
+    let reusable=managed_token(&exported,email,now,false)?;
+    let refresh_ticket=worker.credential_refresh_ticket();
+    if let Some(auth)=reusable.filter(|_|!refresh_ticket.2) {
+        crate::runtime_log::record("accounts","account.credential","reused",json!({"source":"native-getAuthStatus","identityMatched":true,"freshnessConfirmed":true,"forcedRefresh":false,"taskSent":false}));return Ok(auth);
+    }
+    // Refresh only near expiry or when older tokens lack sufficient claims.
+    // Account identity is still checked before any refreshed token can be used.
     if let Some(p)=progress {p.step("credential-refresh",json!({"method":"account/read","refreshToken":true}));}
     let observed = worker
         .request("account/read", json!({"refreshToken":true}))
         .await?;
-    if !observed["account"]["email"]
-        .as_str()
-        .is_some_and(|e| e.eq_ignore_ascii_case(email))
-    {
-        return Err(AccountError::new(
-            "ACCOUNT_CREDENTIAL_IDENTITY",
-            "The authorized account no longer matches this connection.",
-        ));
-    }
+    super::identity::check(&observed,Some(email))?;
     if let Some(p)=progress {p.step("credential-token-export",json!({"method":"getAuthStatus","refreshToken":false}));}
     let exported = worker
-        .request(
-            "getAuthStatus",
-            json!({"includeToken":true,"refreshToken":false}),
-        )
+        .cached_credential()
         .await
         .map_err(|e| AccountError::new(&e.code,format!("Execution credential export failed. {}",e.message)))?;
+    let refreshed_now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_|AccountError::protocol("The credential observation clock is unavailable."))?.as_secs();
+    let auth=managed_token(&exported,email,refreshed_now,true)?.ok_or_else(||AccountError::new("ACCOUNT_CREDENTIAL_STALE","The official backend did not provide a usable credential after refresh. Check this connection; no task was sent."))?;
+    worker.credential_refreshed(refresh_ticket);Ok(auth)
+}
+fn managed_token(exported:&Value,email:&str,now:u64,identity_confirmed:bool)->Result<Option<Value>>{
     let token = exported["authToken"]
         .as_str()
         .filter(|s| !s.is_empty() && s.len() < 64 * 1024)
-        .ok_or_else(|| {
-            AccountError::new(
-                "ACCOUNT_CREDENTIAL",
-                "The official backend did not provide an execution credential.",
-            )
-        })?;
+        ;
+    let Some(token)=token else {return Ok(None)};
     let claims = token
         .split('.')
         .nth(1)
@@ -120,13 +133,22 @@ pub(super) async fn managed_observed(worker:&super::worker::Worker,email:&str,pr
         })
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .unwrap_or(Value::Null);
+    let emails=[claims["email"].as_str(),claims["https://api.openai.com/profile"]["email"].as_str()];
+    let claimed=emails.into_iter().flatten().next();
+    if emails.into_iter().flatten().any(|value|!value.eq_ignore_ascii_case(email)){return Err(AccountError::new("ACCOUNT_CREDENTIAL_IDENTITY","The official credential does not match the selected account. No alternate identity was used and no task was sent."));}
+    let current=claims["exp"].as_u64().is_some_and(|exp|exp>now.saturating_add(MANAGED_MIN_LIFETIME))&&claims.get("nbf").is_none_or(|v|v.as_u64().is_some_and(|nbf|nbf<=now));
+    if !current||claimed.is_none(){
+        if !identity_confirmed{return Ok(None);}
+        // Retain the older opaque-expiry contract only after a fresh native
+        // account/read verified identity. Known stale/future tokens never pass.
+        if claims.get("exp").is_some()&&!current||claims.get("nbf").is_some_and(|v|v.as_u64().is_none_or(|nbf|nbf>now)){return Ok(None);}
+    }
     let account = claims["https://api.openai.com/auth"]["chatgpt_account_id"]
         .as_str()
         .filter(|v| !v.is_empty() && v.len() < 256)
-        .ok_or_else(|| {
-            AccountError::protocol("The official execution credential has no account identity.")
-        })?;
-    Ok(json!({"type":"chatgptAuthTokens","accessToken":token,"chatgptAccountId":account}))
+        ;
+    let Some(account)=account else {return Ok(None)};
+    Ok(Some(json!({"type":"chatgptAuthTokens","accessToken":token,"chatgptAccountId":account})))
 }
 fn targets(home: &Path) -> Result<Vec<Vec<u16>>> {
     let canonical = std::fs::canonicalize(home)

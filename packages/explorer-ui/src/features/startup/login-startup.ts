@@ -7,6 +7,7 @@ import { ApplicationDialog } from '../../components/application-dialog';
 export class LoginStartupController {
   private state: LoginStartupStatus | undefined;
   private pending = false;
+  private refreshing = false;
   private disposed = false;
   private failed = false;
   private readonly dialog = new ApplicationDialog();
@@ -28,6 +29,7 @@ export class LoginStartupController {
     this.check.hidden = !this.state?.enabled;
     this.button.setAttribute('aria-checked', String(this.state?.enabled ?? false));
     this.button.setAttribute('aria-busy', String(this.pending));
+    this.button.dataset.codeCodexStartupRead = String(this.refreshing && this.state?.supported !== false);
     this.button.disabled = this.pending || (!this.failed && (!this.state || !this.state.supported));
     this.button.removeAttribute('title');
   }
@@ -41,6 +43,7 @@ export class LoginStartupController {
   async refresh(): Promise<void> {
     if (this.pending || this.disposed) return;
     this.pending = true;
+    this.refreshing = true;
     this.render();
     try {
       const value = await this.actions.getLoginStartup();
@@ -50,6 +53,7 @@ export class LoginStartupController {
       // a fresh enable is safe. The CLI provides the same recovery command.
       if (!this.disposed) { this.state = undefined; this.failed = true; }
     } finally {
+      this.refreshing = false;
       this.pending = false;
       if (!this.disposed) this.render();
     }

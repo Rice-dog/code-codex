@@ -21,18 +21,31 @@ use tokio::{
 
 const MAX_MESSAGE: usize = 8 * 1024 * 1024;
 type Reply = oneshot::Sender<Result<Value>>;
+struct PendingSlot<'a>{slots:&'a std::sync::Mutex<HashMap<u64,Reply>>,id:u64}
+impl Drop for PendingSlot<'_>{fn drop(&mut self){self.slots.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&self.id);}}
 pub struct Worker {
+    pub(super) health:super::worker_health::Health,
+    pub(super) lifecycle:tokio::sync::RwLock<()>,
+    pub(super) health_gate:Mutex<()>,
+    pub(super) replacement:std::sync::RwLock<Option<Arc<Worker>>>,
+    pub(super) home:std::path::PathBuf,
+    pub(super) sqlite:std::path::PathBuf,
+    retiring:std::sync::atomic::AtomicBool,
+    auth_transition:std::sync::atomic::AtomicBool,
+    credential_refresh:std::sync::Mutex<(u64,u64)>,
     retained_home_lease: std::sync::RwLock<Option<Arc<std::fs::File>>>,
     selection:std::sync::RwLock<Option<String>>,
     auth_source: std::sync::RwLock<Option<(std::path::PathBuf, String, bool, Option<Arc<Worker>>)>>,
     writer: Mutex<tokio::process::ChildStdin>,
-    pending: Mutex<HashMap<u64, Reply>>,
+    pending: std::sync::Mutex<HashMap<u64, Reply>>,
     requests: Mutex<HashMap<String, Value>>,
-    events: Mutex<super::stream::Stream>,
+    events: Arc<Mutex<super::stream::Stream>>,
     next: AtomicU64,
+    evidence: Arc<super::backend_diagnostics::Evidence>,
     child: Mutex<Box<dyn TokioChildWrapper>>,
     dead: std::sync::atomic::AtomicBool,
-    _launch: crate::discovery::AppServerLaunch,
+    _launch: Option<crate::discovery::AppServerLaunch>,
+    #[cfg(test)] fixture:Option<std::path::PathBuf>,
 }
 impl Worker {
     pub(super) fn retain_home_lease(&self,lease:Option<Arc<std::fs::File>>){*self.retained_home_lease.write().unwrap_or_else(std::sync::PoisonError::into_inner)=lease;}
@@ -40,6 +53,10 @@ impl Worker {
         Self::spawn_sqlite(home, &home.join("sqlite")).await
     }
     pub async fn spawn_sqlite(home: &Path, sqlite: &Path) -> Result<Arc<Self>> {
+        Self::spawn_with_events(home,sqlite,None).await
+    }
+    pub(super) fn spawn_with_events<'a>(home:&'a Path,sqlite:&'a Path,events:Option<Arc<Mutex<super::stream::Stream>>>)->std::pin::Pin<Box<dyn std::future::Future<Output=Result<Arc<Self>>>+Send+'a>> {
+        Box::pin(async move {
         let install = crate::discovery::discover_codex(
             None,
             None,
@@ -129,12 +146,16 @@ impl Worker {
             ));
             command.wrap(JobObject);
         }
-        let mut child = command.spawn().map_err(|e| {
+        let child = command.spawn().map_err(|e| {
             AccountError::new(
                 "ACCOUNT_SPAWN",
                 format!("Starting the isolated account backend failed. stage=process-start; osCode={:?}; kind={:?}.",e.raw_os_error(),e.kind()),
             )
         })?;
+        Self::connect(child,Some(launch),home,sqlite,events,#[cfg(test)] None).await
+        })
+    }
+    async fn connect(mut child:Box<dyn TokioChildWrapper>,launch:Option<crate::discovery::AppServerLaunch>,home:&Path,sqlite:&Path,events:Option<Arc<Mutex<super::stream::Stream>>>,#[cfg(test)] fixture:Option<std::path::PathBuf>)->Result<Arc<Self>> {
         let writer = child
             .stdin()
             .take()
@@ -143,38 +164,48 @@ impl Worker {
             .stdout()
             .take()
             .ok_or_else(|| AccountError::protocol("No backend output pipe."))?;
+        let evidence=Arc::new(super::backend_diagnostics::Evidence::default());
+        evidence.process(child.id());
         let startup = Arc::new(Mutex::new(Vec::<u8>::new()));
         let initialized = Arc::new(std::sync::atomic::AtomicBool::new(false));
         if let Some(mut stderr) = child.stderr().take() {
             let startup = startup.clone();
             let initialized = initialized.clone();
+            let evidence=evidence.clone();
             tokio::spawn(async move {
                 let mut bytes = [0u8; 4096];
-                while let Ok(n) = stderr.read(&mut bytes).await {
-                    if n == 0 {
-                        break;
+                let mut lines=super::backend_diagnostics::Lines::default();
+                loop {
+                    let n=match stderr.read(&mut bytes).await {
+                        Ok(0)=>{evidence.stderr_end(None);break;},
+                        Ok(n)=>n,
+                        Err(e)=>{evidence.stderr_end(Some(&e));break;},
+                    };
+                    lines.feed(&bytes[..n],&evidence);
+                    if !initialized.load(Ordering::Acquire) {
+                        let mut saved = startup.lock().await;
+                        let keep = (16 * 1024usize).saturating_sub(saved.len()).min(n);
+                        saved.extend_from_slice(&bytes[..keep]);
                     }
-                    if initialized.load(Ordering::Acquire) {
-                        continue;
-                    }
-                    let mut saved = startup.lock().await;
-                    let keep = (16 * 1024usize).saturating_sub(saved.len()).min(n);
-                    saved.extend_from_slice(&bytes[..keep]);
                 }
+                lines.finish(&evidence);
             });
         }
         let worker = Arc::new(Self {
+            health:super::worker_health::Health::default(),lifecycle:tokio::sync::RwLock::new(()),health_gate:Mutex::new(()),replacement:std::sync::RwLock::new(None),home:home.to_owned(),sqlite:sqlite.to_owned(),retiring:std::sync::atomic::AtomicBool::new(false),auth_transition:std::sync::atomic::AtomicBool::new(false),credential_refresh:std::sync::Mutex::new((0,0)),
             retained_home_lease:std::sync::RwLock::new(None),
             selection:std::sync::RwLock::new(None),
             auth_source: std::sync::RwLock::new(None),
             writer: Mutex::new(writer),
-            pending: Mutex::new(HashMap::new()),
+            pending: std::sync::Mutex::new(HashMap::new()),
             requests: Mutex::new(HashMap::new()),
-            events: Mutex::new(super::stream::Stream::default()),
+            events:events.unwrap_or_else(||Arc::new(Mutex::new(super::stream::Stream::default()))),
             next: AtomicU64::new(1),
+            evidence,
             child: Mutex::new(child),
             dead: std::sync::atomic::AtomicBool::new(false),
             _launch: launch,
+            #[cfg(test)] fixture,
         });
         let weak = Arc::downgrade(&worker);
         tokio::spawn(async move {
@@ -187,13 +218,17 @@ impl Worker {
                     .await;
                 let Some(worker) = weak.upgrade() else { break };
                 if !matches!(read,Ok(n) if n>0) || bytes.len() > MAX_MESSAGE {
+                    worker.evidence.terminal(if bytes.len()>MAX_MESSAGE {"stdout-size-limit"} else if read.is_err() {"stdout-read-error"} else {"stdout-eof"});
                     worker.ended().await;
                     break;
                 }
                 let Ok(message) = serde_json::from_slice::<Value>(&bytes) else {
+                    worker.evidence.terminal("stdout-invalid-json");
                     worker.ended().await;
                     break;
                 };
+                worker.evidence.stdout();
+                if message["method"]=="account/login/completed"{worker.auth_transition.store(false,Ordering::Release);}
                 if message.get("method").is_some() {
                     if message["method"] == "account/chatgptAuthTokens/refresh" {
                         let source = worker
@@ -203,6 +238,7 @@ impl Worker {
                             .clone();
                         let auth = if let Some((home, email, host, managed)) = source {
                             if let Some(managed) = managed {
+                                managed.invalidate_credential();
                                 super::credentials::managed(&managed, &email).await
                             } else {
                                 super::credentials::read(&home, &email, host)
@@ -246,11 +282,11 @@ impl Worker {
                         worker.push(message).await;
                     }
                 } else if let Some(id) = message["id"].as_u64() {
-                    if let Some(reply) = worker.pending.lock().await.remove(&id) {
+                    if let Some(reply) = worker.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id) {
                         let value = if message.get("error").is_some() {
                             Err(AccountError::new(
                                 if message["error"]["message"].as_str().and_then(super::routing::reason).is_some(){"ACCOUNT_WORKSPACE_ROUTING"}else{"ACCOUNT_BACKEND"},
-                                format!("{} Backend evidence: rpcCode={}; reason={}; responseDataWithheld=true; requestReplayed=false.",sanitize_error(&message["error"]["message"]),message["error"]["code"].as_i64().map(|v|v.to_string()).unwrap_or_else(||"unavailable".into()),message["error"]["message"].as_str().and_then(super::routing::reason).unwrap_or("backend-rejected")),
+                                format!("{} Backend evidence: rpcCode={}; reason={}; responseDataWithheld=true; requestReplayed=false; networkObservation={}.",sanitize_error(&message["error"]["message"]),message["error"]["code"].as_i64().map(|v|v.to_string()).unwrap_or_else(||"unavailable".into()),message["error"]["message"].as_str().and_then(super::routing::reason).unwrap_or("backend-rejected"),super::backend_diagnostics::classify(message["error"]["message"].as_str().unwrap_or(""))),
                             ))
                         } else {
                             Ok(message["result"].clone())
@@ -260,7 +296,7 @@ impl Worker {
                 }
             }
         });
-        if let Err(error)=worker.request("initialize",json!({"clientInfo":{"name":"code_codex_multi_account","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}})).await{
+        if let Err(error)=Box::pin(worker.request("initialize",json!({"clientInfo":{"name":"code_codex_multi_account","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}))).await{
             let diagnostic=String::from_utf8_lossy(&startup.lock().await).into_owned();
             worker.stop().await;
             return Err(AccountError::new(&error.code,format!("{} Initialization evidence: {}",error.message,sanitize_error(&json!(diagnostic)))));
@@ -273,16 +309,15 @@ impl Worker {
     }
     async fn ended(&self) {
         self.dead.store(true, Ordering::Release);
-        for (_, pending) in self.pending.lock().await.drain() {
+        for (_, pending) in self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).drain() {
             let _=pending.send(Err(AccountError::new("ACCOUNT_DISCONNECTED","The isolated backend disconnected. The task outcome must be reconciled before retrying.")));
         }
-        self.push(json!({"method":"code-codex/disconnected","params":{}}))
-            .await;
+        if !self.retiring.load(Ordering::Acquire){self.push(json!({"method":"code-codex/disconnected","params":{}})).await;}
     }
     pub fn set_selection(&self,value:Option<String>){*self.selection.write().unwrap_or_else(std::sync::PoisonError::into_inner)=value;}
     pub fn selection_matches(&self,value:&str)->bool {self.selection.read().unwrap_or_else(std::sync::PoisonError::into_inner).as_deref()==Some(value)}
     pub fn is_dead(&self) -> bool {
-        self.dead.load(Ordering::Acquire)
+        self.effective().ok().flatten().map_or_else(||self.dead.load(Ordering::Acquire),|w|w.dead.load(Ordering::Acquire))
     }
     async fn push(&self, mut message: Value) {
         // Login error text may contain an authorization URL. It never leaves the native service.
@@ -299,36 +334,70 @@ impl Worker {
         self.events.lock().await.cursor()
     }
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        if let Some(target)=self.effective()? {
+            if !super::worker_health::read_only(method){return Err(AccountError::new("ACCOUNT_BACKEND_REPLACED","The previous account backend was replaced. No write or task request was replayed."));}
+            return target.healthy_read(method,params).await;
+        }
+        if super::worker_health::read_only(method)&&self.credential_only(){return self.healthy_read(method,params).await;}
+        self.request_local(method,params,Duration::from_secs(45)).await
+    }
+    /// Native credential broker only. A local token read must not enter the
+    /// account/read idle probe (which performs network workspace discovery).
+    /// The consumer checks the expected identity, workspace and token lifetime.
+    pub(super) fn invalidate_credential(&self){let target=self.effective().ok().flatten();let source=target.as_deref().unwrap_or(self);let mut s=source.credential_refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner);s.0=s.0.saturating_add(1);}
+    pub(super) fn credential_refresh_ticket(&self)->(u64,u64,bool){let target=self.effective().ok().flatten();let source=target.as_deref().unwrap_or(self);let s=source.credential_refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner);(source.evidence.id,s.0,s.0>s.1||s.0==u64::MAX)}
+    pub(super) fn credential_refresh_required(&self)->bool{self.credential_refresh_ticket().2}
+    pub(super) fn credential_refreshed(&self,ticket:(u64,u64,bool)){let target=self.effective().ok().flatten();let source=target.as_deref().unwrap_or(self);if source.evidence.id==ticket.0{let mut s=source.credential_refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner);s.1=s.1.max(ticket.1);}}
+    pub(super) async fn cached_credential(&self)->Result<Value>{
+        // Share lifecycle admission with ordinary reads, not the exclusive
+        // network health lane: a slow quota read must not queue a local token.
+        let admission=tokio::time::timeout(Duration::from_secs(15),self.lifecycle.read()).await.map_err(|_|AccountError::new("ACCOUNT_BACKEND_HEALTH_BUSY","The credential backend is completing a lifecycle transition. No task was sent."))?;
+        if let Some(target)=self.effective()? {drop(admission);return Box::pin(target.cached_credential()).await;}
+        if !self.credential_only()||self.auth_transition.load(Ordering::Acquire){return Err(AccountError::new("ACCOUNT_CREDENTIAL_SOURCE","The credential source is not an idle authorized account backend. No task was sent."));}
+        self.request_unlocked("getAuthStatus",json!({"includeToken":true,"refreshToken":false}),Duration::from_secs(15)).await
+    }
+    pub(super) async fn request_local(&self,method:&str,params:Value,budget:Duration)->Result<Value>{
+        let _admission=self.lifecycle.read().await;
+        self.request_unlocked(method,params,budget).await
+    }
+    pub(super) async fn request_unlocked(&self, method: &str, params: Value,budget:Duration) -> Result<Value> {
         let label:String=method.chars().filter(|c|c.is_ascii_alphanumeric()||matches!(c,'/'|'_'|'-')).take(96).collect();
-        let mut operation=crate::runtime_log::Operation::start("accounts","account.backend.request",json!({"method":label,"responseTimeoutMs":45000,"writeTimeoutMs":15000,"paramsWithheld":true}));
-        let started=std::time::Instant::now();
         let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let mut operation=crate::runtime_log::Operation::start("accounts","account.backend.request",json!({"backendInstance":self.evidence.id,"requestId":id,"method":label,"responseTimeoutMs":budget.as_millis(),"writeTimeoutMs":budget.min(Duration::from_secs(15)).as_millis(),"paramsWithheld":true}));
+        let started=std::time::Instant::now();
         let mut stage="check-process";
+        let mut pipe_timings=json!({});
         let result:Result<Value>=async {
+            if matches!(method,"account/login/start"|"account/logout"){self.auth_transition.store(true,Ordering::Release);}
             if self.is_dead(){return Err(AccountError::new("ACCOUNT_DISCONNECTED","The isolated account backend is not running."));}
             let (tx,rx)=oneshot::channel();
             stage="pending-slots";
             {
-                let mut pending=self.pending.lock().await;
+                let mut pending=self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 pending.retain(|_,reply|!reply.is_closed());
                 if pending.len()>=32{return Err(AccountError::new("ACCOUNT_BUSY",format!("Too many account requests are pending. pendingCount={}; limit=32.",pending.len())));}
                 pending.insert(id,tx);
             }
+            let _slot=PendingSlot{slots:&self.pending,id};
             stage="transport-write";
-            match tokio::time::timeout(Duration::from_secs(15),self.send(json!({"id":id,"method":method,"params":params}))).await {
+            match tokio::time::timeout(budget.min(Duration::from_secs(15)),self.send_observed(json!({"id":id,"method":method,"params":params}),&mut pipe_timings)).await {
                 Ok(Ok(()))=>{},
-                Ok(Err(error))=>{self.pending.lock().await.remove(&id);return Err(error);},
-                Err(_)=>{self.pending.lock().await.remove(&id);return Err(AccountError::new("ACCOUNT_OUTCOME_UNKNOWN","Backend transport write exceeded its deadline. stage=transport-write; timeoutMs=15000; deliveryUnverified=true. Do not automatically repeat the operation."));},
+                Ok(Err(error))=>{self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);return Err(error);},
+                Err(_)=>{self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);return Err(AccountError::new("ACCOUNT_OUTCOME_UNKNOWN",format!("Backend transport write exceeded its deadline. stage=transport-write; timeoutMs={}; deliveryUnverified=true. Do not automatically repeat the operation.",budget.min(Duration::from_secs(15)).as_millis())));},
             }
             stage="backend-response";
-            match tokio::time::timeout(Duration::from_secs(45),rx).await {
+            match tokio::time::timeout(budget,rx).await {
                 Ok(Ok(value))=>value,
-                Ok(Err(_))=>{self.pending.lock().await.remove(&id);Err(AccountError::new("ACCOUNT_OUTCOME_UNKNOWN","The backend response channel closed before confirmation. Do not automatically repeat the operation."))},
-                Err(_)=>{self.pending.lock().await.remove(&id);Err(AccountError::new("ACCOUNT_OUTCOME_UNKNOWN","The backend response deadline expired. timeoutMs=45000. Do not automatically repeat the operation."))},
+                Ok(Err(_))=>{self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);Err(AccountError::new("ACCOUNT_OUTCOME_UNKNOWN","The backend response channel closed before confirmation. Do not automatically repeat the operation."))},
+                Err(_)=>{self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);Err(AccountError::new("ACCOUNT_OUTCOME_UNKNOWN",format!("The backend response deadline expired. timeoutMs={}. Do not automatically repeat the operation.",budget.as_millis())))},
             }
         }.await;
-        operation.finish(if result.is_ok(){"confirmed"}else{"failed"},json!({"method":label,"requestId":id,"stage":stage,"durationMs":started.elapsed().as_millis(),"processDead":self.is_dead(),"errorCode":result.as_ref().err().map(|e|e.code.as_str()),"message":result.as_ref().err().map(|e|e.message.as_str()),"paramsWithheld":true,"taskReplayed":false}));
-        result.map_err(|e|AccountError::new(&e.code,format!("{} Transport evidence: operationId={}; requestId={id}; method={label}; stage={stage}; elapsedMs={}; processDead={}; taskReplayed=false.",e.message,operation.id(),started.elapsed().as_millis(),self.is_dead())))
+        if result.is_ok()&&matches!(method,"account/login/cancel"|"account/logout"){self.auth_transition.store(false,Ordering::Release);}
+        self.health.observe(method,&result);
+        self.health.explicit_auth_changed(method,&result);
+        let evidence=if result.is_err(){self.evidence.snapshot()}else{json!({"backendInstance":self.evidence.id})};
+        operation.finish(if result.is_ok(){"confirmed"}else{"failed"},json!({"backendEvidence":evidence,"pipeTimings":pipe_timings,"pendingCount":self.pending_count_observed(),"method":label,"requestId":id,"stage":stage,"durationMs":started.elapsed().as_millis(),"processDead":self.is_dead(),"errorCode":result.as_ref().err().map(|e|e.code.as_str()),"message":result.as_ref().err().map(|e|e.message.as_str()),"paramsWithheld":true,"taskReplayed":false}));
+        result.map_err(|e|AccountError::new(&e.code,format!("{} Transport evidence: operationId={}; backendInstance={}; requestId={id}; method={label}; stage={stage}; elapsedMs={}; processDead={}; taskReplayed=false.",e.message,operation.id(),self.evidence.id,started.elapsed().as_millis(),self.is_dead())))
     }
     pub async fn reply(&self, id: Value, result: Value) -> Result<Value> {
         let request = self
@@ -358,7 +427,11 @@ impl Worker {
         self.send(json!({"id":id,"result":result})).await?;
         Ok(json!({"sent":true}))
     }
+    fn pending_count_observed(&self)->usize {self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()}
     async fn send(&self, value: Value) -> Result<()> {
+        self.send_observed(value,&mut json!({})).await
+    }
+    async fn send_observed(&self, value: Value, timings:&mut Value) -> Result<()> {
         let mut bytes = serde_json::to_vec(&value)
             .map_err(|_| AccountError::protocol("Invalid backend payload."))?;
         if bytes.len() > MAX_MESSAGE {
@@ -367,39 +440,68 @@ impl Worker {
             ));
         }
         bytes.push(b'\n');
+        timings["stage"]=json!("writer-lock");
+        let at=std::time::Instant::now();
         let mut writer = self.writer.lock().await;
-        writer.write_all(&bytes).await.map_err(|_| {
-            AccountError::new(
-                "ACCOUNT_DISCONNECTED",
-                "Writing to the account backend failed.",
-            )
-        })?;
-        writer.flush().await.map_err(|_| {
-            AccountError::new(
-                "ACCOUNT_DISCONNECTED",
-                "Flushing the account backend failed.",
-            )
-        })
-    }
-    pub async fn stop(&self) {
-        let _ = std::pin::Pin::from(self.child.lock().await.kill()).await;
-        self.dead.store(true, Ordering::Release);
-    }
-    pub async fn stop_checked(&self) -> Result<()> {
-        if self.is_dead() {
-            return Ok(());
-        }
-        std::pin::Pin::from(self.child.lock().await.kill())
-            .await
-            .map_err(|_| {
-                AccountError::new(
-                    "ACCOUNT_LOGOUT_STOP",
-                    "The account process could not be stopped. Logout remains pending.",
-                )
-            })?;
-        self.dead.store(true, Ordering::Release);
+        timings["writerWaitMs"]=json!(at.elapsed().as_millis());
+        timings["stage"]=json!("pipe-write");
+        let at=std::time::Instant::now();
+        let result=writer.write_all(&bytes).await;
+        timings["pipeWriteMs"]=json!(at.elapsed().as_millis());
+        result.map_err(|e|AccountError::new("ACCOUNT_DISCONNECTED",format!("Writing to the account backend failed. stage=pipe-write; ioKind={:?}; osCode={:?}.",e.kind(),e.raw_os_error())))?;
+        timings["stage"]=json!("pipe-flush");
+        let at=std::time::Instant::now();
+        let result=writer.flush().await;
+        timings["pipeFlushMs"]=json!(at.elapsed().as_millis());
+        result.map_err(|e|AccountError::new("ACCOUNT_DISCONNECTED",format!("Flushing the account backend failed. stage=pipe-flush; ioKind={:?}; osCode={:?}.",e.kind(),e.raw_os_error())))?;
+        timings["stage"]=json!("sent");
         Ok(())
     }
+    pub async fn stop(&self) {
+        if let Ok(Some(target))=self.effective(){let _=target.stop_physical().await;}
+        let _=self.stop_physical().await;
+    }
+    pub(super) async fn stop_physical(&self)->Result<()> {
+        if self.dead.load(Ordering::Acquire){return Ok(());}
+        std::pin::Pin::from(self.child.lock().await.kill()).await.map_err(|_|AccountError::new("ACCOUNT_LOGOUT_STOP","The isolated account backend could not be stopped; process exit remains unconfirmed."))?;
+        self.dead.store(true,Ordering::Release);Ok(())
+    }
+    pub async fn stop_checked(&self) -> Result<()> {
+        if let Some(target)=self.effective()? {target.stop_physical().await?;}
+        self.stop_physical().await
+    }
+    pub(super) fn effective(&self)->Result<Option<Arc<Worker>>>{
+        let mut next=self.replacement.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();let mut last=None;
+        for _ in 0..16 {let Some(worker)=next else{if let Some(target)=&last{*self.replacement.write().unwrap_or_else(std::sync::PoisonError::into_inner)=Some(std::sync::Arc::clone(target));}return Ok(last)};next=worker.replacement.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();last=Some(worker);}
+        Err(AccountError::new("ACCOUNT_BACKEND_HEALTH_CHAIN","The account backend recovery chain could not be verified; no task was sent."))
+    }
+    fn credential_only(&self)->bool{
+        let unselected=self.selection.read().unwrap_or_else(std::sync::PoisonError::into_inner).is_none();
+        let no_executor_source=self.auth_source.read().unwrap_or_else(std::sync::PoisonError::into_inner).is_none();unselected&&no_executor_source
+    }
+    pub(super) async fn can_retire(&self)->bool{
+        let empty={let mut pending=self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);pending.retain(|_,reply|!reply.is_closed());pending.is_empty()};
+        let credential_only=self.credential_only();
+        credential_only&&!self.auth_transition.load(Ordering::Acquire)&&empty&&self.requests.lock().await.is_empty()
+    }
+    pub(super) async fn spawn_replacement(&self)->Result<Arc<Self>>{
+        #[cfg(test)] if let Some(script)=&self.fixture {return Self::spawn_fixture(&self.home,script,Some(self.events.clone())).await;}
+
+        let worker=Self::spawn_with_events(&self.home,&self.sqlite,Some(self.events.clone())).await?;
+        worker.retain_home_lease(self.retained_home_lease.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone());Ok(worker)
+    }
+    #[cfg(test)]pub(super)fn pending_count(&self)->usize{self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()}
+    #[cfg(test)] pub(super) fn spawn_fixture<'a>(home:&'a Path,script:&'a Path,events:Option<Arc<Mutex<super::stream::Stream>>>)->std::pin::Pin<Box<dyn std::future::Future<Output=Result<Arc<Self>>>+Send+'a>>{
+        Box::pin(async move {
+            let mut command=tokio::process::Command::new("powershell.exe");
+            command.args(["-NoProfile","-ExecutionPolicy","Bypass","-File"]).arg(script).arg("-FixtureRoot").arg(home).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            let mut wrap=TokioCommandWrap::from(command);wrap.wrap(KillOnDrop);
+            #[cfg(windows)]{wrap.wrap(CreationFlags(windows::Win32::System::Threading::CREATE_NO_WINDOW));wrap.wrap(JobObject);}
+            let child=wrap.spawn().map_err(|_|AccountError::protocol("Synthetic account health process failed to start."))?;
+            Self::connect(child,None,home,&home.join("sqlite"),events,Some(script.to_owned())).await
+        })
+    }
+    pub(super) fn mark_retiring(&self,value:bool){self.retiring.store(value,Ordering::Release);}
     pub fn set_auth_source(
         &self,
         home: std::path::PathBuf,
@@ -429,6 +531,56 @@ fn sanitize_error(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn diagnostics_follow_real_jsonl_error_timeout_and_post_initialize_stderr_without_replay() {
+        let d=tempfile::tempdir().unwrap();let script=d.path().join("diagnostic.ps1");
+        std::fs::write(&script,r#"param([string]$FixtureRoot)
+while($null -ne ($line=[Console]::ReadLine())) {
+ $r=$line|ConvertFrom-Json
+ if($null -eq $r.id){continue}
+ [IO.File]::AppendAllText((Join-Path $FixtureRoot 'methods'),([string]$r.method+"`n"))
+ if($r.method -eq 'account/rateLimits/read') {
+  [Console]::Error.WriteLine('reqwest::connect dns error failed to lookup address https://private/?token=private Bearer private')
+  @{id=$r.id;error=@{code=-32603;message='error sending request for url (https://private): dns error: failed to lookup address';data=@{token='private'}}}|ConvertTo-Json -Depth 6 -Compress|ForEach-Object{[Console]::WriteLine($_)}
+ } elseif($r.method -ne 'fixture/hang') {
+  @{id=$r.id;result=@{}}|ConvertTo-Json -Compress|ForEach-Object{[Console]::WriteLine($_)}
+ }
+}
+"#).unwrap();
+        let w=Worker::spawn_fixture(d.path(),&script,None).await.unwrap();
+        crate::runtime_log::capture_test_events();
+        let e=w.request_unlocked("account/rateLimits/read",json!({"private":"private"}),Duration::from_secs(2)).await.unwrap_err();
+        assert_eq!(e.code,"ACCOUNT_BACKEND");assert!(e.message.contains("networkObservation=DNS"));
+        for _ in 0..100 {if w.evidence.snapshot()["stderrLines"].as_u64().unwrap()>0{break}tokio::time::sleep(Duration::from_millis(5)).await;}
+        let stderr=w.evidence.snapshot();assert_eq!(stderr["nearbyStderr"][0]["category"],"DNS");assert!(!stderr.to_string().contains("private"));
+        let e=w.request_unlocked("fixture/hang",json!({}),Duration::from_millis(35)).await.unwrap_err();
+        assert_eq!(e.code,"ACCOUNT_OUTCOME_UNKNOWN");assert_eq!(w.pending_count(),0);
+        let events=crate::runtime_log::take_test_events();
+        let terminal:Vec<_>=events.iter().filter(|v|v["action"]=="account.backend.request"&&v["outcome"]=="failed").collect();
+        assert_eq!(terminal.len(),2);
+        for event in &terminal {
+            let detail=&event["details"];assert_eq!(detail["backendEvidence"]["backendInstance"],w.evidence.id);
+            assert_eq!(detail["pipeTimings"]["stage"],"sent");assert!(detail["pipeTimings"]["writerWaitMs"].is_number());
+            assert_eq!(detail["stage"],"backend-response");assert_eq!(detail["taskReplayed"],false);
+        }
+        // Runtime redaction still protects the existing sanitized outer error message.
+        assert!(!serde_json::to_string(&events).unwrap().contains("Bearer private"));
+        let methods=std::fs::read_to_string(d.path().join("methods")).unwrap();
+        assert_eq!(methods.lines().filter(|m|*m=="account/rateLimits/read").count(),1);
+        assert_eq!(methods.lines().filter(|m|*m=="fixture/hang").count(),1);
+        crate::runtime_log::capture_test_events();
+        let lock=w.writer.lock().await;
+        let e=w.request_unlocked("fixture/lock",json!({}),Duration::from_millis(20)).await.unwrap_err();
+        assert_eq!(e.code,"ACCOUNT_OUTCOME_UNKNOWN");assert_eq!(w.pending_count(),0);
+        let events=crate::runtime_log::take_test_events();
+        let detail=&events.iter().find(|v|v["action"]=="account.backend.request"&&v["outcome"]=="failed").unwrap()["details"];
+        assert_eq!(detail["pipeTimings"]["stage"],"writer-lock");
+        assert_eq!(detail["stage"],"transport-write");
+        drop(lock);
+        assert!(!std::fs::read_to_string(d.path().join("methods")).unwrap().contains("fixture/lock"));
+        w.stop().await;
+    }
     #[tokio::test]
     #[ignore = "Requires the qualified official Windows installation; run explicitly on the maintenance host."]
     async fn real_isolated_backend_does_not_inherit_host_login() {
