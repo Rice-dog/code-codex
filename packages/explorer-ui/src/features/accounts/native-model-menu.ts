@@ -2,7 +2,7 @@
 type Model=Record<string,any>&{model:string;id:string;supportedReasoningEfforts:any[]};
 type Picker={models:Model[];model:string|null;reasoningEffort?:string;selectionMode?:string;onSelectModel:(model:string,effort?:string)=>void;onSelectDefault?:()=>void;onSelectModelOption?:()=>void;onSelectComplete?:()=>void;onOpenChange:(open:boolean)=>void};
 const unavailable=(stage:string)=>Error(`ACCOUNT_NATIVE_MODEL_MENU_UNAVAILABLE: The official model menu data contract could not be verified. stage=${stage}; no model selection was committed.`);
-function fiberChain(anchor:HTMLElement):any[]{
+export function nativeFiberChain(anchor:HTMLElement):any[]{
  const key=Object.keys(anchor).find(k=>k.startsWith('__reactFiber$'));if(!key)throw unavailable('react-anchor');
  let f=(anchor as any)[key];const path:any[]=[];
  for(let i=0;f&&i<512;i++,f=f.return)path.push(f);if(f)throw unavailable('react-depth');
@@ -24,7 +24,7 @@ export class NativeModelMenuPort {
  #leases=new Map<any,{set:any;optimistic:any;restoreSet:any;restoreOptimistic:any;wrap:(fn:any)=>any}>();
  #ids:string[]=[];#selected='';#catalog=new Map<string,Model>();#active=true;#writing=false;#refreshPending=false;
  constructor(private readonly anchor:HTMLButtonElement,private readonly notice:(error:string)=>void=()=>{}){
-  const chain=fiberChain(anchor),picker=pickerOf(chain),clients=new Set<any>();
+  const chain=nativeFiberChain(anchor),picker=pickerOf(chain),clients=new Set<any>();
   for(const f of chain){let c=f.dependencies?.firstContext;for(let i=0;c&&i<32;i++,c=c.next){const value=c.memoizedValue;try{const client=value?.queryClient??value;if(typeof client?.getQueryCache==='function'&&typeof client?.setQueryData==='function')clients.add(client);}catch{}}}
   const candidates:any[]=[];
   for(const client of clients){const cache=client.getQueryCache();if(typeof cache?.getAll!=='function'||typeof cache.subscribe!=='function')continue;
@@ -70,7 +70,7 @@ export class NativeModelMenuPort {
    setWrapped(observer.options);
   }
  }
- picker():Picker{return pickerOf(fiberChain(this.anchor),this.#ids);}
+ picker():Picker{return pickerOf(nativeFiberChain(this.anchor),this.#ids);}
  models():Model[]{return this.#ids.map(id=>this.#catalog.get(id)!);}
  menu():HTMLElement|null{const id=this.anchor.getAttribute('aria-controls');return id?document.getElementById(id):null;}
  close():void{try{this.picker().onOpenChange(false);}catch{}}

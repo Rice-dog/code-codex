@@ -24,13 +24,16 @@ pub(super) fn reorder(root:&Path,connections:&[Connection],value:&Value)->Result
 }
 pub(super) fn observe(root:&Path,id:&str,observed:&Result<Value>,expected:Option<&str>,connections:&[Connection])->Result<()> {
  let status=match observed {Ok(v)=>super::identity::check(v,expected),Err(e)=>Err(e.clone())};
- let required=match status {Ok(())=>false,Err(e)if e.code=="ACCOUNT_AUTH_REQUIRED"=>true,_=>return Ok(())};
+ // A never-authorized connection cannot have an expired verified identity.
+ // Keep it available for its first login rather than marking it revoked.
+ let known_identity=connections.iter().any(|c|c.id==id&&c.api.is_none()&&c.email.as_deref().is_some_and(|e|!e.trim().is_empty()));
+ let required=match status {Ok(())=>false,Err(e)if e.code=="ACCOUNT_AUTH_REQUIRED"=>known_identity,_=>return Ok(())};
  let mut s=read(root)?;let before=s.required.clone();s.required.retain(|v|v!=id&&connections.iter().any(|c|&c.id==v));if required{s.required.push(id.into());}if s.required!=before{write(root,&s)?;}Ok(())
 }
 pub(super) fn connections(root:&Path,connections:&[Connection])->Result<Vec<Value>>{
  let s=read(root)?;let mut rows:Vec<_>=connections.iter().enumerate().collect();
  rows.sort_by_key(|(index,c)|s.order.iter().position(|v|v==&c.id).unwrap_or(s.order.len()+index));
- Ok(rows.into_iter().map(|(_,c)|{let mut v=json!(c);v["reauthorizationRequired"]=json!(c.api.is_none()&&s.required.contains(&c.id));v}).collect())
+ Ok(rows.into_iter().map(|(_,c)|{let mut v=json!(c);v["reauthorizationRequired"]=json!(c.api.is_none()&&c.email.as_deref().is_some_and(|e|!e.trim().is_empty())&&s.required.contains(&c.id));v}).collect())
 }
 #[cfg(test)]mod tests{
  use super::*;

@@ -45,6 +45,7 @@
   "accounts.makePrimary": "Set as primary account",
   "accounts.options": "Account options",
   "accounts.orderSaved": "Account order updated",
+  "accounts.pendingSignIn": "Pending sign-in",
   "accounts.preparing": "Preparing account and tools",
   "accounts.primaryAuthOpen": "Opening the official authorization page…",
   "accounts.primaryAuthStart": "Requesting official authorization…",

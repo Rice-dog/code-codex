@@ -803,12 +803,12 @@
     "name": "Multi-account Tasks",
     "category": "developer-tools",
     "api": 1,
-    "version": "1.0.92",
+    "version": "1.0.96",
     "releaseTag": "plugin-assets-2026-11-02",
-    "asset": "CodeCodex-plugin-multi-account-1.0.92.js",
-    "relativePath": "CodeCodex-plugin-multi-account-1.0.92.js",
-    "size": 199939,
-    "sha256": "6d8889680da4120105ab1a78ac07e350728bb201e9c70db83f27dda0fa83d0aa",
+    "asset": "CodeCodex-plugin-multi-account-1.0.96.js",
+    "relativePath": "CodeCodex-plugin-multi-account-1.0.96.js",
+    "size": 210154,
+    "sha256": "3f19ba064fe514a99b6d62ef284e0dd5973ecff418a03fcece319739cd8e6b58",
     "resources": [],
     "capabilities": [
       "developer-tools"

@@ -1,5 +1,6 @@
 //! First-party downloadable plugins. The trusted catalog is
 //! compiled into the core; downloads cannot choose URLs or expected hashes.
+mod github_asset;
 use base64::Engine;
 use cdp_client::BridgeError;
 use serde::Deserialize;
@@ -764,14 +765,14 @@ fn trusted_url(url: &url::Url) -> bool {
         && url.port_or_known_default() == Some(443)
         && url.username().is_empty()
         && url.password().is_none()
-        && matches!(
+        && (matches!(
             url.host_str(),
             Some(
                 "github.com"
                     | "release-assets.githubusercontent.com"
                     | "objects.githubusercontent.com"
             )
-        )
+        ) || github_asset::trusted_api_asset(url))
 }
 pub(crate) async fn install(id: &str) -> Result<Value, BridgeError> {
     let mut operation =
@@ -904,6 +905,7 @@ async fn download_asset(
     );
     let request_operation = trace.operation.id();
     let client = reqwest::Client::builder()
+        .user_agent(concat!("Code-Codex/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
@@ -918,8 +920,38 @@ async fn download_asset(
         .build()
         .map_err(|e| {trace.fail("client build", &e, 0); crate::network_diagnostics::transport_error("PLUGIN","client build",&p.id,&e)})?;
     let role = format!("plugin={} version={} release={} asset={}",p.id,p.version,p.release_tag,p.asset);
-    let response = trace.send(client.get(&endpoint)).await.map_err(|e|
-        crate::network_diagnostics::transport_error("PLUGIN","send",&role,&e))?;
+    let mut original_status=None;
+    let mut reason="recent-gateway-failure";
+    let primary=if github_asset::prefer_api() {
+        trace.operation.event("primary route", "skipped",json!({"reason":reason,"cooldownMs":60_000,"asset":p.asset}));
+        None
+    }else{
+        match tokio::time::timeout(Duration::from_secs(8),trace.send(client.get(&endpoint))).await {
+            Ok(Ok(response)) if matches!(response.status().as_u16(),502|503|504)=>{
+                original_status=Some(response.status().as_u16());reason="http-gateway-response";
+                github_asset::record_gateway_failure();None
+            }
+            Ok(Ok(response))=>Some(response),
+            Ok(Err(e))=>return Err(crate::network_diagnostics::transport_error("PLUGIN","send",&role,&e)),
+            Err(_)=>{
+                reason="primary-response-headers-deadline";
+                trace.operation.event("primary headers deadline","expired",json!({"budgetMs":8000,"assetBodyRead":false,"stageAttribution":"Response headers were not received; DNS/proxy/TCP/TLS origin is not inferred."}));
+                github_asset::record_gateway_failure();None
+            }
+        }
+    };
+    let response=if let Some(response)=primary {response}else{
+        trace.operation.event("official API fallback", "started",json!({"originalStatus":original_status,"reason":reason,"asset":p.asset,"releaseTag":p.release_tag,"samePinnedIdentity":true,"maxFallbackAttempts":1}));
+        let response=match github_asset::recover(&client,p,trace.operation.id()).await {
+            Ok(response)=>response,
+            Err(failure)=>{
+                trace.operation.finish("failed",json!({"phase":"official-api-fallback","originalStatus":original_status,"fallbackCode":failure.code}));
+                return Err(error(&failure.code,format!("Primary GitHub route was unavailable. reason={reason}; httpStatus={original_status:?}. Official API fallback failed: {}",failure.message)));
+            }
+        };
+        trace.operation.event("official API fallback", "headers received",json!({"originalStatus":original_status,"status":response.status().as_u16(),"asset":p.asset,"integrityVerified":false,"remainingGate":"existing size/SHA256 verification and cache commit"}));
+        response
+    };
     if !response.status().is_success() {
         let error = crate::network_diagnostics::http_error("PLUGIN",&role,&response);
         trace.operation.finish("failed",json!({"phase":"HTTP response validation","code":error.code,"status":response.status().as_u16()}));

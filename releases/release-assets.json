@@ -2,26 +2,26 @@
     {
         "assetName":  "CodeCodex-0.6.0-x64-setup.exe",
         "path":  "CodeCodex-0.6.0-x64-setup.exe",
-        "size":  17089828,
-        "sha256":  "6fdfd95993b817f9a2de1f35c7f4566688cc04fd637f7d27bfbc5f9bdfe9e850"
+        "size":  17116442,
+        "sha256":  "3d5832beb251f8700036640701714fc09f4b045f4b9d61ab1edd85a8df3c1775"
     },
     {
         "assetName":  "CodeCodex-0.6.0-x64.msi",
         "path":  "CodeCodex-0.6.0-x64.msi",
-        "size":  12259328,
-        "sha256":  "8a1042f7e252ee024c499b88fce99b687e64ab99512091b993a9fb514a326312"
+        "size":  12267520,
+        "sha256":  "0b390ca5da8c760569a59ba74304a40a54a62b98db392ce7611c057dbcf3bf68"
     },
     {
         "assetName":  "CodeCodex-0.6.0-x64.zip",
         "path":  "CodeCodex-0.6.0-x64.zip",
-        "size":  14311692,
-        "sha256":  "803a754edc2965ed9e6e6c067208ddbfe5d79d162b300484834702fb3053257c"
+        "size":  14338306,
+        "sha256":  "9885855f688aeab66895a9eba61da1ed4a787bc00ff0421f38d88a36e8fb094a"
     },
     {
         "assetName":  "Uninstall-CodeCodex.exe",
         "path":  "Uninstall-CodeCodex.exe",
-        "size":  2732032,
-        "sha256":  "3515088c7414dc53fb712658bae912a8a0fa69869d68675d89d3776ef4b83fa6"
+        "size":  2732544,
+        "sha256":  "27b496f2428d32c059df0cf9a3ab5a3117e6329f0b697357d237faef89bc6592"
     },
     {
         "releaseTag":  "plugin-assets-2026-11-01",
@@ -333,15 +333,15 @@
     },
     {
         "releaseTag":  "plugin-assets-2026-11-02",
-        "assetName":  "CodeCodex-plugin-multi-account-1.0.92.js",
-        "path":  "plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.92.js",
-        "size":  199939,
-        "sha256":  "6d8889680da4120105ab1a78ac07e350728bb201e9c70db83f27dda0fa83d0aa"
+        "assetName":  "CodeCodex-plugin-multi-account-1.0.96.js",
+        "path":  "plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.96.js",
+        "size":  210154,
+        "sha256":  "3f19ba064fe514a99b6d62ef284e0dd5973ecff418a03fcece319739cd8e6b58"
     },
     {
         "assetName":  "CodeCodex-plugin-catalog-0.6.0.json",
         "path":  "plugins/catalog.json",
         "size":  28326,
-        "sha256":  "4f6fbcc65261a25e61fc42967ad3e82c4a18e337132d8fb42d3b5c8d604f2446"
+        "sha256":  "14d2e27f244f93f6b4b4b81f4a9fdb0dbb85aebef782bbda699d66fa1f633beb"
     }
 ]
