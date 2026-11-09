@@ -1,7 +1,7 @@
-23847006fb1b1890f303e878e70189907f12b1d6565237000c6eb796a0c4bd3c  CodeCodex-0.6.6-x64-setup.exe
-2d78bc4686a6f5a51af6ba518b6df96279d42eddcd7ad7bee5fce8b333e3cb23  CodeCodex-0.6.6-x64.msi
-18a10df7f92522566b19c56ef06f3a856d50a5c8a5fb48b32fcfb269476da7c1  CodeCodex-0.6.6-x64.zip
-b9e00c34da1b5650ce7f72a2d62ab3caba00baf2f88e53e7ce3d60192385eadc  Uninstall-CodeCodex.exe
+377204453918116a08a81b51fee54f06b66fb7682fa056be81fb9eaa3f9c75a4  CodeCodex-0.6.10-x64-setup.exe
+5d147103c6419ca343fec18c7ec6e0c744952afcdea178a48962bd9af16e092c  CodeCodex-0.6.10-x64.msi
+4b13e0812f384ad44c08b6a96c01ebf6c0276cc3be03c4214f09cf33549d74e7  CodeCodex-0.6.10-x64.zip
+87c10124906ab04bf1f23f762641e06620e2bcf4d3adbd02466e00b7e9a59653  Uninstall-CodeCodex.exe
 4bf3ebba5ac222851e7ba0f4318bd693fdb28109fd06bd4a12da591098b95106  plugins/appearance/glow-horizon/CodeCodex-background-glow-horizon-1.0.1.js
 ac2f4a1b14f21b2c944c1ffbcef01f63e7597cb08bc8721282ba1840f2d282e7  plugins/appearance/black-hole/CodeCodex-background-black-hole-1.0.6.js
 857fea5dd51f9bd4cb78a99e976858500d518855f1a7a3af28daeb00ae9ec864  plugins/appearance/heavenly-cloud/CodeCodex-background-heavenly-cloud-1.0.1.js
@@ -46,5 +46,5 @@ b6264078fae002f7a7210775296118dbf3ce618979b64892e9bdea4454a05599  plugins/file-p
 c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2  plugins/file-preview/model-preview/CodeCodex-plugin-model-preview-1.0.0.js
 180b2ceaed686d660e118e406680b07c0c6c259051d9573ae079dfbc8307e202  plugins/appearance/ascii-tiles/CodeCodex-background-ascii-tiles-1.0.8.js
 1da590e0c8640ca9c60e1223303eab051c0822c12b631084ad41b0bcb97b7278  plugins/appearance/shallow-ocean/CodeCodex-background-shallow-ocean-1.0.17.js
-22e5f8e347f87b99a002c87f91b8e88e6f2f8f50fbe2a3789205bac69060e7a2  plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.101.js
-8c1fe6310b694fc9147ececbe26495d442f1db439eb222d8e5ef4bbb20f85022  plugins/catalog.json
+1e2de81960b7ecf22f4cde064d815cffda3253e4563c9c05bee0febe3217d8d5  plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.103.js
+24927d6e01ad63869c44c0ff2be4f241e4e60ace202c43c79c645a8064e389b6  plugins/catalog.json

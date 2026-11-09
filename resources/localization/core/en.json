@@ -141,5 +141,17 @@
   "plugins.downloadError.redirect": "The download address redirected unexpectedly, so the download was stopped for safety. Check network or proxy settings. Report it if it persists.",
   "plugins.downloadError.response": "The download service returned an unexpected response. Try again later. If it persists, report it to the developer.",
   "plugins.downloadError.cancelled": "Download cancelled. You can download it again at any time.",
-  "plugins.downloadError.busy": "This plugin is already downloading. Wait for it to finish, or cancel and retry."
+  "plugins.downloadError.busy": "This plugin is already downloading. Wait for it to finish, or cancel and retry.",
+  "setup.checkingLatest": "Checking for the latest Code-Codex setup.",
+  "setup.downloadLatest": "Downloading the latest verified installer.",
+  "setup.retryUpdate": "The update could not be completed. Run setup again to retry. Your existing installation is retained.",
+  "setup.offlineChoice": "The latest version could not be checked or downloaded. Check your network and retry, or install the bundled version now. Install the bundled version?",
+  "setup.newerInstalled": "A newer Code-Codex version is already installed. Use a newer setup to repair it.",
+  "setup.replacementFailed": "Code-Codex was installed, but the saved setup file could not be updated. You can keep using it to check for new versions.",
+  "setup.welcomeChecking": "Checking for updates...",
+  "setup.welcomeAvailable": "Install latest version {version}",
+  "setup.welcomeCurrent": "This installer is up to date",
+  "setup.welcomeOffline": "Install bundled version",
+  "setup.welcomeNetwork": "Network unavailable. Install bundled version",
+  "setup.welcomeError": "Unable to check updates. Install bundled version"
 }

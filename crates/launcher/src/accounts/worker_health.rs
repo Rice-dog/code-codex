@@ -50,6 +50,16 @@ impl Worker {
   }first
  }
  pub(super) async fn healthy_read(&self,method:&str,params:Value)->Result<Value>{
+  // Quota availability is a remote observation, not evidence that this local
+  // process needs replacement. Its caller already checks the account identity.
+  // Keep lifecycle admission and deadlines without an idle probe or restart.
+  if method=="account/rateLimits/read" {
+   if let Some(target)=self.effective()? {
+    return Box::pin(target.healthy_read(method,params)).await;
+   }
+   return tokio::time::timeout(Duration::from_secs(45),self.request_local(method,params,Duration::from_secs(30)))
+    .await.map_err(|_|AccountError::new("ACCOUNT_USAGE_TIMEOUT","The quota observation exceeded its deadline. The account backend was retained; no task or write was replayed."))?;
+  }
   tokio::time::timeout(Duration::from_secs(45),self.read_with_health(method,params)).await.map_err(|_|AccountError::new("ACCOUNT_BACKEND_HEALTH_TIMEOUT","The bounded account observation ended. No sign-in expiration was inferred and no task or write was replayed."))?
  }
  async fn read_with_health(&self,method:&str,params:Value)->Result<Value>{

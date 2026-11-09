@@ -2603,12 +2603,12 @@
         "name": "Multi-account Tasks",
         "category": "developer-tools",
         "api": 1,
-        "version": "1.0.101",
+        "version": "1.0.103",
         "releaseTag": "plugin-assets-2026-11-02",
-        "asset": "CodeCodex-plugin-multi-account-1.0.101.js",
-        "relativePath": "CodeCodex-plugin-multi-account-1.0.101.js",
-        "size": 218589,
-        "sha256": "22e5f8e347f87b99a002c87f91b8e88e6f2f8f50fbe2a3789205bac69060e7a2",
+        "asset": "CodeCodex-plugin-multi-account-1.0.103.js",
+        "relativePath": "CodeCodex-plugin-multi-account-1.0.103.js",
+        "size": 218631,
+        "sha256": "1e2de81960b7ecf22f4cde064d815cffda3253e4563c9c05bee0febe3217d8d5",
         "resources": [],
         "capabilities": [
           "developer-tools"
@@ -2649,16 +2649,16 @@
         "src/home-view.ts": "146f4f42a5c6306136196321e55ed0322128461dea2e60ab04b8fc9b50c71f59",
         "src/native-structure-changes.ts": "d341c0a907f0ea3642d9118a879de8e824f0df31d4f06dced01f95800128e216",
         "src/active-thread.ts": "6cd04727575b99da874176b39ad90c3cc7342f70aa8ff9536c05d3017a86b141",
-        "src/features/accounts/quota.ts": "73b4ed4d2e61f6429f99ed8ae9fab94abe71acd543440b2c2c21dffadc80b42e",
+        "src/features/accounts/stream-recovery.ts": "03261f031573391754bd456d1e76f832c44951a30988230c983a84273f05ec5e",
+        "src/features/accounts/quota.ts": "543a1a0738bb0114595aadb710e2f574cb9d5f933a17b131f98ab9eb204b499b",
         "src/features/accounts/session-guard.ts": "7c37e0265566e820e3095fb948db5f04f61de3410ed31a02c0de9ac1d5466b0d",
         "src/features/accounts/permissions.ts": "35f59a5766a1bc025ced59cf642e4bdaf45ecd0aa1d85cb1a8404fb6c243c8a3",
         "src/features/accounts/auto-continue.ts": "23e0524f0b72bd7468d47c412475974f15ca6372ec42518e21cd15ee4a3073dc",
-        "src/features/accounts/stream-recovery.ts": "03261f031573391754bd456d1e76f832c44951a30988230c983a84273f05ec5e",
         "src/features/accounts/draft-routing.ts": "e2b83a48443804dcb03e093a58a55adfe38934e64a22e49f7eec550df64702dd",
         "src/features/accounts/native-adapter.ts": "8dab7e77087c6cd038c364bee79700df64927cfe40d4a14f834a9c085183bcca",
         "src/components/application-dialog.ts": "30d7674bbde26d94bc2e994a780e4871ef2706484f6c9e702e37012669361c43",
         "src/features/accounts/primary-status.ts": "15487eaf5f044bc99249170848d41b3d5458886e86e97f22db818f326ee243a2",
-        "src/multi-account-runtime.ts": "90c3f0e087a2b323f36dc171dccd28ea5a85db7a8aa686518f87c0fa32b78228",
+        "src/multi-account-runtime.ts": "a44080347a6811f73f991b14e469b6895f1b729491b323f1ab6824453a7066a1",
         "scripts/utility-packages.mjs": "5486dceccd9e1e03e48101873e4fd3b583a4a4b3185342c3e906b83d2c9e5a3e",
         "scripts/build.mjs": "9fd94f2b13e355bb05022114f4ab964cc4d50e609d069dab9416280635af5f19",
         "scripts/rebuild-plugins.mjs": "f092a2e634074928162bad289ff81510a6ac8c10bebdc6829f6898dccd0ef179",
@@ -2669,7 +2669,7 @@
       },
       "inputFormat": "lf-v1",
       "buildMetadata": {
-        "definition": "163c0601996e6fe4eb7f555eba5981b908a799d585b22af77d45adcc04c07c55",
+        "definition": "d7376f261d9c477d86d1b2f563ca0b122788aa127febabdeca52f84ba7311614",
         "compiler": "0.25.12"
       },
       "artifactRoot": "releases/plugins/developer-tools/multi-account"
@@ -2677,18 +2677,18 @@
   ],
   "pendingPublicationAssets": [
     {
-      "id": "multi-account",
-      "tag": "plugin-assets-2026-11-02",
-      "name": "CodeCodex-plugin-multi-account-1.0.101.js",
-      "size": 218589,
-      "sha256": "22e5f8e347f87b99a002c87f91b8e88e6f2f8f50fbe2a3789205bac69060e7a2"
-    },
-    {
       "id": "custom-background",
       "tag": "plugin-assets-2026-11-01",
       "name": "CodeCodex-background-custom-background-1.0.13.js",
       "size": 32296,
       "sha256": "bc7cb572cb182284861290f941721f65620491844477598ce308f94e0b89ecea"
+    },
+    {
+      "id": "multi-account",
+      "tag": "plugin-assets-2026-11-02",
+      "name": "CodeCodex-plugin-multi-account-1.0.103.js",
+      "size": 218631,
+      "sha256": "1e2de81960b7ecf22f4cde064d815cffda3253e4563c9c05bee0febe3217d8d5"
     }
   ]
 }

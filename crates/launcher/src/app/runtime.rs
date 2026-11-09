@@ -161,6 +161,7 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
     let startup_route_requested=crate::accounts::startup::enabled();
     let startup_route_qualified=startup_route_requested&&crate::accounts::startup::qualify(&installation);
     let mut startup_route_enabled=false;
+    let mut native_startup_route=false;
     let request_main_inspector = if windows_10 || startup_route_qualified {
         let image = installation.executable.clone();
         let capability =
@@ -168,7 +169,8 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
         let request = capability
             .as_ref()
             .map_or(true, |c| c.should_request_inspector());
-        startup_route_enabled=startup_route_qualified&&request;
+        native_startup_route=startup_route_qualified&&installation.source==DiscoverySource::WindowsPackageManager&&capability.as_ref().is_ok_and(|c|c.state==win10_compat::InspectCapability::NativeChromium);
+        startup_route_enabled=startup_route_qualified&&(request||native_startup_route);
         process_diagnostics::observe(
             "Windows10 compatibility",
             "official inspector capability",
@@ -203,7 +205,8 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
     let main_inspector_endpoint = main_inspector_port.map(CdpEndpoint::loopback);
     let startup_route=if startup_route_enabled {
         let listener=PortReservation::reserve()?;let route_port=listener.port()?;
-        let params=crate::accounts::startup::parameters(&installation,endpoint,route_port).map_err(|e|AppError::MainInspector{operation:"startup account transport configuration",details:e.message})?;
+        let mut params=crate::accounts::startup::parameters(&installation,endpoint,route_port,native_startup_route).map_err(|e|AppError::MainInspector{operation:"startup account transport configuration",details:e.message})?;
+        if native_startup_route {params["manifest"]=json!(installation.executable.parent().unwrap().parent().unwrap().join("AppxManifest.xml"));}
         listener.release();Some(params)
     }else{None};
     runtime_log::record("accounts","account.startup.configuration","prepared",json!({"requested":startup_route_requested,"qualified":startup_route_qualified,"enabled":startup_route.is_some(),"networkRequested":false,"officialImageModified":false}));
@@ -241,6 +244,7 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
             port,
             main_inspector_port,
             startup_enabled,
+            if native_startup_route {startup_route.clone()}else{None},
         )
         .await;
         let (mut child, after, worker) = match result {
@@ -299,7 +303,7 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
     tracing::info!(event = "codex_launched", channel = %installation.channel);
 
     let result = async {
-        let mut startup_route_applied=false;
+        let mut startup_route_applied=native_startup_route;
         if let Some(main_inspector_endpoint) = main_inspector_endpoint {
             record_startup_event("main inspector", if startup_route.is_some(){"preparing startup account transport"}else{"waiting for Windows 10 surface patch"});
             let patched = crate::platform_windows_compat::initialize_native_main_process(main_inspector_endpoint, endpoint, launched_pid, launched_after,startup_route.as_ref(),windows_10).await?;

@@ -32,6 +32,7 @@ mod context_handoff;
 mod official_context;
 mod native_route;
 pub(crate) mod startup;
+pub(crate) mod startup_backend;
 mod draft;
 use cdp_client::{BridgeError, CdpEndpoint};
 use serde::{Deserialize, Serialize};

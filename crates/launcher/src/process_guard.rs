@@ -271,10 +271,11 @@ impl CodexProcessGuard {
         package_full_name: String,
         aumid: String,
         arguments: Vec<String>,
+        startup: Option<serde_json::Value>,
     ) -> io::Result<Self> {
         #[cfg(not(windows))]
         {
-            let _ = (package_full_name, aumid, arguments);
+            let _ = (package_full_name, aumid, arguments, startup);
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "Windows package activation is unavailable on this platform",
@@ -310,6 +311,9 @@ impl CodexProcessGuard {
                 .stderr(Stdio::piped())
                 .creation_flags(CREATE_NO_WINDOW);
 
+            if let Some(config)=startup {
+                command.env("CLE_STARTUP_CONFIG",config.to_string()).env("CLE_STARTUP_WRAPPER",std::env::current_exe()?);
+            }
             let mut helper = command.spawn()?;
             let stderr_reader = helper
                 .stderr
@@ -929,9 +933,29 @@ try {
     $controller = New-Object CodexLiveExplorerPackageGuard.PackageController
     $activationStep='activate official Windows package'
     Write-CCActivation $activationStep 'started' @{}
-    $activation = [CodexLiveExplorerPackageGuard.Activator]::Activate(
-        $env:CLE_PACKAGE_AUMID,
-        $env:CLE_PACKAGE_ARGUMENTS)
+    if ($env:CLE_STARTUP_CONFIG) {
+        $startupConfig = $env:CLE_STARTUP_CONFIG | ConvertFrom-Json
+        [xml]$manifest = Get-Content -LiteralPath $startupConfig.manifest -Raw
+        $appId = $env:CLE_PACKAGE_AUMID.Split('!')[-1]
+        $app = $manifest.SelectSingleNode("//*[local-name()='Application' and @Id='$appId']")
+        $alias = $app.SelectSingleNode(".//*[local-name()='ExecutionAlias']/@Alias").Value
+        $start = New-Object Diagnostics.ProcessStartInfo
+        $start.FileName = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\$alias"
+        $start.Arguments = $env:CLE_PACKAGE_ARGUMENTS
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.EnvironmentVariables['CODEX_CLI_PATH'] = $env:CLE_STARTUP_WRAPPER
+        $start.EnvironmentVariables['CODE_CODEX_STARTUP_BACKEND'] = $env:CLE_STARTUP_CONFIG
+        $aliasProcess = [Diagnostics.Process]::Start($start)
+        $activation = New-Object CodexLiveExplorerPackageGuard.ActivationResult
+        $activation.HResult = 0
+        $activation.ProcessId = $aliasProcess.Id
+        $aliasProcess.Dispose()
+    } else {
+        $activation = [CodexLiveExplorerPackageGuard.Activator]::Activate(
+            $env:CLE_PACKAGE_AUMID,
+            $env:CLE_PACKAGE_ARGUMENTS)
+    }
     $activationHResult = [int]$activation.HResult
     $activatedProcessId = [uint32]$activation.ProcessId
     $activationCompleted = $true

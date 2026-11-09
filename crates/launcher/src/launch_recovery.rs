@@ -577,6 +577,7 @@ pub(crate) async fn launch_package(
     port: u16,
     inspector: Option<u16>,
     animation: bool,
+    startup: Option<serde_json::Value>,
 ) -> Result<
     (
         crate::process_guard::CodexProcessGuard,
@@ -588,7 +589,7 @@ pub(crate) async fn launch_package(
     #[cfg(windows)]
     {
         let mut backend = windows::NativeBackend::new(
-            package, aumid, arguments, image, port, inspector, animation,
+            package, aumid, arguments, image, port, inspector, animation, startup,
         );
         let result = drive(&mut backend).await;
         if let Err(error) = &result {
@@ -604,7 +605,7 @@ pub(crate) async fn launch_package(
     }
     #[cfg(not(windows))]
     {
-        let _ = (package, aumid, arguments, image, port, inspector, animation);
+        let _ = (package, aumid, arguments, image, port, inspector, animation, startup);
         Err(RecoveryError::new(
             FailureKind::Unavailable,
             "Windows package recovery is unavailable on this platform",

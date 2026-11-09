@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 2,
+  "revision": 5,
   "rules": [
     {
       "id": "layout",
@@ -29,7 +29,10 @@
       "feature": "Account routing, identity and quotas",
       "sources": [
         "resources/account-host-capabilities.js",
-        "crates/launcher/src/accounts/host.rs"
+        "crates/launcher/src/accounts/host.rs",
+        "packages/explorer-ui/src/features/accounts/native-adapter.ts",
+        "packages/explorer-ui/src/features/accounts/quota.ts",
+        "crates/launcher/src/accounts/worker_health.rs"
       ],
       "tests": [
         "scripts/test-host-capabilities.mjs",
@@ -46,7 +49,8 @@
       ],
       "paths": [],
       "checks": [
-        "Identity match without forced refresh; expired versus unavailable credentials; active-turn refusal and late replies."
+        "Identity match without forced refresh; expired versus unavailable credentials; active-turn refusal and late replies.",
+        "Manual Verify returns verified login status independently of remote quota availability, then schedules the existing background quota queue. Verify and usage reuse observe_managed credentials without duplicate frontend Verify; quota failure does not fail successful login checks. Cached values, one-flight and owner/late-result protections remain. No quota-triggered backend replacement or extra retry counter."
       ]
     },
     {
@@ -186,7 +190,10 @@
       "sources": [
         "crates/launcher/src/accounts/startup.rs",
         "crates/launcher/src/accounts/startup_broker.js",
-        "crates/launcher/src/platform/windows/compat.rs"
+        "crates/launcher/src/platform/windows/compat.rs",
+        "crates/launcher/src/accounts/startup_backend.rs",
+        "crates/launcher/src/launch_recovery/windows.rs",
+        "crates/launcher/src/process_guard.rs"
       ],
       "tests": [
         "crates/launcher/src/accounts/startup.rs",
@@ -201,13 +208,22 @@
         "parentThreadId",
         "parent_thread_id",
         "thread-id",
-        "session-id"
+        "session-id",
+        "CODEX_CLI_PATH",
+        "CODEX_APP_RUNTIME_CLI_PATH",
+        "--print-startup-config",
+        "windows.appExecutionAlias"
       ],
-      "paths": [],
+      "paths": [
+        "AppxManifest.xml"
+      ],
       "checks": [
         "Enabled cold launch versus disabled/not-installed launch; shared official backend spawn contract and native proxy/TLS transport.",
         "Root/subagent ownership, mismatched identity, missing lineage, active request and cancelled/failed startup; no alternate-account fallback.",
-        "Existing plugin disable/re-enable behavior and session settings remain unchanged."
+        "Existing plugin disable/re-enable behavior and session settings remain unchanged.",
+        "Native packaged cold launch preserves package identity through its registered execution alias and honors CODEX_CLI_PATH before startup config and actor creation; disabled plugin uses unchanged shell activation.",
+        "Native stdio wrapper preserves CLI arguments, startup config, JSONL, tools and permissions; control endpoint and thread lineage preserve owner, active-request and disable/re-enable behavior. Legacy inspector path remains supported.",
+        "Native cold startup, initial official request, first account switch, backend exit, network reconnect and core hot handoff require separate observation. Static token matching does not certify runtime behavior."
       ]
     },
     {

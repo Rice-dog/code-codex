@@ -141,5 +141,17 @@
   "plugins.downloadError.redirect": "下载地址跳转异常，为保护安全已停止下载。请检查网络或代理设置，持续失败时反馈给开发者。",
   "plugins.downloadError.response": "下载服务返回的内容异常，请稍后重试。若持续失败，请反馈给开发者。",
   "plugins.downloadError.cancelled": "下载已取消，可随时重新下载。",
-  "plugins.downloadError.busy": "这个插件正在下载，请等待完成，或取消后重试。"
+  "plugins.downloadError.busy": "这个插件正在下载，请等待完成，或取消后重试。",
+  "setup.checkingLatest": "正在检查最新的 Code-Codex 安装程序。",
+  "setup.downloadLatest": "正在下载并校验最新安装程序。",
+  "setup.retryUpdate": "更新未完成，请重新运行安装程序重试。现有安装已保留。",
+  "setup.offlineChoice": "未能检查或下载最新版。可检查网络后重试，或现在安装内嵌版本。是否安装内嵌版本？",
+  "setup.newerInstalled": "已安装的 Code-Codex 版本较新，请使用更新的安装程序进行修复。",
+  "setup.replacementFailed": "Code-Codex 已安装，但原安装程序文件未能更新。仍可使用它检查新版本。",
+  "setup.welcomeChecking": "正在检查更新…",
+  "setup.welcomeAvailable": "安装最新版 {version}",
+  "setup.welcomeCurrent": "当前安装程序已是最新版",
+  "setup.welcomeOffline": "安装内嵌版本",
+  "setup.welcomeNetwork": "网络异常，继续安装当前版本",
+  "setup.welcomeError": "检查更新失败，继续安装当前版本"
 }

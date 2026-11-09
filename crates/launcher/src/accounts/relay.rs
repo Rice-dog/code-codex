@@ -639,12 +639,12 @@ fn fault(stage: &str) -> AccountError {
         format!("stage={stage}; account route forwarding failed; no request was replayed."),
     )
 }
-async fn reject(io: &mut BufReader<TcpStream>, status: u16, message: &str) -> Result<()> {
+pub(super) async fn reject(io: &mut BufReader<TcpStream>, status: u16, message: &str) -> Result<()> {
     let body = json!({"error":{"message":message,"type":"account_route_unavailable"}}).to_string();
     io.write_all(format!("HTTP/1.1 {status} Rejected\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).await.map_err(|_|fault("reject"))?;
     Ok(())
 }
-async fn read_header(io: &mut BufReader<TcpStream>) -> Result<String> {
+pub(super) async fn read_header(io: &mut BufReader<TcpStream>) -> Result<String> {
     let mut bytes = Vec::new();
     loop {
         let remaining=(32769usize).saturating_sub(bytes.len());
@@ -661,14 +661,17 @@ async fn read_header(io: &mut BufReader<TcpStream>) -> Result<String> {
         }
     }
 }
-struct Request {
-    method: reqwest::Method,
-    path: String,
-    headers: HeaderMap,
-    length: usize,
-    websocket: bool,
+pub(super) struct Request {
+    pub method: reqwest::Method,
+    pub path: String,
+    pub headers: HeaderMap,
+    pub length: usize,
+    pub websocket: bool,
 }
 fn parse_header(raw: &str, authority: &str, key: &str) -> Result<Request> {
+    parse_header_paths(raw, authority, key, &["/responses", "/responses/compact", "/health"])
+}
+pub(super) fn parse_header_paths(raw: &str, authority: &str, key: &str, paths: &[&str]) -> Result<Request> {
     let mut lines = raw.split("\r\n");
     let start: Vec<_> = lines.next().unwrap_or("").split(' ').collect();
     if start.len() != 3 || start[2] != "HTTP/1.1" {
@@ -676,7 +679,7 @@ fn parse_header(raw: &str, authority: &str, key: &str) -> Result<Request> {
     }
     let path = start[1]
         .strip_prefix(&format!("/{key}"))
-        .filter(|p| matches!(*p, "/responses" | "/responses/compact" | "/health"))
+        .filter(|p| paths.contains(p))
         .ok_or_else(|| fault("request-route"))?
         .to_owned();
     let mut headers = HeaderMap::new();

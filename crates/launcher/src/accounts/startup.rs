@@ -46,12 +46,16 @@ pub(crate) fn qualify(installation:&crate::discovery::CodexInstallation)->bool {
  })().unwrap_or(false)
 }
 
-pub(crate) fn parameters(installation:&crate::discovery::CodexInstallation,renderer:CdpEndpoint,port:u16)->Result<Value>{
+pub(crate) fn parameters(installation:&crate::discovery::CodexInstallation,renderer:CdpEndpoint,port:u16,native:bool)->Result<Value>{
  let backend=installation.app_server.as_ref().ok_or_else(||error("backend-path"))?;
  let backend=dunce::canonicalize(backend).map_err(|_|error("backend-path"))?;
  let backend_size=crate::renderer_storage::regular(&backend).map_err(|_|error("backend-file"))?.len();
  if backend_size>512*1024*1024{return Err(error("backend-bound"));}
- let backend_sha256={use std::io::Read;let mut file=std::fs::File::open(&backend).map_err(|_|error("backend-open"))?;let mut hash=Sha256::new();let mut bytes=vec![0;1024*1024];loop{let n=file.read(&mut bytes).map_err(|_|error("backend-read"))?;if n==0{break;}hash.update(&bytes[..n]);}format!("{:x}",hash.finalize())};
+ let backend_sha256=if native {String::new()}else{use std::io::Read;let mut file=std::fs::File::open(&backend).map_err(|_|error("backend-open"))?;let mut hash=Sha256::new();let mut bytes=vec![0;1024*1024];loop{let n=file.read(&mut bytes).map_err(|_|error("backend-read"))?;if n==0{break;}hash.update(&bytes[..n]);}format!("{:x}",hash.finalize())};
+ let blocked=if native {std::collections::BTreeSet::new()}else{blocked_threads()?};
+ Ok(json!({"schema":1,"rendererPort":renderer.port(),"port":port,"key":super::nonce(),"control":super::nonce(),"backend":backend,"backendSize":backend_size,"backendSha256":backend_sha256,"blocked":blocked}))
+}
+pub(super) fn blocked_threads()->Result<std::collections::BTreeSet<String>> {
  let mut blocked=std::collections::BTreeSet::new();
  let accounts=workspace_service::application_paths::data_root().map_err(|_|error("storage"))?.join("accounts");
  if accounts.exists(){
@@ -64,12 +68,12 @@ pub(crate) fn parameters(installation:&crate::discovery::CodexInstallation,rende
    if path.exists(){let registry=crate::renderer_storage::read_json(&path,1024*1024).map_err(|_|error("selection-read"))?;if let Some(selected)=registry["selected"].as_object(){for (id,target)in selected{if target!="host"{if blocked.len()>=4096{return Err(error("selection-bound"));}blocked.insert(id.clone());}}}}
   }
  }
- Ok(json!({"schema":1,"rendererPort":renderer.port(),"port":port,"key":super::nonce(),"control":super::nonce(),"backend":backend,"backendSize":backend_size,"backendSha256":backend_sha256,"blocked":blocked}))
+ Ok(blocked)
 }
 pub(crate) fn initializer(params:&Value)->String{include_str!("startup_broker.js").replace("__PARAMS__",&params.to_string())}
 pub(crate) fn save_descriptor(params:&Value,pid:u32)->Result<()> {
  use std::io::Write;
- let mut descriptor=params.clone();descriptor["pid"]=json!(pid);for key in ["blocked","backend","backendSize","backendSha256"]{descriptor.as_object_mut().unwrap().remove(key);}
+ let mut descriptor=params.clone();descriptor["pid"]=json!(pid);for key in ["blocked","backend","backendSize","backendSha256","manifest"]{descriptor.as_object_mut().unwrap().remove(key);}
  let path=descriptor_path()?;
  if path.exists(){crate::renderer_storage::regular(&path).map_err(|_|error("descriptor-file"))?;}
  let mut staged=tempfile::NamedTempFile::new_in(path.parent().ok_or_else(||error("descriptor-parent"))?).map_err(|_|error("descriptor-stage"))?;
@@ -94,7 +98,8 @@ async fn descriptor(endpoint:CdpEndpoint)->Result<Option<Value>>{
  let Some(pid)=v["pid"].as_u64().and_then(|v|u32::try_from(v).ok()).filter(|v|*v>0)else{return Err(error("descriptor-pid"))};
  let Some(port)=v["port"].as_u64().and_then(|v|u16::try_from(v).ok()).filter(|v|*v>0)else{return Err(error("descriptor-port"))};
  for key in ["key","control"]{if !v[key].as_str().is_some_and(|s|s.len()==32&&s.bytes().all(|b|b.is_ascii_hexdigit())){return Err(error("descriptor-capability"));}}
- tokio::task::spawn_blocking(move||{crate::process_guard::verify_listener_owner_fast(endpoint.port(),pid,std::time::UNIX_EPOCH)?;crate::process_guard::verify_listener_owner_fast(port,pid,std::time::UNIX_EPOCH)}).await.map_err(|_|error("owner-worker"))?.map_err(|_|error("listener-owner"))?;
+ let broker_pid=v["brokerPid"].as_u64().and_then(|v|u32::try_from(v).ok()).unwrap_or(pid);
+ tokio::task::spawn_blocking(move||{crate::process_guard::verify_listener_owner_fast(endpoint.port(),pid,std::time::UNIX_EPOCH)?;crate::process_guard::verify_listener_owner_fast(port,broker_pid,std::time::UNIX_EPOCH)}).await.map_err(|_|error("owner-worker"))?.map_err(|_|error("listener-owner"))?;
  Ok(Some(v))
 }
 async fn control(v:&Value,payload:Value)->Result<Value>{

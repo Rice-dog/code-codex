@@ -1,3 +1,4 @@
+mod update_contract;
 mod bootstrap;
 mod activation_lifetime;
 mod accounts;
@@ -287,8 +288,22 @@ enum LaunchFailure {
     DiagnosticSerialization,
 }
 
+fn main() -> ExitCode {
+    if let Some(config) = std::env::var_os(accounts::startup_backend::ENV) {
+        // CLI forwarding needs one event loop, not the desktop worker pool.
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("startup transport runtime");
+        let code = match runtime.block_on(accounts::startup_backend::run(config)) {
+            Ok(code) => code,
+            Err(error) => { eprintln!("{}: {}", error.code, error.message); 24 }
+        };
+        // JSONL stdout has drained; do not wait for a blocking OS stdin read.
+        std::process::exit(i32::from(code));
+    }
+    application_main()
+}
+
 #[tokio::main]
-async fn main() -> ExitCode {
+async fn application_main() -> ExitCode {
     let cli = Cli::parse();
     if let Some(Commands::LoginStartup { enable, disable }) = &cli.command {
         let result = if *enable {

@@ -32,6 +32,7 @@ pub(super) struct NativeBackend {
     port: u16,
     inspector: Option<u16>,
     animation: bool,
+    startup: Option<serde_json::Value>,
     original_pid: u32,
     pub launched_after: SystemTime,
     pub early: Option<early_startup::Worker>,
@@ -45,6 +46,7 @@ impl NativeBackend {
         port: u16,
         inspector: Option<u16>,
         animation: bool,
+        startup: Option<serde_json::Value>,
     ) -> Self {
         Self {
             package,
@@ -54,6 +56,7 @@ impl NativeBackend {
             port,
             inspector,
             animation,
+            startup,
             original_pid: 0,
             launched_after: SystemTime::now(),
             early: None,
@@ -104,6 +107,7 @@ impl Backend for NativeBackend {
             self.package.clone(),
             self.aumid.clone(),
             self.arguments.clone(),
+            self.startup.clone(),
         )
         .await
         .map_err(activation_failure)?;
@@ -852,6 +856,7 @@ mod tests {
             1,
             None,
             false,
+            None,
         );
         backend.original_pid = std::process::id();
         let result = backend.adopt(std::process::id()).await;
