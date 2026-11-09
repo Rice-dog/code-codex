@@ -11,7 +11,7 @@ interface ApplicationMenuActions extends LoginStartupActions {
   checkForUpdates(): void;
   openRuntimeInformation(): void;
   openInstallationFolder(): void;
-  hostUpdateStatus?(): Promise<{latest?:{type?:string;counts?:{pluginDependency?:number;needsReview?:number}};scan?:{status?:string}}> ;
+  hostUpdateStatus?(): Promise<{latest?:{type?:string;counts?:{pluginDependency?:number;needsReview?:number}};scan?:{status?:string};analysis?:{status?:string;message?:string;manualRetryRequired?:boolean}}> ;
   retryHostUpdates?(): Promise<{scheduled:boolean}>;
   openHostUpdates?(): Promise<{opened:boolean}>;
   restartCodeCodex(): Promise<{ scheduled: boolean }>;
@@ -316,7 +316,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     void loginStartup.refresh();
     updateText();
     popup.hidden = false;
-    void actions.hostUpdateStatus?.().then(value=>{if(signal.aborted||popup.hidden)return;const counts=value.latest?.counts;const priority=(counts?.pluginDependency??0)+(counts?.needsReview??0);hostUpdatesItem.dataset.reportStatus=value.scan?.status??'pending';if(value.latest?.type==='update'&&priority>0)hostUpdatesItem.textContent=t('menu.hostUpdates')+` (${priority})`;hostUpdatesItem.title=value.scan?.status==='partial'||value.scan?.status==='unavailable'||value.scan?.status==='failed'||value.scan?.status==='retry_required'?'HOST_UPDATE_INCOMPLETE: Inventory is incomplete; no no-impact conclusion was made.':'';}).catch(()=>{if(!signal.aborted)hostUpdatesItem.title='HOST_UPDATE_REPORT: Update status is unavailable.';});
+    void actions.hostUpdateStatus?.().then(value=>{if(signal.aborted||popup.hidden)return;const counts=value.latest?.counts;const priority=(counts?.pluginDependency??0)+(counts?.needsReview??0);hostUpdatesItem.dataset.reportStatus=value.scan?.status??'pending';if((value.latest?.type==='update'||value.latest?.type==='analysis_refresh')&&priority>0)hostUpdatesItem.textContent=t('menu.hostUpdates')+` (${priority})`;hostUpdatesItem.dataset.analysisStatus=value.analysis?.status??'unknown';hostUpdatesItem.title=value.analysis?.manualRetryRequired?value.analysis.message??'HOST_UPDATE_RULES_CHANGED: Recheck official Codex updates.':value.scan?.status==='partial'||value.scan?.status==='unavailable'||value.scan?.status==='failed'||value.scan?.status==='retry_required'?'HOST_UPDATE_INCOMPLETE: Inventory is incomplete; no no-impact conclusion was made.':'';}).catch(()=>{if(!signal.aborted)hostUpdatesItem.title='HOST_UPDATE_REPORT: Update status is unavailable.';});
     trigger.setAttribute("aria-expanded", "true");
     trigger.dataset.state = 'open';
     position();

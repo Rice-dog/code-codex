@@ -34,7 +34,7 @@ use tokio_util::sync::CancellationToken;
 use super::needs_windows_10_surface_patch;
 use super::{
     ActivateArgs, AppError, AttachArgs, CommonArgs, LaunchFailure, ListenerIdentity,
-    ProcessEndpointVerifier, RunArgs, build_launch_arguments, initialize_electron_main_process,
+    ProcessEndpointVerifier, RunArgs, build_launch_arguments,
     live_launch_snapshot, publish_startup_diagnostic, record_launch_context,
     record_listener_verified, record_precleanup_probe, record_renderer_port, record_startup_event,
     record_supervisor_progress, startup_trace, validate_extra_arguments, wait_for_endpoint,
@@ -158,13 +158,17 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
     let endpoint = CdpEndpoint::loopback(port);
     record_startup_event("port reservation", "renderer port reserved");
     let windows_10 = needs_windows_10_surface_patch();
-    let request_main_inspector = if windows_10 {
+    let startup_route_requested=crate::accounts::startup::enabled();
+    let startup_route_qualified=startup_route_requested&&crate::accounts::startup::qualify(&installation);
+    let mut startup_route_enabled=false;
+    let request_main_inspector = if windows_10 || startup_route_qualified {
         let image = installation.executable.clone();
         let capability =
             tokio::task::spawn_blocking(move || win10_compat::inspect_capability(&image)).await;
         let request = capability
             .as_ref()
             .map_or(true, |c| c.should_request_inspector());
+        startup_route_enabled=startup_route_qualified&&request;
         process_diagnostics::observe(
             "Windows10 compatibility",
             "official inspector capability",
@@ -197,6 +201,12 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
         .map(PortReservation::port)
         .transpose()?;
     let main_inspector_endpoint = main_inspector_port.map(CdpEndpoint::loopback);
+    let startup_route=if startup_route_enabled {
+        let listener=PortReservation::reserve()?;let route_port=listener.port()?;
+        let params=crate::accounts::startup::parameters(&installation,endpoint,route_port).map_err(|e|AppError::MainInspector{operation:"startup account transport configuration",details:e.message})?;
+        listener.release();Some(params)
+    }else{None};
+    runtime_log::record("accounts","account.startup.configuration","prepared",json!({"requested":startup_route_requested,"qualified":startup_route_qualified,"enabled":startup_route.is_some(),"networkRequested":false,"officialImageModified":false}));
     record_startup_event("launch configuration", "debugging arguments prepared");
     let launch_arguments = build_launch_arguments(port, main_inspector_port, &args.codex_args);
     if windows_10 {
@@ -289,15 +299,20 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
     tracing::info!(event = "codex_launched", channel = %installation.channel);
 
     let result = async {
+        let mut startup_route_applied=false;
         if let Some(main_inspector_endpoint) = main_inspector_endpoint {
-            record_startup_event("main inspector", "waiting for Windows 10 surface patch");
-            let patched = initialize_electron_main_process(main_inspector_endpoint, endpoint, launched_pid, launched_after).await?;
-            record_startup_event("main inspector", if patched { "surface patch initialized" } else { "verified native UI ready; continuing with opaque surface fallback" });
-            tracing::info!(event = "electron_main_transparency_result", surface_patch_applied = patched);
+            record_startup_event("main inspector", if startup_route.is_some(){"preparing startup account transport"}else{"waiting for Windows 10 surface patch"});
+            let patched = crate::platform_windows_compat::initialize_native_main_process(main_inspector_endpoint, endpoint, launched_pid, launched_after,startup_route.as_ref(),windows_10).await?;
+            if let Some(params)=startup_route.as_ref().filter(|_|patched) {crate::accounts::startup::save_descriptor(params,launched_pid).map_err(|e|AppError::MainInspector{operation:"startup account transport publication",details:e.message})?;startup_route_applied=true;}
+            record_startup_event("main inspector", if startup_route_applied{"startup account transport adapter initialized"}else if patched { "surface patch initialized" } else { "verified native UI ready; continuing with opaque surface fallback" });
+            tracing::info!(event = "electron_main_transparency_result", surface_patch_applied = patched&&windows_10);
         }
         record_startup_event("CDP version", "waiting for renderer debugging endpoint");
         wait_for_launched_endpoint(endpoint, launched_pid, Duration::from_secs(30)).await?;
         record_startup_event("CDP version", "supported endpoint responded");
+        if startup_route_applied{
+            crate::accounts::startup::verify_launch(endpoint).await.map_err(|e|AppError::MainInspector{operation:"startup account transport verification",details:e.message})?;
+        }
         if startup_enabled {
             record_startup_event("early startup animation", "concurrent supervisor continues through App Server preparation and renderer discovery");
         }

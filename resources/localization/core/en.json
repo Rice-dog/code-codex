@@ -125,5 +125,21 @@
   "plugin.beta": "Beta",
   "menu.restart": "Restart Code-Codex",
   "menu.hostUpdates": "Official Codex update report",
-  "menu.hostUpdatesRetry": "Recheck official Codex updates"
+  "menu.hostUpdatesRetry": "Recheck official Codex updates",
+  "plugins.downloadError.unknown": "The download could not be completed. Try again. If it keeps failing, check Runtime information and report the issue.",
+  "plugins.downloadError.rateLimit": "The download service is busy. Try again in a minute. If it still fails, switch networks and retry.",
+  "plugins.downloadError.missingFile": "The plugin file is unavailable. It may not have been published or may have been removed. Check for an app update. If it persists, report it to the developer.",
+  "plugins.downloadError.configuration": "The plugin download address or catalog is misconfigured. Check for an app update or report it to the developer.",
+  "plugins.downloadError.integrity": "The downloaded file is incomplete or does not match the published version. Download it again. If it persists, report it to the developer.",
+  "plugins.downloadError.storage": "The plugin could not be saved. Check free disk space and write access to the installation folder, then retry.",
+  "plugins.downloadError.access": "Access to the download service was denied. Check your network or proxy settings. If it persists, report it to the developer.",
+  "plugins.downloadError.proxy": "The proxy could not connect to the download service. Check proxy settings or switch networks and retry.",
+  "plugins.downloadError.certificate": "The download connection certificate could not be verified. Check your computer clock and network or proxy settings, then retry.",
+  "plugins.downloadError.timeout": "The download took too long. The network may be congested. Switch networks or try again in a minute.",
+  "plugins.downloadError.server": "The download service is temporarily unavailable. Try again in a minute. If it still fails, switch networks and retry.",
+  "plugins.downloadError.connection": "The download connection failed or was interrupted. Check your connection or switch networks and download again.",
+  "plugins.downloadError.redirect": "The download address redirected unexpectedly, so the download was stopped for safety. Check network or proxy settings. Report it if it persists.",
+  "plugins.downloadError.response": "The download service returned an unexpected response. Try again later. If it persists, report it to the developer.",
+  "plugins.downloadError.cancelled": "Download cancelled. You can download it again at any time.",
+  "plugins.downloadError.busy": "This plugin is already downloading. Wait for it to finish, or cancel and retry."
 }

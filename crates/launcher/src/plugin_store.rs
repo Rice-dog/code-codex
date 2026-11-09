@@ -105,6 +105,7 @@ struct Job {
     phase: &'static str,
     bytes: usize,
     error: Option<String>,
+    error_code: Option<String>,
 }
 fn jobs() -> &'static Mutex<HashMap<String, Job>> {
     static JOBS: OnceLock<Mutex<HashMap<String, Job>>> = OnceLock::new();
@@ -645,6 +646,13 @@ fn read_asset(root: &Path, p: &Package) -> Result<Vec<u8>, BridgeError> {
     );
     Ok(bytes)
 }
+/// Startup checks only this plugin's verified dependency closure. It does not
+/// enumerate/download other plugins or infer installation from an enable flag.
+pub(crate) fn installed(id:&str)->Result<bool,BridgeError>{
+    let root=cache_root()?;let packages=catalog()?;
+    let closure=dependency_order(&packages,id)?;
+    Ok(closure.iter().all(|p|p.assets().iter().all(|asset|source_available(&root,asset))))
+}
 pub(crate) fn status() -> Result<Value, BridgeError> {
     let root = cache_root()?;
     let packages = catalog()?;
@@ -654,7 +662,7 @@ pub(crate) fn status() -> Result<Value, BridgeError> {
     Ok(Value::Array(packages.iter().map(|p|{
         let job=jobs.get(&p.id);
         let closure=dependency_order(&packages,&p.id).expect("catalog dependencies were validated");
-        json!({"id":p.id,"category":p.category,"version":p.version,"installed":closure.iter().all(|p|p.assets().iter().all(|asset|source_available(&root,asset))),"phase":job.map(|j|j.phase),"downloaded":job.map(|j|j.bytes).unwrap_or(0),"total":closure.iter().map(|p|p.total_size()).sum::<usize>(),"error":job.and_then(|j|j.error.as_ref())})
+        json!({"id":p.id,"category":p.category,"version":p.version,"installed":closure.iter().all(|p|p.assets().iter().all(|asset|source_available(&root,asset))),"phase":job.map(|j|j.phase),"downloaded":job.map(|j|j.bytes).unwrap_or(0),"total":closure.iter().map(|p|p.total_size()).sum::<usize>(),"error":job.and_then(|j|j.error.as_ref()),"errorCode":job.and_then(|j|j.error_code.as_ref())})
     }).collect()))
 }
 fn source_available(root: &Path, p: &Package) -> bool {
@@ -829,6 +837,7 @@ async fn install_inner(
                 phase: "downloading",
                 bytes: 0,
                 error: None,
+                error_code: None,
             },
         );
     }
@@ -851,6 +860,7 @@ async fn install_inner(
                     "failed"
                 };
                 j.error = Some(e.message.clone());
+                j.error_code = Some(e.code.clone());
             }
         }
     }

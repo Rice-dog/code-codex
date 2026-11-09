@@ -125,6 +125,10 @@ try{
  await check('Report opens once through the fixed native action and closes menu',`fixture.reportOpens===1&&popup.hidden&&!document.querySelector('[data-code-codex-host-updates]').disabled`);
  await ev(`fixture.hostStatus.scan.status='partial';trigger.click();${settle}`);
  await check('Incomplete inventory is distinguished from a no-impact result',`document.querySelector('[data-code-codex-host-updates]').title.includes('HOST_UPDATE_INCOMPLETE')`);
+ await ev(`fixture.hostStatus.analysis={status:'refresh_required',manualRetryRequired:true,message:'HOST_UPDATE_RULES_CHANGED: Recheck official Codex updates.'};trigger.click();trigger.click();${settle}`);
+ await check('Old-rule analysis is explicit without changing native menu layout',`document.querySelector('[data-code-codex-host-updates]').dataset.analysisStatus==='refresh_required'&&document.querySelector('[data-code-codex-host-updates]').title.includes('HOST_UPDATE_RULES_CHANGED')&&document.querySelector('[data-code-codex-host-updates]').style.length===0`);
+ await ev(`fixture.hostStatus.analysis={status:'current',manualRetryRequired:false};fixture.hostStatus.scan.status='version_unchanged';trigger.click();trigger.click();${settle}`);
+ await check('Current analysis clears stale warning while retaining separate scan state',`document.querySelector('[data-code-codex-host-updates]').dataset.analysisStatus==='current'&&document.querySelector('[data-code-codex-host-updates]').title===''`);
  await ev(`setLocale('zh-CN');trigger.click();trigger.click();${settle}`);
  await check('Report row follows global Chinese localization',`document.querySelector('[data-code-codex-host-updates]').textContent==='官方 Codex 更新报告 (5)'`);
  await ev(`trigger.click();fixture.deferStatus=true;trigger.click();${settle}`);

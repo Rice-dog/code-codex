@@ -92,6 +92,7 @@
   "accounts.apiKeepKey": "密钥留空则保留原密钥。",
   "accounts.apiFetchModels": "获取模型列表",
   "accounts.apiFetchingModels": "正在获取模型…",
+  "accounts.apiDefaultHint": "蓝框为默认模型",
   "accounts.apiRemoveModel": "移除模型",
   "accounts.apiAddModel": "输入模型 ID 后按回车添加"
 }

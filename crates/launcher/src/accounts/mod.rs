@@ -31,6 +31,7 @@ mod relay_diagnostics;
 mod context_handoff;
 mod official_context;
 mod native_route;
+pub(crate) mod startup;
 mod draft;
 use cdp_client::{BridgeError, CdpEndpoint};
 use serde::{Deserialize, Serialize};

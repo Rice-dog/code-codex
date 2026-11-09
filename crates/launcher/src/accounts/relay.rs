@@ -429,7 +429,7 @@ impl Route {
             }
             if let Some(settings)=api {
                 if request.headers.contains_key("content-encoding"){return reject(&mut io,400,"ACCOUNT_API_BODY_ENCODING: Compressed requests are not supported by this route. Re-select the API connection; no upstream request was sent.").await;}
-                body=api_body(&body,&settings.model)?;
+                body=api_body(&body,&settings)?;
             }
             if self.has_handoff() {
                 if request.headers.contains_key("content-encoding") {return reject(&mut io,400,"ACCOUNT_CONTEXT_ENCODING: Re-select this idle route to disable request compression; original history is unchanged; no upstream request was sent.").await;}
@@ -784,10 +784,13 @@ fn api_headers(input:&HeaderMap,auth:&Value)->Result<HeaderMap>{
     out.insert("authorization",HeaderValue::from_str(&format!("Bearer {}",auth["accessToken"].as_str().ok_or_else(||fault("api-credential-token"))?)).map_err(|_|fault("api-credential-header"))?);
     Ok(out)
 }
-fn api_body(bytes:&[u8],model:&str)->Result<Vec<u8>>{
+fn api_body(bytes:&[u8],settings:&super::api::Settings)->Result<Vec<u8>>{
     let mut body:Value=serde_json::from_slice(bytes).map_err(|_|AccountError::new("ACCOUNT_API_BODY","The Responses request body is invalid. No upstream request was sent."))?;
     let object=body.as_object_mut().ok_or_else(||fault("api-body-object"))?;
-    object.insert("model".into(),json!(model));
+    // Native turn settings may select any saved model, independently per thread.
+    // Unknown/foreign IDs still use this connection's explicit default.
+    let supported=object.get("model").and_then(Value::as_str).is_some_and(|model|model==settings.model||settings.models.as_ref().is_some_and(|models|models.iter().any(|id|id==model)));
+    if !supported {object.insert("model".into(),json!(settings.model));}
     // Provider-specific response IDs must never cross a connection boundary.
     object.remove("previous_response_id");object.remove("prompt_cache_key");
     serde_json::to_vec(&body).map_err(|_|fault("api-body-encode"))

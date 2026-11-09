@@ -1,3 +1,4 @@
+import {pluginDownloadMessage} from './plugin-download-message';
 import {translate,t} from './i18n';
 import {pluginDisplayName} from './core/localization/plugin-names';
 import type { WorkspaceBridge } from './contracts/bridge';
@@ -7,7 +8,7 @@ import { runtimeEvent } from "./runtime-events";
 import { beginRuntimeOperation, runtimeErrorDetails } from "./runtime-operations";
 import { ResourceScope } from './core/lifecycle/resource-scope';
 
-interface PackageState { id: string; installed: boolean; phase?: string; downloaded?: number; total?: number; error?: string; }
+interface PackageState { id: string; installed: boolean; phase?: string; downloaded?: number; total?: number; error?: string; errorCode?: string; }
 const cardIds: Record<string, string> = { mountain:'layered-mountain', 'particle-image':'particle-image' };
 let nextLoadingOwner=0;
 export class BackgroundPackageMarket {
@@ -88,7 +89,7 @@ export class BackgroundPackageMarket {
     try{
       await this.bridge.request('explorer.plugins.install',{id},130_000);
       operation.finish('installed',{enabledAutomatically:false});
-    }catch(error){operation.finish('failed',runtimeErrorDetails(error));if(!this.#disposed)this.notice(error instanceof Error?error.message:String(error));}
+    }catch(error){operation.finish('failed',runtimeErrorDetails(error));if(!this.#disposed)this.notice(pluginDownloadMessage(error));}
     finally{this.#busy.delete(id);if(!this.#disposed)await this.#refresh();}
   }
   async #refresh():Promise<void> {
@@ -156,7 +157,7 @@ export class BackgroundPackageMarket {
           const phase=translate(state?.phase==='verifying'?'Verifying':'Downloading');
           label.textContent=`${phase}${percent===null?'…':` · ${percent}%`}`;
         } else label.textContent=`${(packageBytes/1024).toFixed(0)} KB · ${translate(state?.error?'Download failed':state?'Not installed':'Checking…')}`;
-        download.title=state?.error??'';
+        download.title=state?.error?pluginDownloadMessage(state):'';
       }
       const active=button.getAttribute('aria-pressed')==='true'||button.dataset.enabled==='true';
       if(this.#loading.has(info.id)){button.dataset.packageLoadingOwner=this.#loadingOwner;button.textContent=translate('Loading…');button.disabled=true;continue;}

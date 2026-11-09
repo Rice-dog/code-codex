@@ -38,6 +38,8 @@ export interface ContinuationPorts {
  phase(value:AutoPhase):void;
  event(stage:string,details:Record<string,unknown>):void;
  model?:string|undefined;
+ /** APIs have no standard balance endpoint. Admission is verified by prepare. */
+ isApi?(id:string):boolean;
 }
 /** Fresh quota before one continuation; terminal events decide whether to traverse further. */
 export async function continueAfterQuota(cycle:AccountContinuationCycle,ports:ContinuationPorts):Promise<'continued'|'unavailable'|'cancelled'> {
@@ -47,15 +49,32 @@ export async function continueAfterQuota(cycle:AccountContinuationCycle,ports:Co
   const candidateOrdinal=cycle.order.indexOf(id)+1;
   if(!ports.available(id)){ports.event('skipped',{reason:'connection-removed',candidateOrdinal,attempted:cycle.attempted.size});continue;}
   ports.phase('checking');let raw:unknown;
+  if(ports.isApi?.(id)){
+   ports.event('api-candidate',{candidateOrdinal,attempted:cycle.attempted.size,balance:'unverified'});
+  }else{
   try{raw=await ports.quota(id);}catch(error){if(!current())return 'cancelled';ports.event('skipped',{reason:'quota-read-unavailable',errorCode:String(error).match(/ACCOUNT_[A-Z_]+/)?.[0]??'ACCOUNT_USAGE_UNAVAILABLE',candidateOrdinal,attempted:cycle.attempted.size});continue;}
   if(!current())return 'cancelled';
   const eligibility=quotaEligibility(raw,ports.model);
   if(eligibility!=='available'){ports.event('skipped',{reason:'quota-'+eligibility,candidateOrdinal,attempted:cycle.attempted.size});continue;}
-  ports.event('quota-confirmed',{candidateOrdinal,attempted:cycle.attempted.size});ports.phase('preparing');await ports.prepare(id);
+  ports.event('quota-confirmed',{candidateOrdinal,attempted:cycle.attempted.size});
+  }
+  if(!current())return 'cancelled';
+  ports.phase('preparing');await ports.prepare(id);
   if(!current())return 'cancelled';
   ports.phase('continuing');if(!current())return 'cancelled';await ports.resume(id);ports.event('continued',{candidateOrdinal,attempted:cycle.attempted.size});return 'continued';
  }
  return 'cancelled';
+}
+/** Exact saved catalog IDs only; this never changes the connection default. */
+export function apiContinuationSettings(settings:RecordValue,api:{model:string;models?:string[]}):RecordValue {
+ const models=api.models??[api.model];
+ if(!models.length||!models.includes(api.model))throw Error('ACCOUNT_API_MODELS: The saved default model is unavailable. No continuation was sent.');
+ const matched=typeof settings.model==='string'&&models.includes(settings.model);
+ const model=matched?settings.model:api.model;
+ const effort=matched&&typeof settings.effort==='string'&&['none','minimal','low','medium','high','xhigh','max','ultra'].includes(settings.effort)?settings.effort:'medium';
+ const result:RecordValue={...continuationSettings(settings),model,effort,serviceTier:null};
+ if(result.collaborationMode&&typeof result.collaborationMode==='object')result.collaborationMode={...object(result.collaborationMode),settings:{...object(object(result.collaborationMode).settings),model,reasoning_effort:effort}};
+ return result;
 }
 const stickyFields=['model','serviceTier','effort','summary','collaborationMode','multiAgentMode','personality','outputSchema','disabledPluginIds'] as const;
 /** Reuse settings, not original prompts/attachments/tool output or delivery callbacks. */

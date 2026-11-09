@@ -10,7 +10,7 @@ import {projectAssets,requireResetCard,usableCredits} from './assets-model';
 import {installSessionGuard} from './session-guard';
 import {permissionSettings} from './permissions';
 import {runtimeEvent} from '../../runtime-events';
-import {AccountContinuationCycle,continueAfterQuota,isQuotaExhausted,quotaEligibility,continuationSettings,continuationOperation,type AutoPhase} from './auto-continue';
+import {AccountContinuationCycle,apiContinuationSettings,continueAfterQuota,isQuotaExhausted,quotaEligibility,continuationSettings,continuationOperation,type AutoPhase} from './auto-continue';
 import {accountErrorCode,streamFault,shouldRetryStream,type StreamFault} from './stream-recovery';
 import {installDraftRouting,type DraftRoute} from './draft-routing';
 import {rpcManagerService,observeRpcManager,type RpcObservation} from './rpc-observation';
@@ -78,7 +78,8 @@ export class NativeAccountAdapter {
  #rpcStateAt=0;
  #rpcStateThread:string|null=null;
  #rpcQuotaSignature='';
- #rpcCycles=new Map<string,{cycle:AccountContinuationCycle;settings:Native;prepared?:boolean}>();
+ #rpcCycles=new Map<string,{cycle:AccountContinuationCycle;settings:Native;prepared?:boolean;settingsRead?:Promise<void>|undefined}>();
+ #apiChoices=new Map<string,{connectionId:string;model:string;effort:string}>();
  #rpcAutomatic=new Set<string>();
  #rpcTerminals=new Set<string>();
  #rpcRouteFaults=new Map<string,string>();
@@ -144,6 +145,7 @@ export class NativeAccountAdapter {
   if(!['reset','alreadyRedeemed','nothingToReset','noCredit'].includes(result?.outcome))throw Error('ACCOUNT_RESET_OUTCOME_UNKNOWN: The official reset result could not be verified. Do not create another attempt.');
   runtimeEvent('accounts','account.assets','confirmed',{stage:'reset-consume',outcome:result.outcome,accountOrdinal:id==='host'?1:this.#info.connections.findIndex(c=>c.id===id)+2,taskSent:false});return result.outcome;
  }
+ apiChoice(connectionId:string):{model:string;effort:string}|undefined{const thread=this.status().conversationId,choice=thread?this.#apiChoices.get(thread):undefined;return choice?.connectionId===connectionId?choice:undefined;}
  async apiModels(connectionId:string):Promise<{models:string[];selected:string;source:string;warning?:string|null}> {
   return this.#call({action:'api.models',connectionId});
  }
@@ -156,13 +158,14 @@ export class NativeAccountAdapter {
    if(this.#disposed) return;
    const connection=this.#info.connections.find(c=>c.id===connectionId);
    if(connection?.api)connection.api.model=model;
+   if(before.conversationId)this.#apiChoices.delete(before.conversationId);
   }finally{this.#selecting=false;this.changed();}
  }
  get info():AccountsInfo{return this.#info;}
  setEnabled(enabled:boolean):void{const changed=this.#enabled!==enabled;this.#enabled=enabled;this.usage.suspend(!enabled);if(!enabled){clearTimeout(this.#timer);this.#timer=undefined;}else if(changed&&!this.#disposed)this.#timer=setTimeout(()=>void this.#poll(),300);this.setAutoContinue(enabled&&localStorage.getItem(ACCOUNT_AUTO_CONTINUE_KEY)==='true');}
  updateInfo(info:AccountsInfo):void {
   if(info.owner.id!==this.#info.owner.id){
-   this.setAutoContinue(false);
+   this.setAutoContinue(false);this.#apiChoices.clear();
    this.usage.dispose();
    this.#profileError='ACCOUNT_OWNER_CHANGED: The host login changed. Re-enable the plugin to bind the current owner.';
    this.#showNotice(this.#profileError);this.changed();return;
@@ -177,7 +180,7 @@ export class NativeAccountAdapter {
   catch(error){runtimeEvent('accounts','account.request','failed',{operationId,action:params.action,method:typeof params.method==='string'&&RPC.has(params.method)?params.method:undefined,durationMs:Math.round(performance.now()-started),errorCode:accountErrorCode(error),error:String(error),stage:'native-request',readOnly:['shared.events','shared.reconcile','shared.status','usage'].includes(params.action),taskReplayed:false});throw error;}
  }
  async start():Promise<void>{
-  const storage=(event:StorageEvent)=>{if(event.key===null||event.key?.startsWith('code-codex:credit-permission:v1:'+this.#info.owner.id+':'))this.usage.assetChanged();if(event.key===ACCOUNT_AUTO_CONTINUE_KEY||event.key===null){try{this.setAutoContinue(localStorage.getItem(ACCOUNT_AUTO_CONTINUE_KEY)==='true');}catch{this.setAutoContinue(false);}}};
+  const storage=(event:StorageEvent)=>{if(event.key===null||event.key?.startsWith('code-codex:credit-permission:v1:'+this.#info.owner.id+':'))this.usage.assetChanged();if(event.key===ACCOUNT_AUTO_CONTINUE_KEY||event.key===null){try{this.setAutoContinue(localStorage.getItem(ACCOUNT_AUTO_CONTINUE_KEY)==='true');}catch{this.setAutoContinue(false);this.#apiChoices.clear();}}};
   window.addEventListener('storage',storage);this.#disposers.push(()=>window.removeEventListener('storage',storage));
   const profile=this.#info.profile;
   if(!validHostModulePath(profile.initial))throw Error('ACCOUNT_HOST_UNSUPPORTED: Invalid native adapter profile.');
@@ -286,7 +289,7 @@ export class NativeAccountAdapter {
   if(this.#rpcMode&&connectionId!=='host'&&!this.#info.nativeRouting)throw Error('ACCOUNT_EXECUTION_UNSUPPORTED: stage=selection; this native RPC service does not expose independent execution and event injection. The account was not changed and no turn was sent.');
   if(this.#rpcMode&&this.#info.nativeRouting){
    if(!status.conversationId){if(connectionId!=='host'&&!this.#draftReady)throw Error(this.#draftError??'ACCOUNT_DRAFT_CAPABILITY_UNAVAILABLE: New-conversation routing is unavailable.');this.#draft=connectionId;this.#draftArmed=0;this.changed();return;}
-   this.#rpcCycles.get(status.conversationId)?.cycle.cancel();await this.#rpcSelect(status.conversationId,connectionId);return;
+   this.#rpcCycles.get(status.conversationId)?.cycle.cancel();await this.#rpcSelect(status.conversationId,connectionId);this.#apiChoices.delete(status.conversationId);this.changed();return;
   }
   let finishSelection=()=>{};this.#selectionDone=new Promise<void>(resolve=>{finishSelection=resolve;});
   this.#selecting=true;this.#selectionTarget={id:connectionId,conversationId:status.conversationId};this.#progress=5;this.#preparation={phase:'queued',elapsedMs:0};this.changed();
@@ -344,7 +347,7 @@ export class NativeAccountAdapter {
   const reason=this.#selecting||this.#draftPreparing?'account-selection':this.#rpcSendPreparing?'send-preparation':autoPending?'quota-continuation':activeTasks?'active-turn':bindings.some(b=>b.stopping)?'stop-confirmation':bindings.some(b=>b.preparing)?'account-preparation':bindings.some(b=>b.pending.size)?'pending-reply':bindings.some(b=>b.stalled)?'event-recovery':'idle';
   return {busy:reason!=='idle',reason,activeTasks,autoPending};
  }
- endSession():void{this.setAutoContinue(false);this.#disposed=true;for(const p of this.#pendingPreparations.values())p.controller.abort();this.#usageReads.reset();clearTimeout(this.#timer);this.usage.dispose();for(const dispose of this.#disposers.reverse())dispose();this.#disposers=[];this.#bindings.clear();this.#outcomes.clear();this.#managed.clear();this.#rpcRouteDiagnostics.clear();}
+ endSession():void{this.setAutoContinue(false);this.#apiChoices.clear();this.#disposed=true;for(const p of this.#pendingPreparations.values())p.controller.abort();this.#usageReads.reset();clearTimeout(this.#timer);this.usage.dispose();for(const dispose of this.#disposers.reverse())dispose();this.#disposers=[];this.#bindings.clear();this.#outcomes.clear();this.#managed.clear();this.#rpcRouteDiagnostics.clear();}
  async useOfficialIdentity():Promise<void>{
   if(this.#disabling)throw Error('ACCOUNT_DISABLE_PENDING: Account routes are already being restored.');
   this.#disabling=true;this.changed();
@@ -548,7 +551,7 @@ export class NativeAccountAdapter {
    return {};
   }catch(error){this.#fail(b,error);throw error;}finally{b.stopping=false;this.changed();}
  }
- #accountOrder():string[]{return ['host',...this.#info.connections.filter(c=>c.email).map(c=>c.id)];}
+ #accountOrder():string[]{return ['host',...this.#info.connections.filter(c=>c.email||this.#rpcMode&&c.api).map(c=>c.id)];}
  #turnNotification(b:Binding,method:string,p:Native):void{
   if(method==='turn/started'){b.active=true;b.turnId=p.turn?.id;this.usage.markUsed(b.selected);return;}
   if(method==='error'&&p.turnId===b.turnId&&p.willRetry===false&&p.error?.codexErrorInfo==='usageLimitExceeded'){b.quotaErrorTurn=p.turnId;return;}
@@ -661,7 +664,7 @@ export class NativeAccountAdapter {
  #rpcActivity(id:string,active:boolean):void{
   const prior=this.#rpcActive.has(id);
   const selected=this.#info.nativeRoutes?.[id]??'host';
-  if(active&&!prior){this.#rpcActive.add(id);this.usage.markUsed(selected);if(!this.#rpcAutomatic.has(id)&&this.#autoEnabled&&!this.#info.connections.some(c=>c.id===selected&&c.api)){const prepared=this.#rpcCycles.get(id),entry=prepared?.prepared&&!prepared.cycle.cancelled?prepared:{cycle:new AccountContinuationCycle(this.#accountOrder(),selected),settings:{}};entry.prepared=false;this.#rpcCycles.set(id,entry);void this.#rpcObserver?.settings(id).then(settings=>{if(this.#rpcCycles.get(id)===entry)entry.settings={model:settings.latestModel,effort:settings.latestReasoningEffort};}).catch(()=>{});}}
+  if(active&&!prior){this.#rpcActive.add(id);this.usage.markUsed(selected);if(!this.#rpcAutomatic.has(id)&&this.#autoEnabled){const prepared=this.#rpcCycles.get(id),entry=prepared?.prepared&&!prepared.cycle.cancelled?prepared:{cycle:new AccountContinuationCycle(this.#accountOrder(),selected),settings:{}};entry.prepared=false;this.#rpcCycles.set(id,entry);entry.settingsRead=this.#rpcObserver?.settings(id).then(settings=>{if(this.#rpcCycles.get(id)===entry)entry.settings={model:settings.latestModel,effort:settings.latestReasoningEffort};});void entry.settingsRead?.catch(()=>{});}}
   else if(!active&&prior){this.#rpcActive.delete(id);this.usage.invalidate(selected);this.usage.refresh([selected]);}
   if(prior!==active)this.changed();
  }
@@ -691,16 +694,18 @@ export class NativeAccountAdapter {
     const raw=await this.#readUsage(selected);this.usage.observe(selected,raw);
     if(quotaEligibility(raw)==='exhausted'){
      const cycle=new AccountContinuationCycle(this.#accountOrder(),selected);
-     const result=await continueAfterQuota(cycle,{current:()=>!this.#disposed&&this.#autoEnabled&&!this.#profileError&&resolveActiveThread()===id,available:c=>c==='host'||this.#info.connections.some(v=>v.id===c&&v.email),quota:async c=>{const raw=await this.#readUsage(c);this.usage.observe(c,raw);return raw;},prepare:c=>this.#rpcSelect(id,c),resume:async()=>{},phase:()=>{},event:(stage,details)=>runtimeEvent('accounts','account.auto',stage,{...details,origin:'pre-send',taskSent:false})});
+     const nativeSettings=await this.#rpcObserver!.settings(id);let settings:Native={model:nativeSettings.latestModel,effort:nativeSettings.latestReasoningEffort};
+     const current=()=>!this.#disposed&&this.#autoEnabled&&!this.#profileError&&resolveActiveThread()===id;
+     const result=await continueAfterQuota(cycle,{current:()=>!this.#disposed&&this.#autoEnabled&&!this.#profileError&&resolveActiveThread()===id,available:c=>c==='host'||this.#info.connections.some(v=>v.id===c&&(v.email||v.api)),isApi:c=>this.#info.connections.some(v=>v.id===c&&!!v.api),quota:async c=>{const raw=await this.#readUsage(c);this.usage.observe(c,raw);return raw;},prepare:async c=>{settings=await this.#prepareContinuation(id,c,settings,current);},resume:async()=>{},phase:()=>{},event:(stage,details)=>runtimeEvent('accounts','account.auto',stage,{...details,origin:'pre-send',taskSent:false})});
      if(result!=='continued')throw Error('ACCOUNT_AUTO_NO_QUOTA: No account in this traversal has verified available quota. The message was not sent.');
-     this.#rpcCycles.set(id,{cycle,settings:{},prepared:true});
+     this.#rpcCycles.set(id,{cycle,settings,prepared:true});
     }
    }
    this.#rpcRouteFaults.delete(id);
   }
   finally{this.#finishPreparation(preparation.id);this.#rpcSendPreparing=false;if(!this.#selecting)this.#selectionTarget=undefined;finish();this.changed();}
  }
- async #rpcSelect(id:string,selected:string):Promise<void>{
+ async #rpcSelect(id:string,selected:string,continuation?:{settings:Native;current:()=>boolean}):Promise<void>{
   await this.#selectionDone;
   if(this.#disabling||!this.#enabled||this.#disposed)throw Error('ACCOUNT_DISABLE_PENDING: Account selection is unavailable while the plugin is stopping. No turn was sent.');
   let finish=()=>{};this.#selectionDone=new Promise<void>(resolve=>{finish=resolve;});
@@ -714,6 +719,14 @@ export class NativeAccountAdapter {
    const result=await this.#call<Native>({action:'native.prepare',conversationId:id,connectionId:selected,preparationId:preparation.id});
    if(this.#disposed||this.#disabling||preparation.controller.signal.aborted||this.#profileError||result.ready!==true||result.threadId!==id||result.selected!==selected)throw Error('ACCOUNT_NATIVE_ROUTE_PROTOCOL: Native account preparation could not be confirmed. No turn was sent.');
    this.#info.selected[id]=selected;this.#info.nativeRoutes??={};if(selected==='host'&&result.routed!==true)delete this.#info.nativeRoutes[id];else this.#info.nativeRoutes[id]=selected;
+   if(continuation?.current()){
+    if(this.#info.connections.some(c=>c.id===selected&&c.api)){
+     const choice={connectionId:selected,model:String(continuation.settings.model),effort:String(continuation.settings.effort)};
+     await this.#rpcObserver!.setSettings(id,{model:choice.model,effort:choice.effort});
+     this.#apiChoices.set(id,choice);
+     if(this.#apiChoices.size>256)this.#apiChoices.delete(this.#apiChoices.keys().next().value!);
+    }else this.#apiChoices.delete(id);
+   }
    this.#rpcRouteFaults.delete(id);this.#progress=100;this.#preparation={phase:'ready',elapsedMs:0};this.usage.refresh([selected]);
    runtimeEvent('accounts','account.routing','prepared',{stage:'native-route-committed',accountOrdinal:this.#accountOrder().indexOf(selected)+1,tools:'native',history:'shared',taskSent:false});
   }catch(error){this.#progress=0;if(!preparation.controller.signal.aborted){const message=String(error);this.#rpcRouteFaults.set(id,message);this.#showNotice(message);}throw error;}
@@ -730,18 +743,28 @@ export class NativeAccountAdapter {
   this.#info.nativeRoutes??={};if(selected==='host'&&value.routed!==true)delete this.#info.nativeRoutes[id];else this.#info.nativeRoutes[id]=selected;
   if(value.quota)this.usage.observeCached(selected,value.quota);this.changed();
  }
+ async #prepareContinuation(id:string,connectionId:string,settings:Native,current:()=>boolean):Promise<Native>{
+  const api=this.#info.connections.find(c=>c.id===connectionId)?.api;
+  const next=api?apiContinuationSettings(settings,api):settings;
+  if(!current())return next;
+  await this.#rpcSelect(id,connectionId,{settings:next,current});
+  return next;
+ }
  async #rpcContinue(id:string):Promise<void>{
-  if(this.#info.connections.some(c=>c.id===this.#info.nativeRoutes?.[id]&&c.api))return;
   if(this.#rpcAutomatic.has(id)){this.#rpcPendingTerminal.add(id);return;}
   const selected=this.#info.nativeRoutes?.[id]??'host';
   const entry=this.#rpcCycles.get(id)??{cycle:new AccountContinuationCycle(this.#accountOrder(),selected),settings:{}};this.#rpcCycles.set(id,entry);this.#rpcAutomatic.add(id);this.changed();
   const current=()=>!this.#disposed&&this.#autoEnabled&&!this.#profileError&&this.#rpcCycles.get(id)===entry&&!entry.cycle.cancelled;
   try{
+   await entry.settingsRead;
+   if(!current())return;
+   if(!entry.settings.model){const settings=await this.#rpcObserver!.settings(id);entry.settings={model:settings.latestModel,effort:settings.latestReasoningEffort};}
    const result=await continueAfterQuota(entry.cycle,{
-    current,available:c=>c==='host'||this.#info.connections.some(v=>v.id===c&&v.email),
+    current,available:c=>c==='host'||this.#info.connections.some(v=>v.id===c&&(v.email||v.api)),
+    isApi:c=>this.#info.connections.some(v=>v.id===c&&!!v.api),
     model:entry.settings.model,
     quota:async c=>{this.#selectionTarget={id:c,conversationId:id};this.#preparation={phase:'check-quota',elapsedMs:0};this.changed();const raw=await this.#readUsage(c);if(current())this.usage.observe(c,raw);return raw;},
-    prepare:async c=>{if(current())await this.#rpcSelect(id,c);},
+    prepare:async c=>{if(current())entry.settings=await this.#prepareContinuation(id,c,entry.settings,current);},
     resume:async()=>{if(current()){const state=await this.#rpcObserver?.state(id);if(state?.inProgress!==false)throw Error('ACCOUNT_AUTO_TURN_ACTIVE: Another native turn is active. No continuation was sent.');if(current())await this.#rpcObserver!.start(id,continuationOperation(id,entry.settings,crypto.randomUUID()));}},
     phase:phase=>{this.#preparation={phase:phase==='checking'?'check-quota':phase==='preparing'?'native-transport':'continue-task',elapsedMs:0};this.changed();},
     event:(stage,details)=>runtimeEvent('accounts','account.auto',stage,{...details,executionMode:'native-relay'}),
@@ -798,6 +821,6 @@ export class NativeAccountAdapter {
  async dispose():Promise<void>{
   if(!this.canDisable())throw Error('ACCOUNT_TURN_ACTIVE: Finish or stop the active turns before disabling this plugin.');
   const current=await this.request<AccountsInfo>({action:'info'});if(current.owner.id===this.#info.owner.id)await this.#call({action:'release'});
-  this.#disposed=true;for(const p of this.#pendingPreparations.values())p.controller.abort();this.#usageReads.reset();this.usage.dispose();clearTimeout(this.#timer);for(const dispose of this.#disposers.reverse())dispose();this.#disposers=[];this.#bindings.clear();this.#outcomes.clear();this.#managed.clear();this.#rpcRouteDiagnostics.clear();this.changed();
+  this.#disposed=true;for(const p of this.#pendingPreparations.values())p.controller.abort();this.#usageReads.reset();this.usage.dispose();clearTimeout(this.#timer);for(const dispose of this.#disposers.reverse())dispose();this.#disposers=[];this.#bindings.clear();this.#outcomes.clear();this.#managed.clear();this.#rpcRouteDiagnostics.clear();this.#apiChoices.clear();this.changed();
  }
 }

@@ -809,12 +809,12 @@
         "name": "Custom Background",
         "category": "appearance",
         "api": 1,
-        "version": "1.0.11",
+        "version": "1.0.13",
         "releaseTag": "plugin-assets-2026-11-01",
-        "asset": "CodeCodex-background-custom-background-1.0.11.js",
-        "relativePath": "CodeCodex-background-custom-background-1.0.11.js",
-        "size": 31780,
-        "sha256": "bff2200553a94731d78d1e1fe63c00cd5fb6e9e83c2d0872890ded60378dbe4d",
+        "asset": "CodeCodex-background-custom-background-1.0.13.js",
+        "relativePath": "CodeCodex-background-custom-background-1.0.13.js",
+        "size": 32296,
+        "sha256": "bc7cb572cb182284861290f941721f65620491844477598ce308f94e0b89ecea",
         "resources": [],
         "capabilities": [
           "background",
@@ -832,7 +832,7 @@
         "plugins/appearance/custom-background/view.ts": "4f31c1755bd84d5b79e28f7e022b0632138fb9e226a2d9da3173ce0b353ed03c",
         "src/core/background-runtime/visual-session.ts": "88ab5803877ba618f6956ba5ebb5bf8558f2f9f3861560e29168165fc7745370",
         "src/core/media/preview-clock.ts": "6f8c9a47d9c25cbdf9ce2b1d8a51f45887e5b5d09fe6a4dc09e73f72302ddb07",
-        "src/native-background-surfaces.ts": "07ee00f3ba70da3da80eac9b180e627555de5b877f21188b9ae9231f5aaf1dba",
+        "src/native-background-surfaces.ts": "ba5c1a9d0ba17b6fde19501a04c1a23334bd18e77bb1c29ce53d058d2de6653b",
         "plugins/appearance/custom-background/media-presentation.ts": "46e224aeafee08d26789c62558188ca53b5a120b8016a0ac4241d2a1d603d911",
         "plugins/appearance/custom-background/controller.ts": "b95af8180629686f7d708286fb51363537432e79481d06b247553dd0ce3c5c17",
         "src/custom-background.ts": "0ff25fdd7a3d6a0aa6af2147983eb612cc69a4925e02936f95ec99691e3221d7",
@@ -848,7 +848,7 @@
       },
       "inputFormat": "lf-v1",
       "buildMetadata": {
-        "definition": "9120c03ce59454726d1592f937357073403b0b287aeb2ae118a3d7ba2c732860",
+        "definition": "79e58462edc82c58d596e6d601af833ca85d816f6f5bc0b6767e0f189fb8891f",
         "compiler": "0.25.12"
       },
       "artifactRoot": "releases/plugins/appearance/custom-background"
@@ -2603,12 +2603,12 @@
         "name": "Multi-account Tasks",
         "category": "developer-tools",
         "api": 1,
-        "version": "1.0.96",
+        "version": "1.0.101",
         "releaseTag": "plugin-assets-2026-11-02",
-        "asset": "CodeCodex-plugin-multi-account-1.0.96.js",
-        "relativePath": "CodeCodex-plugin-multi-account-1.0.96.js",
-        "size": 210154,
-        "sha256": "3f19ba064fe514a99b6d62ef284e0dd5973ecff418a03fcece319739cd8e6b58",
+        "asset": "CodeCodex-plugin-multi-account-1.0.101.js",
+        "relativePath": "CodeCodex-plugin-multi-account-1.0.101.js",
+        "size": 218589,
+        "sha256": "22e5f8e347f87b99a002c87f91b8e88e6f2f8f50fbe2a3789205bac69060e7a2",
         "resources": [],
         "capabilities": [
           "developer-tools"
@@ -2621,7 +2621,7 @@
         "src/core/localization/preference.ts": "f056e93449867d4b2e0fa61dba8661fb39dfba3a4e197d067a508582e4108bc7",
         "src/i18n.ts": "f90495f19c889f8b49dd48d8156d79363190a0730461ad0955b55de3e0f15ee9",
         "src/icons.ts": "8c7b1ab4d03eacc57f24a4d178afc47362778417f0aa86daf079e46123542489",
-        "src/features/accounts/api-editor.ts": "a0c84cc343ef8b4eca01a1a8f6eabfa174aa9b1692b53c9e2c0c1192067fe892",
+        "src/features/accounts/api-editor.ts": "9307f70499a798f430d363364ff30b42d6ecbb93286bc4b2ebfd303994595565",
         "src/components/hold-reorder.ts": "3a2891a7b21290d6b68afd96daa5228af7766e9e6aaadf4a4d590410871e7b7c",
         "src/features/accounts/plan-badge.ts": "0696b240d6962eb24156ba089383842ce2b2b60f1bc86810f0fd404ea52766e2",
         "src/features/accounts/assets-model.ts": "4003790add5da39bcd314669d880330c6203253c144aeed94ac99bd00f224518",
@@ -2631,16 +2631,17 @@
         "src/core/document-capability-owner.ts": "ea29bc918041b1a32e7fe3654f500e261a452034ab825382f14bad3db8934b9d",
         "src/features/accounts/transport.ts": "6928c2fc5ec99263cb5f1eb37aeb4ea3971b58bfc652391c9ca080e8a7cbbdec",
         "src/host/bridge/accounts.ts": "406bece803285bf21babe8651bf6f593d10543a6298b9ac4922ae65dc8f5eb5a",
-        "src/features/accounts/native-model-menu.ts": "fb14922f5ed67371f59b7aa6a88aa226325155e324b45ef0a6de55dfae6ed72b",
-        "src/features/accounts/model-selector.ts": "882b71db307a9b8ae59eafba0f64fdc9689068d28ac647d3609fdf5d9146c907",
-        "src/features/accounts/native-composer-quota.ts": "50e845e3b5e56b2b4b0e04f3ab71a34e2c551a974308e9f111efa9f8c999ae36",
+        "src/features/accounts/native-model-menu.ts": "1fa0e9c81038a0b8abf068c9d8a7b3947f86dfde163b53377ab7150c92a9cbb8",
+        "src/features/accounts/model-selector.ts": "99fdad8b60ad4ac53bd6d4d77894409f75459e2b3f4fd303a3126c7bb90c0bf6",
+        "src/features/accounts/native-usage-banner.ts": "f0a2877516da23ef9c3fb323442da462eb0fe9e3f188ea61e833833b46bf81d1",
+        "src/features/accounts/native-composer-quota.ts": "6e9348d37527f2c7b28b4878fba640a954ee48887a553fd8e0ac9c5104fd4244",
         "src/features/accounts/contracts.ts": "a429bd2c735e03f15df3a51f1eb20116f42571d4844057a332f893dd9a8b0ce3",
         "src/components/menu-check.ts": "e5c7298d8edb995affb67c0fbcd791d6ac50b8b0fe82e358393f5bc2ce8db0fa",
         "src/adapters/codex-26.715.ts": "cac7f2a7425297f11f2f10a1d2c68a7af7b55a0522a722c83e790353b3ae89d9",
         "src/features/accounts/composer-selector.ts": "2dc5f7a67ab8c0a0682534cb717e093dcbf0f2f72906ad1a0e6a9f11aa72a9d8",
         "src/features/accounts/read-lane.ts": "57322ea0e09f9df108122fcae489bed2c0a860658c7ebb867703c3ea51811792",
         "../../resources/account-host-capabilities.js": "efff089cc43571520ae53d38306db1a32aee658fecfbc601e97afcae99f770dd",
-        "src/features/accounts/rpc-observation.ts": "c9aa7cd6bb3c39f3f97b4433b7d0457ed7fb29706ef31588cd1367da8d6bf3dd",
+        "src/features/accounts/rpc-observation.ts": "be2c98fdc5df0760d5895c2254d64f1f4545fe5ea183e760951a82a3e6c5f68b",
         "src/features/accounts/host-assets.ts": "cda23cc4e82efec336e735c70da5cc817d5120c89785abfd247c59a6e868b071",
         "src/features/accounts/context.ts": "fa8e9ab41f0cbeab5a95bf533058e5f71e4f4d042343fe79c6df60cdc102fa37",
         "src/native-login-observation.ts": "1461c0451c0328adc5ed28456fad70581b7bcb533c4b615a58f0038afa3ebd7a",
@@ -2651,13 +2652,13 @@
         "src/features/accounts/quota.ts": "73b4ed4d2e61f6429f99ed8ae9fab94abe71acd543440b2c2c21dffadc80b42e",
         "src/features/accounts/session-guard.ts": "7c37e0265566e820e3095fb948db5f04f61de3410ed31a02c0de9ac1d5466b0d",
         "src/features/accounts/permissions.ts": "35f59a5766a1bc025ced59cf642e4bdaf45ecd0aa1d85cb1a8404fb6c243c8a3",
-        "src/features/accounts/auto-continue.ts": "c1d0a31acbfb63a62f558a78b75395cabdd5e666b88d94df4842362665674441",
+        "src/features/accounts/auto-continue.ts": "23e0524f0b72bd7468d47c412475974f15ca6372ec42518e21cd15ee4a3073dc",
         "src/features/accounts/stream-recovery.ts": "03261f031573391754bd456d1e76f832c44951a30988230c983a84273f05ec5e",
         "src/features/accounts/draft-routing.ts": "e2b83a48443804dcb03e093a58a55adfe38934e64a22e49f7eec550df64702dd",
-        "src/features/accounts/native-adapter.ts": "f41b171092a6581418d5efffffef372e218bfa0051c912fe7e9e916f8945a263",
+        "src/features/accounts/native-adapter.ts": "8dab7e77087c6cd038c364bee79700df64927cfe40d4a14f834a9c085183bcca",
         "src/components/application-dialog.ts": "30d7674bbde26d94bc2e994a780e4871ef2706484f6c9e702e37012669361c43",
         "src/features/accounts/primary-status.ts": "15487eaf5f044bc99249170848d41b3d5458886e86e97f22db818f326ee243a2",
-        "src/multi-account-runtime.ts": "70eb9b4ddd2a7f0c0bc2fac844ef0669c01bbedc98dfd4f1d56eadc33edef72a",
+        "src/multi-account-runtime.ts": "90c3f0e087a2b323f36dc171dccd28ea5a85db7a8aa686518f87c0fa32b78228",
         "scripts/utility-packages.mjs": "5486dceccd9e1e03e48101873e4fd3b583a4a4b3185342c3e906b83d2c9e5a3e",
         "scripts/build.mjs": "9fd94f2b13e355bb05022114f4ab964cc4d50e609d069dab9416280635af5f19",
         "scripts/rebuild-plugins.mjs": "f092a2e634074928162bad289ff81510a6ac8c10bebdc6829f6898dccd0ef179",
@@ -2668,11 +2669,26 @@
       },
       "inputFormat": "lf-v1",
       "buildMetadata": {
-        "definition": "f8a6f6bb9b34981edffc1b314c48dfe2f86dd529320958630983f17c63608fc7",
+        "definition": "163c0601996e6fe4eb7f555eba5981b908a799d585b22af77d45adcc04c07c55",
         "compiler": "0.25.12"
       },
       "artifactRoot": "releases/plugins/developer-tools/multi-account"
     }
   ],
-  "pendingPublicationAssets": []
+  "pendingPublicationAssets": [
+    {
+      "id": "multi-account",
+      "tag": "plugin-assets-2026-11-02",
+      "name": "CodeCodex-plugin-multi-account-1.0.101.js",
+      "size": 218589,
+      "sha256": "22e5f8e347f87b99a002c87f91b8e88e6f2f8f50fbe2a3789205bac69060e7a2"
+    },
+    {
+      "id": "custom-background",
+      "tag": "plugin-assets-2026-11-01",
+      "name": "CodeCodex-background-custom-background-1.0.13.js",
+      "size": 32296,
+      "sha256": "bc7cb572cb182284861290f941721f65620491844477598ce308f94e0b89ecea"
+    }
+  ]
 }

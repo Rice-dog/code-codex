@@ -327,11 +327,13 @@ fn partial_scan_keeps_last_complete_baseline_and_report_is_durable() {
 fn dependency_registry_has_valid_source_and_test_paths_and_every_rule_is_reachable() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let registry = rules();
-    assert!(registry.len() >= 8);
+    assert!(registry.len() >= 14);
+    assert!(dependency_revision() >= 2);
     let mut ids = BTreeSet::new();
     for r in registry {
         assert!(ids.insert(r.id));
         assert!(!r.tokens.is_empty() || !r.paths.is_empty());
+        assert!(!r.checks.is_empty(), "Every dependency needs concrete acceptance scenarios");
         for file in r.sources.iter().chain(&r.tests) {
             assert!(root.join(file).is_file(), "{file}")
         }
@@ -578,4 +580,58 @@ fn supervisor_monitor_guard_cancels_only_its_child_on_every_exit_path() {
     drop(guard);
     assert!(child.is_cancelled());
     assert!(!parent.is_cancelled());
+}
+
+#[test]
+fn current_rules_do_not_make_a_legacy_or_partial_report_a_verified_analysis() {
+    let current = registry_hash();
+    assert_eq!(analysis_status(&Value::Null)["status"], "pending");
+    let legacy = json!({"version":"old","complete":true});
+    assert_eq!(analysis_status(&legacy)["status"], "refresh_required");
+    assert_eq!(analysis_status(&legacy)["manualRetryRequired"], true);
+    let partial = json!({"registryHash":current,"complete":false});
+    assert_eq!(analysis_status(&partial)["status"], "incomplete");
+    let fresh = json!({"registryHash":current,"complete":true});
+    assert_eq!(analysis_status(&fresh)["status"], "current");
+    assert!(analysis_status(&fresh)["message"].as_str().unwrap().contains("separate validation"));
+}
+#[test]
+fn same_version_stale_rules_require_explicit_refresh_without_scanning_or_rewriting() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut old = snapshot();
+    old.registry_hash = "older-rules".into();
+    commit(dir.path(), &old, None).unwrap();
+    let before = fs::read(dir.path().join("baseline.json")).unwrap();
+    let result = version_gate::check(dir.path(), Some(&old), "old", false, None, || {
+        panic!("a rules update must not cause automatic startup scanning")
+    }).unwrap();
+    assert_eq!(result["scanned"], false);
+    assert_eq!(analysis_status(&read_json(&dir.path().join("latest.json")).unwrap())["status"], "refresh_required");
+    assert_eq!(fs::read(dir.path().join("baseline.json")).unwrap(), before);
+    assert!(!dir.path().join("attempts.json").exists());
+}
+#[test]
+fn explicit_reclassification_records_new_mappings_and_keeps_original_report_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut old = snapshot();
+    old.entries.insert("chunk.js".into(), entry("same-bytes", "code_or_unknown", &[]));
+    commit(dir.path(), &old, None).unwrap();
+    let first = read_json(&dir.path().join("latest.json")).unwrap();
+    let path = dir.path().join("reports").join(first["id"].as_str().unwrap()).join("report.json");
+    let original = fs::read(&path).unwrap();
+    let mut next = old.clone();
+    next.registry_hash = registry_hash();
+    next.entries.get_mut("chunk.js").unwrap().dependencies.push("composer-quota".into());
+    assert_eq!(gate(dir.path(), Some(&old), "old", true, next.clone()).unwrap()["scanned"], true);
+    let latest = read_json(&dir.path().join("latest.json")).unwrap();
+    let report = read_json(&dir.path().join("reports").join(latest["id"].as_str().unwrap()).join("report.json")).unwrap();
+    assert_eq!(report["type"], "analysis_refresh");
+    assert_eq!(report["changes"][0]["change"], "dependency_mapping_changed");
+    assert_eq!(report["dependencies"][0]["id"], "composer-quota");
+    assert!(report["dependencies"][0]["requiredChecks"].as_array().unwrap().len() >= 3);
+    assert_eq!(report["dependencies"][0]["functionalImpact"], "not_tested");
+    assert_eq!(report["dependencyRevision"], dependency_revision());
+    assert_eq!(analysis_status(&latest)["status"], "current");
+    assert_eq!(fs::read(&path).unwrap(), original);
+    assert_eq!(gate(dir.path(), Some(&next), "old", false, next.clone()).unwrap()["scanned"], false);
 }
