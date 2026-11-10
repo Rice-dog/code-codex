@@ -14,7 +14,7 @@ import type {PrimarySwitch} from './features/accounts/contracts';
 const key=Symbol.for('code-codex:multi-account-runtime:v1');
 interface Session {selector?:ComposerAccountSelector;selectorRevision?:string;adapter?:NativeAccountAdapter;enabled:boolean;pending?:Promise<void>;error?:string|undefined;viewRevision?:string;generation?:number;}
 const REVISION='account-native-routing-v25';
-const SELECTOR_REVISION='account-usage-banner-close-v3';
+const SELECTOR_REVISION='account-composer-home-identity-v5';
 const session=():Session=>((window as unknown as Record<symbol,Session>)[key]??={enabled:localStorage.getItem(ACCOUNT_ENABLED_KEY)==='true'});
 const emit=()=>window.dispatchEvent(new Event(ACCOUNT_UI_CHANGED));
 const element=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;};

@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, Weak,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -27,7 +27,17 @@ static ROUTE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
 const MAX_BODY: usize = 32 * 1024 * 1024;
 const UPSTREAM: &str = "https://chatgpt.com/backend-api/codex";
 #[derive(Default)]
-pub(super) struct Routes(pub Mutex<HashMap<String, Arc<Route>>>);
+pub(super) struct Routes {
+    routes: Mutex<HashMap<String, Arc<Route>>>,
+    shared: tokio::sync::Mutex<Option<Arc<SharedRelay>>>,
+}
+struct SharedRelay {
+    authority: String,
+    routes: Mutex<HashMap<String, Weak<Route>>>,
+    client: reqwest::Client,
+    cancel: CancellationToken,
+    probed: AtomicBool,
+}
 pub(super) struct Route {
     pub owner: String,
     thread: std::sync::RwLock<String>,
@@ -40,6 +50,7 @@ pub(super) struct Route {
     client: reqwest::Client,
     key: String,
     authority: String,
+    shared: Option<Weak<SharedRelay>>,
     upstream: String,
     route_id: usize,
     requests: AtomicUsize,
@@ -67,21 +78,27 @@ pub(super) struct Credential {
 impl Drop for Route {
     fn drop(&mut self) {
         self.cancel.cancel();
+        if let Some(shared) = self.shared.as_ref().and_then(Weak::upgrade) {
+            shared.routes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&self.key);
+        }
     }
+}
+impl Drop for SharedRelay {
+    fn drop(&mut self) { self.cancel.cancel(); }
 }
 impl Routes {
     pub fn key(owner: &str, thread: &str) -> String {
         format!("{owner}:{thread}")
     }
     pub fn get(&self, owner: &str, thread: &str) -> Option<Arc<Route>> {
-        self.0
+        self.routes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&Self::key(owner, thread))
             .cloned()
     }
     pub fn owned(&self, owner: &str) -> Vec<Arc<Route>> {
-        self.0
+        self.routes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
@@ -92,7 +109,7 @@ impl Routes {
     pub fn replace(&self, owner: &str, thread: &str, route: Option<Arc<Route>>) {
         let key = Self::key(owner, thread);
         let mut all = self
-            .0
+            .routes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let previous = all.get(&key).cloned();
@@ -113,6 +130,84 @@ impl Routes {
         for route in self.owned(owner) {
             self.replace(owner, &route.thread(), None);
         }
+    }
+    /// One process-local socket serves all native conversations. Each Route
+    /// still owns its credential, context and unguessable URL path.
+    pub async fn start_shared(&self, owner: String, thread: String, credential: Arc<Credential>) -> Result<Arc<Route>> {
+        self.start_shared_with_upstream(owner, thread, credential, UPSTREAM.to_owned()).await
+    }
+    async fn start_shared_with_upstream(&self, owner: String, thread: String, credential: Arc<Credential>, upstream: String) -> Result<Arc<Route>> {
+        let mut slot = self.shared.lock().await;
+        let shared = match slot.as_ref() {
+            Some(shared) => shared.clone(),
+            None => {
+                let shared = SharedRelay::start().await?;
+                *slot = Some(shared.clone());
+                shared
+            }
+        };
+        let route = Route::new(owner, thread, credential, upstream, shared.client.clone(), shared.authority.clone(), super::nonce(), Some(Arc::downgrade(&shared)));
+        shared.routes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(route.key.clone(), Arc::downgrade(&route));
+        Ok(route)
+    }
+}
+impl SharedRelay {
+    async fn start() -> Result<Arc<Self>> {
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|_| fault("client"))?;
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.map_err(|_| fault("bind"))?;
+        let port = listener.local_addr().map_err(|_| fault("local-address"))?.port();
+        let shared = Arc::new(Self {
+            authority: format!("localhost:{port}"),
+            routes: Mutex::new(HashMap::new()),
+            client,
+            cancel: CancellationToken::new(),
+            probed: AtomicBool::new(false),
+        });
+        let weak = Arc::downgrade(&shared);
+        let cancel = shared.cancel.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    accepted = listener.accept() => {
+                        let Ok((socket, peer)) = accepted else { break };
+                        if !peer.ip().is_loopback() { continue; }
+                        let Some(shared) = weak.upgrade() else { break };
+                        tokio::spawn(async move {
+                            let _ = tokio::select! { _ = shared.cancel.cancelled() => Ok(()), result = shared.handle(socket) => result };
+                        });
+                    }
+                }
+            }
+        });
+        Ok(shared)
+    }
+    async fn handle(&self, socket: TcpStream) -> Result<()> {
+        let mut io = BufReader::new(socket);
+        let header = tokio::time::timeout(Duration::from_secs(10), read_header(&mut io))
+            .await.map_err(|_| fault("request-header-timeout"))??;
+        let key = header.split("\r\n").next().unwrap_or("").split(' ').nth(1)
+            .and_then(|path| path.strip_prefix('/'))
+            .and_then(|path| path.split_once('/').map(|(key, _)| key))
+            .filter(|key| key.len() == 32 && key.bytes().all(|c| c.is_ascii_hexdigit()))
+            .ok_or_else(|| fault("request-route"))?;
+        let route = self.routes.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key).and_then(Weak::upgrade);
+        let Some(route) = route else {
+            return reject(&mut io, 403, "ACCOUNT_RELAY_ROUTE: The conversation route is unavailable; no upstream request was sent.").await;
+        };
+        let result = tokio::select! {
+            _ = route.cancel.cancelled() => Ok(()),
+            result = route.handle_header(io, header) => result,
+        };
+        if let Err(error) = &result {
+            crate::runtime_log::record("accounts", "account.relay", "failed", json!({"stage":error.message,"errorCode":error.code,"routeId":route.route_id,"conversationId":route.thread(),"accountCredentialLogged":false,"requestReplayed":false}));
+        }
+        result
     }
 }
 impl Route {
@@ -179,13 +274,25 @@ impl Route {
         // bypass works, without changing global proxy or authentication state.
         // Keep the listener on IPv4 loopback and validate the exact Host below.
         let authority = format!("localhost:{}", address.port());
-        let key = super::nonce();
-        let route = Arc::new(Self {
+        let route = Self::new(owner, thread, credential, upstream, client, authority, super::nonce(), None);
+        crate::runtime_log::record("accounts","account.relay.lifecycle","listening",json!({"routeId":route.route_id,"localPort":address.port(),"loopbackHost":"localhost","listenerFamily":"ipv4","conversationId":route.thread(),"connectionId":route.connection(),"committed":false,"network":crate::network_diagnostics::environment(),"taskSent":false}));
+        let weak = Arc::downgrade(&route);
+        let cancel = route.cancel.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {_ = cancel.cancelled()=>break,accepted=listener.accept()=>{let Ok((socket,peer))=accepted else{break};if !peer.ip().is_loopback(){continue;}let Some(route)=weak.upgrade()else{break};tokio::spawn(async move{let result=tokio::select!{_ = route.cancel.cancelled()=>Ok(()),r=route.handle(socket)=>r};if let Err(e)=result{crate::runtime_log::record("accounts","account.relay","failed",json!({"stage":e.message,"errorCode":e.code,"routeId":route.route_id,"conversationId":route.thread(),"accountCredentialLogged":false,"requestReplayed":false}));}});}}
+            }
+        });
+        Ok(route)
+    }
+    fn new(owner:String, thread:String, credential:Arc<Credential>, upstream:String, client:reqwest::Client, authority:String, key:String, shared:Option<Weak<SharedRelay>>) -> Arc<Self> {
+        Arc::new(Self {
             owner,
             thread: std::sync::RwLock::new(thread),
             base_url: format!("http://{authority}/{key}"),
             authority,
             key,
+            shared,
             cancel: CancellationToken::new(),
             ready: AtomicBool::new(false),
             active: AtomicUsize::new(0),
@@ -201,18 +308,9 @@ impl Route {
             handoff_generation: AtomicUsize::new(0),
             handoff_status: Mutex::new(None),
             lazy_handoff: Mutex::new(None),
-        });
-        crate::runtime_log::record("accounts","account.relay.lifecycle","listening",json!({"routeId":route.route_id,"localPort":address.port(),"loopbackHost":"localhost","listenerFamily":"ipv4","conversationId":route.thread(),"connectionId":route.connection(),"committed":false,"network":crate::network_diagnostics::environment(),"taskSent":false}));
-        let weak = Arc::downgrade(&route);
-        let cancel = route.cancel.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {_ = cancel.cancelled()=>break,accepted=listener.accept()=>{let Ok((socket,peer))=accepted else{break};if !peer.ip().is_loopback(){continue;}let Some(route)=weak.upgrade()else{break};tokio::spawn(async move{let result=tokio::select!{_ = route.cancel.cancelled()=>Ok(()),r=route.handle(socket)=>r};if let Err(e)=result{crate::runtime_log::record("accounts","account.relay","failed",json!({"stage":e.message,"errorCode":e.code,"routeId":route.route_id,"conversationId":route.thread(),"accountCredentialLogged":false,"requestReplayed":false}));}});}}
-            }
-        });
-        Ok(route)
+        })
     }
-    pub fn expire_uncommitted(&self){let thread=self.thread.write().unwrap_or_else(std::sync::PoisonError::into_inner);if thread.starts_with("draft-")&&!self.ready.load(Ordering::Acquire){self.cancel.cancel();}}
+    pub fn expire_uncommitted(&self){let thread=self.thread.read().unwrap_or_else(std::sync::PoisonError::into_inner);if thread.starts_with("draft-")&&!self.ready.load(Ordering::Acquire){drop(thread);self.close();}}
     pub fn thread(&self)->String {self.thread.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()}
     pub fn bind_thread(&self,thread:String)->Result<()> {
         let mut id=self.thread.write().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -223,6 +321,9 @@ impl Route {
         if !self.cancel.is_cancelled(){crate::runtime_log::record("accounts","account.relay.lifecycle","closed",json!({"routeId":self.route_id,"conversationId":self.thread(),"activeRequests":self.active.load(Ordering::Relaxed),"requests":self.requests.load(Ordering::Relaxed),"taskReplayed":false}));}
         self.ready.store(false, Ordering::Release);
         self.cancel.cancel();
+        if let Some(shared) = self.shared.as_ref().and_then(Weak::upgrade) {
+            shared.routes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&self.key);
+        }
     }
     pub fn connection(&self) -> String {
         self.selection
@@ -291,6 +392,11 @@ impl Route {
     /// A direct check separates a dead listener from the configured proxy path.
     /// This verifies the native relay client's HTTP path, not model availability.
     pub async fn probe(&self, force: bool) -> Result<()> {
+        if self.shared.is_some() && self.cancel.is_cancelled() { return Err(fault("route-closed")); }
+        let shared = self.shared.as_ref().and_then(Weak::upgrade);
+        if shared.as_ref().is_some_and(|hub| hub.probed.load(Ordering::Acquire)) {
+            return Ok(());
+        }
         let mut cached = self.probe.lock().await;
         if !force && cached.as_ref().is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(30)) {
             return Ok(());
@@ -319,6 +425,7 @@ impl Route {
         }
         let evidence = json!({"stage":"local-http-probe","challengeMatched":true,"upstreamAttempted":false,"taskSent":false});
         *cached = Some((std::time::Instant::now(), evidence.clone()));
+        if let Some(shared) = shared { shared.probed.store(true, Ordering::Release); }
         operation.finish("confirmed", evidence);
         Ok(())
     }
@@ -353,6 +460,9 @@ impl Route {
         let header = tokio::time::timeout(Duration::from_secs(10), read_header(&mut io))
             .await
             .map_err(|_| fault("request-header-timeout"))??;
+        self.handle_header(io, header).await
+    }
+    async fn handle_header(&self, mut io: BufReader<TcpStream>, header: String) -> Result<()> {
         let request = match parse_header(&header, &self.authority, &self.key) {
             Ok(request) => request,
             Err(error) => {
@@ -812,6 +922,87 @@ fn json_type(text: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn shared_listener_keeps_conversations_isolated_and_survives_one_route_closing() {
+        let upstream = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = upstream.local_addr().unwrap();
+        let backend = tokio::spawn(async move {
+            let mut observed = Vec::new();
+            for _ in 0..2 {
+                let (socket, _) = upstream.accept().await.unwrap();
+                let mut io = BufReader::new(socket);
+                let header = read_header(&mut io).await.unwrap();
+                let account = header.lines().find_map(|line| line.strip_prefix("chatgpt-account-id: ")).unwrap().to_owned();
+                assert!(header.contains(&format!("authorization: Bearer fixture-{account}")));
+                let length = header.lines().find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").and_then(|value| value.trim().parse::<usize>().ok())).unwrap();
+                let mut body = vec![0; length];
+                io.read_exact(&mut body).await.unwrap();
+                assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["conversation"], account);
+                observed.push(account);
+                io.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+            }
+            observed.sort();
+            assert_eq!(observed, ["A", "B"]);
+        });
+        let routes = Routes::default();
+        let endpoint = format!("http://localhost:{}", address.port());
+        let a = routes.start_shared_with_upstream("owner".into(), "thread-a".into(), credential("A"), endpoint.clone()).await.unwrap();
+        a.probe(true).await.unwrap();
+        let b = routes.start_shared_with_upstream("owner".into(), "thread-b".into(), credential("B"), endpoint).await.unwrap();
+        b.probe(true).await.unwrap();
+        assert_eq!(a.authority, b.authority);
+        assert_ne!(a.base_url, b.base_url);
+        assert!(b.probe.lock().await.is_none(), "later routes reuse the shared listener proof");
+        routes.replace("owner", "thread-a", Some(a.clone()));
+        routes.replace("owner", "thread-b", Some(b.clone()));
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let (first, second) = tokio::join!(
+            client.post(format!("{}/responses", a.base_url)).json(&json!({"conversation":"A"})).send(),
+            client.post(format!("{}/responses", b.base_url)).json(&json!({"conversation":"B"})).send()
+        );
+        assert_eq!(first.unwrap().status(), 200, "{:?}", a.status()["diagnostics"]["lastFailure"]);
+        assert_eq!(second.unwrap().status(), 200, "{:?}", b.status()["diagnostics"]["lastFailure"]);
+        backend.await.unwrap();
+        routes.replace("owner", "thread-a", None);
+        assert_eq!(client.get(format!("{}/health", a.base_url)).send().await.unwrap().status(), 403);
+        assert!(!b.cancel.is_cancelled());
+        routes.replace("owner", "thread-b", None);
+    }
+    #[tokio::test]
+    async fn shared_draft_path_waits_for_native_thread_binding_without_a_new_listener() {
+        let upstream = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = upstream.local_addr().unwrap();
+        let backend = tokio::spawn(async move {
+            let (socket, _) = upstream.accept().await.unwrap();
+            let mut io = BufReader::new(socket);
+            let header = read_header(&mut io).await.unwrap();
+            assert!(header.contains("chatgpt-account-id: B"));
+            let length = header.lines().find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").and_then(|value| value.trim().parse::<usize>().ok())).unwrap();
+            let mut body = vec![0; length];
+            io.read_exact(&mut body).await.unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["thread"], "native-thread");
+            io.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+        });
+        let routes = Routes::default();
+        let endpoint = format!("http://localhost:{}", address.port());
+        let existing = routes.start_shared_with_upstream("owner".into(), "existing".into(), credential("A"), endpoint.clone()).await.unwrap();
+        existing.probe(true).await.unwrap();
+        routes.replace("owner", "existing", Some(existing.clone()));
+        let draft = routes.start_shared_with_upstream("owner".into(), "draft-temporary".into(), credential("B"), endpoint).await.unwrap();
+        assert_eq!(existing.authority, draft.authority);
+        draft.probe(true).await.unwrap();
+        assert!(draft.probe.lock().await.is_none());
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        assert_eq!(client.post(format!("{}/responses", draft.base_url)).json(&json!({"thread":"native-thread"})).send().await.unwrap().status(), 503);
+        assert_eq!(draft.requests.load(Ordering::Relaxed), 1);
+        draft.bind_thread("native-thread".into()).unwrap();
+        routes.replace("owner", "native-thread", Some(draft.clone()));
+        assert_eq!(client.post(format!("{}/responses", draft.base_url)).json(&json!({"thread":"native-thread"})).send().await.unwrap().status(), 200);
+        assert_eq!(draft.requests.load(Ordering::Relaxed), 2);
+        backend.await.unwrap();
+        routes.replace("owner", "native-thread", None);
+        routes.replace("owner", "existing", None);
+    }
     #[cfg(windows)]
     #[tokio::test]
     #[ignore="Explicit authenticated live gateway acceptance using synthetic task only"]

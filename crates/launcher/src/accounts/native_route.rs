@@ -297,7 +297,7 @@ async fn prepare(
         Some(if let Some(prior) = &prior {
             prior.clone()
         } else {
-            relay::Route::start(owner.id.clone(), thread.clone(), credential.clone()).await?
+            service.relays.start_shared(owner.id.clone(), thread.clone(), credential.clone()).await?
         })
     } else {
         None

@@ -87,11 +87,14 @@ export class NativeComposerQuota {
  }
  #bind(anchor:HTMLButtonElement):void{
   const chain=nativeFiberChain(anchor),root=anchor.closest('[data-codex-composer-root]');if(!root)throw unavailable('composer-root');
-  const candidates=chain.filter(f=>typeof f.type==='function'&&f.memoizedProps&&'isResponseInProgress' in f.memoizedProps&&(f.memoizedProps.submitDisabled===undefined||typeof f.memoizedProps.submitDisabled==='boolean')&&String(f.type).includes('handleSubmitLocal'));
+  // Home omits this optional prop; the native composer defaults it to false.
+  const candidates=chain.filter(f=>typeof f.type==='function'&&f.memoizedProps&&(f.memoizedProps.isResponseInProgress===undefined||typeof f.memoizedProps.isResponseInProgress==='boolean')&&(f.memoizedProps.submitDisabled===undefined||typeof f.memoizedProps.submitDisabled==='boolean')&&String(f.type).includes('handleSubmitLocal'));
   if(candidates.length!==1)throw unavailable('composer-owner');const fiber=candidates[0]!;
   const contexts:Map<any,Native>[]=[];for(let c=fiber.dependencies?.firstContext,i=0;c&&i<64;c=c.next,i++)if(c.memoizedValue instanceof Map)contexts.push(c.memoizedValue);
   const conversation=this.adapter.status().conversationId;
-  const composers=[...new Set(contexts.flatMap(c=>[...c.values()]).filter(n=>n?.value?.placement==='main'&&['local','new'].includes(n.value.kind)))];
+  // Native home ComposerScope has entrypoint="home" and no placement. Local
+  // conversation scopes use placement="main"; panels/previews are not home.
+  const composers=[...new Set(contexts.flatMap(c=>[...c.values()]).filter(n=>n?.value&&(n.value.kind==='local'&&n.value.placement==='main'||n.value.kind==='new'&&(n.value.entrypoint==='home'||n.value.entrypoint===undefined&&n.value.placement==='main'))))];
   if(composers.length!==1||(composers[0]!.value.conversationId??null)!==conversation)throw unavailable('composer-identity');
   if(this.#root!==root||this.#conversation!==conversation)this.#restore();
   this.#root=root;this.#conversation=conversation;

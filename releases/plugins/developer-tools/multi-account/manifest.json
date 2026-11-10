@@ -3,12 +3,12 @@
   "name": "Multi-account Tasks",
   "category": "developer-tools",
   "api": 1,
-  "version": "1.0.103",
+  "version": "1.0.105",
   "releaseTag": "plugin-assets-2026-11-02",
-  "asset": "CodeCodex-plugin-multi-account-1.0.103.js",
-  "relativePath": "CodeCodex-plugin-multi-account-1.0.103.js",
-  "size": 218631,
-  "sha256": "1e2de81960b7ecf22f4cde064d815cffda3253e4563c9c05bee0febe3217d8d5",
+  "asset": "CodeCodex-plugin-multi-account-1.0.105.js",
+  "relativePath": "CodeCodex-plugin-multi-account-1.0.105.js",
+  "size": 218802,
+  "sha256": "bd7681c43634942e1a9512bac6401fcdaca110a4adbd44953cdf15153ba22b86",
   "resources": [],
   "capabilities": [
     "developer-tools"

@@ -364,6 +364,77 @@ fn installation(root: &Path) -> crate::discovery::CodexInstallation {
     }
 }
 #[test]
+fn every_registered_dependency_signal_reaches_the_scanner_without_marking_unknown_code_safe() {
+    let d = tempfile::tempdir().unwrap();
+    let registry = rules();
+    let mut probes = Vec::new();
+    for rule in &registry {
+        for (index, token) in rule.tokens.iter().enumerate() {
+            let name = format!("{}-{index}.js", rule.id);
+            fs::write(d.path().join(&name), token).unwrap();
+            probes.push((name, rule.id.clone()));
+        }
+        for path in &rule.paths {
+            let parent = d.path().join(path).parent().unwrap().to_owned();
+            fs::create_dir_all(parent).unwrap();
+            // app.asar needs a valid container even for a path-only signal.
+            if path == "resources/app.asar" {
+                asar(&d.path().join(path), json!({}), b"");
+            } else {
+                fs::write(d.path().join(path), b"unrelated fixture bytes").unwrap();
+            }
+            probes.push((path.clone(), rule.id.clone()));
+        }
+    }
+    fs::write(d.path().join("unregistered.js"), b"unregistered behavior").unwrap();
+    fs::write(d.path().join("unregistered.png"), b"resource fixture").unwrap();
+    let scanned = scan::inventory(&installation(d.path()), None, true).unwrap();
+    assert!(scanned.complete, "{:?}", scanned.issues);
+    for (path, id) in probes {
+        let (_, entry) = scanned.entries.iter().find(|(name, _)| name.eq_ignore_ascii_case(&path)).unwrap();
+        assert!(entry.dependencies.contains(&id), "{path}: {id}");
+    }
+    let report = report(None, &scanned);
+    let changes = report["changes"].as_array().unwrap();
+    for (path, category) in [("unregistered.js", "needs_review"), ("unregistered.png", "no_known_plugin_dependency")] {
+        let change = changes.iter().find(|c| c["path"] == path).unwrap();
+        assert_eq!(change["category"], category);
+        assert_eq!(change["functionalImpact"], "not_tested");
+    }
+}
+
+#[test]
+fn shared_route_report_includes_implementation_and_acceptance_without_certifying_runtime() {
+    let d = tempfile::tempdir().unwrap();
+    fs::create_dir(d.path().join("resources")).unwrap();
+    asar(&d.path().join("resources/app.asar"), json!({}), b"");
+    fs::write(d.path().join("native.js"), b"openai_base_url getAuthStatus encrypted_content").unwrap();
+    let scanned = scan::inventory(&installation(d.path()), None, true).unwrap();
+    assert!(scanned.complete, "{:?}", scanned.issues);
+    let report = report(None, &scanned);
+    assert_eq!(report["registryHash"], registry_hash());
+    assert_eq!(report["dependencyRevision"], dependency_revision());
+    let dependencies = report["dependencies"].as_array().unwrap();
+    let route = dependencies.iter().find(|r| r["id"] == "startup-route").unwrap();
+    for source in ["relay.rs", "draft.rs", "native_route.rs"] {
+        let path = json!(format!("crates/launcher/src/accounts/{source}"));
+        assert!(route["sourceFiles"].as_array().unwrap().contains(&path));
+        assert!(route["suggestedTests"].as_array().unwrap().contains(&path));
+    }
+    let checks = route["requiredChecks"].as_array().unwrap();
+    for contract in ["one loopback listener", "closing or cancelling one route", "before the native thread binding", "without additional identity/quota reads"] {
+        assert!(checks.iter().any(|c| c.as_str().unwrap().contains(contract)), "{contract}");
+    }
+    assert!(dependencies.iter().any(|r| r["id"] == "accounts"));
+    let context = dependencies.iter().find(|r| r["id"] == "context").unwrap();
+    assert!(context["suggestedTests"].as_array().unwrap().contains(&json!("crates/launcher/src/accounts/official_context.rs")));
+    for dependency in dependencies {
+        assert_eq!(dependency["functionalImpact"], "not_tested");
+    }
+    assert_eq!(report["validation"]["status"], "not_tested");
+}
+
+#[test]
 fn complete_inventory_hashes_packed_unpacked_and_unknown_resources_without_source_logging() {
     let d = tempfile::tempdir().unwrap();
     fs::create_dir(d.path().join("resources")).unwrap();
