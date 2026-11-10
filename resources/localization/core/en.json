@@ -153,5 +153,7 @@
   "setup.welcomeCurrent": "This installer is up to date",
   "setup.welcomeOffline": "Install bundled version",
   "setup.welcomeNetwork": "Network unavailable. Install bundled version",
-  "setup.welcomeError": "Unable to check updates. Install bundled version"
+  "setup.welcomeError": "Unable to check updates. Install bundled version",
+  "menu.hostValidationSummary": "Updates: {issues} issues · {manual} to test",
+  "menu.hostValidationPassed": "Update checks passed"
 }

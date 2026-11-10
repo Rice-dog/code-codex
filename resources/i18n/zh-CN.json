@@ -167,6 +167,8 @@
   "menu.hideTree": "隐藏文件树",
   "menu.hostUpdates": "官方 Codex 更新报告",
   "menu.hostUpdatesRetry": "重新检测官方 Codex 更新",
+  "menu.hostValidationPassed": "更新检查已通过",
+  "menu.hostValidationSummary": "更新报告：问题 {issues} · 待测 {manual} 组",
   "menu.installation": "打开安装目录",
   "menu.language": "语言",
   "menu.market": "插件市场",

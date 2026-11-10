@@ -15,6 +15,8 @@ mod scan;
 pub(crate) mod scheduler;
 #[path = "host_updates/version_gate.rs"]
 mod version_gate;
+#[path = "host_updates/validation.rs"]
+pub(crate) mod validation;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(super) struct Entry {
@@ -92,7 +94,7 @@ pub(crate) fn status() -> io::Result<Value> {
     let latest = dir.join("latest.json");
     let latest = if latest.exists() { read_json(&latest)? } else { Value::Null };
     Ok(
-        json!({"analysis":analysis_status(&latest),"latest":latest,"scan":if dir.join("status.json").exists(){read_json(&dir.join("status.json"))?}else{json!({"status":"pending"})}}),
+        json!({"analysis":analysis_status(&latest),"latest":latest,"validation":validation::status(&dir).unwrap_or_else(|_|json!({"status":"unavailable"})),"scan":if dir.join("status.json").exists(){read_json(&dir.join("status.json"))?}else{json!({"status":"pending"})}}),
     )
 }
 fn analysis_status(latest: &Value) -> Value {
@@ -307,7 +309,7 @@ pub(crate) fn retry() -> Value {
     if PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) {
         return json!({"scheduled":false,"status":"busy"});
     }
-    tokio::task::spawn_blocking(|| {
+    tokio::spawn(async {
         struct Reset;
         impl Drop for Reset {
             fn drop(&mut self) {
@@ -315,7 +317,9 @@ pub(crate) fn retry() -> Value {
             }
         }
         let _reset = Reset;
-        let _ = observed_run(true, None);
+        if matches!(tokio::task::spawn_blocking(|| observed_run(true, None)).await, Ok(Ok(_))) {
+            let _ = validation::run(validation::endpoint(), true, None).await;
+        }
     });
     json!({"scheduled":true})
 }
@@ -398,7 +402,8 @@ impl Drop for Monitor {
         self.0.cancel();
     }
 }
-pub(crate) fn start(parent: tokio_util::sync::CancellationToken) -> Monitor {
+pub(crate) fn start(parent: tokio_util::sync::CancellationToken, endpoint: cdp_client::CdpEndpoint) -> Monitor {
+    validation::set_endpoint(endpoint);
     let cancel = parent.child_token();
     let guard = Monitor(cancel.clone());
     tokio::spawn(async move {
@@ -414,6 +419,10 @@ pub(crate) fn start(parent: tokio_util::sync::CancellationToken) -> Monitor {
                 "failed",
                 json!({"code":"HOST_UPDATE_SCAN","previousReportsPreserved":true}),
             );
+        } else if !cancel.is_cancelled() {
+            if validation::run(Some(endpoint), false, Some(cancel)).await.is_err() {
+                crate::runtime_log::record("compatibility", "host-update.validation", "unavailable", json!({"code":"HOST_UPDATE_VALIDATION","previousReportsPreserved":true}));
+            }
         }
     });
     guard

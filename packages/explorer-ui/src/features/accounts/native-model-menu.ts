@@ -14,7 +14,7 @@ export function nativeFiberChain(anchor:HTMLElement):any[]{
  }
  return mounted.reverse();
 }
-function pickerOf(chain:any[],ids?:string[]):Picker{
+export function pickerOf(chain:any[],ids?:string[]):Picker{
  const matches=chain.map(f=>f.memoizedProps).filter(p=>Array.isArray(p?.models)&&Array.isArray(p.modelOptions)&&typeof p.onSelectModel==='function'&&typeof p.onOpenChange==='function');
  const exact=ids?matches.filter(p=>p.models.length===ids.length&&p.models.every((m:Model,i:number)=>m.model===ids[i])):matches;
  if(!matches.length)throw unavailable('picker-contract');return exact[0]??matches[0];

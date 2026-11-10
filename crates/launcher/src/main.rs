@@ -93,6 +93,10 @@ enum Commands {
     /// Read-only local official-package change ledger and per-user observation task.
     HostUpdates {
         #[arg(long)] force: bool,
+        /// Validate the recorded update without scanning or promoting a baseline.
+        #[arg(long, conflicts_with_all=["register","unregister","force"])] validate: bool,
+        /// Explicit launch-owned loopback endpoint for read-only host checks.
+        #[arg(long, requires="validate")] port: Option<u16>,
         #[arg(long, conflicts_with="unregister")] register: bool,
         #[arg(long)] unregister: bool,
     },
@@ -328,8 +332,8 @@ async fn application_main() -> ExitCode {
     if let Some(Commands::StartupRecoveryWindow { pid, created_ms, image, close }) = &cli.command {
         return startup_conflict::window_operation(*pid, *created_ms, image, *close);
     }
-    if let Some(Commands::HostUpdates { force, register, unregister }) = &cli.command {
-        let result = if *register || *unregister { if *register {Err(std::io::Error::other("HOST_UPDATE_STARTUP_ONLY: Periodic registration was retired. Use startup observation or --force."))}else{host_updates::scheduler::configure(false)} } else { host_updates::run(*force) };
+    if let Some(Commands::HostUpdates { force, register, unregister, validate, port }) = &cli.command {
+        let result = if *validate {host_updates::validation::run(port.map(cdp_client::CdpEndpoint::loopback), true, None).await} else if *register || *unregister { if *register {Err(std::io::Error::other("HOST_UPDATE_STARTUP_ONLY: Periodic registration was retired. Use startup observation or --force."))}else{host_updates::scheduler::configure(false)} } else { host_updates::run(*force) };
         return match result {Ok(value)=>{println!("{value}");ExitCode::SUCCESS},Err(error)=>{eprintln!("HOST_UPDATE_CHECK: {error}");ExitCode::from(23)}};
     }
     initialize_logging(cli.log_format);

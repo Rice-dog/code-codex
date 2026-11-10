@@ -1,6 +1,7 @@
 import type {AccountRequest,AccountsInfo} from './contracts';
 import {bindAccountTransport,type AccountHandoff,type BoundAccountRequest} from './transport';
 import {runtimeEvent} from '../../runtime-events';
+import {retireDocumentBinding} from '../../core/document-capability-owner';
 
 /** Transfer one concrete native lease, drain late reads, then retire only local hooks. */
 export async function retireLegacyAccountAdapter(recovery?:AccountRequest,current:()=>boolean=()=>true):Promise<void>{
@@ -100,7 +101,7 @@ export async function retireLegacyAccountAdapter(recovery?:AccountRequest,curren
     if(info.activeConversations.length)throw Object.assign(Error('ACCOUNT_UPGRADE_ACTIVE: Execution started during preflight. No lease was released.'),{code:'ACCOUNT_UPGRADE_ACTIVE'});
     localIdle();handoff?.seal?.();
     stage='previous-release';await request({action:'release',owner:info.owner.id});
-    released=true;retired.add(port);handoff?.release();event('released',{activeTasks:0});
+    released=true;retired.add(port);handoff?.release();retireDocumentBinding(port.runtimeIdentity);event('released',{activeTasks:0});
     if(recovery){stage='replacement-exclusive-check';const next=await idle(recovery,await recovery<AccountsInfo>({action:'info'}));if(next.owner.id!==info.owner.id)throw Error('ACCOUNT_HANDOFF_OWNER_CHANGED: The official login changed during lease transfer.');}
    }
   }else if(recovery){stage='replacement-exclusive-retry';await idle(recovery,await recovery<AccountsInfo>({action:'info'}));}

@@ -176,6 +176,8 @@ $script:RemovalUiText = @'
   "hide file tree": "隐藏文件树",
   "official codex update report": "官方 Codex 更新报告",
   "recheck official codex updates": "重新检测官方 Codex 更新",
+  "update checks passed": "更新检查已通过",
+  "updates: {issues} issues · {manual} to test": "更新报告：问题 {issues} · 待测 {manual} 组",
   "open installation folder": "打开安装目录",
   "language": "语言",
   "preview market": "插件市场",

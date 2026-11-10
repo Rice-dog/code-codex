@@ -2603,12 +2603,12 @@
         "name": "Multi-account Tasks",
         "category": "developer-tools",
         "api": 1,
-        "version": "1.0.105",
+        "version": "1.0.106",
         "releaseTag": "plugin-assets-2026-11-02",
-        "asset": "CodeCodex-plugin-multi-account-1.0.105.js",
-        "relativePath": "CodeCodex-plugin-multi-account-1.0.105.js",
-        "size": 218802,
-        "sha256": "bd7681c43634942e1a9512bac6401fcdaca110a4adbd44953cdf15153ba22b86",
+        "asset": "CodeCodex-plugin-multi-account-1.0.106.js",
+        "relativePath": "CodeCodex-plugin-multi-account-1.0.106.js",
+        "size": 218920,
+        "sha256": "499afe51dbbd88d5246912802ac802cfb7a8a75431df73a485c35351caa8c12f",
         "resources": [],
         "capabilities": [
           "developer-tools"
@@ -2628,13 +2628,13 @@
         "src/features/accounts/asset-controls.ts": "e56892c67a51895921d947447522ffbccc62197d9eef51b529930efd8fefe35b",
         "src/features/accounts/quota-view.ts": "5708210fd57261553f8e6f8b50e398c676879ab5b371491992fee6e80922403b",
         "src/features/accounts/account-list.ts": "c9f4e69b897477d3df014bc826be659169d1388ae05ec60389ce47f82d63fd51",
-        "src/core/document-capability-owner.ts": "ea29bc918041b1a32e7fe3654f500e261a452034ab825382f14bad3db8934b9d",
+        "src/core/document-capability-owner.ts": "bea6f3385f9de02267c0df4f7d865acf7fd6553c6e4b31819d4a6bfdfaeb0006",
         "src/features/accounts/transport.ts": "6928c2fc5ec99263cb5f1eb37aeb4ea3971b58bfc652391c9ca080e8a7cbbdec",
         "src/host/bridge/accounts.ts": "406bece803285bf21babe8651bf6f593d10543a6298b9ac4922ae65dc8f5eb5a",
-        "src/features/accounts/native-model-menu.ts": "1fa0e9c81038a0b8abf068c9d8a7b3947f86dfde163b53377ab7150c92a9cbb8",
+        "src/features/accounts/native-model-menu.ts": "56a882d9f129d81e95bc89c8d74204a2754751d051c25fe77ca96e4134e10659",
         "src/features/accounts/model-selector.ts": "99fdad8b60ad4ac53bd6d4d77894409f75459e2b3f4fd303a3126c7bb90c0bf6",
         "src/features/accounts/native-usage-banner.ts": "f0a2877516da23ef9c3fb323442da462eb0fe9e3f188ea61e833833b46bf81d1",
-        "src/features/accounts/native-composer-quota.ts": "c89d642bbe475fc79e83861a961c9f867b3ab7f33c8d735564234de48a407bb3",
+        "src/features/accounts/native-composer-quota.ts": "bdd7862b49586a58a2c07b8bb056ea9fceffeb8aa6e800b7ffb8eabc0b1bfd48",
         "src/features/accounts/contracts.ts": "a429bd2c735e03f15df3a51f1eb20116f42571d4844057a332f893dd9a8b0ce3",
         "src/components/menu-check.ts": "e5c7298d8edb995affb67c0fbcd791d6ac50b8b0fe82e358393f5bc2ce8db0fa",
         "src/adapters/codex-26.715.ts": "cac7f2a7425297f11f2f10a1d2c68a7af7b55a0522a722c83e790353b3ae89d9",
@@ -2669,7 +2669,7 @@
       },
       "inputFormat": "lf-v1",
       "buildMetadata": {
-        "definition": "fed6ebcbb345ce6b2f060bb0d55baa3093a442e6c2373e93295d1548aac0b912",
+        "definition": "4180cb8c5f9b1225e4abf7ba19ceeabc51463921621a011fb83b061e4d2eabc7",
         "compiler": "0.25.12"
       },
       "artifactRoot": "releases/plugins/developer-tools/multi-account"
@@ -2686,9 +2686,9 @@
     {
       "id": "multi-account",
       "tag": "plugin-assets-2026-11-02",
-      "name": "CodeCodex-plugin-multi-account-1.0.105.js",
-      "size": 218802,
-      "sha256": "bd7681c43634942e1a9512bac6401fcdaca110a4adbd44953cdf15153ba22b86"
+      "name": "CodeCodex-plugin-multi-account-1.0.106.js",
+      "size": 218920,
+      "sha256": "499afe51dbbd88d5246912802ac802cfb7a8a75431df73a485c35351caa8c12f"
     }
   ]
 }

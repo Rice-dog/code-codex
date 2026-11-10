@@ -4,7 +4,7 @@ import { ExplorerBridge,getBootstrapConfig } from '../bridge';
 import { initializeRendererStorage } from '../renderer-storage';
 import {connectAccounts,requestAccounts,suspendAccounts} from '../host/bridge/accounts';
 import { connectApplicationMenu } from '../host/bridge/application-menu';
-import {replaceDocumentConnection} from '../core/document-capability-owner';
+import {replaceDocumentConnection,documentBindingRetired,retireDocumentBinding} from '../core/document-capability-owner';
 import {retireLegacyAccountAdapter} from '../features/accounts/legacy-handoff';
 import {installSessionGuard,suspendSessionGuard} from '../features/accounts/session-guard';
 import {MULTI_ACCOUNT_AVAILABLE} from '../core/configuration/optional-features';
@@ -13,12 +13,14 @@ import {runtimeEvent} from '../runtime-events';
 
 /** Composition owns startup ordering. Preference failures must not hide recovery UI. */
 export function startApplication(): void {
+  // Stop a released supervisor before it cancels the current startup or probes.
+  if(documentBindingRetired(getBootstrapConfig().binding))return;
   const key=Symbol.for('code-codex:application-startup:v1'),globals=window as unknown as Record<symbol,{version:string;cancel():void}>;
   const prior=globals[key],version=__CODE_CODEX_VERSION__;
   if(prior){const a=prior.version.split('.').map(Number),b=version.split('.').map(Number);let comparison=0;for(let i=0;i<3;i++){if(a[i]!==b[i]){comparison=a[i]!>b[i]!?1:-1;break;}}if(comparison>0)return;prior.cancel();}
   let cancelled=false,timer:ReturnType<typeof setTimeout>|undefined;globals[key]={version,cancel(){cancelled=true;clearTimeout(timer);}};
   const attempt=async(count:number):Promise<void>=>{
-    if(cancelled)return;
+    if(cancelled||documentBindingRetired(getBootstrapConfig().binding))return;
     try{if(await startOwnedApplication(()=>!cancelled))return;}
     catch(error){const value=(error as {code?:unknown})?.code,code=typeof value==='string'&&/^[A-Z][A-Z0-9_]{1,63}$/.test(value)?value:String(error).match(/ACCOUNT_[A-Z_]+/)?.[0];const waiting=code==='ACCOUNT_UPGRADE_ACTIVE'||code==='ACCOUNT_HANDOFF_YIELDED';runtimeEvent('startup','document handoff','deferred',{code:'CC-START-ACCOUNTS-UPGRADE-001',errorCode:code,attempt:count,retryMs:3000,reason:String(error),endpointAvailable:waiting,taskSent:false});if(!waiting)console.warn('CC-START-ACCOUNTS-UPGRADE-001: Activation is waiting for a verified connection and idle account runtime.',error);}
     if(!cancelled)timer=setTimeout(()=>void attempt(count+1),3000);
@@ -56,7 +58,7 @@ async function startOwnedApplication(current:()=>boolean): Promise<boolean> {
   }catch(error){
     // A cancelled candidate can already own an idle lease after its recovery
     // probe. Release that exact candidate before discarding its only transport.
-    if(acquiredAccountOwner&&!candidateReleaseAttempted){try{await storageBridge.request('explorer.accounts.request',{action:'release',owner:acquiredAccountOwner},55_000);runtimeEvent('accounts','account.handoff','candidate-released',{nativeBinding:bootstrap.binding,reason:'candidate-not-published',taskSent:false});}catch(cleanup){runtimeEvent('accounts','account.handoff','candidate-release-failed',{nativeBinding:bootstrap.binding,error:String(cleanup),taskSent:false});}}
+    if(acquiredAccountOwner&&!candidateReleaseAttempted){try{await storageBridge.request('explorer.accounts.request',{action:'release',owner:acquiredAccountOwner},55_000);retireDocumentBinding(bootstrap.binding);runtimeEvent('accounts','account.handoff','candidate-released',{nativeBinding:bootstrap.binding,reason:'candidate-not-published',taskSent:false});}catch(cleanup){runtimeEvent('accounts','account.handoff','candidate-release-failed',{nativeBinding:bootstrap.binding,error:String(cleanup),taskSent:false});}}
     storageBridge.dispose();runtimeEvent('startup','document handoff','failed',{reason:String(error),previousConnectionRetained:true});throw error;
   }
   storageBridge.connectServices();

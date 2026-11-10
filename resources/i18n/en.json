@@ -167,6 +167,8 @@
   "menu.hideTree": "Hide File Tree",
   "menu.hostUpdates": "Official Codex update report",
   "menu.hostUpdatesRetry": "Recheck official Codex updates",
+  "menu.hostValidationPassed": "Update checks passed",
+  "menu.hostValidationSummary": "Updates: {issues} issues · {manual} to test",
   "menu.installation": "Open Installation Folder",
   "menu.language": "Language",
   "menu.market": "Preview Market",

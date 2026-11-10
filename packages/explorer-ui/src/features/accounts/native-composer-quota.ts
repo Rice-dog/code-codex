@@ -11,7 +11,7 @@ const unavailable=(stage:string)=>Error(`ACCOUNT_NATIVE_QUOTA_UNAVAILABLE: The n
 const families=(value:any)=>value&&typeof value==='object'&&value.kind==='readable-family'&&typeof value.resolve==='function'&&value.scope;
 
 /** Discover initialized semantic roles, never invoke an unknown module factory. */
-async function capabilities(address:string):Promise<Capabilities>{
+export async function capabilities(address:string):Promise<Capabilities>{
  const path=address.split('#')[0]!;
  if(!/^\.\/assets\/[0-9]+\.[A-Za-z0-9_-]+\.js$/.test(path))throw unavailable('runtime-path');
  const namespace=await import(/* @vite-ignore */path);

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 8,
+  "revision": 10,
   "rules": [
     {
       "id": "layout",
@@ -22,6 +22,17 @@
       "paths": [],
       "checks": [
         "Existing/new/unknown composer layouts, missing and ambiguous anchors, navigation and disposal."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.layout",
+        "host.composer",
+        "regression.layout"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "Open an existing conversation and New Chat. Confirm the file tree follows the correct workspace and the composer remains usable.",
+        "Navigate away/back and close the view. Confirm there is one tree and no stale controls."
       ]
     },
     {
@@ -59,6 +70,16 @@
         "Identity match without forced refresh; expired versus unavailable credentials; active-turn refusal and late replies.",
         "Manual Verify returns verified login status independently of remote quota availability, then schedules the existing background quota queue. Verify and usage reuse observe_managed credentials without duplicate frontend Verify; quota failure does not fail successful login checks. Cached values, one-flight and owner/late-result protections remain. No quota-triggered backend replacement or extra retry counter.",
         "Usable native getAuthStatus credentials avoid forced account/read; near-expiry, missing claims and confirmed reauthorization retain existing refresh behavior. Wrong identity, logout/relogin, removed connection and late replies cannot commit stale results. Local credential selection is not blocked by a hung remote quota read."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.interfaces",
+        "regression.interfaces"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "In an idle test conversation select a previously verified child, then the primary account. Confirm identity and quota update without another login.",
+        "Separately test a signed-out/expired connection and an unavailable network; cached quota must not be described as a login failure."
       ]
     },
     {
@@ -79,6 +100,18 @@
       "paths": [],
       "checks": [
         "API saved model subset and default; native model/effort selection; official catalog restore; missing or ambiguous capability."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.interfaces",
+        "host.composer",
+        "host.models",
+        "regression.models"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "Open the native model picker for an API connection: confirm only saved models appear and default/effort selection works.",
+        "Return to an official account and confirm its native catalog and keyboard selection are restored."
       ]
     },
     {
@@ -101,16 +134,28 @@
       "paths": [],
       "checks": [
         "Light/dark native theme, background activation/deactivation and unchanged controls/media."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.theme"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "With a background enabled, inspect light and dark themes, then disable it. Confirm native controls and media retain their geometry."
       ]
     },
     {
       "id": "menu",
       "feature": "Application menu and desktop integration",
       "sources": [
-        "packages/explorer-ui/src/application-menu.ts"
+        "packages/explorer-ui/src/application-menu.ts",
+        "crates/launcher/src/host_updates/validation.rs",
+        "packages/explorer-ui/src/host-update-probes.ts"
       ],
       "tests": [
-        "scripts/test-application-menu.mjs"
+        "scripts/test-application-menu.mjs",
+        "scripts/test-host-update-probes.mjs",
+        "crates/launcher/src/host_updates/validation_tests.rs"
       ],
       "tokens": [
         "radix-menubar",
@@ -119,7 +164,17 @@
       ],
       "paths": [],
       "checks": [
-        "Current/stale/legacy/partial report metadata; late status after close; fixed retry admission and keyboard navigation."
+        "Current/stale/legacy/partial report metadata; late status after close; fixed retry admission and keyboard navigation.",
+        "Separate inventory and compatibility identities; immutable validation runs, no hidden update after zero-delta analysis refresh, unknown changes remain involved, partial checks remain manual and stale rules/engine require explicit revalidation."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.menu"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "Open the Code-Codex menu in Chinese and English. Confirm validation counts and keyboard navigation.",
+        "Close the menu during a status read; it must not reopen or change focus when the reply arrives."
       ]
     },
     {
@@ -143,6 +198,16 @@
       ],
       "checks": [
         "Trusted module discovery and bridge fields; missing/ambiguous contracts; cancellation and resource release."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.interfaces",
+        "host.ownership",
+        "regression.interfaces"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "In a disposable conversation verify one native request and cancellation. Confirm disconnect/unknown outcome is reported without automatic replay."
       ]
     },
     {
@@ -169,6 +234,16 @@
       ],
       "checks": [
         "Local tool and approval protocol; activity/ownership checks; no request replay after unknown outcomes."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.interfaces",
+        "package.modules",
+        "regression.interfaces"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "Use a disposable conversation for a tool/approval turn. Confirm cancel and denied approval do not replay a request."
       ]
     },
     {
@@ -190,6 +265,15 @@
       ],
       "checks": [
         "Trusted package identity, native launch ownership, old/new/unknown versions and uninstall cleanup."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "package.modules"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "At a convenient idle time close and launch the official client using Code-Codex. Confirm native identity and tree readiness.",
+        "Uninstall/cleanup requires a separate disposable installation; do not uninstall the active user installation."
       ]
     },
     {
@@ -205,7 +289,10 @@
         "crates/launcher/src/accounts/draft.rs",
         "crates/launcher/src/accounts/relay.rs",
         "crates/launcher/src/launch_recovery/windows.rs",
-        "crates/launcher/src/process_guard.rs"
+        "crates/launcher/src/process_guard.rs",
+        "packages/explorer-ui/src/core/document-capability-owner.ts",
+        "packages/explorer-ui/src/app/composition.ts",
+        "packages/explorer-ui/src/features/accounts/legacy-handoff.ts"
       ],
       "tests": [
         "crates/launcher/src/accounts/startup.rs",
@@ -213,7 +300,10 @@
         "crates/launcher/src/accounts/relay.rs",
         "crates/launcher/src/accounts/draft.rs",
         "crates/launcher/src/accounts/native_route.rs",
-        "scripts/test-account-native-routing.mjs"
+        "scripts/test-account-native-routing.mjs",
+        "scripts/test-document-retired-binding.mjs",
+        "scripts/test-account-lease-handoff.mjs",
+        "scripts/test-account-candidate-cleanup.mjs"
       ],
       "tokens": [
         "openai_base_url",
@@ -242,7 +332,21 @@
         "Native cold startup, initial official request, first account switch, backend exit, network reconnect and core hot handoff require separate observation. Static token matching does not certify runtime behavior.",
         "Existing conversations and New Chat drafts share one loopback listener and HTTP client per account service, with distinct capability paths and per-conversation credentials, context, quota and cancellation. Two conversations may use the same account; switching one cannot change the other.",
         "Parallel requests remain isolated; closing or cancelling one route leaves the other usable. Unknown/closed capability paths cannot route to another conversation. The initial loopback probe is reused by later routes without additional identity/quota reads, retries or switching waits.",
-        "New Chat refuses inference before the native thread binding and accepts it after binding on the same listener. Cover official/API routes, existing and new chats, disabled/re-enabled plugin and network reconnect separately; real provider success and timing require actual host/service acceptance."
+        "New Chat refuses inference before the native thread binding and accepts it after binding on the same listener. Cover official/API routes, existing and new chats, disabled/re-enabled plugin and network reconnect separately; real provider success and timing require actual host/service acceptance.",
+        "Same-version retired native bindings cannot cancel current startup, claim document ownership or release the working endpoint again; include legacy slot assignment, failed unreleased candidate, current binding reconnection and new-document reset. This is local lifecycle admission only: no added account switch/auth/quota reads, retry or waiting."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.interfaces",
+        "package.modules",
+        "host.ownership",
+        "regression.interfaces"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "At idle, restart with the plugin enabled, open an existing conversation and New Chat, then select a verified child; confirm fast switching and original permission/tool behavior.",
+        "In two disposable conversations choose the same account, switch one, then close one. Confirm the other retains its own account/context and still works.",
+        "Separately test disable/re-enable and a network reconnect. Confirm no cross-conversation routing, duplicate send or stale owner."
       ]
     },
     {
@@ -275,6 +379,15 @@
         "HTTP/SSE completion and errors; real provider tools and multi-turn behavior require separate explicit acceptance.",
         "Return from API restores the latest original official compaction checkpoint plus readable progress without rewriting the archive or summarizing native history. Foreign reasoning is isolated; repeated provider cycles and live official stream state before archive flush preserve provenance.",
         "Legacy native pass-through learns accepted official opaque state only after successful completion. Unknown ciphertext, missing replacement history and corrupt/backwards provenance are explicit failures, never guessed ownership or silent history replacement."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.interfaces"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "In a disposable conversation use an official account, switch to API, then return to official. Check readable history and tool continuity for two turns.",
+        "Cancellation, compaction and encrypted-context errors require preserved evidence; do not rewrite the user archive to make the test pass."
       ]
     },
     {
@@ -314,6 +427,16 @@
         "Exhausted host with usable child/API projects only the three native quota snapshots. Existing native permission/auth/busy blocks stay enforced; returning to host, inactive/changed conversation, foreign replacement and disposal restore or stop only owned projection. Controlled child Send forwards the original callback exactly once with unchanged draft; actual remote first-turn success is a separate host/service acceptance.",
         "Same-version selector correction uses its existing revision-based idle replacement and retains the verified execution adapter/routes; active preparation or turns defer view replacement without an added switching wait.",
         "Actual native ComposerScope home identity is kind=new/entrypoint=home without placement or conversationId. Local main identity and legacy new/main stay supported; panels, previews, library, side, wrong thread, distinct matching contexts and missing identity are rejected. Exercise alias context reuse and store/derived-holder dependency forms through all three quota leases and the original Send callback, not just the owner predicate."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.quota",
+        "host.composer"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "With an exhausted primary and a usable child/API, test New Chat and an existing conversation. Confirm the original Send action runs once with the unchanged draft.",
+        "Close the native usage card, switch back, navigate and dispose. Confirm quota projection restores only its owned subscriptions; permission/auth/busy blocks remain native."
       ]
     },
     {
@@ -341,6 +464,16 @@
       "checks": [
         "Send-to-thinking transition, composer/control replacement, readable busy state and first-switch preparation hint.",
         "Stable account identity across ordering/navigation, late RPC/closed panel cleanup and activity admission."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.composer",
+        "host.ownership",
+        "regression.layout"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "Send in a disposable conversation and watch the account control through preparation, Thinking and composer replacement. Confirm its identity remains readable and no duplicate control appears."
       ]
     },
     {
@@ -366,6 +499,17 @@
         "Official to API and API to next account in saved order; API balance remains unverified and is not read via official quota.",
         "Exact model/effort inheritance or saved default/medium, native settings confirmation before dispatch.",
         "Duplicate terminal events, cancelled task, transient throttling/network/permission errors and active turn do not trigger duplicate continuation."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.interfaces",
+        "host.composer",
+        "regression.models"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "Using a disposable task with an actually exhausted account, confirm continuation follows saved order, including API, and reuses a supported model/effort or saved default/medium.",
+        "Cancel or reproduce a transient network error; neither case may trigger duplicate continuation. This test can spend provider credit and must be deliberate."
       ]
     },
     {
@@ -393,6 +537,15 @@
       "checks": [
         "Settings shared shell/groups including display:contents wrappers, secondary pages and inline header pseudo backgrounds.",
         "Three background attributes, light/dark, disable restoration; protect dialogs/menus/media/conversation masks and native control geometry."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.theme"
+      ],
+      "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
+      "manualSteps": [
+        "Open Settings and representative left-rail secondary pages with the background enabled. Confirm shell/groups are transparent in light and dark themes.",
+        "Disable the background. Confirm dialogs, menus, media and native control geometry are restored."
       ]
     }
   ]

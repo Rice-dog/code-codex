@@ -34,10 +34,10 @@ fn evaluation_failure(details:&Value)->AccountError {
 fn module_expression(expression:&str)->String {
     format!("(async()=>{{{};{};return await ({});}})()",include_str!("host_rpc_deadline.js"),include_str!("../../../../resources/account-host-capabilities.js").replace("export ",""),expression)
 }
-async fn evaluate(endpoint: CdpEndpoint, expression: &str) -> Result<Value> {
+pub(crate) async fn evaluate(endpoint: CdpEndpoint, expression: &str) -> Result<Value> {
     evaluate_budget(endpoint,expression,Duration::from_secs(12)).await
 }
-pub(super) async fn evaluate_budget(endpoint:CdpEndpoint,expression:&str,budget:Duration)->Result<Value>{
+pub(crate) async fn evaluate_budget(endpoint:CdpEndpoint,expression:&str,budget:Duration)->Result<Value>{
     let expression=module_expression(expression);
     let targets = TargetDiscovery::new()
         .map_err(|_| AccountError::protocol("Host discovery unavailable."))?
@@ -94,7 +94,7 @@ pub async fn verify_profile(endpoint:CdpEndpoint)->Result<()> {
  crate::runtime_log::record("accounts","account.compatibility","confirmed",json!({"stage":"capability-probe","observedVersion":manifest["version"],"policy":"capabilities","versionRestricted":false,"accountStateLoaded":false,"taskSent":false}));
  Ok(())
 }
-fn discover_modules()->Result<Value>{
+pub(crate) fn discover_modules()->Result<Value>{
  let install=crate::discovery::discover_codex(None,None,crate::discovery::ChannelPreference::Stable).map_err(|_|AccountError::new("ACCOUNT_HOST","The official Codex host could not be located."))?;
  let mut file=std::fs::File::open(install.executable.parent().ok_or_else(||AccountError::protocol("Invalid host installation."))?.join("resources/app.asar")).map_err(|_|AccountError::protocol("The host bundle cannot be inspected."))?;
  let mut bytes=[0u8;16];file.read_exact(&mut bytes).map_err(|_|AccountError::protocol("Invalid host bundle header."))?;

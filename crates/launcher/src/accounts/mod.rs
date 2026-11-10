@@ -2,7 +2,7 @@
 mod credential_worker;
 mod operations;
 mod model_catalog;
-mod host;
+pub(crate) mod host;
 mod api;
 mod routing;
 mod environment;

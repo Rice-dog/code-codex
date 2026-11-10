@@ -42,6 +42,8 @@ try {
         & npm --prefix $UiRoot run build
         if ($LASTEXITCODE -ne 0) { throw "UI build failed with exit code $LASTEXITCODE" }
     }
+    & node (Join-Path $PSScriptRoot 'build-host-update-probes.mjs')
+    if ($LASTEXITCODE -ne 0) { throw "Host update probe build failed with exit code $LASTEXITCODE" }
 
     $cargo = Resolve-Cargo
     $arguments = @("build", "--workspace", "--locked")

@@ -834,7 +834,7 @@ pub(super) async fn supervise(
             signal_cancellation.cancel();
         }
     });
-    let _update_monitor = crate::host_updates::start(cancellation.clone());
+    let _update_monitor = crate::host_updates::start(cancellation.clone(), endpoint);
     tracing::info!(event = "explorer_supervisor_started");
     let result = supervisor.run(cancellation).await;
     signal_task.abort();
