@@ -680,6 +680,32 @@ if ($script:setupWizard) {
     Set-UiBounds $bar 268 285 424 16
     $bar.Visible = $false
 
+    $script:updateFinished = $false
+    $script:updateWaitTicks = 0
+    $updateText = New-Object System.Windows.Forms.Label
+    Set-UiBounds $updateText 268 218 394 26
+    Set-UiFont $updateText 9
+    $updateText.AutoEllipsis = $true
+    $updateText.Text = 'Checking for updates...'
+    $form.Controls.Add($updateText)
+    $updateChoice = New-Object System.Windows.Forms.CheckBox
+    $updateChoice.Name = 'DownloadLatestVersion'
+    Set-UiBounds $updateChoice 268 216 424 28
+    Set-UiFont $updateChoice 9
+    $updateChoice.AutoEllipsis = $true
+    $updateChoice.Visible = $false
+    $updateChoice.Enabled = $false
+    $form.Controls.Add($updateChoice)
+    $updateSpinner = New-Object System.Windows.Forms.Panel
+    Set-UiBounds $updateSpinner 671 220 18 18
+    $script:updateAngle = 0
+    $updateSpinner.Add_Paint({param($sender,$e)
+        $e.Graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $pen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(45,125,210),2)
+        try {$e.Graphics.DrawArc($pen,3,3,11,11,$script:updateAngle,260)} finally {$pen.Dispose()}
+    })
+    $form.Controls.Add($updateSpinner)
+
     $licenseBox = New-Object System.Windows.Forms.TextBox
     $licenseBox.Name = 'LicenseText'
     $licenseBox.AccessibleName = 'License agreement'
@@ -804,10 +830,13 @@ if ($script:setupWizard) {
         $custom.Visible = $Page -eq 'folder' -and -not $script:setupExisting
         $pathPanel.Visible = $Page -eq 'folder' -and ($script:setupExisting -or $custom.Checked)
         $bar.Visible = $Page -eq 'installing'
+        $updateText.Visible = $Page -eq 'welcome' -and -not $updateChoice.Enabled
+        $updateChoice.Visible = $Page -eq 'welcome' -and $script:updateFinished -and $updateChoice.Enabled
+        $updateSpinner.Visible = $Page -eq 'welcome' -and -not $script:updateFinished
         $actions.Visible = $Page -ne 'installing'
         $back.Visible = $Page -in @('license', 'folder')
         $cancel.Visible = $Page -ne 'finish'
-        $install.Enabled = $Page -ne 'license' -or $agreement.Checked
+        $install.Enabled = if($Page -eq 'welcome'){$script:updateFinished}else{$Page -ne 'license' -or $agreement.Checked}
         $form.AcceptButton = if ($Page -eq 'installing') { $null } else { $install }
         $form.CancelButton = if ($Page -eq 'finish') { $install } elseif ($Page -eq 'installing') { $null } else { $cancel }
         $form.ControlBox = $Page -ne 'installing'
@@ -865,6 +894,10 @@ if ($script:setupWizard) {
             Set-UiBounds $detail 268 136 424 $paragraphHeight
             Set-UiBounds $languageLabel 268 $languageTop 232 20
             Set-UiBounds $languageChoice 268 ($languageTop + 28) 232 28
+            $updateTop = $languageTop + 65
+            Set-UiBounds $updateText 268 $updateTop 394 26
+            Set-UiBounds $updateChoice 268 ($updateTop - 2) 424 28
+            Set-UiBounds $updateSpinner 671 ($updateTop + 2) 18 18
             $languageLabel.Visible = $true
             $languageChoice.TabStop = $true
             $languageChoice.Visible = $true
@@ -941,7 +974,7 @@ if ($script:setupWizard) {
             return
         }
         try {
-            $decision = @{ installRoot = $root; uiLanguage = $script:CodeCodexUiLocale } | ConvertTo-Json -Compress
+            $decision = @{ installRoot = $root; uiLanguage = $script:CodeCodexUiLocale; downloadLatest = ($updateChoice.Enabled -and $updateChoice.Checked) } | ConvertTo-Json -Compress
             $stagedDecision = $env:CLE_SETUP_DECISION_PATH + '.tmp'
             [IO.File]::WriteAllText($stagedDecision, $decision, [System.Text.UTF8Encoding]::new($false))
             [IO.File]::Move($stagedDecision, $env:CLE_SETUP_DECISION_PATH)
@@ -982,6 +1015,51 @@ $script:parentCheckTicks = 0
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 50
 $timer.Add_Tick({
+    if($script:setupWizard -and -not $script:updateFinished) {
+        $script:updateWaitTicks++
+        if($script:updateWaitTicks -ge 300) {
+            $script:updateFinished=$true
+            $updateChoice.Enabled=$false
+            $updateText.Text='Unable to check updates. Install bundled version'
+            if($script:setupPage -eq 'welcome'){
+                $updateSpinner.Visible=$false
+                $updateText.Visible=$true
+                $install.Enabled=$true
+                Update-CodeCodexFormLanguage $form
+            }
+            Write-UiEvent 'welcome update' 'timeout' @{}
+        }
+        $script:updateAngle = ($script:updateAngle + 20) % 360
+        if($updateSpinner.Visible){$updateSpinner.Invalidate()}
+        $updatePath = $env:CLE_SETUP_UPDATE_STATE_PATH
+        if(-not $script:updateFinished -and $updatePath -and [IO.File]::Exists($updatePath)) {
+            try {
+                $updateResult = [IO.File]::ReadAllText($updatePath) | ConvertFrom-Json
+                $script:updateFinished = $true
+                $updateChoice.Enabled = $updateResult.state -eq 'available'
+                $updateChoice.Checked = $updateChoice.Enabled
+                if($updateChoice.Enabled) {
+                    $updateChoice.Text = 'Install latest version {version}'.Replace('{version}','v'+[string]$updateResult.version)
+                } else {
+                    $updateText.Text = switch($updateResult.state) {
+                        'current' {'This installer is up to date'}
+                        'offline' {'Install bundled version'}
+                        'network' {'Network unavailable. Install bundled version'}
+                        default {'Unable to check updates. Install bundled version'}
+                    }
+                }
+                if($script:setupPage -eq 'welcome'){
+                    $updateSpinner.Visible=$false
+                    $updateText.Visible=-not $updateChoice.Enabled
+                    $updateChoice.Visible=$updateChoice.Enabled
+                    $install.Enabled=$true
+                    Update-CodeCodexFormLanguage $form
+                }
+                Write-UiEvent 'welcome update' 'completed' @{state=$updateResult.state;checked=$updateChoice.Checked}
+            } catch {Write-UiEvent 'welcome update' 'read failed' @{reason=$_.Exception.Message}}
+        }
+    }
+
     $script:parentCheckTicks++
     if ($script:parentCheckTicks -ge 20) {
         $script:parentCheckTicks = 0
@@ -1259,6 +1337,7 @@ impl ProgressDialog {
                 "-File",
             ])
             .arg(&script_path)
+            .env("CLE_SETUP_UPDATE_STATE_PATH",state_directory.path().join("update.json"))
             .env("CLE_UI_LANGUAGE",localization::locale().as_str())
             .env("CLE_UI_LANGUAGE_RESOURCES",state_directory.path())
             .env("CLE_PROGRESS_TITLE", localization::text(title))
@@ -1380,6 +1459,10 @@ impl ProgressDialog {
         self.child.is_some()
     }
 
+    pub(crate) fn window_open(&mut self) -> bool {
+        self.child.as_mut().is_some_and(|child| matches!(child.try_wait(), Ok(None)))
+    }
+
     pub(crate) fn startup_failure(&self) -> Option<&str> {
         self.startup_error.as_deref()
     }
@@ -1401,6 +1484,8 @@ impl ProgressDialog {
                     struct Selection {
                         install_root: String,
                         ui_language: workspace_service::ui_language::Locale,
+                        #[serde(default)]
+                        download_latest: bool,
                     }
                     if bytes.len() > 4096 {
                         return Err(
@@ -1446,6 +1531,12 @@ impl ProgressDialog {
             self.check_heartbeat()?;
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    pub(crate) fn download_latest_selected(&self)->bool {
+        self.state_directory.as_ref().and_then(|d|fs::read(d.path().join("selection.json")).ok())
+            .and_then(|bytes|serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|value|value["downloadLatest"]==true)
     }
 
     pub(crate) fn wait_for_uninstall_confirmation(&mut self) -> Result<Option<bool>, String> {

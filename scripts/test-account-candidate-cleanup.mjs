@@ -7,6 +7,7 @@ const out=resolve('artifacts/account-candidate-cleanup');await mkdir(out,{recurs
 globalThis.window=new EventTarget();
 const checks=[];
 for(const active of [false,true]){
+ globalThis.window=new EventTarget();
  const name=active?'active':'idle';globalThis.fixture={active,calls:[],disposed:0,lease:false};
  const file=resolve(out,name+'.mjs');
  await build({entryPoints:[resolve('packages/explorer-ui/src/app/composition.ts')],bundle:true,platform:'node',format:'esm',outfile:file,define:{__CODE_CODEX_VERSION__:'"0.5.80"'},plugins:[{name:'candidate-ports',setup(b){

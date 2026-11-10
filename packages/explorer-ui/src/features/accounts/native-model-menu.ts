@@ -14,7 +14,7 @@ export function nativeFiberChain(anchor:HTMLElement):any[]{
  }
  return mounted.reverse();
 }
-function pickerOf(chain:any[],ids?:string[]):Picker{
+export function pickerOf(chain:any[],ids?:string[]):Picker{
  const matches=chain.map(f=>f.memoizedProps).filter(p=>Array.isArray(p?.models)&&Array.isArray(p.modelOptions)&&typeof p.onSelectModel==='function'&&typeof p.onOpenChange==='function');
  const exact=ids?matches.filter(p=>p.models.length===ids.length&&p.models.every((m:Model,i:number)=>m.model===ids[i])):matches;
  if(!matches.length)throw unavailable('picker-contract');return exact[0]??matches[0];
@@ -80,9 +80,9 @@ export class NativeModelMenuPort {
   this.#catalog=new Map(ids.map(id=>{const known=this.#original.data.find((m:any)=>m.model===id);return[id,{...(known??{}),id,model:id,displayName:known?.displayName??id,description:known?.description??'',hidden:false,isDefault:id===selected,upgrade:null,upgradeInfo:null,availabilityNux:null,availableAccessPrograms:{cyber:[]},modelSpecialty:known?.modelSpecialty??null,supportsPersonality:known?.supportsPersonality??false,multiAgentVersion:known?.multiAgentVersion??null,supportedReasoningEfforts:known?.supportedReasoningEfforts??[],defaultReasoningEffort:known?.defaultReasoningEffort??'medium',inputModalities:known?.inputModalities??['text'],serviceTiers:[],additionalSpeedTiers:[],defaultServiceTier:null} as Model];}));
   this.#writing=true;try{this.#leaseObservers();this.#client.setQueryData(this.#query.queryKey,{...this.#original,data:this.models(),nextCursor:null},{updatedAt:this.#updatedAt});this.#projected=this.#query.state.data;}finally{this.#writing=false;}
  }
- select(model:string,complete=false):void{
+ select(model:string,complete=false,requestedEffort?:string):void{
   const p=this.picker(),info=this.#catalog.get(model);if(!info)throw unavailable('selection-outside-catalog');
-  const effort=info.supportedReasoningEfforts.some((e:any)=>e.reasoningEffort===p.reasoningEffort)?p.reasoningEffort:info.supportedReasoningEfforts.length?info.defaultReasoningEffort:undefined;
+  const effort=requestedEffort??(info.supportedReasoningEfforts.some((e:any)=>e.reasoningEffort===p.reasoningEffort)?p.reasoningEffort:info.supportedReasoningEfforts.length?info.defaultReasoningEffort:undefined);
   p.onSelectModel(model,effort);if(complete){p.onSelectModelOption?.();p.onSelectComplete?.();p.onOpenChange(false);}
  }
  dispose():void{

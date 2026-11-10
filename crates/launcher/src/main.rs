@@ -1,3 +1,4 @@
+mod update_contract;
 mod bootstrap;
 mod activation_lifetime;
 mod accounts;
@@ -92,6 +93,10 @@ enum Commands {
     /// Read-only local official-package change ledger and per-user observation task.
     HostUpdates {
         #[arg(long)] force: bool,
+        /// Validate the recorded update without scanning or promoting a baseline.
+        #[arg(long, conflicts_with_all=["register","unregister","force"])] validate: bool,
+        /// Explicit launch-owned loopback endpoint for read-only host checks.
+        #[arg(long, requires="validate")] port: Option<u16>,
         #[arg(long, conflicts_with="unregister")] register: bool,
         #[arg(long)] unregister: bool,
     },
@@ -287,8 +292,22 @@ enum LaunchFailure {
     DiagnosticSerialization,
 }
 
+fn main() -> ExitCode {
+    if let Some(config) = std::env::var_os(accounts::startup_backend::ENV) {
+        // CLI forwarding needs one event loop, not the desktop worker pool.
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("startup transport runtime");
+        let code = match runtime.block_on(accounts::startup_backend::run(config)) {
+            Ok(code) => code,
+            Err(error) => { eprintln!("{}: {}", error.code, error.message); 24 }
+        };
+        // JSONL stdout has drained; do not wait for a blocking OS stdin read.
+        std::process::exit(i32::from(code));
+    }
+    application_main()
+}
+
 #[tokio::main]
-async fn main() -> ExitCode {
+async fn application_main() -> ExitCode {
     let cli = Cli::parse();
     if let Some(Commands::LoginStartup { enable, disable }) = &cli.command {
         let result = if *enable {
@@ -313,8 +332,8 @@ async fn main() -> ExitCode {
     if let Some(Commands::StartupRecoveryWindow { pid, created_ms, image, close }) = &cli.command {
         return startup_conflict::window_operation(*pid, *created_ms, image, *close);
     }
-    if let Some(Commands::HostUpdates { force, register, unregister }) = &cli.command {
-        let result = if *register || *unregister { if *register {Err(std::io::Error::other("HOST_UPDATE_STARTUP_ONLY: Periodic registration was retired. Use startup observation or --force."))}else{host_updates::scheduler::configure(false)} } else { host_updates::run(*force) };
+    if let Some(Commands::HostUpdates { force, register, unregister, validate, port }) = &cli.command {
+        let result = if *validate {host_updates::validation::run(port.map(cdp_client::CdpEndpoint::loopback), true, None).await} else if *register || *unregister { if *register {Err(std::io::Error::other("HOST_UPDATE_STARTUP_ONLY: Periodic registration was retired. Use startup observation or --force."))}else{host_updates::scheduler::configure(false)} } else { host_updates::run(*force) };
         return match result {Ok(value)=>{println!("{value}");ExitCode::SUCCESS},Err(error)=>{eprintln!("HOST_UPDATE_CHECK: {error}");ExitCode::from(23)}};
     }
     initialize_logging(cli.log_format);

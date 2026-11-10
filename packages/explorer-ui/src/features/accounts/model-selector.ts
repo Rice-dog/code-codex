@@ -4,7 +4,7 @@ import {NativeModelMenuPort} from './native-model-menu';
 /** Only supplies model data and admission to the existing official picker. */
 export class ConnectionModelSelector {
  #catalogSignature='';#anchor:HTMLButtonElement|undefined;#port:NativeModelMenuPort|undefined;#identity='';#epoch=0;
- #ids:string[]=[];#selected='';#syncRequested='';#error='';#abort=new AbortController();#observer:MutationObserver;
+ #ids:string[]=[];#selected='';#default='';#syncRequested='';#error='';#abort=new AbortController();#observer:MutationObserver;
  #frame:number|undefined;#initial:{model:string|null;effort?:string|undefined;mode?:string|undefined}|undefined;#conversation:string|null=null;
  constructor(private readonly adapter:NativeAccountAdapter,private readonly notice:(message:string)=>void){
   this.#observer=new MutationObserver(()=>{if(this.#frame===undefined)this.#frame=requestAnimationFrame(()=>{this.#frame=undefined;this.#reconcile();});});
@@ -18,14 +18,14 @@ export class ConnectionModelSelector {
    const texts=[row,...row.querySelectorAll('*')].map(e=>normalize(e.textContent??''));const matches=port.models().filter(m=>texts.includes(normalize(m.displayName))||texts.includes(normalize(m.model)));
    const rows=[...menu.querySelectorAll('[role=menuitemradio]')];
    const isDefault=rows.length===this.#ids.length+1&&rows[0]===row;
-   const model=matches.length===1?matches[0]!.model:isDefault?this.#selected:undefined;
+   const model=matches.length===1?matches[0]!.model:isDefault?this.#default:undefined;
    if(!model){event.preventDefault();event.stopImmediatePropagation();this.notice('ACCOUNT_NATIVE_MODEL_MENU_UNAVAILABLE: The selected native model could not be matched to the API catalog. stage=row-selection; no model selection was committed.');return;}
    const status=this.adapter.status();if(model===this.#selected&&!status.busy&&!status.preparing&&!isDefault)return;
    event.preventDefault();event.stopImmediatePropagation();
    if(status.busy||status.preparing){this.notice('ACCOUNT_MODEL_BUSY: Finish the current task before changing its model.');return;}
    if(isDefault&&model===this.#selected){try{port.select(model,true);}catch(error){this.notice(String(error));}return;}
    const epoch=this.#epoch,id=status.selected;
-   void this.adapter.selectApiModel(id,model).then(()=>{if(epoch!==this.#epoch||this.adapter.status().selected!==id)return;this.#selected=model;this.#syncRequested=model;port.apply(this.#ids,model);port.select(model,true);}).catch(error=>this.notice(String(error)));
+   void this.adapter.selectApiModel(id,model).then(()=>{if(epoch!==this.#epoch||this.adapter.status().selected!==id)return;this.#default=model;this.#selected=model;this.#syncRequested=model;port.apply(this.#ids,model);port.select(model,true);}).catch(error=>this.notice(String(error)));
   },options);
  }
  #isTrigger(event:Event):boolean{return !!this.#identity&&!!this.#anchor&&event.target instanceof Node&&this.#anchor.contains(event.target);}
@@ -35,29 +35,29 @@ export class ConnectionModelSelector {
   if(this.#anchor!==anchor||identity!==this.#identity){
    this.#clear(status.conversationId===this.#conversation);this.#anchor=anchor;this.#identity=identity;this.#conversation=status.conversationId;
    if(!anchor||!connection?.api)return;
-   this.#selected=connection.api.model;this.#ids=[this.#selected];this.#catalogSignature=JSON.stringify(connection.api.models??null);
-   try{const port=this.#port=new NativeModelMenuPort(anchor,this.notice),p=port.picker();this.#initial={model:p.model,effort:p.reasoningEffort,mode:p.selectionMode};port.apply(this.#ids,this.#selected);this.#observer.observe(anchor,{subtree:true,childList:true,characterData:true});}
+   this.#default=connection.api.model;this.#selected=this.adapter.apiChoice(connection.id)?.model??this.#default;this.#ids=connection.api.models??[this.#default];this.#catalogSignature=JSON.stringify(connection.api.models??null);
+   try{const port=this.#port=new NativeModelMenuPort(anchor,this.notice),p=port.picker();this.#initial={model:p.model,effort:p.reasoningEffort,mode:p.selectionMode};port.apply(this.#ids,this.#default);this.#observer.observe(anchor,{subtree:true,childList:true,characterData:true});}
    catch(error){this.#error=String(error);this.notice(this.#error);return;}
    this.#loadCatalog(connection.id);
   }
   if(connection?.api&&this.#port&&JSON.stringify(connection.api.models??null)!==this.#catalogSignature){
    this.#catalogSignature=JSON.stringify(connection.api.models??null);this.#epoch++;
-   if(connection.api.models){this.#ids=[...connection.api.models];this.#selected=connection.api.model;this.#syncRequested='';this.#port.apply(this.#ids,this.#selected);}else this.#loadCatalog(connection.id);
+   if(connection.api.models){this.#ids=[...connection.api.models];this.#default=connection.api.model;this.#selected=this.adapter.apiChoice(connection.id)?.model??this.#default;this.#syncRequested='';this.#port.apply(this.#ids,this.#default);}else this.#loadCatalog(connection.id);
   }
-  if(connection?.api&&this.#port&&connection.api.model!==this.#selected){this.#selected=connection.api.model;this.#syncRequested='';this.#port.apply(this.#ids.includes(this.#selected)?this.#ids:[this.#selected],this.#selected);}
+  if(connection?.api&&this.#port&&((this.adapter.apiChoice(connection.id)?.model??connection.api.model)!==this.#selected||connection.api.model!==this.#default)){this.#default=connection.api.model;this.#selected=this.adapter.apiChoice(connection.id)?.model??this.#default;this.#syncRequested='';this.#port.apply(this.#ids.includes(this.#selected)?this.#ids:[this.#default,this.#selected],this.#default);}
   this.#sync();
  }
  #loadCatalog(id:string):void{
-  const epoch=this.#epoch;void this.adapter.apiModels(id).then(result=>{if(epoch!==this.#epoch||!this.#port)return;this.#ids=result.models;this.#selected=result.selected;this.#port.apply(this.#ids,this.#selected);if(result.warning)this.notice(result.warning);this.#sync();}).catch(error=>{if(epoch===this.#epoch)this.notice(String(error));});
+  const epoch=this.#epoch;void this.adapter.apiModels(id).then(result=>{if(epoch!==this.#epoch||!this.#port)return;this.#ids=result.models;this.#default=result.selected;this.#selected=this.adapter.apiChoice(id)?.model??this.#default;this.#port.apply(this.#ids,this.#default);if(result.warning)this.notice(result.warning);this.#sync();}).catch(error=>{if(epoch===this.#epoch)this.notice(String(error));});
  }
  #sync():void{
   const status=this.adapter.status();if(!this.#port||status.busy||status.preparing||this.#syncRequested===this.#selected)return;
-  try{this.#syncRequested=this.#selected;if(this.#port.picker().model!==this.#selected)this.#port.select(this.#selected);}catch(error){this.notice(String(error));}
+  try{this.#syncRequested=this.#selected;if(this.#port.picker().model!==this.#selected)this.#port.select(this.#selected,false,this.adapter.apiChoice(status.selected)?.effort);}catch(error){this.notice(String(error));}
  }
  #reconcile():void{
   const port=this.#port,status=this.adapter.status();if(!port||status.busy||status.preparing||!this.#syncRequested)return;
   try{const model=port.picker().model;if(!model||model===this.#selected||!this.#ids.includes(model))return;
-   const epoch=this.#epoch;void this.adapter.selectApiModel(status.selected,model).then(()=>{if(epoch!==this.#epoch)return;this.#selected=model;this.#syncRequested=model;port.apply(this.#ids,model);},error=>{if(epoch!==this.#epoch)return;port.select(this.#selected);this.notice(String(error));});
+   const epoch=this.#epoch;void this.adapter.selectApiModel(status.selected,model).then(()=>{if(epoch!==this.#epoch)return;this.#default=model;this.#selected=model;this.#syncRequested=model;port.apply(this.#ids,model);},error=>{if(epoch!==this.#epoch)return;port.select(this.#selected);this.notice(String(error));});
   }catch(error){this.notice(String(error));}
  }
  #clear(restore:boolean):void{

@@ -522,7 +522,7 @@ const applicationMenuActions = {
     return requestApplicationMenu<import('./contracts/login-startup').LoginStartupStatus>('explorer.login.startup.set', { enabled });
   },
   retryHostUpdates: () => requestApplicationMenu<{scheduled:boolean}>('explorer.host.updates.retry'),
-  hostUpdateStatus: () => requestApplicationMenu<{latest?:{type?:string;counts?:{pluginDependency?:number;needsReview?:number}};scan?:{status?:string}}>('explorer.host.updates.status'),
+  hostUpdateStatus: () => requestApplicationMenu<{latest?:{type?:string;counts?:{pluginDependency?:number;needsReview?:number}};scan?:{status?:string};analysis?:{status?:string;message?:string;manualRetryRequired?:boolean}}>('explorer.host.updates.status'),
   openHostUpdates: () => requestApplicationMenu<{opened:boolean}>('explorer.host.updates.open'),
   restartCodeCodex: () => requestApplicationMenu<{ scheduled: boolean }>('explorer.installation.restart'),
   openUninstaller: () => requestApplicationMenu<{ opened: boolean }>('explorer.installation.uninstall'),

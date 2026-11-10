@@ -265,6 +265,13 @@ pub(super) async fn initialize_electron_main_process(
     launched_pid: u32,
     launched_after: SystemTime,
 ) -> Result<bool, AppError> {
+    initialize_native_main_process(endpoint,renderer,launched_pid,launched_after,None,true).await
+}
+
+pub(crate) async fn initialize_native_main_process(
+    endpoint:CdpEndpoint,renderer:CdpEndpoint,launched_pid:u32,launched_after:SystemTime,
+    startup:Option<&Value>,surface:bool,
+) -> Result<bool,AppError> {
     let result: Result<bool, AppError> = async {
         if !wait_for_win10_inspector(
             endpoint,
@@ -277,7 +284,7 @@ pub(super) async fn initialize_electron_main_process(
         {
             return Ok(false);
         }
-        verify_owned_listener(endpoint, launched_pid, launched_after).await?;
+        verify_main_listener(endpoint, launched_pid, launched_after,startup.is_some()).await?;
 
         let target =
             wait_for_main_inspector_target(endpoint, MAIN_INSPECTOR_STARTUP_TIMEOUT).await?;
@@ -294,7 +301,7 @@ pub(super) async fn initialize_electron_main_process(
 
         // Pin the connected inspector to the launched official process immediately
         // before evaluating the fixed, non-user-controlled initializer.
-        if let Err(error) = verify_owned_listener(endpoint, launched_pid, launched_after).await {
+        if let Err(error) = verify_main_listener(endpoint, launched_pid, launched_after,startup.is_some()).await {
             let _ = socket.close(None).await;
             return Err(error);
         }
@@ -310,13 +317,16 @@ pub(super) async fn initialize_electron_main_process(
             .await?;
         let call_frame_id = session.wait_for_paused_call_frame().await?;
 
+        let expression=if let Some(params)=startup {
+            format!("(()=>{{const startup=({});if(startup.installed!==true)throw Error('ACCOUNT_STARTUP_INSTALL');return {};}})()",crate::accounts::startup::initializer(params),if surface{ELECTRON_MAIN_TRANSPARENCY_PATCH}else{"({surfaceHookEnabled:true,constructorHookCount:0})"})
+        }else{ELECTRON_MAIN_TRANSPARENCY_PATCH.to_owned()};
         let evaluation = session
             .command(
                 4,
                 "Debugger.evaluateOnCallFrame",
                 json!({
                     "callFrameId": call_frame_id,
-                    "expression": ELECTRON_MAIN_TRANSPARENCY_PATCH,
+                    "expression": expression,
                     "returnByValue": true,
                     "silent": false
                 }),
@@ -469,6 +479,12 @@ pub(super) async fn verify_owned_listener(
             ProcessGuardError::OwnershipUnknown
                 .context("verify_owned_listener ownership worker", error)
         })??;
+    Ok(())
+}
+
+async fn verify_main_listener(endpoint:CdpEndpoint,pid:u32,after:SystemTime,fast:bool)->Result<(),AppError>{
+    if !fast{return verify_owned_listener(endpoint,pid,after).await;}
+    tokio::task::spawn_blocking(move||crate::process_guard::verify_listener_owner_fast(endpoint.port(),pid,after)).await.map_err(|_|ProcessGuardError::OwnershipUnknown)??;
     Ok(())
 }
 

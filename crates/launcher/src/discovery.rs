@@ -1200,7 +1200,7 @@ fn deny_staged_executable_mutation(executable_acl_handle: &mut File) -> Result<(
 }
 
 #[cfg(windows)]
-fn set_protected_dacl(handle: &mut File, sddl: &str) -> Result<(), DiscoveryError> {
+pub(crate) fn set_protected_dacl(handle: &mut File, sddl: &str) -> Result<(), DiscoveryError> {
     let descriptor: LocalBox<SecurityDescriptor> = sddl.parse().map_err(|error| {
         DiscoveryError::AppServerNotFound.context("set_protected_dacl", format!("cause={error}"))
     })?;

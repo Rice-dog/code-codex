@@ -1,4 +1,5 @@
 import {projectAssets,assetProjection,emptyAssets,resetDefinitelyNotSent,type AccountAssets} from './assets-model';
+import {accountErrorCode} from './stream-recovery';
 export interface QuotaRemaining {fiveHour:number|null;weekly:number|null;}
 /** Unix seconds supplied by the server, independently cached for each window. */
 export interface QuotaResetTimes {fiveHour:number|null;weekly:number|null;}
@@ -111,7 +112,13 @@ export class AccountUsageStore {
     if(this.#disposed)return;
     if((this.#observations.get(id)??0)!==observation){this.diagnostic(id,'superseded',{stage:'quota-read',operationId,reason:'newer-observation'});return;}
     this.#accept(id,raw,this.now(),true);this.diagnostic(id,'completed',{stage:'quota-read',operationId,complete:this.#values.get(id)?.phase==='ready'});
-   },error=>{if(!this.#disposed&&(this.#observations.get(id)??0)===observation){this.#values.set(id,{...(this.#values.get(id)?.raw?{raw:this.#values.get(id)!.raw}:{}),lastSuccessAt:this.#values.get(id)?.lastSuccessAt,phase:'unavailable',checkedAt:this.now(),nextRead:this.now()+300000,error:error instanceof Error?error.message:String(error)});this.diagnostic(id,'failed',{stage:'quota-read',retryMs:300000,cached:!!this.#values.get(id)?.raw,error:String(error)});}}).finally(()=>{this.#running--;if(!this.#disposed){this.revision++;this.changed();this.#pump();}});
+   },error=>{
+    if(this.#disposed||(this.#observations.get(id)??0)!==observation)return;
+    const code=accountErrorCode(error),retryMs=300000;
+    const previous=this.#values.get(id);
+    this.#values.set(id,{...(previous?.raw?{raw:previous.raw}:{}),lastSuccessAt:previous?.lastSuccessAt,phase:'unavailable',checkedAt:this.now(),nextRead:this.now()+retryMs,error:code+': '+String(error)});
+    this.diagnostic(id,'failed',{stage:'quota-read',retryMs,cached:!!previous?.raw,errorCode:code,error:String(error)});
+   }).finally(()=>{this.#running--;if(!this.#disposed){this.revision++;this.changed();this.#pump();}});
   }
  }
  #accept(id:string,raw:unknown,observedAt=this.now(),officialRead=false):void{

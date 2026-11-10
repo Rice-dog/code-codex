@@ -11,7 +11,7 @@ interface ApplicationMenuActions extends LoginStartupActions {
   checkForUpdates(): void;
   openRuntimeInformation(): void;
   openInstallationFolder(): void;
-  hostUpdateStatus?(): Promise<{latest?:{type?:string;counts?:{pluginDependency?:number;needsReview?:number}};scan?:{status?:string}}> ;
+  hostUpdateStatus?(): Promise<{latest?:{type?:string;counts?:{pluginDependency?:number;needsReview?:number}};scan?:{status?:string};analysis?:{status?:string;message?:string;manualRetryRequired?:boolean};validation?:{status?:string;counts?:{issues?:number;manualGroups?:number};checkCounts?:{passed?:number;issues?:number;manual?:number}}}> ;
   retryHostUpdates?(): Promise<{scheduled:boolean}>;
   openHostUpdates?(): Promise<{opened:boolean}>;
   restartCodeCodex(): Promise<{ scheduled: boolean }>;
@@ -303,7 +303,9 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     popup.style.top = `${Math.max(8, Math.min(Math.round(rect.bottom), window.innerHeight - popup.offsetHeight - 8))}px`;
     positionSub();
   };
+  let hostStatusEpoch=0;
   const close = (returnFocus = false) => {
+    hostStatusEpoch++;
     closeSub();
     if (popup.hidden) return;
     popup.hidden = true;
@@ -312,11 +314,26 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     if (returnFocus && trigger.isConnected) trigger.focus();
   };
   const open = (focusFirst = false) => {
+    const statusEpoch=++hostStatusEpoch;
     dismissNativeMenu();
     void loginStartup.refresh();
     updateText();
     popup.hidden = false;
-    void actions.hostUpdateStatus?.().then(value=>{if(signal.aborted||popup.hidden)return;const counts=value.latest?.counts;const priority=(counts?.pluginDependency??0)+(counts?.needsReview??0);hostUpdatesItem.dataset.reportStatus=value.scan?.status??'pending';if(value.latest?.type==='update'&&priority>0)hostUpdatesItem.textContent=t('menu.hostUpdates')+` (${priority})`;hostUpdatesItem.title=value.scan?.status==='partial'||value.scan?.status==='unavailable'||value.scan?.status==='failed'||value.scan?.status==='retry_required'?'HOST_UPDATE_INCOMPLETE: Inventory is incomplete; no no-impact conclusion was made.':'';}).catch(()=>{if(!signal.aborted)hostUpdatesItem.title='HOST_UPDATE_REPORT: Update status is unavailable.';});
+    void actions.hostUpdateStatus?.().then(value=>{
+      if(signal.aborted||popup.hidden||statusEpoch!==hostStatusEpoch)return;
+      const counts=value.latest?.counts,priority=(counts?.pluginDependency??0)+(counts?.needsReview??0),validation=value.validation;
+      hostUpdatesItem.dataset.reportStatus=value.scan?.status??'pending';
+      if((value.latest?.type==='update'||value.latest?.type==='analysis_refresh')&&priority>0)hostUpdatesItem.textContent=t('menu.hostUpdates')+` (${priority})`;
+      hostUpdatesItem.dataset.analysisStatus=value.analysis?.status??'unknown';
+      hostUpdatesItem.dataset.validationStatus=validation?.status??'pending';
+      if(validation&&['passed','manual_required','issues_found'].includes(validation.status??'')){
+        const issues=Math.max(validation.counts?.issues??0,validation.checkCounts?.issues??0),manual=validation.counts?.manualGroups??0;
+        hostUpdatesItem.textContent=issues||manual?t('menu.hostValidationSummary',{issues,manual}):t('menu.hostValidationPassed');
+        hostUpdatesItem.title=`Automatic checks: ${validation.checkCounts?.passed??0} passed; ${validation.checkCounts?.issues??0} issues; ${validation.checkCounts?.manual??0} unavailable. ${manual} grouped acceptance actions remain. See VALIDATION.md; partial checks do not certify full behavior.`;
+      }else hostUpdatesItem.title=validation?.status==='refresh_required'?'HOST_UPDATE_VALIDATION_STALE: Recheck official Codex updates to validate with the current engine/rules.':'';
+      if(value.analysis?.manualRetryRequired)hostUpdatesItem.title=value.analysis.message??'HOST_UPDATE_RULES_CHANGED: Recheck official Codex updates.';
+      else if(['partial','unavailable','failed','retry_required'].includes(value.scan?.status??''))hostUpdatesItem.title='HOST_UPDATE_INCOMPLETE: Inventory is incomplete; no no-impact conclusion was made.';
+    }).catch(()=>{if(!signal.aborted&&!popup.hidden&&statusEpoch===hostStatusEpoch)hostUpdatesItem.title='HOST_UPDATE_REPORT: Update status is unavailable.';});
     trigger.setAttribute("aria-expanded", "true");
     trigger.dataset.state = 'open';
     position();

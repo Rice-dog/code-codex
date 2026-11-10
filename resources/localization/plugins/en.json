@@ -92,6 +92,7 @@
   "accounts.apiKeepKey": "Leave the key empty to keep the stored key.",
   "accounts.apiFetchModels": "Fetch models",
   "accounts.apiFetchingModels": "Fetching models…",
+  "accounts.apiDefaultHint": "Blue outline = default model",
   "accounts.apiRemoveModel": "Remove model",
   "accounts.apiAddModel": "Add model ID, then press Enter"
 }

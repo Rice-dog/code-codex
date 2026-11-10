@@ -327,11 +327,13 @@ fn partial_scan_keeps_last_complete_baseline_and_report_is_durable() {
 fn dependency_registry_has_valid_source_and_test_paths_and_every_rule_is_reachable() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let registry = rules();
-    assert!(registry.len() >= 8);
+    assert!(registry.len() >= 14);
+    assert!(dependency_revision() >= 2);
     let mut ids = BTreeSet::new();
     for r in registry {
         assert!(ids.insert(r.id));
         assert!(!r.tokens.is_empty() || !r.paths.is_empty());
+        assert!(!r.checks.is_empty(), "Every dependency needs concrete acceptance scenarios");
         for file in r.sources.iter().chain(&r.tests) {
             assert!(root.join(file).is_file(), "{file}")
         }
@@ -361,6 +363,77 @@ fn installation(root: &Path) -> crate::discovery::CodexInstallation {
         app_server: None,
     }
 }
+#[test]
+fn every_registered_dependency_signal_reaches_the_scanner_without_marking_unknown_code_safe() {
+    let d = tempfile::tempdir().unwrap();
+    let registry = rules();
+    let mut probes = Vec::new();
+    for rule in &registry {
+        for (index, token) in rule.tokens.iter().enumerate() {
+            let name = format!("{}-{index}.js", rule.id);
+            fs::write(d.path().join(&name), token).unwrap();
+            probes.push((name, rule.id.clone()));
+        }
+        for path in &rule.paths {
+            let parent = d.path().join(path).parent().unwrap().to_owned();
+            fs::create_dir_all(parent).unwrap();
+            // app.asar needs a valid container even for a path-only signal.
+            if path == "resources/app.asar" {
+                asar(&d.path().join(path), json!({}), b"");
+            } else {
+                fs::write(d.path().join(path), b"unrelated fixture bytes").unwrap();
+            }
+            probes.push((path.clone(), rule.id.clone()));
+        }
+    }
+    fs::write(d.path().join("unregistered.js"), b"unregistered behavior").unwrap();
+    fs::write(d.path().join("unregistered.png"), b"resource fixture").unwrap();
+    let scanned = scan::inventory(&installation(d.path()), None, true).unwrap();
+    assert!(scanned.complete, "{:?}", scanned.issues);
+    for (path, id) in probes {
+        let (_, entry) = scanned.entries.iter().find(|(name, _)| name.eq_ignore_ascii_case(&path)).unwrap();
+        assert!(entry.dependencies.contains(&id), "{path}: {id}");
+    }
+    let report = report(None, &scanned);
+    let changes = report["changes"].as_array().unwrap();
+    for (path, category) in [("unregistered.js", "needs_review"), ("unregistered.png", "no_known_plugin_dependency")] {
+        let change = changes.iter().find(|c| c["path"] == path).unwrap();
+        assert_eq!(change["category"], category);
+        assert_eq!(change["functionalImpact"], "not_tested");
+    }
+}
+
+#[test]
+fn shared_route_report_includes_implementation_and_acceptance_without_certifying_runtime() {
+    let d = tempfile::tempdir().unwrap();
+    fs::create_dir(d.path().join("resources")).unwrap();
+    asar(&d.path().join("resources/app.asar"), json!({}), b"");
+    fs::write(d.path().join("native.js"), b"openai_base_url getAuthStatus encrypted_content").unwrap();
+    let scanned = scan::inventory(&installation(d.path()), None, true).unwrap();
+    assert!(scanned.complete, "{:?}", scanned.issues);
+    let report = report(None, &scanned);
+    assert_eq!(report["registryHash"], registry_hash());
+    assert_eq!(report["dependencyRevision"], dependency_revision());
+    let dependencies = report["dependencies"].as_array().unwrap();
+    let route = dependencies.iter().find(|r| r["id"] == "startup-route").unwrap();
+    for source in ["relay.rs", "draft.rs", "native_route.rs"] {
+        let path = json!(format!("crates/launcher/src/accounts/{source}"));
+        assert!(route["sourceFiles"].as_array().unwrap().contains(&path));
+        assert!(route["suggestedTests"].as_array().unwrap().contains(&path));
+    }
+    let checks = route["requiredChecks"].as_array().unwrap();
+    for contract in ["one loopback listener", "closing or cancelling one route", "before the native thread binding", "without additional identity/quota reads"] {
+        assert!(checks.iter().any(|c| c.as_str().unwrap().contains(contract)), "{contract}");
+    }
+    assert!(dependencies.iter().any(|r| r["id"] == "accounts"));
+    let context = dependencies.iter().find(|r| r["id"] == "context").unwrap();
+    assert!(context["suggestedTests"].as_array().unwrap().contains(&json!("crates/launcher/src/accounts/official_context.rs")));
+    for dependency in dependencies {
+        assert_eq!(dependency["functionalImpact"], "not_tested");
+    }
+    assert_eq!(report["validation"]["status"], "not_tested");
+}
+
 #[test]
 fn complete_inventory_hashes_packed_unpacked_and_unknown_resources_without_source_logging() {
     let d = tempfile::tempdir().unwrap();
@@ -578,4 +651,58 @@ fn supervisor_monitor_guard_cancels_only_its_child_on_every_exit_path() {
     drop(guard);
     assert!(child.is_cancelled());
     assert!(!parent.is_cancelled());
+}
+
+#[test]
+fn current_rules_do_not_make_a_legacy_or_partial_report_a_verified_analysis() {
+    let current = registry_hash();
+    assert_eq!(analysis_status(&Value::Null)["status"], "pending");
+    let legacy = json!({"version":"old","complete":true});
+    assert_eq!(analysis_status(&legacy)["status"], "refresh_required");
+    assert_eq!(analysis_status(&legacy)["manualRetryRequired"], true);
+    let partial = json!({"registryHash":current,"complete":false});
+    assert_eq!(analysis_status(&partial)["status"], "incomplete");
+    let fresh = json!({"registryHash":current,"complete":true});
+    assert_eq!(analysis_status(&fresh)["status"], "current");
+    assert!(analysis_status(&fresh)["message"].as_str().unwrap().contains("separate validation"));
+}
+#[test]
+fn same_version_stale_rules_require_explicit_refresh_without_scanning_or_rewriting() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut old = snapshot();
+    old.registry_hash = "older-rules".into();
+    commit(dir.path(), &old, None).unwrap();
+    let before = fs::read(dir.path().join("baseline.json")).unwrap();
+    let result = version_gate::check(dir.path(), Some(&old), "old", false, None, || {
+        panic!("a rules update must not cause automatic startup scanning")
+    }).unwrap();
+    assert_eq!(result["scanned"], false);
+    assert_eq!(analysis_status(&read_json(&dir.path().join("latest.json")).unwrap())["status"], "refresh_required");
+    assert_eq!(fs::read(dir.path().join("baseline.json")).unwrap(), before);
+    assert!(!dir.path().join("attempts.json").exists());
+}
+#[test]
+fn explicit_reclassification_records_new_mappings_and_keeps_original_report_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut old = snapshot();
+    old.entries.insert("chunk.js".into(), entry("same-bytes", "code_or_unknown", &[]));
+    commit(dir.path(), &old, None).unwrap();
+    let first = read_json(&dir.path().join("latest.json")).unwrap();
+    let path = dir.path().join("reports").join(first["id"].as_str().unwrap()).join("report.json");
+    let original = fs::read(&path).unwrap();
+    let mut next = old.clone();
+    next.registry_hash = registry_hash();
+    next.entries.get_mut("chunk.js").unwrap().dependencies.push("composer-quota".into());
+    assert_eq!(gate(dir.path(), Some(&old), "old", true, next.clone()).unwrap()["scanned"], true);
+    let latest = read_json(&dir.path().join("latest.json")).unwrap();
+    let report = read_json(&dir.path().join("reports").join(latest["id"].as_str().unwrap()).join("report.json")).unwrap();
+    assert_eq!(report["type"], "analysis_refresh");
+    assert_eq!(report["changes"][0]["change"], "dependency_mapping_changed");
+    assert_eq!(report["dependencies"][0]["id"], "composer-quota");
+    assert!(report["dependencies"][0]["requiredChecks"].as_array().unwrap().len() >= 3);
+    assert_eq!(report["dependencies"][0]["functionalImpact"], "not_tested");
+    assert_eq!(report["dependencyRevision"], dependency_revision());
+    assert_eq!(analysis_status(&latest)["status"], "current");
+    assert_eq!(fs::read(&path).unwrap(), original);
+    assert_eq!(gate(dir.path(), Some(&next), "old", false, next.clone()).unwrap()["scanned"], false);
 }

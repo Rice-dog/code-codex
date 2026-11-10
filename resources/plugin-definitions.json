@@ -136,7 +136,7 @@
       "name": "Custom Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.11",
+      "version": "1.0.13",
       "releaseTag": "plugin-assets-2026-11-01",
       "capabilities": [
         "background",
@@ -331,7 +331,7 @@
       "name": "Multi-account Tasks",
       "category": "developer-tools",
       "api": 1,
-      "version": "1.0.96",
+      "version": "1.0.106",
       "releaseTag": "plugin-assets-2026-11-02",
       "capabilities": [
         "developer-tools"

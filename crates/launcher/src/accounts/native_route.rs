@@ -33,6 +33,9 @@ fn save_route_state(root:&Path,epoch:&str,thread:&str,mode:Option<&str>)->Result
 }
 
 async fn native(endpoint: CdpEndpoint, params: Value) -> Result<Value> {
+    // Startup-owned actors already use the process broker. Keep the existing
+    // prepare/commit/rollback/disable flow, adapting only its transport step.
+    if let Some(result)=super::startup::transition(endpoint,&params).await?{return Ok(result);}
     let mut params = params;
     let mut operation=crate::runtime_log::Operation::start("accounts","account.native-transition",json!({"mode":params["mode"],"conversationId":params["threadId"],"target":if params["baseUrl"].is_string(){"relay"}else{"default"},"stage":"native-route-open","taskSent":false}));
     params["binding"] = json!(format!(
@@ -80,6 +83,7 @@ async fn native(endpoint: CdpEndpoint, params: Value) -> Result<Value> {
         ));
     }
     operation.finish("confirmed",json!({"stage":"native-route-result","ready":value["ready"],"routed":value["routed"],"inProgress":value["inProgress"],"diagnostics":value["diagnostics"],"taskSent":false}));
+    super::startup::observe_transition(endpoint,&params,&value).await?;
     Ok(value)
 }
 pub(super) async fn require_idle(endpoint: CdpEndpoint, thread: &str) -> Result<()> {
@@ -107,6 +111,7 @@ pub(super) async fn restore<'a>(
         save_route_state(&root,epoch.as_deref().unwrap(),&route.thread(),Some("default"))?;
         service.relays.replace(&owner.id, &route.thread(), None);
     }
+    super::startup::restore(endpoint,owner).await?;
     Ok(_operation)
 }
 pub(super) async fn request(
@@ -292,7 +297,7 @@ async fn prepare(
         Some(if let Some(prior) = &prior {
             prior.clone()
         } else {
-            relay::Route::start(owner.id.clone(), thread.clone(), credential.clone()).await?
+            service.relays.start_shared(owner.id.clone(), thread.clone(), credential.clone()).await?
         })
     } else {
         None

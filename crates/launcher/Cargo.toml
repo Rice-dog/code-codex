@@ -51,7 +51,7 @@ same-file = "1.0.6"
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
 tokio-tungstenite.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

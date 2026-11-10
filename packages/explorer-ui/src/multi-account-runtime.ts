@@ -13,8 +13,8 @@ import type {PrimarySwitch} from './features/accounts/contracts';
 // Document ownership is independent of the market/file-tree panel's lifetime.
 const key=Symbol.for('code-codex:multi-account-runtime:v1');
 interface Session {selector?:ComposerAccountSelector;selectorRevision?:string;adapter?:NativeAccountAdapter;enabled:boolean;pending?:Promise<void>;error?:string|undefined;viewRevision?:string;generation?:number;}
-const REVISION='account-native-routing-v23';
-const SELECTOR_REVISION='account-composer-quota-v1';
+const REVISION='account-native-routing-v25';
+const SELECTOR_REVISION='account-composer-home-identity-v5';
 const session=():Session=>((window as unknown as Record<symbol,Session>)[key]??={enabled:localStorage.getItem(ACCOUNT_ENABLED_KEY)==='true'});
 const emit=()=>window.dispatchEvent(new Event(ACCOUNT_UI_CHANGED));
 const element=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;};
@@ -213,7 +213,15 @@ export class MultiAccountPlugin {
    }
    if(action==='reconcile'){if(adapter)feedback=await adapter.reconcile(id);else{await requestAccounts({action:'reconcile',owner:info.owner.id,connectionId:id});feedback='idle';}}
    else{const result=await requestAccounts<{signedIn?:boolean}>({action,owner:info.owner.id,connectionId:id});if(action==='verify')feedback=result.signedIn?'signedIn':'signedOut';}
-   check();if(['verify','login','remove'].includes(action))adapter?.usage.invalidate(id);await this.#refresh(true);check();return feedback;
+   check();
+   if(['verify','login','remove'].includes(action))adapter?.usage.invalidate(id);
+   if(action==='verify') {
+    // Login feedback is independent of remote quota availability.
+    adapter?.usage.refresh([id]);
+    void this.#refresh(true).catch(this.#error);
+    return feedback;
+   }
+   await this.#refresh(true);check();return feedback;
   }
   catch(error){if(String(error).includes('ACCOUNT_AUTH_REQUIRED'))await this.#refresh().catch(()=>{});throw error;}
   finally{if(action==='primary.start'&&primaryRequested)void this.#readPrimary();this.#primaryStarting=false;this.#busy=false;this.render();}

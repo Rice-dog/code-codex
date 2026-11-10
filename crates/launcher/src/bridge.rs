@@ -48,13 +48,10 @@ use workspace_service::{
     WatchVisibilityHandle, Workspace, WorkspaceError, WorkspaceWatcher,
 };
 
-const GITHUB_LATEST_RELEASE_ENDPOINT: &str =
-    "https://api.github.com/repos/Rice-dog/code-codex/releases/latest";
+use crate::update_contract::{GITHUB_LATEST_RELEASE_ENDPOINT, MAX_UPDATE_ASSET_BYTES, MIN_UPDATE_ASSET_BYTES};
 const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
 const GITHUB_API_VERSION: &str = "2022-11-28";
 const MAX_UPDATE_RESPONSE_BYTES: usize = 256 * 1024;
-const MAX_UPDATE_ASSET_BYTES: u64 = 128 * 1024 * 1024;
-const MIN_UPDATE_ASSET_BYTES: u64 = 256 * 1024;
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);

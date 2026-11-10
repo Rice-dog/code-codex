@@ -4,6 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {build}=require(path.resolve('packages/explorer-ui/node_modules/esbuild/lib/main.js'));
 const root=process.cwd(),checks=[];
+const currentViewRevision=fs.readFileSync(path.join(root,'packages/explorer-ui/src/multi-account-runtime.ts'),'utf8').match(/const REVISION='([^']+)'/)[1];
 const tick=()=>new Promise(r=>setImmediate(r));
 const catalog=[{id:'multi-account',api:1,version:'fixture',category:'developer-tools',sha256:'fixture'}];
 async function bundle(contents,plugins=[]){return (await build({stdin:{contents,resolveDir:path.join(root,'packages/explorer-ui/src'),loader:'ts'},bundle:true,format:'cjs',platform:'node',write:false,define:{__CODE_CODEX_PLUGIN_CATALOG__:JSON.stringify(catalog)},plugins})).outputFiles[0].text;}
@@ -70,7 +71,7 @@ async function record(name,fn){const evidence=await fn();checks.push({name,confi
   const r=lifecycle({enabled:true});transport(r,async()=>structuredClone(info));r.plugin.start();await tick();assert(r.state.adapter);const starts=r.win.starts;
   r.state.adapter=undefined;r.state.selector=undefined;r.state.pending=new Promise(()=>{});transport(r,async()=>structuredClone(info));
   r.win.dispatchEvent(new Event('code-codex:accounts-connected'));await tick();await tick();
-  assert(r.state.adapter);assert.equal(r.state.viewRevision,'account-native-routing-v23');assert.equal(r.win.starts,starts+1);assert.equal(r.state.pending,undefined);r.plugin.stop();
+  assert(r.state.adapter);assert.equal(r.state.viewRevision,currentViewRevision);assert.equal(r.win.starts,starts+1);assert.equal(r.state.pending,undefined);r.plugin.stop();
   return {timerTicks:0,adapterRebound:true,obsoletePendingDiscarded:true};
  });
  await record('A retired cross-version panel cannot eagerly acquire the new native endpoint',async()=>{

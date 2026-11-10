@@ -1,29 +1,25 @@
-# Code-Codex v0.6.0
-
-本次软件更新覆盖上一公开软件版本 **v0.5.89 → v0.6.0** 的保留改动；中间的本地候选版本不单独计为公开更新。[完整源码比较](https://github.com/Rice-dog/code-codex/compare/v0.5.89...v0.6.0)。
+# Code-Codex v0.6.13
 
 ## 简体中文
 
-- **新版官方客户端兼容**：完善原生工作区、活动页面、输入框和模型按钮识别，适配新版文件树挂载结构；保留旧接口适配，按实际能力与响应合同判断兼容性。
-- **启动与连接恢复**：补齐启动冲突、Bridge派发、响应截止和官方后台传输诊断，保留具体阶段与证据，继续保护活动任务和已有登录状态。
-- **官方更新变更台账**：启动时按官方版本转换触发分析并记录已处理转换，避免重复扫描；按插件依赖标注可能受影响的部分，保存报告与基线。静态影响信号不替代功能实测，也不保证自动修复未来破坏性接口变化。
-- **顶部菜单**：新增通过Code-Codex启动链重启应用的入口，将开机自启、重启、卸载集中排列，改善自启状态读取时的显示稳定性，普通界面继续跟随中英文设置。
-- **透明度与主题**：完善新版官方页面、上下渐变遮罩和设置底板适配，恢复时只处理本插件拥有的状态，复用现有主题与原生能力。
-- **插件资源下载**：补齐目录锁定的两项独立运行资源后再发布软件，沿用原tag、文件名、大小和SHA256校验，保留其他插件的独立版本与缓存身份。
-- **安装与交接**：完善安装、卸载和运行期交接的阶段信息，保留设置、素材及校验匹配的插件缓存；活动任务继续受保护，热接管可能等到任务空闲后完成。
+本次更新覆盖上一公开软件版本 **v0.6.0 → v0.6.13** 的累计改动；中间的本地版本不算单独公开更新。[完整源码比较](https://github.com/Rice-dog/code-codex/compare/v0.6.0...v0.6.13)。
 
-本轮按要求**未运行CLI自动化测试或CI**。发布操作包括编译打包、公开资源与匿名下载完整性核对、本机安装及运行界面核对；此前测试记录不作为本轮重新测试结果。真实模型调用、登录授权、额度兑换及所有官方客户端/系统组合未在本轮重新验收。
+- **安装器欢迎页检查更新**：一行显示检测中、发现新版、已是最新版或检测失败。有新版时可勾选下载，取消则安装自带版本；下载完成后核对来源、大小与 SHA-256，再进入新版安装。成功后尝试更新原来保存的 setup 文件，保留以后再次检查更新的入口。
+- **官方更新兼容验收**：在原变更台账上增加真实安装包/宿主只读检查、受控正负例和逐功能结果。区分无影响、检查通过、发现问题和待手测，合并重复手测步骤；未知变化及未覆盖的行为继续明确列出。启动仍按官方版本变化去重，不因规则更新自动重复扫描。
+- **连接与运行恢复**：修复退休连接残留和文档能力所有者更新的问题，改善后台交接和状态恢复，保留活动任务、设置、素材与有效插件缓存。
+- **设置页面背景**：通过共用的原生页面结构适配设置与部分侧栏页面背景，保留控件、菜单和主题的原有行为。
+- **插件下载提示与资源**：普通界面根据中英文设置，区分网络连接、服务器繁忙、限流、缺失文件、配置、存储和完整性问题，给出更易懂的处理建议。补齐当前目录锁定但尚未公开的资源；继续按精确大小和 SHA-256 校验，保留未变化插件的缓存。
+
+沿用本机已完成构建与验证的核心程序，不为发布重复编译或运行 CI。此前本机检查覆盖类型检查、相关回归、受控浏览器、隔离官方后台合同与实际宿主只读检查；发布另行核对资源、安装包与公开下载完整性。部分自动检查通过不等于全部功能验收：真实远端模型调用、额度耗尽、网络切换、多对话并发、所有历史升级路径及全部系统/官方版本组合仍有未验收范围。报告中待手测的项目继续保留，不宣称未来官方更新必然兼容。
 
 ## English
 
-This release includes the retained changes since the previous public software release, **v0.5.89 → v0.6.0**. Intermediate local candidates are not separate public updates. [Full source comparison](https://github.com/Rice-dog/code-codex/compare/v0.5.89...v0.6.0).
+This release covers the cumulative retained changes from the previous public software release, **v0.6.0 → v0.6.13**. Intermediate local versions are not separate public updates. [Full source comparison](https://github.com/Rice-dog/code-codex/compare/v0.6.0...v0.6.13).
 
-- **Current official-client compatibility**: Improved qualification of native workspaces, active pages, composers and model controls, plus updated file-tree placement. Legacy adapters remain available, with compatibility decided by observed capabilities and response contracts.
-- **Startup and connection recovery**: Added stage-specific diagnostics for startup conflicts, Bridge dispatch, response deadlines and official backend transport, while preserving active tasks and existing sign-in state.
-- **Official-update change ledger**: Startup analysis follows official version transitions and records processed transitions to avoid duplicate scans. Reports and baselines identify potentially affected plugin dependencies. Static signals do not replace functional validation or guarantee automatic repair of future breaking interfaces.
-- **Application menu**: Added restart through the managed Code-Codex launch chain. Login startup, restart and uninstall are grouped together, with more stable startup-state presentation and existing Chinese/English localization.
-- **Opacity and themes**: Improved current official-page, gradient-mask and settings-surface adaptation. Restoration is limited to owned state and reuses existing theme and native capabilities.
-- **Plugin downloads**: Published the two exact missing runtime assets before the software release. Pinned tags, filenames, sizes and SHA256 checks remain intact, along with other plugins' independent versions and cache identities.
-- **Installation and handoff**: Improved installation, removal and runtime-handoff diagnostics while retaining settings, media and verified caches. Active tasks stay protected; hot activation may wait until they are idle.
+- **Update checks on the setup welcome page**: One line shows progress, a newer version, an up-to-date installer or a failed check. Select the download option for the new version, or clear it to install the bundled version. Setup verifies the download source, size and SHA-256 before launching the newer installer. After success, it attempts to update the original saved setup file for future update checks.
+- **Official-update compatibility validation**: Added read-only checks against the actual installed package and host, controlled positive/negative cases and per-feature results to the existing change ledger. Results distinguish no impact, checks passed, issues found and manual validation required, with duplicate manual steps grouped together. Unknown changes and uncovered behavior remain explicit. Startup still deduplicates official-version transitions; a rules update does not automatically rescan the same version.
+- **Connection and runtime recovery**: Fixed stale retired connections and document-capability ownership updates, improving backend handoff and state recovery while retaining active tasks, settings, media and valid plugin caches.
+- **Settings backgrounds**: Shared native page structure now handles settings and additional sidebar-page backings while preserving controls, menus and theme behavior.
+- **Plugin download guidance and resources**: User-facing messages follow the Chinese/English language setting and distinguish connection problems, busy servers, rate limits, missing files, configuration, storage and integrity errors with clearer next steps. Published resources already pinned by the current catalog but previously absent online. Exact size/SHA-256 verification and unchanged plugin caches remain intact.
 
-As requested, **no CLI automated tests or CI were run for this release**. Release operations cover compilation, packaging, public-resource integrity, anonymous downloads, local installation and runtime-interface observation. Earlier test records are not presented as newly executed release tests. Live model calls, authorization, quota redemption and every official-client/OS combination were not revalidated in this round.
+The release reuses the core already built and validated locally, without redundant compilation or CI. Earlier local validation covered type checking, relevant regressions, controlled browser checks, an isolated official-backend contract and read-only checks in the actual host; release operations separately verify resources, packages and public downloads. Passing automated subchecks does not certify every feature: live remote model calls, quota exhaustion, network switching, concurrent conversations, every historical upgrade path and all OS/official-client combinations still have unvalidated scope. Required manual checks remain visible; future official updates are not guaranteed compatible.

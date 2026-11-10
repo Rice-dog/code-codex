@@ -59,7 +59,7 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
         let credential=if let Some(api)=&connection.api{relay::Route::prepare_api(selected.clone(),api.clone(),super::api::read(&super::retention::home(&root,&selected)?)?)?}
             else{progress.wait(relay::Route::prepare_credential(selected.clone(),worker.ok_or_else(||failure("credentials"))?,connection.email.clone().ok_or_else(||failure("email"))?,Some(progress))).await?};
         let token=super::nonce();
-        let route=relay::Route::start(owner.id.clone(),format!("draft-{token}"),credential).await?;
+        let route=service.relays.start_shared(owner.id.clone(),format!("draft-{token}"),credential).await?;
         let expired=Arc::downgrade(&route);tokio::spawn(async move{tokio::time::sleep(Duration::from_secs(120)).await;if let Some(route)=expired.upgrade(){route.expire_uncommitted();}});
         let draft=Draft{owner:owner.id.clone(),selected: selected.clone(),generation,connection:serde_json::to_value(&connection).map_err(|_|failure("connection-snapshot"))?,cwd,route:route.clone(),created:Instant::now(),committed:false,preparation_id:p["preparationId"].as_str().map(str::to_owned)};
         progress.wait(route.probe(true)).await?;

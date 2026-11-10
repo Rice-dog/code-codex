@@ -18,6 +18,10 @@ use std::time::Duration;
 mod gui_support;
 #[path = "../script_wrapper.rs"]
 mod script_wrapper;
+#[path = "../update_contract.rs"]
+mod update_contract;
+#[path = "../setup_update.rs"]
+mod setup_update;
 
 const TITLE: &str = "Code-Codex setup";
 const INSTALL_SCRIPT: &str = "Install-CodeCodex.ps1";
@@ -77,6 +81,8 @@ struct PortableExecutableLayout {
 
 fn main() -> ExitCode {
     let mut arguments: Vec<_> = env::args_os().skip(1).collect();
+    let offline = arguments.iter().any(|v|v.eq_ignore_ascii_case("-Offline")) || env::var_os("CODECODEX_SETUP_OFFLINE").is_some();
+    arguments.retain(|v|!v.eq_ignore_ascii_case("-Offline"));
     match requested_ui_language(&arguments){
         Ok(Some(locale))=>gui_support::localization::set_session(locale),Ok(None)=>{},
         Err(error)=>{gui_support::show_dialog(TITLE,&error,true);return ExitCode::FAILURE;}
@@ -134,6 +140,7 @@ fn main() -> ExitCode {
         deliver_failure(&mut progress, &detail, false);
         return ExitCode::FAILURE;
     }
+    let welcome_check = if interactive {Some(setup_update::begin_welcome_check(&progress,offline))}else{None};
     if interactive {
         match progress.wait_for_setup_selection() {
             Ok(Some(root)) => {
@@ -153,6 +160,32 @@ fn main() -> ExitCode {
             }
         }
     }
+    if !automatic_update && !offline {
+        let checked=if interactive {
+            if progress.download_latest_selected() {
+                welcome_check.as_ref().and_then(|c|c.lock().ok()?.take()).unwrap_or_else(||Err("SETUP_UPDATE_RESULT_MISSING".into()))
+            }else{Ok(None)}
+        }else{setup_update::check()};
+        match checked {
+            Ok(Some(available))=>match setup_update::download(available,&arguments,&mut progress) {
+                Ok(update)=>{
+                    let original=match env::current_exe(){Ok(p)=>p,Err(e)=>{deliver_failure(&mut progress,&e.to_string(),false);return ExitCode::FAILURE;}};
+                    progress.close();
+                    return match update.install(&arguments,&original) {
+                        Ok(installed)=>{save_session(&journal,if installed{"installed; setup replacement pending"}else{"handoff-unconfirmed"});ExitCode::SUCCESS},
+                        Err(detail)=>{journal.event("online setup","failed",json!({"reason":detail}));gui_support::show_dialog(TITLE,"The update could not be completed. Run setup again to retry. Your existing installation is retained.",true);ExitCode::FAILURE}
+                    };
+                }
+                Err(detail)=>{journal.event("online setup download","failed",json!({"reason":detail}));deliver_failure(&mut progress,"The update could not be completed. Run setup again to retry. Your existing installation is retained.",false);return ExitCode::FAILURE;}
+            },
+            Ok(None)=>journal.event("online setup","bundled installer selected",json!({})),
+            Err(detail)=>journal.event("online setup","check failed; bundled installer selected",json!({"reason":detail})),
+        }
+    }
+    if setup_update::bundled_is_older(&arguments) {
+        deliver_failure(&mut progress,"A newer Code-Codex version is already installed. Use a newer setup to repair it.",false);
+        return ExitCode::FAILURE;
+    }
     journal.event("installation transaction", "started", json!({}));
     save_session(&journal, "installing");
     match run_setup(&arguments, &mut progress) {
@@ -170,6 +203,13 @@ fn main() -> ExitCode {
             );
             journal.event("installer output","captured",json!({"stdout":sanitize_script_output(&output.stdout),"stderr":sanitize_script_output(&output.stderr)}));
             save_session(&journal, "installed");
+            if let Some(path)=env::var_os("CODECODEX_SETUP_RECEIPT") {
+                let path=PathBuf::from(path);
+                if path.is_absolute() && path.file_name().is_some_and(|v|v=="installed-receipt") {
+                    if let Err(e)=fs::write(&path,env!("CARGO_PKG_VERSION")) {journal.event("setup receipt","failed",json!({"reason":e.to_string()}));}
+                }
+            }
+
             progress.set_progress_detail(
                 100,
                 "Installation complete",

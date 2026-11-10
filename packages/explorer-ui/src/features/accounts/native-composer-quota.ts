@@ -1,6 +1,7 @@
 import {nativeFiberChain} from './native-model-menu';
 import type {NativeAccountAdapter} from './native-adapter';
 import {runtimeEvent} from '../../runtime-events';
+import {NativeUsageBanner} from './native-usage-banner';
 
 type Native=Record<string,any>;
 type Gate='hardBlocked'|'reserve'|'resetPending';
@@ -10,7 +11,7 @@ const unavailable=(stage:string)=>Error(`ACCOUNT_NATIVE_QUOTA_UNAVAILABLE: The n
 const families=(value:any)=>value&&typeof value==='object'&&value.kind==='readable-family'&&typeof value.resolve==='function'&&value.scope;
 
 /** Discover initialized semantic roles, never invoke an unknown module factory. */
-async function capabilities(address:string):Promise<Capabilities>{
+export async function capabilities(address:string):Promise<Capabilities>{
  const path=address.split('#')[0]!;
  if(!/^\.\/assets\/[0-9]+\.[A-Za-z0-9_-]+\.js$/.test(path))throw unavailable('runtime-path');
  const namespace=await import(/* @vite-ignore */path);
@@ -48,15 +49,12 @@ async function capabilities(address:string):Promise<Capabilities>{
  */
 export class NativeComposerQuota {
  #cap:Capabilities|undefined;#loading:Promise<void>|undefined;#error='';#disposed=false;
- #leases=new Map<Native,Lease>();#hidden=new Map<HTMLElement,{hidden:boolean;display:string;priority:string}>();
+ #leases=new Map<Native,Lease>();#banners:NativeUsageBanner;
  #anchor:HTMLButtonElement|undefined;#identity='';#refreshQueued=false;#root:Element|undefined;#conversation:string|null|undefined;#owner:string;
- constructor(private readonly adapter:NativeAccountAdapter,private readonly changed:()=>void){this.#owner=adapter.info.owner.id;}
- diagnostics():{ready:boolean;scoped:boolean;error:string|null;subscriptions:number;hiddenHostBanners:number;gates:Array<{gate:Gate;native:boolean;projected:boolean}>}{return {ready:this.#leases.size===3,scoped:!!this.#selection(),error:this.#error||null,subscriptions:this.#leases.size,hiddenHostBanners:this.#hidden.size,gates:[...this.#leases.values()].map(l=>({gate:l.gate,native:l.original(),projected:l.snapshot.getSnapshot()}))};}
+ constructor(private readonly adapter:NativeAccountAdapter,private readonly changed:()=>void){this.#owner=adapter.info.owner.id;this.#banners=new NativeUsageBanner(this.#owner,()=>!this.#disposed&&adapter.info.owner.id===this.#owner&&adapter.status().active);}
+ diagnostics():{ready:boolean;scoped:boolean;error:string|null;subscriptions:number;hiddenHostBanners:number;gates:Array<{gate:Gate;native:boolean;projected:boolean}>}{return {ready:this.#leases.size===3,scoped:!!this.#selection(),error:this.#error||null,subscriptions:this.#leases.size,hiddenHostBanners:this.#banners.hiddenCount,gates:[...this.#leases.values()].map(l=>({gate:l.gate,native:l.original(),projected:l.snapshot.getSnapshot()}))};}
  observes(node:Element):boolean{
-  if(!this.#selection())return false;
-  let fiber=(node as any)[Object.keys(node).find(k=>k.startsWith('__reactFiber$'))!];
-  for(let i=0;fiber&&i<64;i++,fiber=fiber.return)if(typeof fiber.memoizedProps?.canShowUsageBanners==='boolean')return true;
-  return false;
+  return this.#banners.observes(node);
  }
  #selection():{id:string;blocked:boolean}|undefined{
   const status=this.adapter.status(),info=this.adapter.info;
@@ -70,6 +68,7 @@ export class NativeComposerQuota {
  #projecting():boolean{return !!this.#root?.isConnected&&this.adapter.status().conversationId===this.#conversation&&!this.#root.closest('[data-app-shell-active-page="false"],[aria-hidden="true"]')&&!!this.#selection();}
  update(anchor:HTMLButtonElement|undefined):void{
   if(this.#disposed)return;this.#anchor=anchor;
+  this.#banners.update(anchor,this.adapter.status().conversationId,!!this.#selection());
   if(!this.#selection()||!anchor){this.#restore();return;}
   if(!this.#cap){
    if(!this.#loading&&!this.#error)this.#loading=capabilities(this.adapter.info.profile.initial).then(cap=>{if(!this.#disposed){this.#cap=cap;this.changed();}},error=>{this.#error=String(error);runtimeEvent('accounts','account.quota-adapter','unavailable',{stage:'native-quota-capability',taskSent:false});});
@@ -88,11 +87,14 @@ export class NativeComposerQuota {
  }
  #bind(anchor:HTMLButtonElement):void{
   const chain=nativeFiberChain(anchor),root=anchor.closest('[data-codex-composer-root]');if(!root)throw unavailable('composer-root');
-  const candidates=chain.filter(f=>typeof f.type==='function'&&f.memoizedProps&&'isResponseInProgress' in f.memoizedProps&&(f.memoizedProps.submitDisabled===undefined||typeof f.memoizedProps.submitDisabled==='boolean')&&String(f.type).includes('handleSubmitLocal'));
+  // Home omits this optional prop; the native composer defaults it to false.
+  const candidates=chain.filter(f=>typeof f.type==='function'&&f.memoizedProps&&(f.memoizedProps.isResponseInProgress===undefined||typeof f.memoizedProps.isResponseInProgress==='boolean')&&(f.memoizedProps.submitDisabled===undefined||typeof f.memoizedProps.submitDisabled==='boolean')&&String(f.type).includes('handleSubmitLocal'));
   if(candidates.length!==1)throw unavailable('composer-owner');const fiber=candidates[0]!;
   const contexts:Map<any,Native>[]=[];for(let c=fiber.dependencies?.firstContext,i=0;c&&i<64;c=c.next,i++)if(c.memoizedValue instanceof Map)contexts.push(c.memoizedValue);
   const conversation=this.adapter.status().conversationId;
-  const composers=[...new Set(contexts.flatMap(c=>[...c.values()]).filter(n=>n?.value?.placement==='main'&&['local','new'].includes(n.value.kind)))];
+  // Native home ComposerScope has entrypoint="home" and no placement. Local
+  // conversation scopes use placement="main"; panels/previews are not home.
+  const composers=[...new Set(contexts.flatMap(c=>[...c.values()]).filter(n=>n?.value&&(n.value.kind==='local'&&n.value.placement==='main'||n.value.kind==='new'&&(n.value.entrypoint==='home'||n.value.entrypoint===undefined&&n.value.placement==='main'))))];
   if(composers.length!==1||(composers[0]!.value.conversationId??null)!==conversation)throw unavailable('composer-identity');
   if(this.#root!==root||this.#conversation!==conversation)this.#restore();
   this.#root=root;this.#conversation=conversation;
@@ -134,7 +136,7 @@ export class NativeComposerQuota {
    snapshot.getSnapshot=lease.wrapped;this.#leases.set(snapshot,lease);added=true;
   }else this.#leases.get(snapshot)!.fiber=fiber;
   const selection=this.#selection(),identity=selection?.id+':'+selection?.blocked;
-  this.#banners(root);this.#error='';if(added||identity!==this.#identity){this.#identity=identity;this.#refresh();runtimeEvent('accounts','account.quota-adapter','bound',{stage:'native-composer-quota',subscriptions:3,hostUsageCacheChanged:false,taskSent:false});}
+  this.#error='';if(added||identity!==this.#identity){this.#identity=identity;this.#refresh();runtimeEvent('accounts','account.quota-adapter','bound',{stage:'native-composer-quota',subscriptions:3,hostUsageCacheChanged:false,taskSent:false});}
  }
  #refresh():void{
   if(this.#refreshQueued)return;this.#refreshQueued=true;
@@ -157,25 +159,7 @@ export class NativeComposerQuota {
   }
   throw unavailable('subscription-effect');
  }
- #banners(root:Element):void{
-  // The native banner's billing/reset actions belong to the host account.
-  // A child keeps its own existing quota/credit controls, not those host actions.
-  const ancestry=nativeFiberChain(root as HTMLElement);
-  // Usage banners may be rendered above the composer through the thread view.
-  // Stay inside its verified conversation, including its native portals.
-  const owners=this.#conversation?ancestry.filter(f=>typeof f.type==='function'&&f.memoizedProps?.conversationId===this.#conversation):[];
-  const rootFiber=owners.at(-1)??ancestry[0],stack=[rootFiber],current=new Set<HTMLElement>();let count=0;
-  while(stack.length){const fiber=stack.pop();if(!fiber)continue;if(++count>20000)throw unavailable('banner-budget');
-   const p=fiber.memoizedProps;if(typeof fiber.type==='function'&&typeof p?.canShowUsageBanners==='boolean'&&typeof p.sendBlocked==='boolean'&&p.rateLimit?.rate_limit_upsell&&p.rateLimit.rate_limit_upsell.banner_type!=='image_generation_limit_reached'&&!p.imageGenerationLimit){
-    const nodes=[fiber.child];let children=0;while(nodes.length&&children++<256){const f=nodes.pop();if(!f)continue;if(f.stateNode instanceof HTMLElement){current.add(f.stateNode);break;}if(f.sibling)nodes.push(f.sibling);if(f.child)nodes.push(f.child);}
-   }
-   if(fiber!==rootFiber&&fiber.sibling)stack.push(fiber.sibling);if(fiber.child)stack.push(fiber.child);
-  }
-  for(const [node,prior]of this.#hidden)if(!current.has(node)){this.#show(node,prior);this.#hidden.delete(node);}
-  for(const node of current)if(!this.#hidden.has(node)){this.#hidden.set(node,{hidden:node.hidden,display:node.style.getPropertyValue('display'),priority:node.style.getPropertyPriority('display')});node.hidden=true;node.style.setProperty('display','none','important');}
- }
- #show(node:HTMLElement,prior:{hidden:boolean;display:string;priority:string}):void{if(node.style.getPropertyValue('display')==='none'&&node.style.getPropertyPriority('display')==='important'){node.hidden=prior.hidden;if(prior.display)node.style.setProperty('display',prior.display,prior.priority);else node.style.removeProperty('display');}}
  #release(lease:Lease):void{if(lease.snapshot.getSnapshot===lease.wrapped){lease.snapshot.getSnapshot=lease.original;try{this.#notify(lease);}catch{}}}
- #restore():void{for(const lease of this.#leases.values())this.#release(lease);this.#leases.clear();for(const [node,prior]of this.#hidden)this.#show(node,prior);this.#hidden.clear();this.#identity='';this.#root=undefined;this.#conversation=undefined;}
- dispose():void{this.#restore();this.#disposed=true;this.#anchor=undefined;}
+ #restore():void{for(const lease of this.#leases.values())this.#release(lease);this.#leases.clear();this.#identity='';this.#root=undefined;this.#conversation=undefined;}
+ dispose():void{this.#banners.dispose();this.#restore();this.#disposed=true;this.#anchor=undefined;}
 }

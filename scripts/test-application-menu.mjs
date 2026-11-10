@@ -125,6 +125,10 @@ try{
  await check('Report opens once through the fixed native action and closes menu',`fixture.reportOpens===1&&popup.hidden&&!document.querySelector('[data-code-codex-host-updates]').disabled`);
  await ev(`fixture.hostStatus.scan.status='partial';trigger.click();${settle}`);
  await check('Incomplete inventory is distinguished from a no-impact result',`document.querySelector('[data-code-codex-host-updates]').title.includes('HOST_UPDATE_INCOMPLETE')`);
+ await ev(`fixture.hostStatus.analysis={status:'refresh_required',manualRetryRequired:true,message:'HOST_UPDATE_RULES_CHANGED: Recheck official Codex updates.'};trigger.click();trigger.click();${settle}`);
+ await check('Old-rule analysis is explicit without changing native menu layout',`document.querySelector('[data-code-codex-host-updates]').dataset.analysisStatus==='refresh_required'&&document.querySelector('[data-code-codex-host-updates]').title.includes('HOST_UPDATE_RULES_CHANGED')&&document.querySelector('[data-code-codex-host-updates]').style.length===0`);
+ await ev(`fixture.hostStatus.analysis={status:'current',manualRetryRequired:false};fixture.hostStatus.scan.status='version_unchanged';trigger.click();trigger.click();${settle}`);
+ await check('Current analysis clears stale warning while retaining separate scan state',`document.querySelector('[data-code-codex-host-updates]').dataset.analysisStatus==='current'&&document.querySelector('[data-code-codex-host-updates]').title===''`);
  await ev(`setLocale('zh-CN');trigger.click();trigger.click();${settle}`);
  await check('Report row follows global Chinese localization',`document.querySelector('[data-code-codex-host-updates]').textContent==='官方 Codex 更新报告 (5)'`);
  await ev(`trigger.click();fixture.deferStatus=true;trigger.click();${settle}`);
@@ -137,5 +141,19 @@ try{
  await ev(`fixture.statusError=false;fixture.openError=false;trigger.click();document.querySelector('[data-code-codex-host-updates-retry]').click();document.querySelector('[data-code-codex-host-updates-retry]').click();${settle}`);
  await check('Manual retry uses one fixed action and closes the existing menu',`fixture.reportRetries===1&&popup.hidden&&!document.querySelector('[data-code-codex-host-updates-retry]').disabled`);
  await check('Manual retry follows global Chinese label and native menu role',`document.querySelector('[data-code-codex-host-updates-retry]').textContent==='重新检测官方 Codex 更新'&&document.querySelector('[data-code-codex-host-updates-retry]').getAttribute('role')==='menuitem'`);
+ await ev(`fixture.hostStatus.validation={status:'manual_required',counts:{issues:0,manualGroups:4},checkCounts:{passed:7,issues:0,manual:1}};trigger.click();${settle}`);
+ await check('Validation groups replace the ambiguous changed-file number in Chinese',`document.querySelector('[data-code-codex-host-updates]').textContent==='更新报告：问题 0 · 待测 4 组'&&document.querySelector('[data-code-codex-host-updates]').title.includes('7 passed')`);
+ await ev(`setLocale('en');trigger.click();trigger.click();${settle}`);
+ await check('Validation result follows the existing global English locale',`document.querySelector('[data-code-codex-host-updates]').textContent==='Updates: 0 issues · 4 to test'`);
+ await ev(`fixture.hostStatus.validation={status:'issues_found',counts:{issues:2,manualGroups:3},checkCounts:{passed:5,issues:1,manual:0}};trigger.click();trigger.click();${settle}`);
+ await check('Executed failures are visible separately from manual acceptance',`document.querySelector('[data-code-codex-host-updates]').textContent==='Updates: 2 issues · 3 to test'&&document.querySelector('[data-code-codex-host-updates]').dataset.validationStatus==='issues_found'`);
+ await ev(`fixture.hostStatus.validation={status:'passed',counts:{issues:0,manualGroups:0},checkCounts:{passed:7,issues:0,manual:0}};trigger.click();trigger.click();${settle}`);
+ await check('Completed checks have a concise pass label',`document.querySelector('[data-code-codex-host-updates]').textContent==='Update checks passed'`);
+ await ev(`fixture.hostStatus.validation.status='refresh_required';trigger.click();trigger.click();${settle}`);
+ await check('An old validation engine cannot retain a green pass label',`document.querySelector('[data-code-codex-host-updates]').title.includes('HOST_UPDATE_VALIDATION_STALE')&&!document.querySelector('[data-code-codex-host-updates]').textContent.includes('passed')`);
+ await ev(`trigger.click();fixture.deferStatus=true;trigger.click();trigger.click();fixture.resolveStatus({validation:{status:'issues_found',counts:{issues:999,manualGroups:999}}});fixture.deferStatus=false;${settle}`);
+ await check('Late validation cannot update a closed menu',`popup.hidden&&!document.querySelector('[data-code-codex-host-updates]').textContent.includes('999')`);
+ await ev(`fixture.deferStatus=true;trigger.click();window.oldStatusReply=fixture.resolveStatus;trigger.click();fixture.deferStatus=false;fixture.hostStatus.validation.status='passed';trigger.click();${settle};oldStatusReply({validation:{status:'issues_found',counts:{issues:999,manualGroups:999}}});${settle}`);
+ await check('An old response cannot replace a newer reopened-menu result',`!popup.hidden&&document.querySelector('[data-code-codex-host-updates]').textContent==='Update checks passed'`);
  writeFileSync(resolve(out,'result.json'),JSON.stringify({passed:true,checks},null,2));console.log(`Application menu: ${checks.length} browser checks passed; no OS state changed`);
 }finally{await browser.close();await new Promise(r=>server.close(r));}

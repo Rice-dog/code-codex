@@ -15,6 +15,8 @@ mod scan;
 pub(crate) mod scheduler;
 #[path = "host_updates/version_gate.rs"]
 mod version_gate;
+#[path = "host_updates/validation.rs"]
+pub(crate) mod validation;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(super) struct Entry {
@@ -44,14 +46,22 @@ struct Rule {
     feature: String,
     sources: Vec<String>,
     tests: Vec<String>,
+    #[serde(default)]
+    checks: Vec<String>,
     tokens: Vec<String>,
     paths: Vec<String>,
 }
-fn rules() -> Vec<Rule> {
+fn registry() -> Value {
     serde_json::from_str::<Value>(include_str!(
         "../../../resources/host-update-dependencies.json"
     ))
-    .expect("embedded dependency registry")["rules"]
+    .expect("embedded dependency registry")
+}
+fn dependency_revision() -> u64 {
+    registry()["revision"].as_u64().expect("dependency revision")
+}
+fn rules() -> Vec<Rule> {
+    registry()["rules"]
         .as_array()
         .expect("registry rules")
         .iter()
@@ -62,7 +72,7 @@ fn registry_hash() -> String {
     hash(
         &[
             include_bytes!("../../../resources/host-update-dependencies.json").as_slice(),
-            b"path-scope-v2",
+            b"path-scope-v3-analysis-identity",
         ]
         .concat(),
     )
@@ -82,9 +92,23 @@ fn encode(v: &impl Serialize) -> io::Result<Vec<u8>> {
 pub(crate) fn status() -> io::Result<Value> {
     let dir = directory()?;
     let latest = dir.join("latest.json");
+    let latest = if latest.exists() { read_json(&latest)? } else { Value::Null };
     Ok(
-        json!({"latest":if latest.exists(){read_json(&latest)?}else{Value::Null},"scan":if dir.join("status.json").exists(){read_json(&dir.join("status.json"))?}else{json!({"status":"pending"})}}),
+        json!({"analysis":analysis_status(&latest),"latest":latest,"validation":validation::status(&dir).unwrap_or_else(|_|json!({"status":"unavailable"})),"scan":if dir.join("status.json").exists(){read_json(&dir.join("status.json"))?}else{json!({"status":"pending"})}}),
     )
+}
+fn analysis_status(latest: &Value) -> Value {
+    let current = registry_hash();
+    let (status, message) = if latest.is_null() {
+        ("pending", "HOST_UPDATE_ANALYSIS_PENDING: No recorded analysis is available.")
+    } else if latest["registryHash"].as_str() != Some(current.as_str()) {
+        ("refresh_required", "HOST_UPDATE_RULES_CHANGED: This report used older or unknown analysis rules. Recheck official Codex updates to analyze with the current rules; previous reports are retained.")
+    } else if latest["complete"] != true {
+        ("incomplete", "HOST_UPDATE_ANALYSIS_INCOMPLETE: The inventory is incomplete; no no-impact conclusion was made.")
+    } else {
+        ("current", "HOST_UPDATE_ANALYSIS_CURRENT: The recorded inventory used the current rules. Functional impact still requires separate validation.")
+    };
+    json!({"status":status,"registryHash":current,"reportRegistryHash":latest["registryHash"],"dependencyRevision":dependency_revision(),"manualRetryRequired":matches!(status,"refresh_required"|"incomplete"),"message":message})
 }
 pub(crate) fn directory() -> io::Result<PathBuf> {
     let p = workspace_service::application_paths::data_root()?.join("host-updates");
@@ -131,10 +155,10 @@ fn changes(previous: Option<&Snapshot>, current: &Snapshot) -> Vec<Value> {
     let empty = BTreeMap::new();
     let old = previous.map(|p| &p.entries).unwrap_or(&empty);
     let names: BTreeSet<_> = old.keys().chain(current.entries.keys()).collect();
-    names.into_iter().filter_map(|name|{let a=old.get(name);let b=current.entries.get(name);if a.zip(b).is_some_and(|(a,b)|a.sha256==b.sha256&&a.kind==b.kind){return None}
+    names.into_iter().filter_map(|name|{let a=old.get(name);let b=current.entries.get(name);if a.zip(b).is_some_and(|(a,b)|a.sha256==b.sha256&&a.kind==b.kind&&a.dependencies==b.dependencies){return None}
  let dependencies:BTreeSet<_>=a.into_iter().chain(b).flat_map(|e|e.dependencies.iter().cloned()).collect();
  let category=if !dependencies.is_empty(){"plugin_dependency"}else if b.or(a).is_some_and(|e|e.kind=="resource"){"no_known_plugin_dependency"}else{"needs_review"};
- Some(json!({"path":name,"change":if a.is_none(){"added"}else if b.is_none(){if current.complete{"removed"}else{"not_observed"}}else{"modified"},"category":category,"dependencyIds":dependencies,"before":a,"after":b,"functionalImpact":"not_tested"}))}).collect()
+ Some(json!({"path":name,"change":if a.is_none(){"added"}else if b.is_none(){if current.complete{"removed"}else{"not_observed"}}else if a.zip(b).is_some_and(|(a,b)|a.sha256==b.sha256&&a.kind==b.kind){"dependency_mapping_changed"}else{"modified"},"category":category,"dependencyIds":dependencies,"before":a,"after":b,"functionalImpact":"not_tested"}))}).collect()
 }
 fn report(previous: Option<&Snapshot>, current: &Snapshot) -> Value {
     let changes = changes(previous, current);
@@ -150,8 +174,8 @@ fn report(previous: Option<&Snapshot>, current: &Snapshot) -> Value {
                 .map(str::to_owned)
         })
         .collect();
-    let dependencies:Vec<_>=registry.iter().filter(|r|affected.contains(&r.id)).map(|r|json!({"id":r.id,"feature":r.feature,"sourceFiles":r.sources,"suggestedTests":r.tests,"functionalImpact":"not_tested"})).collect();
-    json!({"schema":1,"dependencyRevision":1,"type":if previous.is_none(){"baseline"}else if changes.is_empty()&&previous.is_some_and(|p|p.version==current.version&&p.package==current.package){"analysis_refresh"}else{"update"},"observedMs":current.observed_ms,"previousVersion":previous.map(|s|&s.version),"version":current.version,"package":current.package,"complete":current.complete,"counts":{"all":changes.len(),"pluginDependency":changes.iter().filter(|v|v["category"]=="plugin_dependency").count(),"noKnownPluginDependency":changes.iter().filter(|v|v["category"]=="no_known_plugin_dependency").count(),"needsReview":changes.iter().filter(|v|v["category"]=="needs_review").count()},"dependencies":dependencies,"issues":current.issues,"changes":changes,"validation":{"status":"not_tested","reason":"Static dependency candidates only. Actual behavior must be tested separately; no inference, OAuth or account mutation was performed."},"coverage":"Observed installed package files and packed ASAR entries. Unobserved intermediate versions and server-side changes cannot be reconstructed. Resource classification means no registered dependency identified, not proof of no behavioral effect."})
+    let dependencies:Vec<_>=registry.iter().filter(|r|affected.contains(&r.id)).map(|r|json!({"id":r.id,"feature":r.feature,"sourceFiles":r.sources,"suggestedTests":r.tests,"requiredChecks":r.checks,"functionalImpact":"not_tested"})).collect();
+    json!({"schema":1,"dependencyRevision":dependency_revision(),"registryHash":current.registry_hash,"type":if previous.is_none(){"baseline"}else if previous.is_some_and(|p|p.version==current.version&&p.package==current.package&&p.entries.len()==current.entries.len()&&p.entries.iter().all(|(name,a)|current.entries.get(name).is_some_and(|b|a.sha256==b.sha256&&a.kind==b.kind))){"analysis_refresh"}else{"update"},"observedMs":current.observed_ms,"previousVersion":previous.map(|s|&s.version),"version":current.version,"package":current.package,"complete":current.complete,"counts":{"all":changes.len(),"pluginDependency":changes.iter().filter(|v|v["category"]=="plugin_dependency").count(),"noKnownPluginDependency":changes.iter().filter(|v|v["category"]=="no_known_plugin_dependency").count(),"needsReview":changes.iter().filter(|v|v["category"]=="needs_review").count()},"dependencies":dependencies,"issues":current.issues,"changes":changes,"validation":{"status":"not_tested","reason":"Static dependency candidates only. Actual behavior must be tested separately; no inference, OAuth or account mutation was performed."},"coverage":"Observed installed package files and packed ASAR entries. Unobserved intermediate versions and server-side changes cannot be reconstructed. Resource classification means no registered dependency identified, not proof of no behavioral effect."})
 }
 fn markdown(v: &Value) -> String {
     let mut s = format!(
@@ -166,11 +190,17 @@ fn markdown(v: &Value) -> String {
         v["counts"]["needsReview"],
         v["coverage"].as_str().unwrap_or("")
     );
+    s += &format!("Analysis rules: revision {}; fingerprint {}.\n\n", v["dependencyRevision"], v["registryHash"]);
     for r in v["dependencies"].as_array().into_iter().flatten() {
         s += &format!(
             "- {}\n  - Source: {}\n  - Suggested checks: {}\n",
             r["feature"], r["sourceFiles"], r["suggestedTests"]
         )
+    }
+    for r in v["dependencies"].as_array().into_iter().flatten() {
+        for check in r["requiredChecks"].as_array().into_iter().flatten() {
+            s += &format!("- Required check (NOT TESTED), {}: {}\n", r["id"], check.as_str().unwrap_or(""));
+        }
     }
     s += "\n## Inventory issues\n\n";
     for issue in v["issues"].as_array().into_iter().flatten() {
@@ -216,7 +246,7 @@ fn commit_report(
     promote: bool,
 ) -> io::Result<Value> {
     let r = report(previous, current);
-    let identity = json!({"version":current.version,"package":current.package,"complete":current.complete,"issues":current.issues,"registry":hash(include_bytes!("../../../resources/host-update-dependencies.json")),"files":current.entries.iter().map(|(name,e)|json!([name,e.size,e.sha256,e.kind,e.dependencies])).collect::<Vec<_>>()});
+    let identity = json!({"version":current.version,"package":current.package,"complete":current.complete,"issues":current.issues,"registry":current.registry_hash,"files":current.entries.iter().map(|(name,e)|json!([name,e.size,e.sha256,e.kind,e.dependencies])).collect::<Vec<_>>()});
     let signature = hash(&encode(&identity)?);
     let latest_path = dir.join("latest.json");
     let changed = if latest_path.exists() {
@@ -257,7 +287,7 @@ fn commit_report(
         // Commit a report before changing either pointer; a failed write never erases the old baseline.
         atomic(
             &dir.join("latest.json"),
-            &json!({"schema":1,"signature":signature,"id":id,"version":current.version,"complete":current.complete,"counts":r["counts"],"type":r["type"],"observedMs":current.observed_ms,"functionalImpact":"not_tested"}),
+            &json!({"schema":1,"signature":signature,"id":id,"version":current.version,"complete":current.complete,"counts":r["counts"],"type":r["type"],"observedMs":current.observed_ms,"registryHash":current.registry_hash,"dependencyRevision":dependency_revision(),"functionalImpact":"not_tested"}),
         )?;
         crate::runtime_log::record(
             "compatibility",
@@ -279,7 +309,7 @@ pub(crate) fn retry() -> Value {
     if PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) {
         return json!({"scheduled":false,"status":"busy"});
     }
-    tokio::task::spawn_blocking(|| {
+    tokio::spawn(async {
         struct Reset;
         impl Drop for Reset {
             fn drop(&mut self) {
@@ -287,7 +317,9 @@ pub(crate) fn retry() -> Value {
             }
         }
         let _reset = Reset;
-        let _ = observed_run(true, None);
+        if matches!(tokio::task::spawn_blocking(|| observed_run(true, None)).await, Ok(Ok(_))) {
+            let _ = validation::run(validation::endpoint(), true, None).await;
+        }
     });
     json!({"scheduled":true})
 }
@@ -370,7 +402,8 @@ impl Drop for Monitor {
         self.0.cancel();
     }
 }
-pub(crate) fn start(parent: tokio_util::sync::CancellationToken) -> Monitor {
+pub(crate) fn start(parent: tokio_util::sync::CancellationToken, endpoint: cdp_client::CdpEndpoint) -> Monitor {
+    validation::set_endpoint(endpoint);
     let cancel = parent.child_token();
     let guard = Monitor(cancel.clone());
     tokio::spawn(async move {
@@ -386,6 +419,10 @@ pub(crate) fn start(parent: tokio_util::sync::CancellationToken) -> Monitor {
                 "failed",
                 json!({"code":"HOST_UPDATE_SCAN","previousReportsPreserved":true}),
             );
+        } else if !cancel.is_cancelled() {
+            if validation::run(Some(endpoint), false, Some(cancel)).await.is_err() {
+                crate::runtime_log::record("compatibility", "host-update.validation", "unavailable", json!({"code":"HOST_UPDATE_VALIDATION","previousReportsPreserved":true}));
+            }
         }
     });
     guard
