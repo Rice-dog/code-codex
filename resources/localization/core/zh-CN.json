@@ -155,5 +155,6 @@
   "setup.welcomeNetwork": "网络异常，继续安装当前版本",
   "setup.welcomeError": "检查更新失败，继续安装当前版本",
   "menu.hostValidationSummary": "更新报告：问题 {issues} · 待测 {manual} 组",
-  "menu.hostValidationPassed": "更新检查已通过"
+  "menu.hostValidationPassed": "更新检查已通过",
+  "plugin.name.spectral-drape": "光谱点阵帷幕"
 }

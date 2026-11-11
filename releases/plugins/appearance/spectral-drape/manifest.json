@@ -1,0 +1,18 @@
+{
+  "id": "spectral-drape",
+  "name": "Spectral Drape Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.2",
+  "releaseTag": "plugin-assets-2026-11-11",
+  "capabilities": [
+    "background",
+    "preview"
+  ],
+  "asset": "CodeCodex-background-spectral-drape-1.0.2.js",
+  "relativePath": "CodeCodex-background-spectral-drape-1.0.2.js",
+  "size": 45146,
+  "sha256": "5236aaaa21b71ab2a32df2831c6919c0e9ff1c5476db92b7e00a39ff6b658136",
+  "resources": [],
+  "source": "https://github.com/Rice-dog/code-codex"
+}

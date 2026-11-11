@@ -529,12 +529,12 @@
     "name": "Codex Startup Transition",
     "category": "appearance",
     "api": 1,
-    "version": "1.1.32",
-    "releaseTag": "plugin-assets-2026-11-01",
-    "asset": "CodeCodex-plugin-codex-startup-transition-1.1.32.js",
-    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.1.32.js",
-    "size": 42495,
-    "sha256": "de094f68fb7db7d744d71704453bd117ea862192884027ea8ff1182a55b1298a",
+    "version": "1.1.33",
+    "releaseTag": "plugin-assets-2026-11-11",
+    "asset": "CodeCodex-plugin-codex-startup-transition-1.1.33.js",
+    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.1.33.js",
+    "size": 42542,
+    "sha256": "0292d2b0c3b6c7d710fec898f2dcbfedfe4254a11cd5a522bcaadc162a7810cf",
     "resources": [],
     "capabilities": [
       "startup",
@@ -803,16 +803,34 @@
     "name": "Multi-account Tasks",
     "category": "developer-tools",
     "api": 1,
-    "version": "1.0.106",
-    "releaseTag": "plugin-assets-2026-11-02",
-    "asset": "CodeCodex-plugin-multi-account-1.0.106.js",
-    "relativePath": "CodeCodex-plugin-multi-account-1.0.106.js",
-    "size": 218920,
-    "sha256": "499afe51dbbd88d5246912802ac802cfb7a8a75431df73a485c35351caa8c12f",
+    "version": "1.0.110",
+    "releaseTag": "plugin-assets-2026-11-10",
+    "asset": "CodeCodex-plugin-multi-account-1.0.110.js",
+    "relativePath": "CodeCodex-plugin-multi-account-1.0.110.js",
+    "size": 220664,
+    "sha256": "2dccb07707f5f8448160e24262371fb634acf815703e0bf31abf742f4d2d1f04",
     "resources": [],
     "capabilities": [
       "developer-tools"
     ],
+    "source": "https://github.com/Rice-dog/code-codex"
+  },
+  {
+    "id": "spectral-drape",
+    "name": "Spectral Drape Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.2",
+    "releaseTag": "plugin-assets-2026-11-11",
+    "capabilities": [
+      "background",
+      "preview"
+    ],
+    "asset": "CodeCodex-background-spectral-drape-1.0.2.js",
+    "relativePath": "CodeCodex-background-spectral-drape-1.0.2.js",
+    "size": 45146,
+    "sha256": "5236aaaa21b71ab2a32df2831c6919c0e9ff1c5476db92b7e00a39ff6b658136",
+    "resources": [],
     "source": "https://github.com/Rice-dog/code-codex"
   }
 ]

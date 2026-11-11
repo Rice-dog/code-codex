@@ -76,14 +76,15 @@ export class NativeComposerQuota {
   }
   try{this.#bind(anchor);}catch(error){this.#error=String(error);this.#restore();}
  }
- async ready(required:boolean):Promise<void>{
-  if(!this.#selection())return;
+  async ready(required:boolean):Promise<boolean>{
+   if(!this.#selection())return false;
   await this.#loading;if(this.#anchor)this.update(this.#anchor);
-  if(this.#error){if(required)throw Error(this.#error);return;}
-  if(this.#leases.size!==3){if(required)throw unavailable('composer-subscriptions');return;}
+   if(this.#error){if(required)throw Error(this.#error);return false;}
+   if(this.#leases.size!==3){if(required)throw unavailable('composer-subscriptions');return false;}
   const selection=this.#selection();if(selection?.blocked)throw Error('ACCOUNT_SELECTED_QUOTA_EXHAUSTED: The selected account has no included usage remaining. Select another account or explicitly permit its available credits. No message was sent.');
   // React owns the actual recomputation and every other submitDisabled operand.
   await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+   return true;
  }
  #bind(anchor:HTMLButtonElement):void{
   const chain=nativeFiberChain(anchor),root=anchor.closest('[data-codex-composer-root]');if(!root)throw unavailable('composer-root');

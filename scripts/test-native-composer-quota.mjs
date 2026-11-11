@@ -63,6 +63,7 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const browser=await launchFixture(`http://127.0.0.1:${server.address().port}`),checks=[];
 const check=async(name,expression)=>{assert.equal(await browser.evaluate(expression),true,name);checks.push(name);};
 try{
+ await check('Quota readiness reports its completed frame so Send does not wait a second frame',`(async()=>{await make();const original=requestAnimationFrame;let frames=0;window.requestAnimationFrame=callback=>{frames++;return original(callback);};try{return await quota.ready(true)===true&&frames===1;}finally{window.requestAnimationFrame=original;}})()`);
  for(const existing of [false,true])for(const response of ['omitted',false,true]){
   await check(`${existing?'Existing':'New'} composer accepts ${response} response prop and projects only its three gates`,`(async()=>{await make(${JSON.stringify({existing,...(response==='omitted'?{}:{response})})});return quota.diagnostics().ready&&quota.diagnostics().subscriptions===3&&!send.disabled&&snapshots.every(s=>s.getSnapshot()===false)&&originals.every(s=>s()===true);})()`);
  }

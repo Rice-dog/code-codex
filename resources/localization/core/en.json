@@ -155,5 +155,6 @@
   "setup.welcomeNetwork": "Network unavailable. Install bundled version",
   "setup.welcomeError": "Unable to check updates. Install bundled version",
   "menu.hostValidationSummary": "Updates: {issues} issues · {manual} to test",
-  "menu.hostValidationPassed": "Update checks passed"
+  "menu.hostValidationPassed": "Update checks passed",
+  "plugin.name.spectral-drape": "Spectral Drape Background"
 }

@@ -128,9 +128,9 @@ export class ComposerAccountSelector {
   void this.adapter.prepareSend().then(async()=>{
    if(this.#disposed)return;
    this.update();
-   await this.#quota.ready(button.disabled);
+   const rendered=await this.#quota.ready(button.disabled);
    // Account/model changes can replace native nodes while retaining the draft.
-   await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+   if(!rendered)await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
    if(this.#disposed||epoch!==this.#sendEpoch)return;
    this.update();
    const currentFields=this.#editors(),currentButtons=activePageElements<HTMLButtonElement>(document,SEND).filter(b=>this.#belongs(b)&&b.checkVisibility());
