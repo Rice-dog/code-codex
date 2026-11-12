@@ -1,27 +1,34 @@
 {
   "schema": 1,
-  "revision": 10,
+  "revision": 19,
   "rules": [
     {
       "id": "layout",
       "feature": "File tree, workspace mount and composer",
       "sources": [
         "packages/explorer-ui/src/adapters/codex-26.715.ts",
-        "packages/explorer-ui/src/inject.ts"
+        "packages/explorer-ui/src/inject.ts",
+        "packages/explorer-ui/src/active-thread.ts",
+        "packages/explorer-ui/src/host-update-probes.ts"
       ],
       "tests": [
         "scripts/test-codex-layout.mjs",
-        "scripts/test-account-selector.mjs"
+        "scripts/test-account-selector.mjs",
+        "scripts/test-account-thread-identity.mjs"
       ],
       "tokens": [
         "data-app-shell-workspace",
         "MainContentClip",
         "data-thread-scroll-footer",
-        "data-app-shell-main-surface"
+        "data-app-shell-main-surface",
+        "data-app-action-sidebar-thread-active",
+        "aria-hidden",
+        "inert"
       ],
       "paths": [],
       "checks": [
-        "Existing/new/unknown composer layouts, missing and ambiguous anchors, navigation and disposal."
+        "Existing/new/unknown composer layouts, missing and ambiguous anchors, navigation and disposal.",
+        "Collapsed inert/aria-hidden sidebar rows do not compete with the active thread; A/B retain independent saved connections, true multiple active IDs remain ambiguous, and New Chat keeps draft selection."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -46,14 +53,27 @@
         "crates/launcher/src/accounts/worker_health.rs",
         "crates/launcher/src/accounts/credentials.rs",
         "crates/launcher/src/accounts/queries.rs",
-        "crates/launcher/src/accounts/usage.rs"
+        "crates/launcher/src/accounts/usage.rs",
+        "crates/launcher/src/accounts/primary.rs",
+        "crates/launcher/src/accounts/primary_host.js",
+        "packages/explorer-ui/src/multi-account-runtime.ts",
+        "packages/explorer-ui/src/features/accounts/error-presentation.ts",
+        "packages/explorer-ui/src/features/accounts/quota-view.ts",
+        "crates/launcher/src/accounts/mod.rs",
+        "crates/launcher/src/accounts/native_route.rs"
       ],
       "tests": [
         "scripts/test-host-capabilities.mjs",
         "scripts/test-account-native-routing.mjs",
         "crates/launcher/src/accounts/credentials.rs",
         "crates/launcher/src/accounts/queries.rs",
-        "scripts/test-account-query-lifecycle.cjs"
+        "scripts/test-account-query-lifecycle.cjs",
+        "scripts/test-account-primary-host.mjs",
+        "scripts/test-account-primary-diagnostics.mjs",
+        "crates/launcher/src/accounts/primary.rs",
+        "scripts/test-account-error-presentation.mjs",
+        "scripts/test-account-admission.mjs",
+        "scripts/test-account-reset-ui.mjs"
       ],
       "tokens": [
         "appServerManagers",
@@ -63,13 +83,19 @@
         "account/read",
         "getAuthStatus",
         "thread/resume",
-        "thread/loaded/list"
+        "thread/loaded/list",
+        "account/login/start",
+        "account/login/cancel",
+        "account/login/completed"
       ],
       "paths": [],
       "checks": [
         "Identity match without forced refresh; expired versus unavailable credentials; active-turn refusal and late replies.",
         "Manual Verify returns verified login status independently of remote quota availability, then schedules the existing background quota queue. Verify and usage reuse observe_managed credentials without duplicate frontend Verify; quota failure does not fail successful login checks. Cached values, one-flight and owner/late-result protections remain. No quota-triggered backend replacement or extra retry counter.",
-        "Usable native getAuthStatus credentials avoid forced account/read; near-expiry, missing claims and confirmed reauthorization retain existing refresh behavior. Wrong identity, logout/relogin, removed connection and late replies cannot commit stale results. Local credential selection is not blocked by a hung remote quota read."
+        "Usable native getAuthStatus credentials avoid forced account/read; near-expiry, missing claims and confirmed reauthorization retain existing refresh behavior. Wrong identity, logout/relogin, removed connection and late replies cannot commit stale results. Local credential selection is not blocked by a hung remote quota read.",
+        "Failed/interrupted primary setup must release ordinary route switching and disable; explicit cancel distinguishes canceled, notFound and missing loginId. Pre-dispatch failures do not claim OAuth started. A real pending login retains existing admission. No OAuth write replay or new polling.",
+        "Quota presentation distinguishes explicit connection failure, response deadline, incomplete data and generic unavailable. ACCOUNT_BACKEND/ACCOUNT_STREAM_UNCLASSIFIED alone must not imply offline or expired login. Preserve cached percentages and original diagnostic code. Current-thread terminal connection errors use existing notice, never automatic replay or extra RPC; isolated browser fixture does not certify real provider delivery.",
+        "Local native.status/shared.status snapshots reuse an already-held owner lease and current document without official account/read; unknown/ended/retired sessions cannot leak another owner, and snapshot results never replace native.ensure/send/mutation admission. Reselecting a committed connection uses native.ensure, with stale-route repair and original busy/cancellation behavior."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -79,7 +105,8 @@
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "In an idle test conversation select a previously verified child, then the primary account. Confirm identity and quota update without another login.",
-        "Separately test a signed-out/expired connection and an unavailable network; cached quota must not be described as a login failure."
+        "Separately test a signed-out/expired connection and an unavailable network; cached quota must not be described as a login failure.",
+        "In an idle disposable installation start/cancel a primary-account authorization, including an interrupted receipt. Confirm ordinary account switching and disable remain usable after interruption, and that canceled differs from notFound/unconfirmed. Do not change the active user login automatically."
       ]
     },
     {
@@ -119,11 +146,15 @@
       "feature": "Backgrounds, surface opacity and theme",
       "sources": [
         "packages/explorer-ui/src/host/appearance/theme-probe.ts",
-        "packages/explorer-ui/src/native-background-surfaces.ts"
+        "packages/explorer-ui/src/native-background-surfaces.ts",
+        "packages/explorer-ui/src/plugin-host/backgrounds/spectral-drape.ts",
+        "packages/explorer-ui/src/effects/spectral-drape/model.ts",
+        "packages/explorer-ui/src/features/plugin-settings/parameter-panel.ts"
       ],
       "tests": [
         "scripts/test-appearance-adapter.mjs",
-        "scripts/test-conversation-mask.mjs"
+        "scripts/test-conversation-mask.mjs",
+        "scripts/test-spectral-drape.mjs"
       ],
       "tokens": [
         "app.appearance.get",
@@ -133,7 +164,9 @@
       ],
       "paths": [],
       "checks": [
-        "Light/dark native theme, background activation/deactivation and unchanged controls/media."
+        "Light/dark native theme, background activation/deactivation and unchanged controls/media.",
+        "Spectral Drape uses shared ManagedBackgroundController, independent Worker first-frame, native settings surface transparency and theme lease. Test download without activation, parameter/reset persistence, shared ASCII panel, reduced-motion/paused idle, startup copy and cleanup; no account/switch checks or new waits.",
+        "Spectral click uses visible folded-surface NDC and CSS offset/DPR-independent pointer coordinates; offset canvas multi-point uniform regression. Saved live defaults and dot SVG icon match panel; startup animation selector includes spectral. Brush path stays unchanged."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -251,10 +284,13 @@
       "feature": "Official executable, launch and package identity",
       "sources": [
         "crates/launcher/src/discovery.rs",
-        "crates/launcher/src/process_guard.rs"
+        "crates/launcher/src/process_guard.rs",
+        "crates/launcher/resources/package-activation.cs",
+        "crates/launcher/build.rs"
       ],
       "tests": [
-        "scripts/test-startup-conflict-native.ps1"
+        "scripts/test-startup-conflict-native.ps1",
+        "crates/launcher/src/process_guard.rs"
       ],
       "tokens": [],
       "paths": [
@@ -264,7 +300,8 @@
         "resources/app-update.yml"
       ],
       "checks": [
-        "Trusted package identity, native launch ownership, old/new/unknown versions and uninstall cleanup."
+        "Trusted package identity, native launch ownership, old/new/unknown versions and uninstall cleanup.",
+        "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -292,7 +329,9 @@
         "crates/launcher/src/process_guard.rs",
         "packages/explorer-ui/src/core/document-capability-owner.ts",
         "packages/explorer-ui/src/app/composition.ts",
-        "packages/explorer-ui/src/features/accounts/legacy-handoff.ts"
+        "packages/explorer-ui/src/features/accounts/legacy-handoff.ts",
+        "crates/launcher/resources/package-activation.cs",
+        "crates/launcher/build.rs"
       ],
       "tests": [
         "crates/launcher/src/accounts/startup.rs",
@@ -303,7 +342,8 @@
         "scripts/test-account-native-routing.mjs",
         "scripts/test-document-retired-binding.mjs",
         "scripts/test-account-lease-handoff.mjs",
-        "scripts/test-account-candidate-cleanup.mjs"
+        "scripts/test-account-candidate-cleanup.mjs",
+        "crates/launcher/src/process_guard.rs"
       ],
       "tokens": [
         "openai_base_url",
@@ -333,7 +373,9 @@
         "Existing conversations and New Chat drafts share one loopback listener and HTTP client per account service, with distinct capability paths and per-conversation credentials, context, quota and cancellation. Two conversations may use the same account; switching one cannot change the other.",
         "Parallel requests remain isolated; closing or cancelling one route leaves the other usable. Unknown/closed capability paths cannot route to another conversation. The initial loopback probe is reused by later routes without additional identity/quota reads, retries or switching waits.",
         "New Chat refuses inference before the native thread binding and accepts it after binding on the same listener. Cover official/API routes, existing and new chats, disabled/re-enabled plugin and network reconnect separately; real provider success and timing require actual host/service acceptance.",
-        "Same-version retired native bindings cannot cancel current startup, claim document ownership or release the working endpoint again; include legacy slot assignment, failed unreleased candidate, current binding reconnection and new-document reset. This is local lifecycle admission only: no added account switch/auth/quota reads, retry or waiting."
+        "Same-version retired native bindings cannot cancel current startup, claim document ownership or release the working endpoint again; include legacy slot assignment, failed unreleased candidate, current binding reconnection and new-document reset. This is local lifecycle admission only: no added account switch/auth/quota reads, retry or waiting.",
+        "Within one startup transport operation reuse the verified descriptor and HTTP client across status/route/bind. Preserve listener ownership, capability/proof, active-request rejection, legacy/API fallback, failed replies and default restore; no descriptor is cached across operations.",
+        "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -355,12 +397,16 @@
       "sources": [
         "crates/launcher/src/accounts/context_handoff.rs",
         "crates/launcher/src/accounts/official_context.rs",
-        "crates/launcher/src/accounts/relay.rs"
+        "crates/launcher/src/accounts/relay.rs",
+        "crates/launcher/src/accounts/relay_diagnostics.rs",
+        "crates/launcher/src/accounts/context_recovery.rs"
       ],
       "tests": [
         "crates/launcher/src/accounts/context_handoff.rs",
         "crates/launcher/src/accounts/relay.rs",
-        "crates/launcher/src/accounts/official_context.rs"
+        "crates/launcher/src/accounts/official_context.rs",
+        "crates/launcher/src/accounts/relay_diagnostics.rs",
+        "crates/launcher/src/accounts/context_recovery.rs"
       ],
       "tokens": [
         "encrypted_content",
@@ -370,7 +416,11 @@
         "function_call_output",
         "local_shell_call",
         "response.output_item.done",
-        "response.completed"
+        "response.completed",
+        "codex_apps_open_page",
+        "codex_apps_selected_page_part_",
+        "internal_chat_message_metadata_passthrough",
+        "task_complete"
       ],
       "paths": [],
       "checks": [
@@ -378,7 +428,14 @@
         "Duplicate/missing call_id, incomplete compaction, cancelled/unknown outcome and compressed/oversized body refusals.",
         "HTTP/SSE completion and errors; real provider tools and multi-turn behavior require separate explicit acceptance.",
         "Return from API restores the latest original official compaction checkpoint plus readable progress without rewriting the archive or summarizing native history. Foreign reasoning is isolated; repeated provider cycles and live official stream state before archive flush preserve provenance.",
-        "Legacy native pass-through learns accepted official opaque state only after successful completion. Unknown ciphertext, missing replacement history and corrupt/backwards provenance are explicit failures, never guessed ownership or silent history replacement."
+        "Legacy native pass-through learns accepted official opaque state only after successful completion. Unknown ciphertext, missing replacement history and corrupt/backwards provenance are explicit failures, never guessed ownership or silent history replacement.",
+        "Encrypted-context diagnostics link a captured official workspace/connection fingerprint, input before and after projection, completed output fingerprint, bounded error code and safe hashed item reference. Diagnostic bounds omit samples without altering native HTTP/WebSocket requests or response bytes.",
+        "Native agent companion-page function_call_output records with no call_id are reference data, not executed tool results. Project only verified names/metadata to user-priority quoted context; preserve full output. Genuine orphan tool results and unknown shapes still fail.",
+        "Exact encrypted reasoning rejected in structured native task-complete errors or a matching sent upstream item is isolated only in the outbound copy on a later explicit request. Keep official compaction, readable history and real tool results. No automatic inference replay and no original archive mutation.",
+        "For a request containing known rejected reasoning, rebuild its failed history without other encrypted reasoning before the latest user boundary; retain active-turn reasoning, native compaction and visible task/tool records. Count known rejections separately from other historical reasoning omitted. Clean native checkpoints without rejected bytes remain unchanged.",
+        "Prepare loads recovery evidence once and transfers it to Handoff; ordinary reasoning builds response attribution without the former duplicate hashing pass. Exact rejected/history isolation, archive identity and no automatic replay remain.",
+        "Diagnostic-only request-local encrypted-item indexes must survive overlapping HTTP/WS projections without changing recovery/forwarding policy. Rejection events correlate operation/sampling, native input cipher and current recovery index; missing association stays explicit. No extra credential read, ciphertext hash pass, archive scan, retry or wait.",
+        "Actual encrypted-context root cause remains unproven without matching producer/route/request evidence. Native compact completion and unchanged original archive prefix are separate from ordinary chat acceptance; runtime logs retain their bounded5MiB/10-run scope."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -387,7 +444,9 @@
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "In a disposable conversation use an official account, switch to API, then return to official. Check readable history and tool continuity for two turns.",
-        "Cancellation, compaction and encrypted-context errors require preserved evidence; do not rewrite the user archive to make the test pass."
+        "Cancellation, compaction and encrypted-context errors require preserved evidence; do not rewrite the user archive to make the test pass.",
+        "In disposable official-account conversations compare same-account continuation, same-account close/reopen and A to B to A. Join item and opaque fingerprints with workspace fingerprint and operation/sampling sequence. A real quota-credit reset requires explicit user action and before/after controls. Missing older provenance remains unknown.",
+        "At idle recover an actually failed long conversation using its recorded invalid_encrypted_content evidence. Confirm successful native compaction and a later normal message; separately check disable/default-route behavior and keep the original failure evidence."
       ]
     },
     {
@@ -426,7 +485,8 @@
         "New Chat and existing native composer: optional isResponseInProgress omitted/undefined or boolean false/true must qualify through the same mounted owner/context/subscription contract; invalid values, missing and ambiguous owners remain rejected.",
         "Exhausted host with usable child/API projects only the three native quota snapshots. Existing native permission/auth/busy blocks stay enforced; returning to host, inactive/changed conversation, foreign replacement and disposal restore or stop only owned projection. Controlled child Send forwards the original callback exactly once with unchanged draft; actual remote first-turn success is a separate host/service acceptance.",
         "Same-version selector correction uses its existing revision-based idle replacement and retains the verified execution adapter/routes; active preparation or turns defer view replacement without an added switching wait.",
-        "Actual native ComposerScope home identity is kind=new/entrypoint=home without placement or conversationId. Local main identity and legacy new/main stay supported; panels, previews, library, side, wrong thread, distinct matching contexts and missing identity are rejected. Exercise alias context reuse and store/derived-holder dependency forms through all three quota leases and the original Send callback, not just the owner predicate."
+        "Actual native ComposerScope home identity is kind=new/entrypoint=home without placement or conversationId. Local main identity and legacy new/main stay supported; panels, previews, library, side, wrong thread, distinct matching contexts and missing identity are rejected. Exercise alias context reuse and store/derived-holder dependency forms through all three quota leases and the original Send callback, not just the owner predicate.",
+        "A projected quota-ready operation and its composer caller share one React animation-frame wait; unchanged draft, replaced controls, disabled/error and disposal still prevent duplicate or late sends."
       ],
       "automatedChecks": [
         "package.inventory",

@@ -5,6 +5,7 @@ export const STARTUP_BACKGROUNDS = [
   ['milky-way','Milky Way Background'], ['mountain','Layered Mountain Background'],
   ['cloud-train','Cloud Train Background'], ['blinking-squares','Blinking Squares Background'],
   ['particle-image','Particle Image Background'], ['pixel-sculpt','Pixel Sculpt Background'],
+  ['spectral-drape','Spectral Drape Background'],
   ['ascii-tiles','ASCII Tiles Background'], ['custom-background','Custom Background'],
   ['shallow-ocean','Shallow Ocean Letters Background'],
 ] as const;

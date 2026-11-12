@@ -29,6 +29,7 @@ mod outcome;
 mod relay;
 mod relay_diagnostics;
 mod context_handoff;
+mod context_recovery;
 mod official_context;
 mod native_route;
 pub(crate) mod startup;
@@ -192,6 +193,23 @@ impl AccountService {
         self.qualified
 .get_or_try_init(|| host::verify_profile(endpoint))
             .await?;
+        // These are snapshots owned by an existing local lease, not admission
+        // evidence. Reading progress must not perform another account/read.
+        if matches!(action.as_str(), "native.status" | "shared.status") {
+            let owner = text(&params, "owner")?;
+            let all = self.state.lock().await;
+            if all.contains_key(owner) {
+                if !current() || owner_root(owner)?.join("ended-session.json").exists() {
+                    return Err(AccountError::new("ACCOUNT_STALE_SESSION", "The owning account session ended before its local status could be read."));
+                }
+                let thread = identifier(&params, "conversationId")?;
+                return Ok(if action == "native.status" {
+                    self.relays.get(owner, thread).map(|r|r.status()).unwrap_or(json!({"connectionId":"host","routed":false,"ready":true,"activeRequests":0}))
+                } else {
+                    self.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&format!("{owner}:{thread}")).map(|p|p.snapshot()).unwrap_or(json!({"status":"none"}))
+                });
+            }
+        }
         let observe_started=std::time::Instant::now();
         let owner=match host::observe(endpoint).await {
             Ok(owner)=>owner,
@@ -445,6 +463,10 @@ impl AccountService {
                 }
                 if let Some(value)=consumed {
                     let outcome=value["outcome"].as_str().filter(|s|matches!(*s,"reset"|"alreadyRedeemed"|"nothingToReset"|"noCredit")).ok_or_else(||AccountError::new("ACCOUNT_RESET_OUTCOME_UNKNOWN","The reset outcome could not be verified. Do not submit a new redemption key."))?;
+                    crate::runtime_log::record("accounts","account.reset.receipt","confirmed",json!({
+                        "connectionFingerprint":relay_diagnostics::fingerprint(&id),
+                        "backendInstance":worker.credential_refresh_ticket().0,"outcome":outcome,
+                        "historyMutation":false}));
                     Ok(json!({"outcome":outcome}))
                 }else{Ok(usage::project(&raw))}
                 };
@@ -990,6 +1012,30 @@ fn lease(root: &Path) -> Result<std::fs::File> {
 #[cfg(test)]
 mod lease_tests {
     use super::*;
+    #[tokio::test]
+    async fn leased_status_reads_do_not_call_official_account_or_admit_work() {
+        let service=AccountService::default();
+        // No server is listening: any official owner request would fail.
+        *service.endpoint.write().unwrap()=Some(CdpEndpoint::loopback(1));
+        service.qualified.set(()).unwrap();
+        let owner=format!("dedup-fixture-{}",nonce());
+        service.state.lock().await.insert(owner.clone(),OwnerState{generation:nonce(),executors:Default::default(),login:None,registry:Registry::default(),workers:Default::default(),threads:Default::default(),active:Default::default(),cursors:Default::default(),_lease:tempfile::tempfile().unwrap(),lease_generation:None});
+        let preparation=preparation::Preparation::start();
+        service.preparations.lock().unwrap().insert(format!("{owner}:thread-one"),preparation.clone());
+        let read=|action:&str,thread:&str|json!({"action":action,"owner":owner,"conversationId":thread});
+        assert_eq!(service.request(read("native.status","thread-one"),None,||true).await.unwrap()["routed"],false);
+        assert_eq!(service.request(read("shared.status","thread-one"),None,||true).await.unwrap()["status"],"preparing");
+        assert_eq!(service.request(read("shared.status","thread-two"),None,||true).await.unwrap()["status"],"none");
+        assert_eq!(service.request(read("native.status","thread-one"),None,||false).await.unwrap_err().code,"ACCOUNT_STALE_SESSION");
+        assert!(service.request(json!({"action":"shared.status","owner":format!("other-{}",nonce()),"conversationId":"thread-one"}),None,||true).await.is_err());
+        // A snapshot is never substituted for native.ensure admission.
+        assert!(service.request(json!({"action":"native.ensure","owner":owner,"conversationId":"thread-one","connectionId":"host"}),None,||true).await.is_err());
+        let root=owner_root(&owner).unwrap();crate_marker(&root,true).unwrap();
+        assert_eq!(service.request(read("native.status","thread-one"),None,||true).await.unwrap_err().code,"ACCOUNT_STALE_SESSION");
+        crate_marker(&root,false).unwrap();std::fs::remove_dir(root).unwrap();
+        assert!(service.state.lock().await[&owner].registry.selected.is_empty());
+        assert_eq!(preparation.snapshot()["status"],"preparing");
+    }
     #[test] fn released_native_endpoint_requires_a_new_concrete_document_generation(){
         assert!(!lease_generation_changed(Some("old"),Some("old")));
         assert!(!lease_generation_changed(Some("old"),None));

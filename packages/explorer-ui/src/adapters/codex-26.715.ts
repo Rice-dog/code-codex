@@ -83,7 +83,8 @@ export function isTemporaryLocalThreadAlias(value: unknown): value is string {
 }
 
 function verifiedActiveLocalThreadIds(root: ParentNode): string[] | null {
-  const activeElements = activePageElements(root, ACTIVE_THREAD_MARKER_SELECTOR);
+  const activeElements = activePageElements(root, ACTIVE_THREAD_MARKER_SELECTOR)
+    .filter((element) => !element.closest('[inert],[aria-hidden="true"]'));
   if (!activeElements.length) return null;
   const values = activeElements.map((element) => {
     const encoded = element.getAttribute("data-app-action-sidebar-thread-id");

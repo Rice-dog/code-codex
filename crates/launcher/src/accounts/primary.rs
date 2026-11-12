@@ -34,7 +34,7 @@ fn write(root:&Path,p:&Pending)->Result<()>{crate::renderer_storage::atomic(&pat
 fn event(p:&Pending,outcome:&str){crate::runtime_log::record("accounts","account.primary",outcome,json!({"operationId":p.operation_id,"stage":p.stage,"state":p.state,"elapsedMs":if p.started_at_ms==0{0}else{p.updated_at_ms.saturating_sub(p.started_at_ms)},"errorCode":p.error_code,"formerPrimaryPreserved":p.former_primary_preserved,"loginDispatched":p.authorization_requested,"authorizationRequested":p.authorization_requested,"taskSent":false,"credentialsExposed":false}));}
 fn update(root:&Path,p:&mut Pending,stage:Option<&str>)->Result<()>{
  let _lock=STATE_IO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
- if !read(root)?.is_some_and(|v|v.operation_id==p.operation_id&&v.state=="pending"){return Err(AccountError::new("ACCOUNT_PRIMARY_STALE","The primary-account operation was replaced or ended. No authorization was replayed."))}
+ if !read(root)?.is_some_and(|v|v.operation_id==p.operation_id&&matches!(v.state.as_str(),"pending"|"interrupted")){return Err(AccountError::new("ACCOUNT_PRIMARY_STALE","The primary-account operation was replaced or ended. No authorization was replayed."))}
  if let Some(stage)=stage{p.stage=stage.into();}p.updated_at_ms=now();write(root,p)?;event(p,if p.state=="pending"{"progress"}else{p.state.as_str()});Ok(())
 }
 fn recovery(p:&Pending)->&'static str{if p.authorization_requested{"Verify the current official login before retrying. Authorization may have started; it was not replayed."}else{"Authorization was not requested. Reopen the panel after the connection recovers and retry when all tasks are idle."}}
@@ -70,14 +70,25 @@ pub(super) async fn refresh_status(endpoint:CdpEndpoint,root:&Path,owner:&host::
 pub(super) fn guard(root:&Path,owner:&host::Owner,action:&str)->Result<()> {
  let value=status(root,owner)?;
  let uncertain=value["state"]=="interrupted"&&read(root)?.is_some_and(|v|v.authorization_requested);
- if (value["state"]=="pending"||uncertain)&&!matches!(action,"info"|"primary.status"|"native.status"|"primary.cancel"|"session.policy"|"session.end"|"verify"|"usage"|"events"|"shared.events"|"shared.status"|"shared.stop"|"reconcile"|"shared.reconcile") {
+ if (value["state"]=="pending"||uncertain&&action=="primary.start")&&!matches!(action,"info"|"primary.status"|"native.status"|"primary.cancel"|"session.policy"|"session.end"|"verify"|"usage"|"events"|"shared.events"|"shared.status"|"shared.stop"|"reconcile"|"shared.reconcile") {
   return Err(AccountError::new("ACCOUNT_PRIMARY_PENDING","A primary-account authorization is pending. Complete or cancel it before changing execution accounts. No task was sent."))
  }Ok(())
 }
 async fn official(endpoint:CdpEndpoint,params:Value)->Result<Value>{
+ response(official_value(endpoint,params).await?)
+}
+async fn official_value(endpoint:CdpEndpoint,params:Value)->Result<Value>{
  let source=include_str!("primary_host.js").replace("__PROFILE__",&host::profile().to_string()).replace("__PARAMS__",&params.to_string());
- let value=host::evaluate_budget(endpoint,&source,Duration::from_secs(20)).await?;
+ host::evaluate_budget(endpoint,&source,Duration::from_secs(20)).await
+}
+fn response(value:Value)->Result<Value>{
  if let Some(f)=value.get("failure"){return Err(AccountError::new(f["code"].as_str().unwrap_or("ACCOUNT_PRIMARY_RPC"),format!("Primary-account operation was not completed. stage={}; checkedThreads={}; authorizationRequested={}; no inference was sent.",f["stage"].as_str().unwrap_or("unknown"),f["checkedThreads"].as_u64().unwrap_or(0),f["authorizationRequested"].as_bool().unwrap_or(false))))}Ok(value)
+}
+fn finish_cancel(root:&Path,saved:&mut Pending,confirmed:bool)->Result<Value>{
+ saved.state=if confirmed{"cancelled"}else{"failed"}.into();
+ saved.error_code=if confirmed{None}else{Some("ACCOUNT_PRIMARY_CANCEL_UNCONFIRMED".into())};
+ update(root,saved,Some("authorization-cancel"))?;
+ Ok(json!({"cancelled":confirmed,"localSetupEnded":true,"authorizationUnconfirmed":!confirmed&&saved.authorization_requested}))
 }
 async fn require_plugin_idle(service:&AccountService)->Result<()> {
  let all=tokio::time::timeout(Duration::from_secs(5),service.state.lock()).await.map_err(|_|AccountError::new("ACCOUNT_REQUEST_BUSY","Primary-account idle verification could not acquire the account registry. No authorization was requested."))?;
@@ -91,8 +102,16 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
  let root=super::owner_root(&owner.id)?;
  if p["action"]=="primary.status"{refresh_status(endpoint,&root,owner).await?;return status(&root,owner)}
  if p["action"]=="primary.cancel" {
+  refresh_status(endpoint,&root,owner).await?;
   let Some(mut saved)=read(&root)?else{return Ok(json!({"cancelled":true}))};
-  if saved.state=="pending" {if saved.login_id.is_empty(){return Err(AccountError::new("ACCOUNT_PRIMARY_PREPARING","Primary-account preparation is still running. Wait for a result before cancelling authorization."))}if let Err(error)=official(endpoint,json!({"mode":"cancel","loginId":saved.login_id})).await{saved.error_code=Some(error.code.clone());let _=update(&root,&mut saved,Some("authorization-cancel"));return Err(AccountError::new(&error.code,format!("Cancellation was not confirmed. stage=authorization-cancel; operationId={}; no authorization was replayed. {}",saved.operation_id,error.message)))}saved.state="cancelled".into();saved.error_code=None;update(&root,&mut saved,Some("authorization-cancel"))?;}
+  if matches!(saved.state.as_str(),"pending"|"interrupted") {
+   if saved.login_id.is_empty(){
+    if saved.state=="pending" {return Err(AccountError::new("ACCOUNT_PRIMARY_PREPARING","Primary-account preparation is still running. Wait for a result before cancelling authorization."))}
+    return finish_cancel(&root,&mut saved,false);
+   }
+   let receipt=match official(endpoint,json!({"mode":"cancel","loginId":saved.login_id})).await{Ok(value)=>value,Err(error)=>{saved.error_code=Some(error.code.clone());let _=update(&root,&mut saved,Some("authorization-cancel"));return Err(AccountError::new(&error.code,format!("Cancellation was not confirmed. stage=authorization-cancel; operationId={}; no authorization was replayed. {}",saved.operation_id,error.message)))}};
+   return finish_cancel(&root,&mut saved,receipt["status"]=="canceled");
+  }
   return Ok(json!({"cancelled":true}));
  }
  guard(&root,owner,"primary.start")?;
@@ -134,7 +153,9 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
  require_plugin_idle(service).await?;
  if !current()||host::observe(endpoint).await?.id!=owner.id{return Err(AccountError::new("ACCOUNT_OWNER_CHANGED","The official identity changed before authorization. No login was requested."))}
  saved.authorization_requested=true;update(&root,&mut saved,Some("authorization-start"))?;
-  let value=official(endpoint,json!({"mode":"start","operationId":saved.operation_id})).await?;
+  let value=official_value(endpoint,json!({"mode":"start","operationId":saved.operation_id})).await?;
+ if value["failure"]["authorizationRequested"]==false {saved.authorization_requested=false;}
+ let value=response(value)?;
  saved.login_id=value["loginId"].as_str().unwrap_or("").to_owned();update(&root,&mut saved,Some("authorization-open"))?;
  if let Err(e)=super::open_authorization(value["authUrl"].as_str().unwrap_or("")){let _=official(endpoint,json!({"mode":"cancel","loginId":saved.login_id})).await;return Err(e)}
  update(&root,&mut saved,Some("authorization-wait"))?;
@@ -145,6 +166,18 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
 
 #[cfg(test)] mod tests {
  use super::*;
+ #[test] fn interrupted_authorization_does_not_block_switch_or_disable_and_can_end_locally(){
+  let (_dir,root,owner)=fixture();let mut p=Pending::new(&owner,"b@example.invalid".into());p.state="interrupted".into();p.authorization_requested=true;write(&root,&p).unwrap();
+  for action in ["select","native.prepare","native.detach","native.status"] {assert!(guard(&root,&owner,action).is_ok(),"{action}");}
+  assert!(guard(&root,&owner,"primary.start").is_err());
+  let receipt=finish_cancel(&root,&mut p,false).unwrap();assert_eq!(receipt["cancelled"],false);assert_eq!(receipt["localSetupEnded"],true);assert_eq!(receipt["authorizationUnconfirmed"],true);
+  assert_eq!(status(&root,&owner).unwrap()["errorCode"],"ACCOUNT_PRIMARY_CANCEL_UNCONFIRMED");assert!(guard(&root,&owner,"primary.start").is_ok());
+ }
+ #[test] fn confirmed_cancel_finishes_an_interrupted_known_login_without_stale_write(){
+  let (_dir,root,owner)=fixture();let mut p=Pending::new(&owner,"b@example.invalid".into());p.state="interrupted".into();p.login_id="fixture-login".into();p.authorization_requested=true;write(&root,&p).unwrap();
+  assert_eq!(finish_cancel(&root,&mut p,true).unwrap()["cancelled"],true);assert_eq!(status(&root,&owner).unwrap()["state"],"cancelled");
+  assert!(finish_cancel(&root,&mut p,false).is_err());
+ }
  #[tokio::test] async fn pending_preparation_blocks_before_any_route_restoration(){let service=AccountService::default();assert!(require_plugin_idle(&service).await.is_ok());service.preparations.lock().unwrap().insert("owner:task".into(),super::super::preparation::Preparation::start());let error=require_plugin_idle(&service).await.unwrap_err();assert_eq!(error.code,"ACCOUNT_TURN_ACTIVE");assert!(error.message.contains("preparations=1")&&error.message.contains("No authorization was requested"));}
  #[test] fn authorization_is_committed_only_for_the_selected_identity(){
   let dir=tempfile::tempdir().unwrap();let root=dir.path().join("a".repeat(64));std::fs::create_dir(&root).unwrap();let a=host::Owner{id:"a".repeat(64),label:"a@example.invalid".into(),plan:None};let b=host::Owner{id:"b".repeat(64),label:"b@example.invalid".into(),plan:None};

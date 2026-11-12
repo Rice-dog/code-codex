@@ -213,6 +213,7 @@ $script:RemovalUiText = @'
   "pdf preview": "PDF 预览",
   "pixel sculpt background": "像素浮雕",
   "shallow ocean letters background": "浅海来信",
+  "spectral drape background": "光谱点阵帷幕",
   "ui surface opacity": "界面透明度",
   "transparent background": "透明背景",
   "video preview": "视频预览",

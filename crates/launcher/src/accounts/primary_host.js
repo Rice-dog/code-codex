@@ -9,7 +9,7 @@
  if(matches.size!==1)return {failure:{code:'ACCOUNT_PRIMARY_CAPABILITY',stage:'primary-manager'}};
  service=[...matches][0].dup();stage='manager-ready';
   const ready=await read(()=>{opened=service.open('local');return opened;});if(ready.status!=='ready')throw Error('ACCOUNT_RPC_UNAVAILABLE');manager=ready.manager.dup();
-  if(p.mode==='cancel'){stage='authorization-cancel';const value=await manager.sendRequest('account/login/cancel',{loginId:p.loginId},{timeoutMs:8000});const v=window[slot];if(v?.loginId===p.loginId)v.dispose();return value;}
+  if(p.mode==='cancel'){stage='authorization-cancel';const value=await manager.sendRequest('account/login/cancel',{loginId:p.loginId},{timeoutMs:8000});if(!['canceled','notFound'].includes(value?.status))throw Error('ACCOUNT_PRIMARY_CANCEL_PROTOCOL');const v=window[slot];if(v?.loginId===p.loginId)v.dispose();return value;}
   let cursor;const seen=new Set();
   for(let page=0;;page++){
    if(page>=64)throw Error('ACCOUNT_NATIVE_LOADED_BOUND');

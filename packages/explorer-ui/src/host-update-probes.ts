@@ -26,7 +26,13 @@ export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];docu
   const root=document.createElement('div');root.innerHTML='<button data-app-shell-sidebar-trigger></button><div><aside class="app-shell-left-panel"></aside><main class="main-surface"></main></div>';
   assert(codex26715Adapter.qualifiesRenderer(root));assert(codex26715Adapter.supportsVersion('unknown'));
   root.querySelector('main')!.parentElement!.append(root.querySelector('main')!.cloneNode());assert(!codex26715Adapter.qualifiesRenderer(root));root.querySelectorAll('main').forEach(n=>n.remove());assert(!codex26715Adapter.qualifiesRenderer(root));
-  add('regression.layout','passed','Executed production layout qualification on detached supported, missing and ambiguous workspace fixtures.','controlled-production-regression');
+  const marker=(id:string)=>`<div data-app-action-sidebar-thread-active="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-kind="local" data-app-action-sidebar-thread-id="local:${id}"></div>`;
+  for(const hidden of ['inert','aria-hidden="true"','inert aria-hidden="true"']){
+   root.innerHTML=marker('thread_active')+`<div ${hidden}>`+marker('thread_hidden')+'</div>';
+   assert(codex26715Adapter.activeThreadId(root)==='thread_active');
+  }
+  root.innerHTML=marker('thread_active')+marker('thread_other');assert(codex26715Adapter.activeThreadId(root)===null);
+  add('regression.layout','passed','Executed production layout qualification and collapsed-sidebar thread identity positive/ambiguous fixtures on detached DOM.','controlled-production-regression');
  }catch{add('regression.layout','issue','A controlled production layout regression failed.','controlled-production-regression');}
  try{
   const picker={models:[],modelOptions:[],onSelectModel(){throw Error('never select');},onOpenChange(){throw Error('never open');}};

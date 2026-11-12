@@ -303,6 +303,7 @@ impl CodexProcessGuard {
                     "-Command",
                     PACKAGE_ACTIVATION_SCRIPT,
                 ])
+                .env("CLE_PACKAGE_HELPER", package_helper_base64())
                 .env("CLE_PACKAGE_AUMID", aumid)
                 .env("CLE_PACKAGE_FULL_NAME", package_full_name)
                 .env("CLE_PACKAGE_ARGUMENTS", activation_arguments)
@@ -545,11 +546,35 @@ mod activation_wait_tests {
         if let CodexProcessGuard::Package(p)=&mut guard{assert!(p.helper.try_wait().unwrap().is_none());}
         guard.terminate().await;target.wait().await.unwrap();
     }
+    #[test]
+    fn embedded_activation_helper_ignores_temp_code_page() {
+        use std::os::windows::process::CommandExt as _;
+        let root = tempfile::tempdir().unwrap();
+        for name in ["ascii", "中文临时目录", "مجلد", "user-😀"] {
+            let directory = root.path().join(name);
+            std::fs::create_dir(&directory).unwrap();
+            // Invalid AUMID exercises production load + COM without starting an app.
+            let output = std::process::Command::new(trusted_powershell().unwrap())
+                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Sta", "-Command", PACKAGE_ACTIVATION_SCRIPT])
+                .env("CLE_PACKAGE_HELPER", package_helper_base64())
+                .env("CLE_PACKAGE_AUMID", "CodeCodex.Unregistered.UnicodeTest!App")
+                .env("CLE_PACKAGE_FULL_NAME", "CodeCodex.Unregistered.UnicodeTest")
+                .env_remove("CLE_STARTUP_CONFIG")
+                .env("TEMP", &directory).env("TMP", &directory)
+                .stdin(Stdio::null()).creation_flags(0x0800_0000).output().unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("load embedded package activation helper") && stderr.contains("\"outcome\":\"passed\""), "{stderr}");
+            let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(result["HResult"].as_i64().unwrap() < 0);
+            assert_eq!(result["ProcessId"], 0);
+            assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        }
+    }
+
     #[tokio::test]
     async fn clr_control_reader_is_nonblocking_with_an_open_stdin_pipe() {
-        let csharp=PACKAGE_ACTIVATION_SCRIPT.split("$source = @'\n").nth(1).unwrap().split("\n'@").next().unwrap();
-        let command=format!("$code=@'\n{csharp}\n'@\nAdd-Type -TypeDefinition $code; $pending=[CodexLiveExplorerPackageGuard.ControlInput]::BeginRead(); [Console]::Out.WriteLine('monitor-live'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 500; [Console]::Out.WriteLine('monitor-finished')");
-        let mut helper=TokioCommand::new(trusted_powershell().unwrap()).args(["-NoProfile","-NonInteractive","-Command",&command]).creation_flags(0x0800_0000).stdin(Stdio::piped()).stdout(Stdio::piped()).kill_on_drop(true).spawn().unwrap();
+        let command="[void][Reflection.Assembly]::Load([Convert]::FromBase64String($env:CLE_PACKAGE_HELPER)); $pending=[CodexLiveExplorerPackageGuard.ControlInput]::BeginRead(); [Console]::Out.WriteLine('monitor-live'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 500; [Console]::Out.WriteLine('monitor-finished')";
+        let mut helper=TokioCommand::new(trusted_powershell().unwrap()).args(["-NoProfile","-NonInteractive","-Command",command]).env("CLE_PACKAGE_HELPER",package_helper_base64()).creation_flags(0x0800_0000).stdin(Stdio::piped()).stdout(Stdio::piped()).kill_on_drop(true).spawn().unwrap();
         let mut output=BufReader::new(helper.stdout.take().unwrap());let mut line=String::new();
         tokio::time::timeout(Duration::from_secs(10),output.read_line(&mut line)).await.expect("open stdin must not block monitor").unwrap();assert_eq!(line.trim(),"monitor-live");
         line.clear();tokio::time::timeout(Duration::from_secs(3),output.read_line(&mut line)).await.unwrap().unwrap();assert_eq!(line.trim(),"monitor-finished");
@@ -680,6 +705,12 @@ async fn read_package_activation_line(output: tokio::process::ChildStdout) -> io
 }
 
 #[cfg(windows)]
+fn package_helper_base64() -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(include_bytes!(concat!(env!("OUT_DIR"), "/package-activation.dll")))
+}
+
+#[cfg(windows)]
 const PACKAGE_ACTIVATION_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
@@ -688,237 +719,8 @@ function Write-CCActivation([string]$phase, [string]$outcome, $fields) {
     foreach($key in $fields.Keys){$item[$key]=$fields[$key]}
     [Console]::Error.WriteLine('CC_PROCESS_QUERY='+(ConvertTo-Json -InputObject $item -Compress -Depth 4))
 }
-$activationStep='compile package activation helper'
-$source = @'
-using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
+$activationStep='load embedded package activation helper'
 
-namespace CodexLiveExplorerPackageGuard
-{
-    public static class ControlInput
-    {
-        // Console.In.ReadLineAsync can block synchronously on .NET Framework.
-        // Run the actual read on a CLR thread, never a PowerShell scriptblock.
-        public static System.Threading.Tasks.Task<string> BeginRead()
-        {
-            return System.Threading.Tasks.Task.Factory.StartNew(
-                () => Console.In.ReadLine(), System.Threading.CancellationToken.None,
-                System.Threading.Tasks.TaskCreationOptions.LongRunning,
-                System.Threading.Tasks.TaskScheduler.Default);
-        }
-    }
-    [Flags]
-    public enum ActivateOptions : uint
-    {
-        None = 0,
-        DesignMode = 1,
-        NoErrorUI = 2,
-        NoSplashScreen = 4
-    }
-
-    public enum PackageExecutionState : int
-    {
-        Unknown = 0,
-        Running = 1,
-        Suspending = 2,
-        Suspended = 3,
-        Terminated = 4
-    }
-
-    [ComImport]
-    [Guid("1BB12A62-2AD8-432B-8CCF-0C2C52AFCD5B")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IPackageExecutionStateChangeNotification
-    {
-        [PreserveSig]
-        int OnStateChanged(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName,
-            PackageExecutionState newState);
-    }
-
-    [ComImport]
-    [Guid("2E941141-7F97-4756-BA1D-9DECDE894A3D")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IApplicationActivationManager
-    {
-        [PreserveSig]
-        int ActivateApplication(
-            [MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
-            [MarshalAs(UnmanagedType.LPWStr)] string arguments,
-            ActivateOptions options,
-            out uint processId);
-
-        [PreserveSig]
-        int ActivateForFile(
-            [MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
-            IntPtr itemArray,
-            [MarshalAs(UnmanagedType.LPWStr)] string verb,
-            out uint processId);
-
-        [PreserveSig]
-        int ActivateForProtocol(
-            [MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
-            IntPtr itemArray,
-            out uint processId);
-    }
-
-    [ComImport]
-    [Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
-    public class ApplicationActivationManager
-    {
-    }
-
-    // Method order and signatures mirror the complete IPackageDebugSettings
-    // vtable in ShObjIdl_core.h. In particular, TerminateAllProcesses is slot
-    // 5 and GetPackageExecutionState is slot 13 after IUnknown.
-    [ComImport]
-    [Guid("F27C3930-8029-4AD1-94E3-3DBA417810C1")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IPackageDebugSettings
-    {
-        [PreserveSig]
-        int EnableDebugging(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName,
-            [MarshalAs(UnmanagedType.LPWStr)] string debuggerCommandLine,
-            IntPtr environment);
-
-        [PreserveSig]
-        int DisableDebugging(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-
-        [PreserveSig]
-        int Suspend(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-
-        [PreserveSig]
-        int Resume(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-
-        [PreserveSig]
-        int TerminateAllProcesses(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-
-        [PreserveSig]
-        int SetTargetSessionId(uint sessionId);
-
-        [PreserveSig]
-        int EnumerateBackgroundTasks(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName,
-            out uint taskCount,
-            out IntPtr taskIds,
-            out IntPtr taskNames);
-
-        [PreserveSig]
-        int ActivateBackgroundTask(ref Guid taskId);
-
-        [PreserveSig]
-        int StartServicing(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-
-        [PreserveSig]
-        int StopServicing(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-
-        [PreserveSig]
-        int StartSessionRedirection(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName,
-            uint sessionId);
-
-        [PreserveSig]
-        int StopSessionRedirection(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName);
-
-        [PreserveSig]
-        int GetPackageExecutionState(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName,
-            out PackageExecutionState packageExecutionState);
-
-        [PreserveSig]
-        int RegisterForPackageStateChanges(
-            [MarshalAs(UnmanagedType.LPWStr)] string packageFullName,
-            IPackageExecutionStateChangeNotification packageExecutionStateChangeNotification,
-            out uint cookie);
-
-        [PreserveSig]
-        int UnregisterForPackageStateChanges(uint cookie);
-    }
-
-    [ComImport]
-    [Guid("B1AEC16F-2383-4852-B0E9-8F0B1DC66B4D")]
-    public class PackageDebugSettings
-    {
-    }
-
-    public sealed class ActivationResult
-    {
-        public int HResult { get; set; }
-        public uint ProcessId { get; set; }
-    }
-
-    public static class Activator
-    {
-        public static ActivationResult Activate(string appUserModelId, string arguments)
-        {
-            IApplicationActivationManager manager = null;
-            uint processId = 0;
-            int hresult;
-            try
-            {
-                manager = (IApplicationActivationManager)new ApplicationActivationManager();
-                hresult = manager.ActivateApplication(
-                    appUserModelId,
-                    arguments,
-                    ActivateOptions.NoErrorUI,
-                    out processId);
-            }
-            catch (Exception error)
-            {
-                hresult = Marshal.GetHRForException(error);
-                processId = 0;
-            }
-            finally
-            {
-                if (manager != null && Marshal.IsComObject(manager))
-                {
-                    try
-                    {
-                        Marshal.FinalReleaseComObject(manager);
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-            return new ActivationResult { HResult = hresult, ProcessId = processId };
-        }
-    }
-
-    public sealed class PackageController : IDisposable
-    {
-        private IPackageDebugSettings settings;
-
-        public PackageController()
-        {
-            settings = (IPackageDebugSettings)new PackageDebugSettings();
-        }
-
-        public int TerminateAllProcesses(string packageFullName)
-        {
-            return settings.TerminateAllProcesses(packageFullName);
-        }
-
-        public void Dispose()
-        {
-            if (settings != null && Marshal.IsComObject(settings))
-            {
-                Marshal.FinalReleaseComObject(settings);
-            }
-            settings = null;
-        }
-    }
-}
-'@
 
 $controller = $null
 $activatedProcess = $null
@@ -927,7 +729,7 @@ $activationHResult = [int]0
 $activatedProcessId = [uint32]0
 try {
     Write-CCActivation $activationStep 'started' @{}
-    Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
+    [void][Reflection.Assembly]::Load([Convert]::FromBase64String($env:CLE_PACKAGE_HELPER))
     Write-CCActivation $activationStep 'passed' @{}
     $activationStep='create package controller'
     $controller = New-Object CodexLiveExplorerPackageGuard.PackageController

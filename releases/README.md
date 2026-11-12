@@ -1,25 +1,25 @@
-# Code-Codex v0.6.13
+# Code-Codex v0.6.20
 
 ## 简体中文
 
-本次更新覆盖上一公开软件版本 **v0.6.0 → v0.6.13** 的累计改动；中间的本地版本不算单独公开更新。[完整源码比较](https://github.com/Rice-dog/code-codex/compare/v0.6.0...v0.6.13)。
+累计更新范围：上一公开软件版本 **v0.6.13 → v0.6.20**。[完整源码比较](https://github.com/Rice-dog/code-codex/compare/v0.6.13...v0.6.20)。
 
-- **安装器欢迎页检查更新**：一行显示检测中、发现新版、已是最新版或检测失败。有新版时可勾选下载，取消则安装自带版本；下载完成后核对来源、大小与 SHA-256，再进入新版安装。成功后尝试更新原来保存的 setup 文件，保留以后再次检查更新的入口。
-- **官方更新兼容验收**：在原变更台账上增加真实安装包/宿主只读检查、受控正负例和逐功能结果。区分无影响、检查通过、发现问题和待手测，合并重复手测步骤；未知变化及未覆盖的行为继续明确列出。启动仍按官方版本变化去重，不因规则更新自动重复扫描。
-- **连接与运行恢复**：修复退休连接残留和文档能力所有者更新的问题，改善后台交接和状态恢复，保留活动任务、设置、素材与有效插件缓存。
-- **设置页面背景**：通过共用的原生页面结构适配设置与部分侧栏页面背景，保留控件、菜单和主题的原有行为。
-- **插件下载提示与资源**：普通界面根据中英文设置，区分网络连接、服务器繁忙、限流、缺失文件、配置、存储和完整性问题，给出更易懂的处理建议。补齐当前目录锁定但尚未公开的资源；继续按精确大小和 SHA-256 校验，保留未变化插件的缓存。
+- **Unicode 路径安装修复**：快捷方式改用 Windows 原生 Unicode Shell 接口读写，改善中文及其他非 ASCII 用户目录下的安装、升级与恢复（#59）。
+- **启动助手修复**：激活助手在构建时预编译，启动时从内存加载，移除用户临时目录中的 C# 动态编译，解决非 ASCII TEMP 路径相关失败来源（#60）。
+- **新增光谱点阵帷幕背景**：提供参数面板与默认参数，点击波纹跟随鼠标在帷幕表面的位置；也可在启动动画的插件背景选源中使用。
+- **复用背景参数面板**：帷幕与字符背景共用参数控件、分组及重置交互；未变化的插件保留原独立版本和有效缓存。
+- **宿主适配维护**：更新实际依赖登记与部分页面、主题能力适配。未知官方变化仍需按检查报告验收。
 
-沿用本机已完成构建与验证的核心程序，不为发布重复编译或运行 CI。此前本机检查覆盖类型检查、相关回归、受控浏览器、隔离官方后台合同与实际宿主只读检查；发布另行核对资源、安装包与公开下载完整性。部分自动检查通过不等于全部功能验收：真实远端模型调用、额度耗尽、网络切换、多对话并发、所有历史升级路径及全部系统/官方版本组合仍有未验收范围。报告中待手测的项目继续保留，不宣称未来官方更新必然兼容。
+安装包沿用已在本机构建、安装并核对字节的核心，本次另核对公开插件资源、安装包白名单和 SHA-256；不运行 CI。Unicode 路径的本机检查不等于原报告者全部系统环境均已验收；真实官方冷启动及所有历史升级组合仍有未验证范围。#84 尚未确认为修复，本次不关闭或宣称解决。
 
 ## English
 
-This release covers the cumulative retained changes from the previous public software release, **v0.6.0 → v0.6.13**. Intermediate local versions are not separate public updates. [Full source comparison](https://github.com/Rice-dog/code-codex/compare/v0.6.0...v0.6.13).
+Cumulative changes from the previous public software release, **v0.6.13 → v0.6.20**. [Full source comparison](https://github.com/Rice-dog/code-codex/compare/v0.6.13...v0.6.20).
 
-- **Update checks on the setup welcome page**: One line shows progress, a newer version, an up-to-date installer or a failed check. Select the download option for the new version, or clear it to install the bundled version. Setup verifies the download source, size and SHA-256 before launching the newer installer. After success, it attempts to update the original saved setup file for future update checks.
-- **Official-update compatibility validation**: Added read-only checks against the actual installed package and host, controlled positive/negative cases and per-feature results to the existing change ledger. Results distinguish no impact, checks passed, issues found and manual validation required, with duplicate manual steps grouped together. Unknown changes and uncovered behavior remain explicit. Startup still deduplicates official-version transitions; a rules update does not automatically rescan the same version.
-- **Connection and runtime recovery**: Fixed stale retired connections and document-capability ownership updates, improving backend handoff and state recovery while retaining active tasks, settings, media and valid plugin caches.
-- **Settings backgrounds**: Shared native page structure now handles settings and additional sidebar-page backings while preserving controls, menus and theme behavior.
-- **Plugin download guidance and resources**: User-facing messages follow the Chinese/English language setting and distinguish connection problems, busy servers, rate limits, missing files, configuration, storage and integrity errors with clearer next steps. Published resources already pinned by the current catalog but previously absent online. Exact size/SHA-256 verification and unchanged plugin caches remain intact.
+- **Unicode installation paths**: Shortcut reads and writes now use native Windows Unicode Shell interfaces, improving installation, upgrade and restoration in Chinese and other non-ASCII user directories (#59).
+- **Startup helper**: The activation helper is compiled at build time and loaded from memory at startup. Removing runtime C# compilation in the user TEMP directory eliminates that source of non-ASCII TEMP failures (#60).
+- **Spectral Drape background**: Added a parameter panel and defaults, with click ripples positioned on the drape surface under the pointer. The effect is also available as a plugin background source for startup animation.
+- **Shared background parameter panel**: Spectral Drape and ASCII Tiles reuse controls, groups and reset interactions. Unchanged plugins retain their independent versions and valid caches.
+- **Host compatibility maintenance**: Updated dependency registrations and selected page/theme capability adapters. Unknown official changes still require acceptance using the compatibility report.
 
-The release reuses the core already built and validated locally, without redundant compilation or CI. Earlier local validation covered type checking, relevant regressions, controlled browser checks, an isolated official-backend contract and read-only checks in the actual host; release operations separately verify resources, packages and public downloads. Passing automated subchecks does not certify every feature: live remote model calls, quota exhaustion, network switching, concurrent conversations, every historical upgrade path and all OS/official-client combinations still have unvalidated scope. Required manual checks remain visible; future official updates are not guaranteed compatible.
+Packages reuse the core already built, installed and byte-checked locally; publication separately verifies public plugin resources, package allowlists and SHA-256, without CI. Local Unicode-path checks do not certify every reporter environment; real official cold startup and all historical upgrade combinations retain unvalidated scope. Issue #84 is not claimed fixed or closed. 

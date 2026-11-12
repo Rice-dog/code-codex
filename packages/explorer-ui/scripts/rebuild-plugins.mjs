@@ -1,3 +1,4 @@
+import {buildSpectralDrape} from './build-spectral-drape.mjs';
 import {buildAsciiTiles} from './build-ascii-tiles.mjs';
 import {buildShallowOcean} from './build-shallow-ocean.mjs';
 import {readFile,writeFile,mkdir,cp,rm} from 'node:fs/promises';
@@ -21,6 +22,7 @@ export async function rebuildPlugins(root,options,selection){
  const stage=resolve(root,'dist',`.plugin-build-${randomUUID()}`),report=[];await mkdir(stage,{recursive:true});
  try{
   const catalog=await buildBackgroundPackages(root,options,stage);
+  catalog.push(await buildSpectralDrape(root,options,stage));
   catalog.push(await buildAsciiTiles(root,options,stage));
   catalog.push(await buildShallowOcean(root,options,stage));
   catalog.push(await buildCustomBackground(root,options,stage));

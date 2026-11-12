@@ -1,0 +1,11 @@
+# Spectral Drape
+
+Integrated from the user-owned `E:/Python_Project/codecodex-plugin/spectral-drape-effect` WebGL implementation. Visual reference: ReactBits Spectral Drape (https://pro.reactbits.dev/docs/components/spectral-drape). No paid reference source, React runtime, external image/font or CDN asset is included. The original effect directory is not modified.
+
+The original fragment shader and Oklab/fold/camera math are retained. Click ripples now use the pointer NDC and the visible folded/opening surface projection instead of intersecting an undeformed z=0 plane; brush interaction is unchanged. Extra projection work runs only for live ripples, with one shared projection across rings. A class replaces the React effect wrapper; the existing WorkerBackgroundRenderer owns first-frame readiness, viewport/input/visibility and cancellation. ManagedBackgroundController owns dark-theme lease, particle surface marker, exclusivity and release. Reduced motion stops the scheduling loop even when an old ripple exists; DPR updates resize the same canvas. Drawing/context failure uses the shared failure lifecycle and allows explicit re-enable.
+
+Thirty scalar parameters use model.ts defaults/ranges, persisted under code-codex:spectral-drape-background:v1; no stored setting is added on download. Body/highlight colors become the original two-color array only at the render boundary. Four reset groups restore their own defaults. Opening duration4.6seconds/strength1 is independent from paused flow. Startup uses an independent Worker with the same saved parameters and never changes the normal enabled set. Light background colors retain original ink rendering; host dark-theme lease follows existing background policy.
+
+Settings/card/controller are the shared parameter-panel.ts implementation also used by ASCII Tiles; theme/surface/window settings rules are not copied. No new account calls, polling, wait or visual-state mirror. Exact plugin/app versions and acceptance evidence are maintained in the local baseline, not this module page.
+
+Current scalar defaults were captured from the actual saved/active plugin: dotSize0.55, strands9, thickness2.15, depth1.2; all other captured settings preserved. Existing user preferences are not overwritten. The complete defaults/ranges remain in model.ts.

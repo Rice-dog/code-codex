@@ -1,4 +1,5 @@
 import {AccountReadLane,waitForAccount} from './read-lane';
+import {accountFailureMessage} from './error-presentation';
 import {hostAssetRequest} from './host-assets';
 import {dispatcherRole,managerRole,loadHostNamespace,validHostModulePath} from '../../../../../resources/account-host-capabilities.js';
 import type {AccountRequest,AccountsInfo,EventsResult,NativeAccountStatus} from './contracts';
@@ -716,7 +717,8 @@ export class NativeAccountAdapter {
   const timer=setInterval(()=>{if(ended||polling)return;polling=true;void this.#call<Native>({action:'shared.status',conversationId:id}).then(p=>{if(!ended&&p.status==='preparing'){this.#progress=p.progress;this.#preparation={phase:p.phase,elapsedMs:p.elapsedMs,operationId:p.operationId};this.changed();}},()=>{}).finally(()=>{polling=false;});},700);
   try{
    const state=await this.#rpcObserver?.state(id,preparation.controller.signal);if(this.#disabling||preparation.controller.signal.aborted)throw Error('ACCOUNT_OBSERVATION_CANCELLED: Account selection ended before preparation. No turn was sent.');if(state?.inProgress!==false)throw Error('ACCOUNT_TURN_ACTIVE: The native turn must be confirmed idle before switching.');
-   const result=await this.#call<Native>({action:'native.prepare',conversationId:id,connectionId:selected,preparationId:preparation.id});
+    const action=this.#info.selected[id]===selected&&this.#info.nativeRoutes?.[id]===selected?'native.ensure':'native.prepare';
+    const result=await this.#call<Native>({action,conversationId:id,connectionId:selected,preparationId:preparation.id});
    if(this.#disposed||this.#disabling||preparation.controller.signal.aborted||this.#profileError||result.ready!==true||result.threadId!==id||result.selected!==selected)throw Error('ACCOUNT_NATIVE_ROUTE_PROTOCOL: Native account preparation could not be confirmed. No turn was sent.');
    this.#info.selected[id]=selected;this.#info.nativeRoutes??={};if(selected==='host'&&result.routed!==true)delete this.#info.nativeRoutes[id];else this.#info.nativeRoutes[id]=selected;
    if(continuation?.current()){
@@ -783,6 +785,7 @@ export class NativeAccountAdapter {
   }
   if(method==='error'||method==='turn/completed'&&p.turn?.status==='failed'){
    const error=p.error??p.turn?.error,info=error?.codexErrorInfo;
+   if((method==='turn/completed'||p.willRetry===false)&&p.threadId===resolveActiveThread()&&typeof error?.message==='string'&&accountFailureMessage(error.message,'send')!==error.message)this.#showNotice(error.message);
    const kind=typeof info==='string'?info:info&&typeof info==='object'?Object.keys(info)[0]:undefined;
    const known=['contextWindowExceeded','usageLimitExceeded','httpConnectionFailed','responseStreamConnectionFailed','responseStreamDisconnected','responseTooManyFailedAttempts','internalServerError','unauthorized','badRequest','sandboxError'];
    const status=info&&typeof info==='object'?Object.values(info).find(v=>v&&typeof v==='object'&&'httpStatusCode'in v) as Native|undefined:undefined;
@@ -810,7 +813,7 @@ export class NativeAccountAdapter {
   this.#outcomes.set(id,{key,message});
   runtimeEvent('accounts','account.outcome','unverified',{conversationId:id,previousTurnId:turnId,reason,bytesRead:result.outcomeEvidence?.bytesRead,tailOffset:result.outcomeEvidence?.tailOffset,limitBytes:result.outcomeEvidence?.limitBytes,taskReplayed:false});
  }
- #showNotice(message:string):void{this.#lastNotice=message;this.notice(message);}
+ #showNotice(message:string):void{this.#lastNotice=message;this.notice(accountFailureMessage(message,'send'));}
  #clearError(b:Binding):void{if(b.error&&b.error===this.#lastNotice)this.#showNotice('');b.error=undefined;}
  #fail(b:Binding,error:unknown):void{b.error=error instanceof Error?error.message:String(error);this.#showNotice(b.error);this.changed();}
  changed():void{

@@ -163,7 +163,7 @@ pub(super) async fn request(
                 .await?["ready"]
                     == true
             {
-                if !current() || host::observe(endpoint).await?.id != owner.id {
+                if !current() || progress.is_cancelled() {
                     return Err(stale());
                 }
                 if let Err(error) = progress.wait(route.probe(false)).await {
@@ -273,8 +273,11 @@ async fn prepare(
     progress.phase("credentials", 35);
     if selected!="host"&&api.is_none()&&super::presentation::reauthorization_required(&root,&selected)? {return Err(AccountError::new("ACCOUNT_AUTH_REQUIRED","This connection requires reauthorization. Check or sign in again before switching; no task was sent."));}
     let prior = service.relays.get(&owner.id, &thread);
-    let portable = api.is_some() || super::context_handoff::enrolled(&root, &thread)?;
-    let mut handoff=if portable {Some(super::context_handoff::Handoff::for_route(super::credentials::official_home()?,std::path::PathBuf::from(metadata["path"].as_str().ok_or_else(||AccountError::protocol("Official context archive path is missing."))?),thread.clone(),&root,api.is_some())?)}else{None};
+    let home=super::credentials::official_home()?;
+    let path=std::path::PathBuf::from(metadata["path"].as_str().ok_or_else(||AccountError::protocol("Official context archive path is missing."))?);
+    let recovery=super::context_recovery::Recovery::load(&home,&path,&thread)?;
+    let portable = api.is_some() || super::context_handoff::enrolled(&root, &thread)? || recovery.has_rejections();
+    let mut handoff=if portable {Some(super::context_handoff::Handoff::for_route_recovery(home,path,thread.clone(),&root,api.is_some(),Some(recovery))?)}else{None};
     if let Some(source)=handoff.as_mut(){source.verify()?;}
     let credential = if let Some(settings)=&api {
         Some(relay::Route::prepare_api(selected.clone(),settings.clone(),super::api::read(&super::retention::home(&root,&selected)?)?)?)

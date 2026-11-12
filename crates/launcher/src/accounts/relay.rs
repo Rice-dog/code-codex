@@ -359,7 +359,9 @@ impl Route {
         *self.lazy_handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner)=Some((home,path,root));
     }
     fn has_handoff(&self)->bool {self.handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()||self.lazy_handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()}
-    fn project_handoff(&self, value:&mut Value)->Result<Option<usize>> {
+    #[cfg(test)]
+    fn project_handoff(&self,value:&mut Value)->Result<Option<usize>> {self.project_handoff_trace(value,&mut None)}
+    fn project_handoff_trace(&self, value:&mut Value, trace:&mut Option<Arc<std::collections::HashMap<String,String>>>)->Result<Option<usize>> {
         let mut source=self.handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if source.is_none(){
             let mut pending=self.lazy_handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -369,7 +371,9 @@ impl Route {
             }
         }
         if let Some(source)=source.as_mut(){
-            let details=source.project(value)?;
+            let result=source.project(value);
+            *trace=Some(source.sent_evidence());
+            let details=result?;
             let ticket=details["bootstrapCandidate"].as_bool().filter(|v|*v).map(|_|self.handoff_generation.load(Ordering::Relaxed));
             *self.handoff_status.lock().unwrap_or_else(std::sync::PoisonError::into_inner)=Some(details.clone());
             crate::runtime_log::record("accounts","account.context-handoff","projected",details);
@@ -455,6 +459,33 @@ impl Route {
         }
         Ok(auth.0.clone())
     }
+    fn context_diagnostic(&self, operation: &crate::runtime_log::Operation, selection: &Credential,
+        identity: &Value, value: &Value, stage: &str, sampling_sequence: u64) {
+        let started = std::time::Instant::now();
+        let items: &[Value] = if value["type"] == "response.output_item.done" {
+            std::slice::from_ref(&value["item"])
+        } else {
+            value["input"].as_array().or_else(||value["response"]["output"].as_array())
+                .or_else(||value["output"].as_array()).map(Vec::as_slice).unwrap_or(&[])
+        };
+        if let Some(summary) = super::relay_diagnostics::opaque_summary(items) {
+            operation.event("account.context.trace", "observed", json!({"stage":stage,
+                "routeId":self.route_id,"conversationId":self.thread(),"samplingSequence":sampling_sequence,
+                "connectionFingerprint":super::relay_diagnostics::fingerprint(&selection.connection),
+                "identity":identity,"observation":summary,"requestState":super::relay_diagnostics::request_state(value),"originInference":"unproven",
+                "samplingMicros":started.elapsed().as_micros()}));
+        }
+    }
+    fn context_rejection(&self, operation:&crate::runtime_log::Operation, selection:&Credential, identity:&Value, value:&Value, request:Option<&Arc<std::collections::HashMap<String,String>>>, sampling:u64) {
+        // Ordinary events allocate nothing here. No archive read or network request.
+        let error=value.get("error").or_else(||value.get("response").and_then(|v|v.get("error"))).unwrap_or(value);
+        if !matches!(error["code"].as_str(),Some("invalid_encrypted_content"|"encrypted_content_invalid")){return;}
+        let current=self.handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().map(|v|v.sent_evidence());
+        if let Some(evidence)=super::relay_diagnostics::rejected_input(value,request.map(|v|v.as_ref()),current.as_deref()) {
+            operation.event("account.context.rejection","observed",json!({"routeId":self.route_id,"conversationId":self.thread(),"samplingSequence":sampling,
+                "connectionFingerprint":super::relay_diagnostics::fingerprint(&selection.connection),"identity":identity,"inputEvidence":evidence,"taskReplayed":false}));
+        }
+    }
     async fn handle(&self, socket: TcpStream) -> Result<()> {
         let mut io = BufReader::new(socket);
         let header = tokio::time::timeout(Duration::from_secs(10), read_header(&mut io))
@@ -514,6 +545,11 @@ impl Route {
                 return Err(error);
             }
         };
+        let identity = json!({"workspaceFingerprint":auth["chatgptAccountId"].as_str().map(super::relay_diagnostics::fingerprint),
+            "accountFingerprint":(!selection.email.is_empty()).then(||super::relay_diagnostics::fingerprint(&selection.email.to_ascii_lowercase())),
+            "backendInstance":match &selection.source {Source::Managed(worker)=>Some(worker.credential_refresh_ticket().0),_=>None},
+            "routeSource":if matches!(&selection.source,Source::Api(_)){"api"}else{"official"}});
+        operation.event("account.relay.identity", "bound", identity.clone());
         let api=if let Source::Api(settings)=&selection.source{Some(settings)}else{None};
         if api.is_some()&&request.websocket {
             operation.finish("blocked",json!({"stage":"api-transport-mismatch","errorCode":"ACCOUNT_API_HTTP_REQUIRED","upstreamAttempted":false,"taskSent":false}));
@@ -527,7 +563,7 @@ impl Route {
                 format!("{}{}", api.map(|s|s.base_url.as_str()).unwrap_or(&self.upstream), request.path),
             )
             .headers(headers);
-        let mut bootstrap_ticket=None;
+        let mut bootstrap_ticket=None;let mut context_input=None;
         if request.length > 0 {
             operation.event("account.relay.phase","observed",json!({"stage":"request-body","expectedBytes":request.length}));
             let mut body = vec![0; request.length];
@@ -543,8 +579,18 @@ impl Route {
             }
             if self.has_handoff() {
                 if request.headers.contains_key("content-encoding") {return reject(&mut io,400,"ACCOUNT_CONTEXT_ENCODING: Re-select this idle route to disable request compression; original history is unchanged; no upstream request was sent.").await;}
-                let projected:Result<Vec<u8>>=(||{let mut value:Value=serde_json::from_slice(&body).map_err(|_|fault("context-request-json"))?;bootstrap_ticket=self.project_handoff(&mut value)?;serde_json::to_vec(&value).map_err(|_|fault("context-request-encode"))})();
+                let projected: Result<Vec<u8>> = (|| {
+                    let mut value: Value = serde_json::from_slice(&body).map_err(|_|fault("context-request-json"))?;
+                    self.context_diagnostic(&operation,&selection,&identity,&value,"http-input-before-projection",0);
+                    bootstrap_ticket = self.project_handoff_trace(&mut value,&mut context_input)?;
+                    self.context_diagnostic(&operation,&selection,&identity,&value,"http-input-after-projection",0);
+                    serde_json::to_vec(&value).map_err(|_|fault("context-request-encode"))
+                })();
                 match projected {Ok(bytes) if bytes.len()<=MAX_BODY=>body=bytes,Ok(_)=>return reject(&mut io,413,"ACCOUNT_CONTEXT_BUDGET: Projected request exceeds the local budget; no upstream request was sent.").await,Err(error)=>{operation.finish("blocked",json!({"stage":"context-handoff","errorCode":error.code,"upstreamAttempted":false,"taskSent":false}));return reject(&mut io,409,&error.message).await;}}
+            } else if !request.headers.contains_key("content-encoding") {
+                if let Ok(value) = serde_json::from_slice::<Value>(&body) {
+                    self.context_diagnostic(&operation,&selection,&identity,&value,"http-native-input",0);
+                }
             }
             builder = builder.body(body);
         }
@@ -604,8 +650,8 @@ impl Route {
             let closed_by=loop {
                 tokio::select! {biased;
                  _=selection.cancel.cancelled()=>break "identity-changed",
-                 m=client.next()=>{let mut m=match m{Some(Ok(m))=>m,Some(Err(_))=>break "client-read-error",None=>break "client-eof"};client_frames+=1;if let Message::Text(text)=&m{if text.len()>MAX_BODY{return Err(fault("websocket-message-bound"));}if json_type(text)==Some("response.create")&&sampling.is_none(){self.active.fetch_add(1,Ordering::Relaxed);sampling=Some(Active(&self.active));sampling_requests+=1;operation.event("account.relay.sampling","started",json!({"samplingSequence":sampling_requests,"stage":"websocket-response-create","requestAccepted":"unknown"}));}}if let Message::Text(text)=&m {if json_type(text)==Some("response.create") {let mut value:Value=serde_json::from_str(text).map_err(|_|fault("context-websocket-json"))?;if let Err(error)=(||{if value["generate"]==false&&value.get("input").is_none(){value["input"]=json!([]);}if self.handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|v|v.portable()){socket_history.expand(&mut value)?;}socket_bootstrap_ticket=self.project_handoff(&mut value)?;Ok::<(),AccountError>(())})(){self.failed(&mut operation,"context-handoff",json!({"errorCode":error.code,"taskSent":false,"upstreamSamplingSent":false}));let _=client.send(Message::Text(json!({"type":"error","error":{"code":"account_context_handoff","message":error.message}}).to_string().into())).await;break "context-handoff-blocked";}m=Message::Text(value.to_string().into());}}if server.send(m).await.is_err(){break "upstream-write-error";}}
-                 m=server.next()=>{let m=match m{Some(Ok(m))=>m,Some(Err(_))=>break "upstream-read-error",None=>break "upstream-eof"};server_frames+=1;let mut pass=true;if let Message::Text(text)=&m{if text.len()>MAX_BODY{return Err(fault("websocket-response-bound"));}if let Ok(value)=serde_json::from_str::<Value>(text){if self.handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|v|v.portable()){socket_history.observe(&value);}self.accept_handoff(socket_bootstrap_ticket,&value);pass=!self.observe_event(&value);let kind=value["type"].as_str().unwrap_or("");if matches!(kind,"response.completed"|"response.failed"|"error"){let evidence=json!({"samplingSequence":sampling_requests,"stage":kind,"classification":super::relay_diagnostics::failure_class(&value),"taskReplayed":false});operation.event("account.relay.sampling",if kind=="response.completed"{"completed"}else{"failed"},evidence.clone());if kind!="response.completed"{*self.last_failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner)=Some(json!({"routeId":self.route_id,"operationId":operation.id(),"observedAt":now(),"stage":"websocket-response-error","evidence":evidence,"taskReplayed":false}));}sampling.take();socket_bootstrap_ticket=None;}else if kind=="response.compaction.compacting"{operation.event("account.relay.compaction","observed",json!({"samplingSequence":sampling_requests,"stage":"upstream-compacting","taskReplayed":false}));}}}if pass&&client.send(m).await.is_err(){break "client-write-error";}}
+                 m=client.next()=>{let mut m=match m{Some(Ok(m))=>m,Some(Err(_))=>break "client-read-error",None=>break "client-eof"};client_frames+=1;if let Message::Text(text)=&m{if text.len()>MAX_BODY{return Err(fault("websocket-message-bound"));}if json_type(text)==Some("response.create")&&sampling.is_none(){self.active.fetch_add(1,Ordering::Relaxed);sampling=Some(Active(&self.active));sampling_requests+=1;operation.event("account.relay.sampling","started",json!({"samplingSequence":sampling_requests,"stage":"websocket-response-create","requestAccepted":"unknown"}));}}if let Message::Text(text)=&m {if json_type(text)==Some("response.create") {let mut value:Value=serde_json::from_str(text).map_err(|_|fault("context-websocket-json"))?;self.context_diagnostic(&operation,&selection,&identity,&value,"input-before-projection",sampling_requests);if let Err(error)=(||{if value["generate"]==false&&value.get("input").is_none(){value["input"]=json!([]);}if self.handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|v|v.portable()){socket_history.expand(&mut value)?;}socket_bootstrap_ticket=self.project_handoff_trace(&mut value,&mut context_input)?;Ok::<(),AccountError>(())})(){self.failed(&mut operation,"context-handoff",json!({"errorCode":error.code,"taskSent":false,"upstreamSamplingSent":false}));let _=client.send(Message::Text(json!({"type":"error","error":{"code":"account_context_handoff","message":error.message}}).to_string().into())).await;break "context-handoff-blocked";}self.context_diagnostic(&operation,&selection,&identity,&value,"input-after-projection",sampling_requests);m=Message::Text(value.to_string().into());}}if server.send(m).await.is_err(){break "upstream-write-error";}}
+                 m=server.next()=>{let m=match m{Some(Ok(m))=>m,Some(Err(_))=>break "upstream-read-error",None=>break "upstream-eof"};server_frames+=1;let mut pass=true;if let Message::Text(text)=&m{if text.len()>MAX_BODY{return Err(fault("websocket-response-bound"));}if let Ok(value)=serde_json::from_str::<Value>(text){if self.handoff.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|v|v.portable()){socket_history.observe(&value);}if value["type"]=="response.output_item.done"{self.context_diagnostic(&operation,&selection,&identity,&value,"output-item-done",sampling_requests);}self.accept_handoff(socket_bootstrap_ticket,&value);self.context_rejection(&operation,&selection,&identity,&value,context_input.as_ref(),sampling_requests);pass=!self.observe_event(&value);let kind=value["type"].as_str().unwrap_or("");if matches!(kind,"response.completed"|"response.failed"|"error"){let evidence=json!({"samplingSequence":sampling_requests,"stage":kind,"errorSummary":super::relay_diagnostics::error_summary(&value),"classification":super::relay_diagnostics::failure_class(&value),"taskReplayed":false});operation.event("account.relay.sampling",if kind=="response.completed"{"completed"}else{"failed"},evidence.clone());if kind!="response.completed"{*self.last_failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner)=Some(json!({"routeId":self.route_id,"operationId":operation.id(),"observedAt":now(),"stage":"websocket-response-error","evidence":evidence,"taskReplayed":false}));}sampling.take();socket_bootstrap_ticket=None;}else if kind=="response.compaction.compacting"{operation.event("account.relay.compaction","observed",json!({"samplingSequence":sampling_requests,"stage":"upstream-compacting","taskReplayed":false}));}}}if pass&&client.send(m).await.is_err(){break "client-write-error";}}
                 }
             };
             let details=json!({"stage":"websocket-closed","closedBy":closed_by,"samplingActive":sampling.is_some(),"samplingRequests":sampling_requests,"clientFrames":client_frames,"serverFrames":server_frames,"identityChanged":selection.cancel.is_cancelled(),"taskReplayed":false});
@@ -645,7 +691,7 @@ impl Route {
                 return Err(fault("credential-selection-superseded"));
             }
             received=received.saturating_add(bytes.len() as u64);
-            if status<400 {observation.push(&bytes,sse,|v|{self.accept_handoff(bootstrap_ticket,v);self.observe_event(v);if matches!(v["type"].as_str(),Some("response.failed"|"error")){model_failure=Some(json!({"eventType":v["type"],"classification":super::relay_diagnostics::failure_class(v)}));}});}
+            if status<400 {observation.push(&bytes,sse,|v|{if v["type"]=="response.output_item.done"||v["object"]=="response"{self.context_diagnostic(&operation,&selection,&identity,v,"http-output-complete",0);}self.accept_handoff(bootstrap_ticket,v);self.context_rejection(&operation,&selection,&identity,v,context_input.as_ref(),0);self.observe_event(v);if matches!(v["type"].as_str(),Some("response.failed"|"error")){model_failure=Some(json!({"eventType":v["type"],"classification":super::relay_diagnostics::failure_class(v),"errorSummary":super::relay_diagnostics::error_summary(v)}));}});}
             if status>=400 {body_evidence.observe(&bytes);}
             io.write_all(format!("{:x}\r\n", bytes.len()).as_bytes())
                 .await
@@ -658,11 +704,11 @@ impl Route {
                 .map_err(|_| fault("response-client"))?;
             io.flush().await.map_err(|_| fault("response-client"))?;
         }
-        if status<400&&!sse {observation.finish(|v|{self.accept_handoff(bootstrap_ticket,v);self.observe_event(v);if matches!(v["type"].as_str(),Some("response.failed"|"error")){model_failure=Some(json!({"eventType":v["type"],"classification":super::relay_diagnostics::failure_class(v)}));}});}
+        if status<400&&!sse {observation.finish(|v|{if v["type"]=="response.output_item.done"||v["object"]=="response"{self.context_diagnostic(&operation,&selection,&identity,v,"http-output-complete",0);}self.accept_handoff(bootstrap_ticket,v);self.context_rejection(&operation,&selection,&identity,v,context_input.as_ref(),0);self.observe_event(v);if matches!(v["type"].as_str(),Some("response.failed"|"error")){model_failure=Some(json!({"eventType":v["type"],"classification":super::relay_diagnostics::failure_class(v),"errorSummary":super::relay_diagnostics::error_summary(v)}));}});}
         io.write_all(b"0\r\n\r\n")
             .await
             .map_err(|_| fault("response-client"))?;
-        if status>=400 {self.failed(&mut operation,"upstream-http-error",json!({"status":status,"errorSummary":body_evidence.summary()}));}
+        if status>=400 {if let Some(value)=body_evidence.value(){self.context_rejection(&operation,&selection,&identity,&value,context_input.as_ref(),0);self.observe_event(&value);}self.failed(&mut operation,"upstream-http-error",json!({"status":status,"errorSummary":body_evidence.summary()}));}
         else if let Some(failure)=model_failure {self.failed(&mut operation,"upstream-stream-error",json!({"status":status,"receivedBytes":received,"modelFailure":failure,"wireUnchanged":true}));}
         else {operation.finish("completed",json!({"stage":"http-stream-complete","status":status,"receivedBytes":received,"taskReplayed":false}));}
         Ok(())
@@ -1130,6 +1176,35 @@ mod tests {
         let mut observer=ResponseObservation::default();observer.push(b"{\"output\":[]}",false,|_|panic!());observer.finish(|v|events.push(v.clone()));assert_eq!(events.len(),2);
     }
     #[tokio::test]
+    async fn official_compact_http_isolates_only_recorded_rejected_reasoning() {
+        use std::io::Write;
+        let home=tempfile::tempdir().unwrap();let path=super::super::context_handoff::tests::archive(home.path(),"thread");
+        let id="rs_0123456789abcdef";let reasoning=json!({"type":"reasoning","id":id,"encrypted_content":"REJECTED_BYTES"});
+        let error=json!({"error":{"code":"invalid_encrypted_content","message":format!("The encrypted content for item {id} could not be verified. Reason: Encrypted content could not be decrypted or parsed.")}});
+        let mut file=std::fs::OpenOptions::new().append(true).open(&path).unwrap();writeln!(file,"{}",json!({"type":"response_item","payload":reasoning})).unwrap();writeln!(file,"{}",json!({"type":"event_msg","payload":{"type":"task_complete","error":{"message":format!("Error running remote compact task: {error}")}}})).unwrap();
+        let source=super::super::context_handoff::Handoff::for_route(home.path().into(),path.clone(),"thread".into(),home.path(),false).unwrap();let original=std::fs::read(&path).unwrap();
+        let expected=json!({"model":"native","context_management":[{"type":"compaction"}],"input":[{"type":"compaction","encrypted_content":"KEEP_NATIVE_COMPACT"},{"type":"message","role":"user","content":"VISIBLE_TASK"}]});
+        let mut input=expected.clone();input["input"].as_array_mut().unwrap().insert(1,reasoning);input["previous_response_id"]=json!("rejected-chain");
+        let listener=TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,0)).await.unwrap();let address=listener.local_addr().unwrap();
+        let backend=tokio::spawn(async move{let (s,_)=listener.accept().await.unwrap();let mut io=BufReader::new(s);let raw=read_header(&mut io).await.unwrap();assert!(raw.starts_with("POST /responses/compact "));let length=raw.lines().find_map(|s|s.to_ascii_lowercase().strip_prefix("content-length:").map(|s|s.trim().parse::<usize>().unwrap())).unwrap();let mut body=vec![0;length];io.read_exact(&mut body).await.unwrap();assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(),expected);io.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();});
+        let client=reqwest::Client::builder().no_proxy().build().unwrap();let route=Route::listen("owner".into(),"thread".into(),credential("host"),format!("http://{address}"),client.clone()).await.unwrap();route.set_handoff(source);route.ready.store(true,Ordering::Release);
+        let response=client.post(format!("{}/responses/compact",route.base_url)).json(&input).send().await.unwrap();assert_eq!(response.status(),200);response.bytes().await.unwrap();backend.await.unwrap();assert_eq!(std::fs::read(path).unwrap(),original);route.close();
+    }
+    #[tokio::test]
+    async fn official_websocket_quarantines_rejected_reasoning_on_next_explicit_send_only() {
+        let home=tempfile::tempdir().unwrap();let path=super::super::context_handoff::tests::archive(home.path(),"thread");
+        let source=super::super::context_handoff::Handoff::for_route(home.path().into(),path.clone(),"thread".into(),home.path(),false).unwrap();let original=std::fs::read(&path).unwrap();
+        let id="rs_0123456789abcdef";let first=json!({"type":"response.create","input":[{"type":"reasoning","id":id,"encrypted_content":"LIVE_REJECTED"},{"role":"user","content":"VISIBLE_TASK"}]});let expected=first.clone();
+        let error=json!({"type":"error","error":{"code":"invalid_encrypted_content","message":format!("The encrypted content for item {id} could not be verified. Reason: Encrypted content could not be decrypted or parsed.")}});let wire_error=error.clone();
+        let listener=TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,0)).await.unwrap();let address=listener.local_addr().unwrap();
+        let backend=tokio::spawn(async move{let (s,_)=listener.accept().await.unwrap();let mut ws=tokio_tungstenite::accept_async(s).await.unwrap();let v:Value=serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();assert_eq!(v,expected);ws.send(Message::Text(wire_error.to_string().into())).await.unwrap();let v:Value=serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();assert_eq!(v["input"],json!([{"role":"user","content":"VISIBLE_TASK"}]));ws.send(Message::Text(json!({"type":"response.completed","response":{"output":[]}}).to_string().into())).await.unwrap();});
+        let route=Route::listen("owner".into(),"thread".into(),credential("host"),format!("http://{address}"),reqwest::Client::builder().no_proxy().build().unwrap()).await.unwrap();route.set_handoff(source);route.ready.store(true,Ordering::Release);
+        let socket=TcpStream::connect(&route.authority).await.unwrap();let (mut ws,_)=tokio_tungstenite::client_async(route.base_url.replace("http://","ws://")+"/responses",socket).await.unwrap();
+        ws.send(Message::Text(first.to_string().into())).await.unwrap();let received:Value=serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();assert_eq!(received,error);
+        assert!(tokio::time::timeout(Duration::from_millis(50),ws.next()).await.is_err());
+        ws.send(Message::Text(first.to_string().into())).await.unwrap();assert!(ws.next().await.unwrap().unwrap().to_text().unwrap().contains("response.completed"));backend.await.unwrap();route.close();assert_eq!(std::fs::read(path).unwrap(),original);
+    }
+    #[tokio::test]
     async fn official_http_keeps_native_context_after_api_without_archive_writes() {
         let home=tempfile::tempdir().unwrap();let path=super::super::context_handoff::tests::archive(home.path(),"thread");
         let source=super::super::context_handoff::Handoff::for_route(home.path().into(),path.clone(),"thread".into(),home.path(),true).unwrap();source.commit().unwrap();
@@ -1585,6 +1660,43 @@ mod tests {
         assert!(!out.contains_key("cookie"));
         assert!(!out.contains_key("openai-organization"));
     }
+    #[tokio::test]
+    async fn context_trace_joins_identity_and_item_without_private_values() {
+        crate::runtime_log::capture_test_events();
+        let route = Route::new("owner".into(),"thread".into(),credential("host"),"http://fixture".into(),
+            reqwest::Client::builder().no_proxy().build().unwrap(),"localhost:1".into(),"fixture".into(),None);
+        let selection = route.selection.read().unwrap().clone();
+        let identity = json!({"workspaceFingerprint":super::super::relay_diagnostics::fingerprint("PRIVATE_WORKSPACE")});
+        let operation = crate::runtime_log::Operation::start("accounts","fixture",json!({}));
+        let item = json!({"id":"rs_0123456789abcdef","type":"reasoning","encrypted_content":"PRIVATE_CIPHER","status":"completed"});
+        route.context_diagnostic(&operation,&selection,&identity,&json!({"input":[item.clone()]}),"http-native-input",1);
+        route.context_diagnostic(&operation,&selection,&identity,&json!({"type":"response.output_item.done","item":item}),"output-item-done",1);
+        let events = crate::runtime_log::take_test_events();
+        let traces: Vec<_> = events.iter().filter(|e|e["action"]=="account.context.trace").collect();
+        assert_eq!(traces.len(),2);
+        assert_eq!(traces[0]["details"]["operationId"],operation.id());
+        assert_eq!(traces[0]["details"]["observation"],traces[1]["details"]["observation"]);
+        assert!(traces[0]["details"]["samplingMicros"].is_u64());
+        assert!(!serde_json::to_string(&events).unwrap().contains("PRIVATE_"));
+        assert_eq!(traces[0]["details"]["identity"]["workspaceFingerprint"],identity["workspaceFingerprint"]);
+    }
+    #[tokio::test]
+    async fn rejection_observation_keeps_operation_and_sampling_beyond_trace_samples() {
+        crate::runtime_log::capture_test_events();
+        let route=Route::new("owner".into(),"thread".into(),credential("host"),"http://fixture".into(),reqwest::Client::builder().no_proxy().build().unwrap(),"localhost:1".into(),"fixture".into(),None);
+        let selection=route.selection.read().unwrap().clone();
+        let operation=crate::runtime_log::Operation::start("accounts","fixture",json!({}));
+        let id="rs_0123456789abcdef";
+        let input=Arc::new(std::collections::HashMap::from([(id.into(),super::super::relay_diagnostics::fingerprint("PRIVATE_CIPHER"))]));
+        let error=json!({"error":{"code":"invalid_encrypted_content","message":format!("The encrypted content for item {id} could not be verified. Reason: Encrypted content could not be decrypted or parsed.")}});
+        route.context_rejection(&operation,&selection,&json!({}),&error,Some(&input),7);
+        let events=crate::runtime_log::take_test_events();let event=events.iter().find(|v|v["action"]=="account.context.rejection").unwrap();
+        assert_eq!(event["details"]["operationId"],operation.id());assert_eq!(event["details"]["samplingSequence"],7);
+        assert_eq!(event["details"]["inputEvidence"]["requestCipherFingerprint"],super::super::relay_diagnostics::fingerprint("PRIVATE_CIPHER"));
+        assert!(!event.to_string().contains("PRIVATE_"));assert!(!event.to_string().contains(id));
+        assert_eq!(route.requests.load(Ordering::Relaxed),0);
+    }
+
 }
 
 #[cfg(test)]

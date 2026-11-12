@@ -1,0 +1,12 @@
+import {recordCaughtRuntimeError} from '../../runtime-operations';
+export const SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID='code-codex.spectral-drape-background';
+export const SPECTRAL_DRAPE_SETTINGS_KEY='code-codex:spectral-drape-background:v1';
+export type SpectralDrapeSettings=Record<string,number|string|boolean>&{backgroundColor:string;density:number;introEnabled:boolean};
+export const DEFAULT_SPECTRAL_DRAPE_SETTINGS={"bodyColor": "#6A4BFF", "highlightColor": "#E4DBFF", "backgroundColor": "#0a0a0a", "density": 1, "dotSize": 0.55, "strands": 9, "amplitude": 1, "frequency": 1, "thickness": 2.15, "depth": 1.2, "softness": 0.6, "intensity": 1, "colorShift": 0.3, "tilt": -40, "turn": -45, "roll": 110, "zoom": 1, "flow": 1, "speed": 1, "interactive": true, "brush": 1, "brushRadius": 0.2, "parallax": 1, "clickRipples": true, "seed": 0, "paused": false, "dpr": 2, "introEnabled": true, "introDuration": 4.6, "introStrength": 1} as SpectralDrapeSettings;
+export const RANGES:Record<string,readonly [number,number,number]>={"density": [0.2, 2.5, 0.05], "dotSize": [0.2, 3, 0.05], "strands": [1, 12, 1], "amplitude": [0, 3, 0.05], "frequency": [0.1, 3, 0.05], "thickness": [0.2, 3, 0.05], "depth": [0, 3, 0.05], "softness": [0, 1, 0.01], "intensity": [0, 3, 0.05], "colorShift": [-1, 1, 0.01], "tilt": [-90, 90, 1], "turn": [-90, 90, 1], "roll": [-180, 180, 1], "zoom": [0.4, 2.5, 0.05], "flow": [0, 3, 0.05], "speed": [0, 3, 0.05], "brush": [0, 3, 0.05], "brushRadius": [0.05, 0.6, 0.01], "parallax": [0, 3, 0.05], "seed": [0, 20, 1], "dpr": [0.5, 2, 0.25], "introDuration": [0.8, 12, 0.1], "introStrength": [0, 2, 0.05]};
+export function normalizeSpectralDrapeSettings(input:unknown):SpectralDrapeSettings {
+ const v=input&&typeof input==='object'?input as Record<string,unknown>:{};const next={...DEFAULT_SPECTRAL_DRAPE_SETTINGS};
+ for(const [k,def] of Object.entries(next)){const value=v[k],range=RANGES[k];if(range){next[k]=typeof value==='number'&&Number.isFinite(value)?Math.max(range[0],Math.min(range[1],range[2]===1?Math.round(value):value)):def;}else if(typeof def==='boolean')next[k]=typeof value==='boolean'?value:def;else next[k]=typeof value==='string'&&/^#[a-f0-9]{6}$/i.test(value)?value:def;}
+ return next;
+}
+export function readSpectralDrapeSettings(){try{return normalizeSpectralDrapeSettings(JSON.parse(localStorage.getItem(SPECTRAL_DRAPE_SETTINGS_KEY)??'{}'));}catch(error){recordCaughtRuntimeError('Spectral settings read',error);return {...DEFAULT_SPECTRAL_DRAPE_SETTINGS};}}

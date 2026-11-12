@@ -2892,33 +2892,15 @@ impl PlatformShortcutShell {
 }
 
 #[cfg(windows)]
+#[path = "../shortcut_shell.rs"]
+mod native_shortcut;
+
+#[cfg(windows)]
 impl ShortcutShell for PlatformShortcutShell {
     fn inspect(&self, path: &Path) -> Result<ShortcutMetadata, IntegrationError> {
-        const SCRIPT: &str = r#"
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$path = [IO.Path]::GetFullPath($env:CLE_SHORTCUT_PATH)
-$directory = [IO.Path]::GetDirectoryName($path)
-$name = [IO.Path]::GetFileName($path)
-$wscript = New-Object -ComObject WScript.Shell
-$shortcut = $wscript.CreateShortcut($path)
-$shell = New-Object -ComObject Shell.Application
-$folder = $shell.Namespace($directory)
-if ($null -eq $folder) { throw 'The shortcut directory could not be opened.' }
-$item = $folder.ParseName($name)
-if ($null -eq $item) { throw 'The shortcut could not be parsed.' }
-[PSCustomObject]@{
-    target = [string]$shortcut.TargetPath
-    description = [string]$shortcut.Description
-    targetParsingPath = [string]$item.ExtendedProperty('System.Link.TargetParsingPath')
-    iconLocation = [string]$shortcut.IconLocation
-} | ConvertTo-Json -Compress
-"#;
-        let output = self.run(SCRIPT, &[("CLE_SHORTCUT_PATH", path.as_os_str())])?;
-        let text = String::from_utf8(output.stdout)
-            .map_err(|error| IntegrationError::Shell(error.to_string()))?;
-        serde_json::from_str(text.trim_start_matches('\u{feff}').trim())
-            .map_err(IntegrationError::from)
+        native_shortcut::inspect(path).map_err(|error| {
+            IntegrationError::Shell(format!("stage=shortcut-read; path={}; {error}", path.display()))
+        })
     }
 
     fn create(
@@ -2929,36 +2911,12 @@ if ($null -eq $item) { throw 'The shortcut could not be parsed.' }
         icon: &Path,
         description: &str,
     ) -> Result<(), IntegrationError> {
-        const SCRIPT: &str = r#"
-$ErrorActionPreference = 'Stop'
-$path = [IO.Path]::GetFullPath($env:CLE_SHORTCUT_PATH)
-if ([IO.Path]::GetExtension($path) -ine '.lnk') { throw 'Shortcut staging path must end in .lnk.' }
-$wscript = New-Object -ComObject WScript.Shell
-$shortcut = $wscript.CreateShortcut($path)
-$shortcut.TargetPath = [IO.Path]::GetFullPath($env:CLE_SHORTCUT_TARGET)
-$shortcut.WorkingDirectory = [IO.Path]::GetFullPath($env:CLE_SHORTCUT_WORKING_DIRECTORY)
-$shortcut.IconLocation = ('{0},0' -f [IO.Path]::GetFullPath($env:CLE_SHORTCUT_ICON))
-$shortcut.Description = $env:CLE_SHORTCUT_DESCRIPTION
-$shortcut.WindowStyle = 1
-$shortcut.Save()
-"#;
-        self.run(
-            SCRIPT,
-            &[
-                ("CLE_SHORTCUT_PATH", path.as_os_str()),
-                ("CLE_SHORTCUT_TARGET", target.as_os_str()),
-                (
-                    "CLE_SHORTCUT_WORKING_DIRECTORY",
-                    working_directory.as_os_str(),
-                ),
-                ("CLE_SHORTCUT_ICON", icon.as_os_str()),
-                (
-                    "CLE_SHORTCUT_DESCRIPTION",
-                    std::ffi::OsStr::new(description),
-                ),
-            ],
-        )?;
-        Ok(())
+        if !path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("lnk")) {
+            return Err(IntegrationError::Shell("Shortcut staging path must end in .lnk.".into()));
+        }
+        native_shortcut::create(path, target, working_directory, icon, description).map_err(|error| {
+            IntegrationError::Shell(format!("stage=shortcut-write; path={}; {error}", path.display()))
+        })
     }
 
     fn replace_file(&self, staged: &Path, destination: &Path) -> Result<(), IntegrationError> {
@@ -4683,6 +4641,44 @@ mod tests {
             fs::read(&fixture.paths.shortcut).expect("restored official shortcut"),
             fixture.original
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn real_windows_unicode_shortcuts_preserve_metadata_and_transactions() {
+        let shell = PlatformShortcutShell::new().expect("Windows Shell bridge");
+        let temporary = tempfile::tempdir().expect("isolated integration root");
+        let executable = std::env::current_exe().expect("test executable");
+        // Include characters outside both Chinese and Western ANSI code pages.
+        for name in ["ascii", "中文 用户", "مجلد", "user-😀", "日本語-é"] {
+            let root = temporary.path().join(name);
+            let install_root = root.join("安装 directory");
+            let desktop = root.join("桌面 desktop");
+            fs::create_dir_all(&install_root).unwrap();
+            fs::create_dir_all(&desktop).unwrap();
+            fs::copy(&executable, install_root.join(LAUNCHER_NAME)).unwrap();
+            let icon = install_root.join("图标 😀.ico");
+            fs::write(&icon, include_bytes!("../../resources/code-codex.ico")).unwrap();
+            let paths = IntegrationPaths::resolve(&install_root, Some(&desktop), None).unwrap();
+            shell.create(&paths.chatgpt_shortcut, &executable, &install_root, &icon,
+                "Original 中文 😀 shortcut").expect("create Unicode shortcut");
+            let original = fs::read(&paths.chatgpt_shortcut).unwrap();
+            let metadata = shell.inspect(&paths.chatgpt_shortcut).expect("read Unicode shortcut");
+            assert!(paths_equal(Path::new(&metadata.target), &executable));
+            assert_eq!(metadata.description, "Original 中文 😀 shortcut");
+            assert_eq!(metadata.icon_location, format!("{},0", icon.display()));
+            prepare_install(&shell, &paths).expect("snapshot original");
+            install(&shell, &paths, "0.1.4", None).expect("install in Unicode paths");
+            assert_eq!(status(&shell, &paths).unwrap().state, IntegrationState::Managed);
+            rollback_install(&shell, &paths).expect("rollback original");
+            assert_eq!(fs::read(&paths.chatgpt_shortcut).unwrap(), original);
+            assert!(!paths.fallback_shortcut.exists());
+            install(&shell, &paths, "0.1.4", None).expect("install again");
+            install(&shell, &paths, "0.1.5", None).expect("upgrade existing shortcuts");
+            restore(&shell, &paths).expect("restore after upgrade");
+            assert_eq!(fs::read(&paths.chatgpt_shortcut).unwrap(), original);
+            assert!(!paths.fallback_shortcut.exists());
+        }
     }
 
     #[cfg(windows)]

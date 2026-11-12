@@ -102,31 +102,33 @@ async fn descriptor(endpoint:CdpEndpoint)->Result<Option<Value>>{
  tokio::task::spawn_blocking(move||{crate::process_guard::verify_listener_owner_fast(endpoint.port(),pid,std::time::UNIX_EPOCH)?;crate::process_guard::verify_listener_owner_fast(port,broker_pid,std::time::UNIX_EPOCH)}).await.map_err(|_|error("owner-worker"))?.map_err(|_|error("listener-owner"))?;
  Ok(Some(v))
 }
-async fn control(v:&Value,payload:Value)->Result<Value>{
- let client=reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(3)).build().map_err(|_|error("control-client"))?;
+fn control_client()->Result<reqwest::Client>{reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(3)).build().map_err(|_|error("control-client"))}
+async fn control(client:&reqwest::Client,v:&Value,payload:Value)->Result<Value>{
  let result=client.post(format!("http://localhost:{}/{}/control",v["port"].as_u64().unwrap(),v["key"].as_str().unwrap())).header("x-code-codex-control",v["control"].as_str().unwrap()).json(&payload).send().await.map_err(|_|error("control-send"))?;
  if !result.status().is_success(){return Err(error("control-rejected"));}
  let bytes=result.bytes().await.map_err(|_|error("control-read"))?;if bytes.len()>8192{return Err(error("control-bound"));}
  serde_json::from_slice(&bytes).map_err(|_|error("control-json"))
 }
-pub(super) async fn available(endpoint:CdpEndpoint)->Result<bool>{
- let Some(v)=descriptor(endpoint).await?else{return Ok(false)};
- let status=control(&v,json!({"action":"status"})).await?;
+async fn ready_descriptor(endpoint:CdpEndpoint)->Result<Option<(Value,reqwest::Client)>>{
+ let Some(v)=descriptor(endpoint).await?else{return Ok(None)};
+ let client=control_client()?;
+ let status=control(&client,&v,json!({"action":"status"})).await?;
  if status["schema"]!=1||status["pid"]!=v["pid"]||status["rendererPort"]!=endpoint.port()||status["ready"]!=true||!status["spawns"].as_u64().is_some_and(|v|v>0){return Err(error("backend-startup-unverified"));}
- Ok(true)
+ Ok(Some((v,client)))
 }
 pub(crate) async fn verify_launch(endpoint:CdpEndpoint)->Result<bool>{
  let Some(v)=descriptor(endpoint).await?else{return Ok(false)};
+ let client=control_client()?;
  let started=std::time::Instant::now();
- let mut status=control(&v,json!({"action":"status"})).await?;
+ let mut status=control(&client,&v,json!({"action":"status"})).await?;
  // Renderer CDP can be open before the desktop has requested its backend.
  // Observe the original native startup, not just a debugging-port milestone.
  while status["spawns"].as_u64()==Some(0)&&status["failed"]==false&&started.elapsed()<Duration::from_secs(15){
   tokio::time::sleep(Duration::from_millis(100)).await;
-  status=control(&v,json!({"action":"status"})).await?;
+  status=control(&client,&v,json!({"action":"status"})).await?;
  }
  if status["spawns"].as_u64()==Some(0){
-  control(&v,json!({"action":"retire"})).await?;
+  control(&client,&v,json!({"action":"retire"})).await?;
   std::fs::remove_file(descriptor_path()?).map_err(|_|error("unapplied-descriptor-removal"))?;
   crate::runtime_log::record("accounts","account.startup.transport","not-applied",json!({"stage":"native-backend-spawn","fallback":"existing-native-routing","taskReplayed":false}));return Ok(false);
  }
@@ -134,15 +136,14 @@ pub(crate) async fn verify_launch(endpoint:CdpEndpoint)->Result<bool>{
  crate::runtime_log::record("accounts","account.startup.transport",if ready{"confirmed"}else{"failed"},json!({"stage":"native-backend-spawn","ready":ready,"backendSpawns":status["spawns"],"officialProcessOwned":true,"taskReplayed":false}));
  if !ready{return Err(error("startup-confirmation"));}Ok(true)
 }
-pub(super) async fn bind(endpoint:CdpEndpoint,owner:&host::Owner,thread:&str,target:Option<&str>)->Result<()> {
- let v=descriptor(endpoint).await?.ok_or_else(||error("descriptor-missing"))?;
+async fn bind(client:&reqwest::Client,v:&Value,owner:&host::Owner,thread:&str,target:Option<&str>)->Result<()> {
  let proof=if target.is_some(){let auth=super::credentials::read(&super::credentials::official_home()?,&owner.label,true)?;let token=auth["accessToken"].as_str().ok_or_else(||error("owner-credential"))?;Some(format!("{:x}",Sha256::digest(format!("Bearer {token}").as_bytes())))}else{None};
- let reply=control(&v,json!({"action":"bind","owner":owner.id,"thread":thread,"target":target,"proof":proof})).await?;
+ let reply=control(client,v,json!({"action":"bind","owner":owner.id,"thread":thread,"target":target,"proof":proof})).await?;
  if reply["accepted"]!=true{return Err(error("binding-result"));}Ok(())
 }
 pub(super) async fn restore(endpoint:CdpEndpoint,owner:&host::Owner)->Result<()> {
  let Some(v)=descriptor(endpoint).await?else{return Ok(())};
- let reply=control(&v,json!({"action":"restore","owner":owner.id})).await?;
+ let reply=control(&control_client()?,&v,json!({"action":"restore","owner":owner.id})).await?;
  if reply["accepted"]!=true{return Err(error("restore-result"));}Ok(())
 }
 
@@ -150,10 +151,9 @@ pub(super) async fn restore(endpoint:CdpEndpoint,owner:&host::Owner)->Result<()>
 /// preparation, commit, rollback, disable/re-enable and task gates stay intact.
 pub(super) async fn transition(endpoint:CdpEndpoint,p:&Value)->Result<Option<Value>>{
  if !matches!(p["mode"].as_str(),Some("check"|"switch")){return Ok(None);}
- if !available(endpoint).await?{return Ok(None);}
- let v=descriptor(endpoint).await?.ok_or_else(||error("descriptor-missing"))?;
+ let Some((v,client))=ready_descriptor(endpoint).await?else{return Ok(None)};
  let thread=p["threadId"].as_str().ok_or_else(||error("thread"))?;
- let route=control(&v,json!({"action":"route","thread":thread})).await?;
+ let route=control(&client,&v,json!({"action":"route","thread":thread})).await?;
  if route["direct"]==true||p["api"].is_object(){return Ok(None);}
  let state_params=json!({"mode":"state","threadId":thread});
  let expression=include_str!("native_route.js").replace("__PARAMS__",&state_params.to_string()).replace("__PROFILE__",&host::profile().to_string());
@@ -161,18 +161,18 @@ pub(super) async fn transition(endpoint:CdpEndpoint,p:&Value)->Result<Option<Val
  if !state["inProgress"].is_boolean(){return Err(error("native-state"));}
  if p["mode"]=="check" {
   let ready=route["blocked"]==false&&route["target"]==p["baseUrl"];
-  if ready&&route["target"].is_string()&&state["inProgress"]==false{let owner=host::observe(endpoint).await?;bind(endpoint,&owner,thread,route["target"].as_str()).await?;}
+  if ready&&route["target"].is_string()&&state["inProgress"]==false{let owner=host::observe(endpoint).await?;bind(&client,&v,&owner,thread,route["target"].as_str()).await?;}
   return Ok(Some(json!({"ready":ready,"routed":route["target"].is_string()||route["blocked"]==true,"inProgress":state["inProgress"],"startupTransport":true})));
  }
  if state["inProgress"]!=false{return Err(AccountError::new("ACCOUNT_TURN_ACTIVE","Finish the active task before preparing this account."));}
  let owner=host::observe(endpoint).await?;
- bind(endpoint,&owner,thread,p["baseUrl"].as_str()).await?;
+ bind(&client,&v,&owner,thread,p["baseUrl"].as_str()).await?;
  crate::runtime_log::record("accounts","account.startup.transition","confirmed",json!({"conversationId":thread,"actorReleased":false,"taskSent":false}));
  Ok(Some(json!({"ready":true,"permissionsPreserved":true,"startupTransport":true})))
 }
 pub(super) async fn observe_transition(endpoint:CdpEndpoint,p:&Value,result:&Value)->Result<()> {
- if !matches!(p["mode"].as_str(),Some("adopt"|"switch"))||result["ready"]!=true||!available(endpoint).await?{return Ok(());}
- let Some(v)=descriptor(endpoint).await?else{return Ok(())};
- let reply=control(&v,json!({"action":"native","thread":p["threadId"],"direct":p["baseUrl"].is_string()})).await?;
+ if !matches!(p["mode"].as_str(),Some("adopt"|"switch"))||result["ready"]!=true{return Ok(());}
+ let Some((v,client))=ready_descriptor(endpoint).await?else{return Ok(())};
+ let reply=control(&client,&v,json!({"action":"native","thread":p["threadId"],"direct":p["baseUrl"].is_string()})).await?;
  if reply["accepted"]!=true{return Err(error("native-transition"));}Ok(())
 }

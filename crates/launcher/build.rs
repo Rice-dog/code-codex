@@ -3,6 +3,20 @@ fn main() {
         return;
     }
 
+    // Build once on the developer machine; never compile C# in the user's TEMP.
+    println!("cargo:rerun-if-changed=resources/package-activation.cs");
+    println!("cargo:rerun-if-env-changed=SystemRoot");
+    let compiler = std::path::PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot"))
+        .join("Microsoft.NET/Framework64/v4.0.30319/csc.exe");
+    let assembly = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"))
+        .join("package-activation.dll");
+    let status = std::process::Command::new(compiler)
+        .args(["/nologo", "/target:library", "/optimize+"])
+        .arg(format!("/out:{}", assembly.display()))
+        .arg(std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).join(r"resources\package-activation.cs"))
+        .status().expect("compile embedded package activation helper");
+    assert!(status.success(), "package activation helper compilation failed");
+
     println!("cargo:rerun-if-changed=resources/windows-manifest.rc");
     println!("cargo:rerun-if-changed=resources/application.manifest");
     println!("cargo:rerun-if-changed=resources/code-codex.ico");
