@@ -2,20 +2,20 @@
   {
     "assetName": "CodeCodex-0.6.20-x64-setup.exe",
     "path": "CodeCodex-0.6.20-x64-setup.exe",
-    "size": 22372596,
-    "sha256": "c6d19a35f3fe3b228b323609d2f0252541874e9433fc794a5891c2b052a56cdb"
+    "size": 22372529,
+    "sha256": "f0462e15574ed2278c024b8f85b5c568a8a238827b784d2ee268d79dacea1b4d"
   },
   {
     "assetName": "CodeCodex-0.6.20-x64.msi",
     "path": "CodeCodex-0.6.20-x64.msi",
     "size": 12521472,
-    "sha256": "e3f6899b4b9e9404f815180fb6bc13a20c4004af54335fa1aeedf3b18b8730da"
+    "sha256": "e2f39800b669ae481e50d066d3bdf6502b1ed985c0e41458ff4dc700b4d36c12"
   },
   {
     "assetName": "CodeCodex-0.6.20-x64.zip",
     "path": "CodeCodex-0.6.20-x64.zip",
-    "size": 16458972,
-    "sha256": "04d88985e4fd94fcdca7d4d55f704c265fba234885add90a3ce3733e32e7fd2a"
+    "size": 16458905,
+    "sha256": "73c352daa88cab27246d00b87efac380d98e2fffbe12009c161d13b119290e14"
   },
   {
     "assetName": "Uninstall-CodeCodex.exe",
