@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 18,
+  "revision": 19,
   "rules": [
     {
       "id": "layout",
@@ -284,10 +284,13 @@
       "feature": "Official executable, launch and package identity",
       "sources": [
         "crates/launcher/src/discovery.rs",
-        "crates/launcher/src/process_guard.rs"
+        "crates/launcher/src/process_guard.rs",
+        "crates/launcher/resources/package-activation.cs",
+        "crates/launcher/build.rs"
       ],
       "tests": [
-        "scripts/test-startup-conflict-native.ps1"
+        "scripts/test-startup-conflict-native.ps1",
+        "crates/launcher/src/process_guard.rs"
       ],
       "tokens": [],
       "paths": [
@@ -297,7 +300,8 @@
         "resources/app-update.yml"
       ],
       "checks": [
-        "Trusted package identity, native launch ownership, old/new/unknown versions and uninstall cleanup."
+        "Trusted package identity, native launch ownership, old/new/unknown versions and uninstall cleanup.",
+        "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -325,7 +329,9 @@
         "crates/launcher/src/process_guard.rs",
         "packages/explorer-ui/src/core/document-capability-owner.ts",
         "packages/explorer-ui/src/app/composition.ts",
-        "packages/explorer-ui/src/features/accounts/legacy-handoff.ts"
+        "packages/explorer-ui/src/features/accounts/legacy-handoff.ts",
+        "crates/launcher/resources/package-activation.cs",
+        "crates/launcher/build.rs"
       ],
       "tests": [
         "crates/launcher/src/accounts/startup.rs",
@@ -336,7 +342,8 @@
         "scripts/test-account-native-routing.mjs",
         "scripts/test-document-retired-binding.mjs",
         "scripts/test-account-lease-handoff.mjs",
-        "scripts/test-account-candidate-cleanup.mjs"
+        "scripts/test-account-candidate-cleanup.mjs",
+        "crates/launcher/src/process_guard.rs"
       ],
       "tokens": [
         "openai_base_url",
@@ -367,7 +374,8 @@
         "Parallel requests remain isolated; closing or cancelling one route leaves the other usable. Unknown/closed capability paths cannot route to another conversation. The initial loopback probe is reused by later routes without additional identity/quota reads, retries or switching waits.",
         "New Chat refuses inference before the native thread binding and accepts it after binding on the same listener. Cover official/API routes, existing and new chats, disabled/re-enabled plugin and network reconnect separately; real provider success and timing require actual host/service acceptance.",
         "Same-version retired native bindings cannot cancel current startup, claim document ownership or release the working endpoint again; include legacy slot assignment, failed unreleased candidate, current binding reconnection and new-document reset. This is local lifecycle admission only: no added account switch/auth/quota reads, retry or waiting.",
-        "Within one startup transport operation reuse the verified descriptor and HTTP client across status/route/bind. Preserve listener ownership, capability/proof, active-request rejection, legacy/API fallback, failed replies and default restore; no descriptor is cached across operations."
+        "Within one startup transport operation reuse the verified descriptor and HTTP client across status/route/bind. Preserve listener ownership, capability/proof, active-request rejection, legacy/API fallback, failed replies and default restore; no descriptor is cached across operations.",
+        "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance."
       ],
       "automatedChecks": [
         "package.inventory",
