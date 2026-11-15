@@ -10,6 +10,13 @@ import {inspectComposerBackdrop} from './native-composer-backdrop';
 import {inspectSidePanelOpacity} from './native-side-panel-opacity';
 
 type Check={id:string;status:'passed'|'issue'|'manual';scope:string;detail:string};
+export function inspectCollapsedTreePaint(root:Document):Pick<Check,'status'|'detail'> {
+ const alpha=getComputedStyle(root.documentElement).getPropertyValue('--code-codex-mask-tree').trim();
+ const rails=Array.from(root.querySelectorAll<HTMLElement>('[data-code-codex-owned="true"][data-collapsed="true"]')).flatMap(h=>Array.from(h.shadowRoot?.querySelectorAll<HTMLElement>('.collapsed-tab')??[])).filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility==='visible';});
+ if(!root.documentElement.hasAttribute('data-code-codex-ui-mask-active')||!alpha||!rails.length)return {status:'manual',detail:'Collapse the file tree with UI Surface Opacity and a background active to inspect its expand rail.'};
+ const bad=rails.some(e=>{const s=getComputedStyle(e),parts=s.backgroundColor.match(/^rgba?\(([^)]+)\)$/)?.[1]?.split(',').map(Number);return !parts||Math.abs((parts[3]??1)-Number(alpha))>.005||s.backgroundImage!=='none';});
+ return {status:bad?'issue':'passed',detail:bad?'Collapsed file-tree expand rail does not follow the file-tree opacity.':'Mounted collapsed file-tree expand rail follows the file-tree opacity.'};
+}
 export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];documentVersion:string|null}>{
  const checks:Check[]=[];
  const add=(id:string,status:Check['status'],detail:string,scope='actual-host-read-only')=>checks.push({id,status,scope,detail});
@@ -110,5 +117,7 @@ export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];docu
  add('host.composer-backdrop',backdrop.status,backdrop.detail);
  const sidePanel=inspectSidePanelOpacity(document);
  add('host.side-panel-paint',sidePanel.status,sidePanel.detail);
+ const treeRail=inspectCollapsedTreePaint(document);
+ add('host.tree-rail-paint',treeRail.status,treeRail.detail);
  return {checks,documentVersion:manifest.version??null};
 }

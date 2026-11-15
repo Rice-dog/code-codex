@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 25,
+  "revision": 26,
   "rules": [
     {
       "id": "layout",
@@ -164,7 +164,8 @@
         "packages/explorer-ui/src/surface-opacity-runtime.ts",
         "packages/explorer-ui/src/host-update-probes.ts",
         "packages/explorer-ui/src/host-paint-inspection.ts",
-        "packages/explorer-ui/src/native-side-panel-opacity.ts"
+        "packages/explorer-ui/src/native-side-panel-opacity.ts",
+        "packages/explorer-ui/src/components/styles/background-surfaces.ts"
       ],
       "tests": [
         "scripts/test-appearance-adapter.mjs",
@@ -172,7 +173,8 @@
         "scripts/test-spectral-drape.mjs",
         "scripts/test-native-composer-backdrop.mjs",
         "scripts/test-host-update-probes.mjs",
-        "scripts/test-native-side-panel-opacity.mjs"
+        "scripts/test-native-side-panel-opacity.mjs",
+        "scripts/test-collapsed-tree-opacity.mjs"
       ],
       "tokens": [
         "app.appearance.get",
@@ -186,7 +188,8 @@
         "data-summary-panel-variant",
         "data-summary-panel-density",
         "data-app-shell-compact-page-gutter",
-        "data-new-tab-scroll-root"
+        "data-new-tab-scroll-root",
+        "data-collapsed"
       ],
       "paths": [],
       "checks": [
@@ -196,13 +199,15 @@
         "With Surface active, inspect visible native footer and its decorative parent backgrounds including generated ::before/::after. Detect opaque color or gradient even when composer and conversation alpha are zero. Inactive/unmounted/cached pages are manual; legitimate conversation masks and native content are excluded.",
         "Simulate native footer replacement and tree fold/unfold widths in dark/light at 0/intermediate/100 alpha. Verify unchanged draft/input alpha and out-of-scope content; disabling or disposing restores native decoration. Real-host fold/unfold separately.",
         "Reusable paint inspection checks background color/image and generated before/after layers on contract-owned surfaces; legitimate controls/cards remain native. Exercise fold/reopen/remount, theme and active/inactive states with preserved drafts; unavailable real pages stay manual.",
-        "Mounted native summary and right-panel gutter/New tab backings follow utility opacity once at 0/mid/100; controls, webviews, terminal and media remain native. Dark/light, remount and deactivate restore use isolated fixtures; unmounted panels remain manual."
+        "Mounted native summary and right-panel gutter/New tab backings follow utility opacity once at 0/mid/100; controls, webviews, terminal and media remain native. Dark/light, remount and deactivate restore use isolated fixtures; unmounted panels remain manual.",
+        "Collapsed owned file-tree expand rail follows the tree opacity independently of conversation alpha at 0/mid/100. Detect fixed alpha, opaque fill or gradient; check real fold/reopen and isolated remount/light/dark. Expanded, inactive or unmounted rails remain manual; preserve button geometry, native interactions and out-of-scope paint."
       ],
       "automatedChecks": [
         "package.inventory",
         "host.theme",
         "host.composer-backdrop",
-        "host.side-panel-paint"
+        "host.side-panel-paint",
+        "host.tree-rail-paint"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [

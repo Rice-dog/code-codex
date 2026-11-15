@@ -114,4 +114,8 @@ export const backgroundTreeSurfaceStyles = String.raw`
     backdrop-filter: none !important;
   }
 
+  :host-context(html[data-code-codex-ui-mask-active][data-code-codex-ui-mask-active]) .collapsed-tab {
+    background: rgba(16, 17, 20, var(--code-codex-mask-tree)) !important;
+  }
+
 `;
