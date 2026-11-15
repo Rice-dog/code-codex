@@ -250,9 +250,10 @@ function Wait-RestartProcessExit($Candidate, [string]$Image, [TimeSpan]$Timeout 
 function Invoke-RestartRecovery([string]$Image, [string]$PreferencePath) {
     $candidate = Get-RestartCandidate $Image
     if ($null -eq $candidate) { return 'ready' }
-    if ($candidate.Managed) { return 'managed' }
+    $updateRecovery = $env:CLE_UPDATE_RESTART_ALLOWED -eq '1'
+    if ($candidate.Managed -and -not $updateRecovery) { return 'managed' }
     try {
-        $automatic = Read-RestartPreference $PreferencePath
+        $automatic = ($env:CLE_UPDATE_RESTART_ALLOWED -eq '1') -or (Read-RestartPreference $PreferencePath)
         $remember = $false
         if (-not $automatic) {
             $choice = Show-RestartConfirmation
@@ -262,7 +263,7 @@ function Invoke-RestartRecovery([string]$Image, [string]$PreferencePath) {
         # Reinspect after consent: never close a new instance or a newly managed session.
         $current = Get-RestartCandidate $Image
         try {
-            if ($null -ne $current -and ($current.Managed -or $current.Pid -ne $candidate.Pid -or $current.Created -ne $candidate.Created)) {
+            if ($null -ne $current -and (($current.Managed -and -not $updateRecovery) -or $current.Pid -ne $candidate.Pid -or $current.Created -ne $candidate.Created)) {
                 throw 'Codex changed while awaiting confirmation; no process was closed'
             }
             if ($null -eq $current -and -not $candidate.Process.HasExited) { throw 'Official process inspection became unavailable' }

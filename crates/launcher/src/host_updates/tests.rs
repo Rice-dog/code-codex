@@ -217,6 +217,7 @@ fn entry(body: &str, kind: &str, deps: &[&str]) -> Entry {
 fn snapshot() -> Snapshot {
     Snapshot {
         registry_hash: "fixture".into(),
+        runtimes: vec![],
         schema: 1,
         version: "old".into(),
         package: "official".into(),
@@ -705,4 +706,97 @@ fn explicit_reclassification_records_new_mappings_and_keeps_original_report_byte
     assert_eq!(analysis_status(&latest)["status"], "current");
     assert_eq!(fs::read(&path).unwrap(), original);
     assert_eq!(gate(dir.path(), Some(&next), "old", false, next.clone()).unwrap()["scanned"], false);
+}
+
+fn runtime_directory(root: &Path, body: &[u8]) {
+    use base64::Engine;
+    let digest=base64::engine::general_purpose::STANDARD.encode(Sha256::digest(body));
+    fs::write(root.join("runtime.json"),body).unwrap();
+    fs::write(root.join("AppxManifest.xml"),b"<Package/>").unwrap();
+    fs::write(root.join("AppxBlockMap.xml"),format!(r#"<BlockMap xmlns="http://schemas.microsoft.com/appx/2010/blockmap" xmlns:b4="http://schemas.microsoft.com/appx/2021/blockmap" HashMethod="http://www.w3.org/2001/04/xmlenc#sha256"><File Name="runtime.json" Size="{}"><b4:FileHash Hash="{digest}"/></File></BlockMap>"#,body.len())).unwrap();
+}
+fn runtime_fixture(version: &str, root: &Path) -> runtime::RuntimePackage {
+    runtime::RuntimePackage { package: format!("OpenAI.CodexPrimaryRuntime.v{}_{}_x64__3k8sg7r9htsxt",version.replace('.',"-"),version), version:version.into(),root:root.to_string_lossy().into() }
+}
+#[test]
+fn runtime_only_transition_is_distinct_and_unchanged_components_skip_inventory() {
+    let d=tempfile::tempdir().unwrap();
+    let mut old=snapshot();old.runtimes=vec![runtime_fixture("26.9.0.0",Path::new("old"))];
+    let mut new=old.clone();new.runtimes=vec![runtime_fixture("26.10.0.0",Path::new("new"))];
+    new.entries.insert("runtime/new/runtime.json".into(),entry("new backend","code_or_unknown",&["desktop"]));
+    let result=version_gate::check_components(d.path(),Some(&old),&new.version,&new.runtimes,false,None,||Ok(new.clone())).unwrap();
+    assert_eq!(result["status"],"complete");assert_eq!(report(Some(&old),&new)["type"],"update");
+    let baseline=fs::read(d.path().join("baseline.json")).unwrap();
+    assert_eq!(version_gate::check_components(d.path(),Some(&new),&new.version,&new.runtimes,false,None,||panic!("unchanged components must not scan")).unwrap()["status"],"version_unchanged");
+    assert_eq!(fs::read(d.path().join("baseline.json")).unwrap(),baseline);
+    // Replaying the exact prior relation restores its immutable report without scan.
+    assert_eq!(version_gate::check_components(d.path(),Some(&old),&new.version,&new.runtimes,false,None,||panic!("completed runtime relation must not scan")).unwrap()["status"],"already_checked");
+    let mut third=new.clone();third.runtimes=vec![runtime_fixture("26.11.0.0",Path::new("third"))];third.complete=false;
+    assert_eq!(version_gate::check_components(d.path(),Some(&new),&third.version,&third.runtimes,false,None,||Ok(third.clone())).unwrap()["status"],"partial");
+    assert_eq!(fs::read(d.path().join("baseline.json")).unwrap(),baseline);
+}
+#[test]
+fn runtime_inventory_selects_numeric_newest_reuses_desktop_and_reports_removal() {
+    let desktop=tempfile::tempdir().unwrap();let first=tempfile::tempdir().unwrap();let second=tempfile::tempdir().unwrap();
+    fs::create_dir_all(desktop.path().join("resources")).unwrap();asar(&desktop.path().join("resources/app.asar"),json!({}),b"");
+    runtime_directory(first.path(),b"first");runtime_directory(second.path(),b"second");
+    let a=runtime_fixture("26.9.0.0",first.path());let b=runtime_fixture("26.10.0.0",second.path());
+    assert_eq!(runtime::inventory_package(&[a.clone(),b.clone()]).unwrap(),&b);
+    let install=installation(desktop.path());
+    let old=scan::inventory_components(&install,&[a.clone()],None,false,None).unwrap();assert!(old.complete);
+    // Trusted unchanged MSIX components are reused without opening their old files.
+    fs::remove_file(desktop.path().join("resources/app.asar")).unwrap();
+    let new=scan::inventory_components(&install,&[a.clone(),b.clone()],Some(&old),false,None).unwrap();assert!(new.complete,"{:?}",new.issues);
+    assert_eq!(old.entries["resources/app.asar"],new.entries["resources/app.asar"]);
+    assert!(new.entries.contains_key(&format!("runtime/{}/runtime.json",b.package)));
+    assert!(!new.entries.contains_key(&format!("runtime/{}/runtime.json",a.package)));
+    assert!(changes(Some(&old),&new).iter().any(|c|c["change"]=="removed"));
+    assert!(new.entries[&format!("runtime-registration/{}.json",a.package)].dependencies.contains(&"desktop".into()));
+    runtime_directory(first.path(),b"first selected again");
+    let rollback=scan::inventory_components(&install,&[a.clone()],Some(&new),false,None).unwrap();assert!(rollback.complete);
+    assert_eq!(rollback.entries[&format!("runtime/{}/runtime.json",a.package)].sha256,hash(b"first selected again"));
+    let missing=runtime_fixture("26.11.0.0",Path::new("nonexistent-runtime-fixture"));
+    assert!(!scan::inventory_components(&install,&[missing],Some(&new),false,None).unwrap().complete);
+    let forced=scan::inventory_components(&install,&[b],Some(&new),true,None).unwrap();assert!(!forced.complete);
+}
+#[cfg(windows)]
+#[test]
+#[ignore = "Read-only current-user WinRT Runtime registration; no traversal or inference."]
+fn actual_registered_primary_runtime_metadata() {
+    let packages=runtime::registered().unwrap();
+    println!("RUNTIME_REGISTRATIONS={}",serde_json::to_string(&packages).unwrap());
+    for p in &packages { assert!(Path::new(&p.root).join("AppxManifest.xml").is_file()); }
+}
+
+#[cfg(windows)]
+#[test]
+fn runtime_msix_catalog_preserves_declared_hashes_and_missing_whole_hash_reads_bytes() {
+    use base64::Engine;
+    let desktop=tempfile::tempdir().unwrap();fs::create_dir_all(desktop.path().join("resources")).unwrap();asar(&desktop.path().join("resources/app.asar"),json!({}),b"");
+    let dir=tempfile::tempdir().unwrap();runtime_directory(dir.path(),b"metadata");
+    let package=runtime_fixture("26.12.0.0",dir.path());
+    let body=b"declared dependency bytes";let digest=base64::engine::general_purpose::STANDARD.encode(Sha256::digest(body));
+    let xml=fs::read_to_string(dir.path().join("AppxBlockMap.xml")).unwrap().replace("</BlockMap>",&format!(r#"<File Name="dependencies\example.js" Size="{}"><b4:FileHash Hash="{digest}"/></File><File Name="fallback.js" Size="8"/></BlockMap>"#,body.len()));
+    fs::write(dir.path().join("AppxBlockMap.xml"),&xml).unwrap();fs::write(dir.path().join("fallback.js"),b"fallback").unwrap();
+    let run=||scan::inventory_components(&installation(desktop.path()),std::slice::from_ref(&package),None,true,None).unwrap();
+    let snapshot=run();assert!(snapshot.complete,"{:?}",snapshot.issues);
+    let declared=&snapshot.entries[&format!("runtime/{}/dependencies/example.js",package.package)];
+    assert_eq!(declared.sha256,hash(body));assert_eq!(declared.stamp,"msix-declared-file-sha256-v1");
+    assert_eq!(snapshot.entries[&format!("runtime/{}/fallback.js",package.package)].sha256,hash(b"fallback"));
+    fs::write(dir.path().join("AppxBlockMap.xml"),xml.replace(r"dependencies\example.js",r"..\example.js")).unwrap();assert!(!run().complete);
+    fs::write(dir.path().join("AppxBlockMap.xml"),xml.replace(&digest,"invalid")).unwrap();assert!(!run().complete);
+    fs::write(dir.path().join("AppxBlockMap.xml"),xml.replace("</BlockMap>","<File Name=\"fallback.js\" Size=\"8\"/></BlockMap>")).unwrap();assert!(!run().complete);
+    assert!(runtime::catalog("<!DOCTYPE BlockMap [<!ENTITY a 'x'>]><BlockMap/>").is_err());
+}
+#[cfg(windows)]
+#[test]
+#[ignore = "Read-only official Runtime MSIX inventory and sampled byte/hash comparison; no inference."]
+fn actual_primary_runtime_catalog_inventory() {
+    let packages=runtime::registered().unwrap();let package=runtime::inventory_package(&packages).expect("installed Runtime");
+    let root=Path::new(&package.root);let start=Instant::now();let xml=fs::read_to_string(root.join("AppxBlockMap.xml")).unwrap();let files=runtime::catalog(&xml).unwrap();
+    for relative in ["runtime.json","plugins/openai-primary-runtime/plugins/documents/README.md","plugins/openai-primary-runtime/plugins/pdf/README.md"] {
+        let file=files.iter().find(|f|f.name==relative).unwrap();assert_eq!(file.sha256.as_deref(),Some(hash(&fs::read(root.join(relative)).unwrap()).as_str()));
+    }
+    assert!(files.iter().all(|file|file.sha256.is_some()),"Current Runtime catalog contains unsupported hash rows");
+    println!("RUNTIME_CATALOG={{\"package\":{:?},\"entries\":{},\"elapsedMs\":{},\"sampledFiles\":3,\"declaredWholeFileHashes\":{}}}",package.package,files.len(),start.elapsed().as_millis(),files.iter().filter(|f|f.sha256.is_some()).count());
 }

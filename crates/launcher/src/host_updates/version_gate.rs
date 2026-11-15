@@ -4,6 +4,10 @@ use super::*;
 struct Attempt {
     from: String,
     to: String,
+    #[serde(default)]
+    from_runtime: String,
+    #[serde(default)]
+    to_runtime: String,
     state: String,
     at: u64,
     report: Option<String>,
@@ -53,6 +57,7 @@ fn saved_snapshot(dir: &Path, a: &Attempt) -> io::Result<Snapshot> {
     let snapshot: Snapshot = serde_json::from_value(value).map_err(io::Error::other)?;
     if !snapshot.complete
         || snapshot.version != a.to
+        || runtime::identity(&snapshot.runtimes) != a.to_runtime
         || report["complete"] != true
         || report["version"] != a.to
     {
@@ -68,19 +73,32 @@ pub(super) fn check(
     cancel: Option<&tokio_util::sync::CancellationToken>,
     scan: impl FnOnce() -> io::Result<Snapshot>,
 ) -> io::Result<Value> {
+    check_components(dir, previous, to, &[], force, cancel, scan)
+}
+pub(super) fn check_components(
+    dir: &Path,
+    previous: Option<&Snapshot>,
+    to: &str,
+    runtimes: &[runtime::RuntimePackage],
+    force: bool,
+    cancel: Option<&tokio_util::sync::CancellationToken>,
+    scan: impl FnOnce() -> io::Result<Snapshot>,
+) -> io::Result<Value> {
     let from = previous.map(|p| p.version.as_str()).unwrap_or("");
-    // Same-version startup never traverses files, even when registry rules or metadata changed.
-    if !force && previous.is_some_and(|p| p.complete && p.version == to) {
+    let from_runtime = previous.map(|p| runtime::identity(&p.runtimes)).unwrap_or_default();
+    let to_runtime = runtime::identity(runtimes);
+    // Rule-only changes still require explicit retry; a Runtime change is a host update.
+    if !force && previous.is_some_and(|p| p.complete && p.version == to && from_runtime == to_runtime) {
         write_status(dir, "version_unchanged", from, to)?;
         return Ok(
             json!({"status":"version_unchanged","version":to,"scanned":false,"baselinePromoted":false}),
         );
     }
     let mut journal = load_journal(dir)?;
-    let relation = key(from, to);
+    let relation = if from_runtime.is_empty() && to_runtime.is_empty() { key(from, to) } else { hash(&encode(&[from, to, &from_runtime, &to_runtime])?) };
     if !force {
         if let Some(a) = journal.get(&relation) {
-            if a.from != from || a.to != to {
+            if a.from != from || a.to != to || a.from_runtime != from_runtime || a.to_runtime != to_runtime {
                 return Err(io::Error::other("version transition key mismatch"));
             }
             if a.state == "complete" {
@@ -109,6 +127,8 @@ pub(super) fn check(
     let mut attempt = Attempt {
         from: from.into(),
         to: to.into(),
+        from_runtime,
+        to_runtime: to_runtime.clone(),
         state: "running".into(),
         at: now(),
         report: None,
@@ -119,7 +139,7 @@ pub(super) fn check(
     write_status(dir, "scanning", from, to)?;
     let result = (|| {
         let current = scan()?;
-        if current.version != to {
+        if current.version != to || runtime::identity(&current.runtimes) != to_runtime {
             return Err(io::Error::other("official version changed during scan"));
         }
         if cancel.is_some_and(|c| c.is_cancelled()) {

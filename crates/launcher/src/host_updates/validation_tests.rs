@@ -67,7 +67,7 @@ fn stale_engine_rules_and_version_are_separate_from_inventory_freshness() {
 }
 #[test]
 fn registry_check_references_resolve_and_manual_steps_are_concrete() {
- let ids=["package.inventory","package.modules","host.interfaces","host.quota","host.layout","host.menu","host.composer","host.theme","host.models","host.ownership","regression.interfaces","regression.layout","regression.models"];
+ let ids=["package.inventory","package.modules","host.interfaces","host.quota","host.layout","host.split-layout","host.menu","host.composer","host.theme","host.composer-backdrop","host.models","host.ownership","regression.interfaces","regression.layout","regression.models","regression.account-behavior","host.settings-paint","host.side-panel-paint"];
  for r in registry()["rules"].as_array().unwrap() {
   assert!(!r["automatedChecks"].as_array().unwrap().is_empty());
   for id in r["automatedChecks"].as_array().unwrap(){assert!(ids.contains(&id.as_str().unwrap()),"{id}");}
@@ -86,4 +86,14 @@ fn nonzero_reclassification_adds_new_rules_without_erasing_update_paths() {
  atomic(&d.path().join("latest.json"),&json!({"id":"refresh"})).unwrap();let (id,merged)=anchor(d.path()).unwrap();
  assert_eq!(id,"original");assert_eq!(merged["changes"].as_array().unwrap().len(),1);assert_eq!(merged["changes"][0]["dependencyIds"],json!(["new","old"]));assert_eq!(merged["analysisDependencyIds"],json!(["extra","new"]));assert_eq!(fs::read(original.join("report.json")).unwrap(),before);
  assert_eq!(identity(d.path(),"original").unwrap()["inventoryId"],"refresh");
+}
+
+#[test]
+fn refresh_does_not_anchor_another_runtime_generation() {
+ let d=tempfile::tempdir().unwrap();
+ for (id,kind,time,runtime) in [("matching","update",1,"runtime-a"),("different","update",2,"runtime-b"),("refresh","analysis_refresh",3,"runtime-a")] {
+  let p=report_dir(d.path(),id,kind,time);let mut v=read_json(&p.join("report.json")).unwrap();v["runtimes"]=json!([runtime]);atomic(&p.join("report.json"),&v).unwrap();
+ }
+ atomic(&d.path().join("latest.json"),&json!({"id":"refresh"})).unwrap();
+ assert_eq!(anchor(d.path()).unwrap().0,"matching");
 }

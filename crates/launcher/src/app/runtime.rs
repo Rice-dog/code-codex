@@ -55,6 +55,7 @@ pub(super) fn default_run_args() -> RunArgs {
         codex_args: Vec::new(),
         allow_unsupported_version: false,
         login_startup: false,
+        official_update_from: None,
     }
 }
 
@@ -89,14 +90,14 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
     if !compatible && !args.allow_unsupported_version {
         return Err(AppError::UnsupportedVersion);
     }
+    let update_recovery=args.official_update_from.as_deref().is_some_and(|from| crate::official_update::is_newer(&installation.version,from));
     record_startup_event("existing process", "checking for conflicting Codex process");
     if is_executable_running(&installation.executable)? {
         if installation.source != DiscoverySource::WindowsPackageManager {
             return Err(AppError::AlreadyRunning);
         }
         record_startup_event("existing process", "offering consent-based graceful restart");
-        match crate::startup_conflict::resolve(&installation.executable)
-            .await
+        match (if update_recovery {crate::startup_conflict::resolve_after_update(&installation.executable).await} else {crate::startup_conflict::resolve(&installation.executable).await})
             .map_err(AppError::StartupConflict)?
         {
             crate::startup_conflict::Outcome::Cancelled => {

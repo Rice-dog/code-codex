@@ -24,6 +24,7 @@ mod startup_conflict;
 mod startup_recovery_ui;
 mod login_startup;
 mod menu_restart;
+mod official_update;
 mod host_updates;
 mod startup_diagnostics;
 mod startup_examples;
@@ -106,6 +107,15 @@ enum Commands {
         #[arg(long)] pid:u32,
         #[arg(long)] created_ms:u64,
     },
+    #[command(hide=true)]
+    OfficialUpdateFollow {
+        #[arg(long)] port:u16,
+        #[arg(long)] pid:u32,
+        #[arg(long)] created_ms:u64,
+        #[arg(long)] from_version:String,
+        #[arg(long)] image:PathBuf,
+        #[arg(long)] ready:PathBuf,
+    },
     /// Discover and launch the official Codex Desktop application.
     Run(RunArgs),
     /// Attach to a user-authorized, already-running loopback CDP endpoint.
@@ -177,6 +187,8 @@ struct RunArgs {
     /// Used only by the opt-in Windows login entry; never grants restart consent.
     #[arg(long, hide = true)]
     login_startup: bool,
+    #[arg(long, hide=true)]
+    official_update_from: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -343,6 +355,7 @@ async fn application_main() -> ExitCode {
     let mode = match &command {
         Commands::HostUpdates {..} => "host-updates",
         Commands::MenuRestart {..} => "menu-restart",
+        Commands::OfficialUpdateFollow {..} => "official-update-follow",
         Commands::Run(_) => "run",
         Commands::Attach(_) => "attach",
         Commands::Activate(_) => "activate",
@@ -361,6 +374,7 @@ async fn application_main() -> ExitCode {
     let result = match command {
         Commands::HostUpdates {..} => unreachable!("handled before initialization"),
         Commands::MenuRestart {port,pid,created_ms} => menu_restart::run(port,pid,created_ms).await.map_err(AppError::StartupConflict),
+        Commands::OfficialUpdateFollow {port,pid,created_ms,from_version,image,ready} => official_update::follow(port,pid,created_ms,from_version,image,ready).await.map_err(AppError::StartupConflict),
         Commands::Run(args) => run(args).await,
         Commands::LoginStartup { .. } => unreachable!("handled before initialization"),
         Commands::Attach(args) => attach(args).await,

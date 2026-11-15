@@ -9,6 +9,8 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+#[path = "host_updates/runtime.rs"]
+mod runtime;
 #[path = "host_updates/scan.rs"]
 mod scan;
 #[path = "host_updates/scheduler.rs"]
@@ -30,6 +32,8 @@ pub(super) struct Entry {
 pub(super) struct Snapshot {
     #[serde(default)]
     registry_hash: String,
+    #[serde(default)]
+    runtimes: Vec<runtime::RuntimePackage>,
     schema: u32,
     version: String,
     package: String,
@@ -72,7 +76,7 @@ fn registry_hash() -> String {
     hash(
         &[
             include_bytes!("../../../resources/host-update-dependencies.json").as_slice(),
-            b"path-scope-v3-analysis-identity",
+            b"path-scope-v5-runtime-msix-catalog",
         ]
         .concat(),
     )
@@ -175,7 +179,7 @@ fn report(previous: Option<&Snapshot>, current: &Snapshot) -> Value {
         })
         .collect();
     let dependencies:Vec<_>=registry.iter().filter(|r|affected.contains(&r.id)).map(|r|json!({"id":r.id,"feature":r.feature,"sourceFiles":r.sources,"suggestedTests":r.tests,"requiredChecks":r.checks,"functionalImpact":"not_tested"})).collect();
-    json!({"schema":1,"dependencyRevision":dependency_revision(),"registryHash":current.registry_hash,"type":if previous.is_none(){"baseline"}else if previous.is_some_and(|p|p.version==current.version&&p.package==current.package&&p.entries.len()==current.entries.len()&&p.entries.iter().all(|(name,a)|current.entries.get(name).is_some_and(|b|a.sha256==b.sha256&&a.kind==b.kind))){"analysis_refresh"}else{"update"},"observedMs":current.observed_ms,"previousVersion":previous.map(|s|&s.version),"version":current.version,"package":current.package,"complete":current.complete,"counts":{"all":changes.len(),"pluginDependency":changes.iter().filter(|v|v["category"]=="plugin_dependency").count(),"noKnownPluginDependency":changes.iter().filter(|v|v["category"]=="no_known_plugin_dependency").count(),"needsReview":changes.iter().filter(|v|v["category"]=="needs_review").count()},"dependencies":dependencies,"issues":current.issues,"changes":changes,"validation":{"status":"not_tested","reason":"Static dependency candidates only. Actual behavior must be tested separately; no inference, OAuth or account mutation was performed."},"coverage":"Observed installed package files and packed ASAR entries. Unobserved intermediate versions and server-side changes cannot be reconstructed. Resource classification means no registered dependency identified, not proof of no behavioral effect."})
+    json!({"schema":1,"dependencyRevision":dependency_revision(),"registryHash":current.registry_hash,"type":if previous.is_none(){"baseline"}else if previous.is_some_and(|p|p.version==current.version&&p.package==current.package&&p.runtimes==current.runtimes&&p.entries.len()==current.entries.len()&&p.entries.iter().all(|(name,a)|current.entries.get(name).is_some_and(|b|a.sha256==b.sha256&&a.kind==b.kind))){"analysis_refresh"}else{"update"},"observedMs":current.observed_ms,"previousVersion":previous.map(|s|&s.version),"version":current.version,"package":current.package,"runtimes":current.runtimes,"previousRuntimes":previous.map(|p|&p.runtimes),"complete":current.complete,"counts":{"all":changes.len(),"pluginDependency":changes.iter().filter(|v|v["category"]=="plugin_dependency").count(),"noKnownPluginDependency":changes.iter().filter(|v|v["category"]=="no_known_plugin_dependency").count(),"needsReview":changes.iter().filter(|v|v["category"]=="needs_review").count()},"dependencies":dependencies,"issues":current.issues,"changes":changes,"validation":{"status":"not_tested","reason":"Static dependency candidates only. Actual behavior must be tested separately; no inference, OAuth or account mutation was performed."},"coverage":"Observed desktop files, all official PrimaryRuntime registration metadata and official MSIX-declared per-file SHA-256 values of the newest registered Runtime distribution, with catalog/manifest/runtime metadata read directly. Runtime content matching uses paths; declared hashes are not local file integrity verification. Older catalogs without whole-file hashes fall back to direct reads. Desktop packed ASAR entries are expanded as before. Older side-by-side Runtime contents are not scanned. Registration does not establish which backend is active. Unobserved intermediate versions and server-side changes cannot be reconstructed. Resource classification means no registered dependency identified, not proof of no behavioral effect."})
 }
 fn markdown(v: &Value) -> String {
     let mut s = format!(
@@ -191,6 +195,7 @@ fn markdown(v: &Value) -> String {
         v["coverage"].as_str().unwrap_or("")
     );
     s += &format!("Analysis rules: revision {}; fingerprint {}.\n\n", v["dependencyRevision"], v["registryHash"]);
+    s += &format!("Registered PrimaryRuntime packages: {}. Previous registrations: {}.\n\n",v["runtimes"],v["previousRuntimes"]);
     for r in v["dependencies"].as_array().into_iter().flatten() {
         s += &format!(
             "- {}\n  - Source: {}\n  - Suggested checks: {}\n",
@@ -246,7 +251,7 @@ fn commit_report(
     promote: bool,
 ) -> io::Result<Value> {
     let r = report(previous, current);
-    let identity = json!({"version":current.version,"package":current.package,"complete":current.complete,"issues":current.issues,"registry":current.registry_hash,"files":current.entries.iter().map(|(name,e)|json!([name,e.size,e.sha256,e.kind,e.dependencies])).collect::<Vec<_>>()});
+    let identity = json!({"version":current.version,"package":current.package,"runtimes":current.runtimes,"complete":current.complete,"issues":current.issues,"registry":current.registry_hash,"files":current.entries.iter().map(|(name,e)|json!([name,e.size,e.sha256,e.kind,e.dependencies])).collect::<Vec<_>>()});
     let signature = hash(&encode(&identity)?);
     let latest_path = dir.join("latest.json");
     let changed = if latest_path.exists() {
@@ -386,13 +391,22 @@ fn run_owned(
             "HOST_UPDATE_SOURCE: Only the verified official package may be inventoried.",
         ));
     }
-    version_gate::check(
+    let runtimes = match runtime::registered() {
+        Ok(packages) => packages,
+        Err(error) => {
+            let value = json!({"status":"unavailable","observedMs":now(),"code":"HOST_UPDATE_RUNTIME_DISCOVERY","message":error.to_string()});
+            atomic(&dir.join("status.json"), &value)?;
+            return Ok(value);
+        }
+    };
+    version_gate::check_components(
         &dir,
         previous.as_ref(),
         &install.version,
+        &runtimes,
         force,
         cancel.as_ref(),
-        || scan::inventory_owned(&install, previous.as_ref(), true, cancel.clone()),
+        || scan::inventory_components(&install, &runtimes, previous.as_ref(), force, cancel.clone()),
     )
 }
 /// Existing core lifetime owns one startup observation; there is no timer. No renderer or account/plugin instance owns it.

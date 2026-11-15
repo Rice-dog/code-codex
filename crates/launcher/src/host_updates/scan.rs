@@ -4,6 +4,7 @@ const MAX_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 struct Scan<'a> {
     cancel: Option<tokio_util::sync::CancellationToken>,
     root: &'a Path,
+    prefix: String,
     old: Option<&'a Snapshot>,
     reuse: bool,
     entries: BTreeMap<String, Entry>,
@@ -130,7 +131,7 @@ impl Scan<'_> {
         for row in rows {
             self.budget()?;
             let path = row.path();
-            let name = path
+            let name = self.prefix.clone() + &path
                 .strip_prefix(self.root)
                 .map_err(io::Error::other)?
                 .to_string_lossy()
@@ -177,6 +178,40 @@ impl Scan<'_> {
             if let Err(e) = result {
                 self.issues.push(format!("file-incomplete: {name}; {e}"));
             }
+        }
+        Ok(())
+    }
+    fn runtime_catalog(&mut self) -> io::Result<()> {
+        let path=self.root.join("AppxBlockMap.xml");
+        let metadata=regular(&path)?;
+        if metadata.len()>32*1024*1024 { return Err(io::Error::other("Runtime block map exceeds existing metadata bound")); }
+        let xml=fs::read_to_string(&path)?;
+        let files=runtime::catalog(&xml)?;
+        if files.is_empty() { return Err(io::Error::other("Runtime block map contains no files")); }
+        // PackageManager supplies a registered immutable MSIX root. FileHash is
+        // the official per-file SHA-256, not a claim that local bytes were reread.
+        for file in files {
+            self.budget()?;
+            if file.name.is_empty() || file.name.split('/').any(|c|c.is_empty()||c=="."||c==".."||c.contains(':')) || file.name.starts_with('/') {
+                return Err(io::Error::other("Runtime block map has an invalid relative path"));
+            }
+            let name=format!("{}{}",self.prefix,file.name);
+            if self.entries.contains_key(&name) { return Err(io::Error::other("Runtime block map has duplicate files")); }
+            if let Some(sha256)=file.sha256 {
+                let dependencies=self.classify(&name,None);
+                self.entries.insert(name,Entry{size:file.size,sha256,kind:"code_or_unknown".into(),dependencies,stamp:"msix-declared-file-sha256-v1".into()});
+            } else {
+                // Older block maps may lack whole-file hashes. Read only those
+                // files, retaining the same path checks, budgets and cancellation.
+                let path=self.root.join(&file.name);let meta=regular(&path)?;
+                if !meta.is_file() || meta.len()!=file.size { return Err(io::Error::other("Runtime catalog/file size mismatch")); }
+                self.read(&name,&mut fs::File::open(path)?,file.size,"runtime-file-bytes-v1".into())?;
+            }
+        }
+        // Keep the catalog and package identity metadata as actual byte evidence.
+        for relative in ["AppxBlockMap.xml","AppxManifest.xml","runtime.json"] {
+            let path=self.root.join(relative);let meta=regular(&path)?;
+            self.read(&format!("{}{relative}",self.prefix),&mut fs::File::open(path)?,meta.len(),"runtime-metadata-bytes-v1".into())?;
         }
         Ok(())
     }
@@ -303,6 +338,15 @@ pub(super) fn inventory_owned(
     force: bool,
     cancel: Option<tokio_util::sync::CancellationToken>,
 ) -> io::Result<Snapshot> {
+    inventory_components(install, &[], old, force, cancel)
+}
+pub(super) fn inventory_components(
+    install: &crate::discovery::CodexInstallation,
+    runtimes: &[runtime::RuntimePackage],
+    old: Option<&Snapshot>,
+    force: bool,
+    cancel: Option<tokio_util::sync::CancellationToken>,
+) -> io::Result<Snapshot> {
     let parent = install
         .executable
         .parent()
@@ -322,6 +366,7 @@ pub(super) fn inventory_owned(
     let mut scan = Scan {
         cancel,
         root,
+        prefix: String::new(),
         old: if same { old } else { None },
         reuse,
         entries: BTreeMap::new(),
@@ -330,7 +375,9 @@ pub(super) fn inventory_owned(
         started: Instant::now(),
         rules: rules(),
     };
-    if let Err(e) = scan.tree(root, 0) {
+    if reuse && old.is_some_and(|s|s.complete) {
+        scan.entries.extend(old.unwrap().entries.iter().filter(|(name,_)|!name.starts_with("runtime/") && !name.starts_with("runtime-registration/")).map(|(n,e)|(n.clone(),e.clone())));
+    } else if let Err(e) = scan.tree(root, 0) {
         scan.issues.push(format!("inventory-incomplete: {e}"));
     }
     if !scan
@@ -340,9 +387,26 @@ pub(super) fn inventory_owned(
     {
         scan.issues.push("official bundle was not observed".into())
     }
+    for package in runtimes {
+        let name = format!("runtime-registration/{}.json",package.package);
+        let bytes = encode(package)?;
+        scan.entries.insert(name.clone(), Entry { size: bytes.len() as u64, sha256: hash(&bytes), kind: "code_or_unknown".into(), dependencies: scan.classify("runtime-registration/metadata.json",Some(&bytes)), stamp: "registration".into() });
+    }
+    if let Some(package) = runtime::inventory_package(runtimes) {
+        scan.prefix = format!("runtime/{}/",package.package);
+        let reusable = !force && old.is_some_and(|s|s.complete && s.registry_hash==registry_hash() && runtime::inventory_package(&s.runtimes)==Some(package));
+        if reusable {
+            scan.entries.extend(old.unwrap().entries.iter().filter(|(n,_)|n.starts_with(&scan.prefix)).map(|(n,e)|(n.clone(),e.clone())));
+        } else {
+            scan.root = Path::new(&package.root);
+            scan.reuse = false;
+            if let Err(e) = scan.runtime_catalog() { scan.issues.push(format!("runtime-inventory-incomplete: {}; {e}",package.package)); }
+        }
+    }
     Ok(Snapshot {
         registry_hash: registry_hash(),
-        schema: 1,
+        runtimes: runtimes.to_vec(),
+        schema: 2,
         version: install.version.clone(),
         package: install.package_full_name.clone().unwrap_or_default(),
         root: root.to_string_lossy().into(),
