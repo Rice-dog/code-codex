@@ -1,8 +1,13 @@
+import {unexpectedPaint} from './host-paint-inspection';
+import {quotaRemaining} from './features/accounts/quota';
+import {AccountContinuationCycle,continueAfterQuota,isQuotaExhausted} from './features/accounts/auto-continue';
 // Separate, on-demand read-only entry. Never imported by the switch/send path.
 import {qualifyHostModules,managerRole,dispatcherRole} from '../../../resources/account-host-capabilities.js';
 import {codex26715Adapter,activePageElements,MAIN_SURFACE_SELECTOR} from './adapters/codex-26.715';
 import {nativeFiberChain,pickerOf} from './features/accounts/native-model-menu';
 import {capabilities as nativeQuotaCapabilities} from './features/accounts/native-composer-quota';
+import {inspectComposerBackdrop} from './native-composer-backdrop';
+import {inspectSidePanelOpacity} from './native-side-panel-opacity';
 
 type Check={id:string;status:'passed'|'issue'|'manual';scope:string;detail:string};
 export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];documentVersion:string|null}>{
@@ -39,6 +44,24 @@ export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];docu
   assert((pickerOf([{memoizedProps:picker}]) as unknown)===picker);assert(refuses(()=>pickerOf([{memoizedProps:{...picker,modelOptions:null}}])));
   add('regression.models','passed','Executed production picker prop qualification with valid and missing-array fixtures; no callback was called.','controlled-production-regression');
  }catch{add('regression.models','issue','A controlled production model-picker regression failed.','controlled-production-regression');}
+ // Exercise production decision logic with local values only; no account service exists here.
+ try{
+  const now=Date.now(),window=(usedPercent:number,windowDurationMins:number)=>({usedPercent,windowDurationMins,resetsAt:Math.floor(now/1000)+3600});
+  const raw={rateLimits:{primary:window(25,300),secondary:window(60,10080)}};
+  assert(quotaRemaining(raw,now).fiveHour===75&&quotaRemaining(raw,now).weekly===40);
+  assert(quotaRemaining({},now).fiveHour===null);
+  assert(quotaRemaining({rateLimits:{primary:window(100,300)}},now).fiveHour===0);
+  assert(!isQuotaExhausted({status:'failed',error:{codexErrorInfo:'httpConnectionFailed'}}));
+  assert(isQuotaExhausted({status:'failed',error:{codexErrorInfo:'usageLimitExceeded'}}));
+  const first=new AccountContinuationCycle(['a','b','b','c'],'a'),second=new AccountContinuationCycle(['a','b'],'a');
+  let reads=0,prepared=0,sent=0;
+  const ports={current:()=>true,available:()=>true,quota:async()=>{reads++;return raw;},prepare:async()=>{prepared++;},resume:async()=>{sent++;},phase:()=>{},event:()=>{}};
+  assert(await continueAfterQuota(first,ports)==='continued');assert(reads===1&&prepared===1&&sent===1);
+  assert(second.next()==='b');first.cancel();assert(await continueAfterQuota(first,ports)==='cancelled');assert(sent===1);
+  const cancelled=new AccountContinuationCycle(['a','b'],'a');
+  assert(await continueAfterQuota(cancelled,{...ports,prepare:async()=>{cancelled.cancel();}})==='cancelled');assert(sent===1);
+  add('regression.account-behavior','passed','Production quota unknown/zero/window mapping, terminal classification, independent cycles, one continuation and cancellation exercised with local ports only. Live routing/provider acceptance remain separate.','controlled-production-regression');
+ }catch{add('regression.account-behavior','issue','A controlled quota/continuation behavior regression failed.','controlled-production-regression');}
  // Qualify exactly the same interfaces used by production, without publishing
  // a profile, constructing managers, subscribing, reading accounts or sending RPC.
  let profile:any;
@@ -52,6 +75,14 @@ export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];docu
  else add('host.quota','manual','The numbered native quota runtime is not initialized in this document. Check a mounted composer before judging compatibility.');
  const mains=activePageElements(document,MAIN_SURFACE_SELECTOR);
  add('host.layout',mains.length===0?'manual':codex26715Adapter.qualifiesRenderer(document)?'passed':'issue',mains.length===0?'No native workspace is mounted; check an existing conversation and New Chat.':'Production workspace qualification checked active-page ownership, native rail and main surface.');
+ // Inspect only the active main viewport, never a cached page or side-chat frame.
+ const split=mains.flatMap(main=>Array.from(main.querySelectorAll<HTMLElement>('[data-app-shell-workspace-layout="split"][data-app-shell-right-panel-full-width="false"]'))).filter(view=>view.getBoundingClientRect().width>0);
+ const frames=split.flatMap(view=>Array.from(view.children).filter((child):child is HTMLElement=>child instanceof HTMLElement&&/MainContentFrame[-_]/.test(child.className)).map(frame=>({view,frame})));
+ if(frames.length===1){
+  const {view,frame}=frames[0]!,v=view.getBoundingClientRect(),f=frame.getBoundingClientRect();
+  const fits=f.left>=v.left-1&&f.right<=v.right+1;
+  add('host.split-layout',fits?'passed':'issue',`Mounted main split frame ${fits?'fits':'extends beyond'} its viewport; leftOverflow=${Math.max(0,v.left-f.left).toFixed(2)}px; rightOverflow=${Math.max(0,f.right-v.right).toFixed(2)}px. No panel was opened.`);
+ }else add('host.split-layout','manual','A unique visible native split viewport/frame is not mounted. Open a right-side panel and recheck with the tree expanded and collapsed.');
  const menubar=document.querySelector('[role="menubar"]');
  const triggers=menubar?.querySelectorAll('button[id^="application-menu-trigger-"][id$="-menu"]');
  add('host.menu',!menubar?'manual':triggers?.length?'passed':'issue',!menubar?'The native menu bar is not mounted.':'Native menu triggers and their owning menubar were inspected without opening menus.');
@@ -71,5 +102,13 @@ export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];docu
  // manual scenarios when those pages/modes are not mounted.
  const style=getComputedStyle(document.documentElement);
  add('host.theme',style.getPropertyValue('--color-text').trim()||style.getPropertyValue('--color-token-text-primary').trim()?'passed':'manual','Current native theme tokens were inspected; light/dark transitions and Settings pages still require their own scenarios.');
+ const backgroundActive=['data-code-codex-particle-image-background','data-code-codex-glow-horizon-background'].some(a=>document.documentElement.hasAttribute(a));
+ const settings=activePageElements<HTMLElement>(document,`${MAIN_SURFACE_SELECTOR} [data-app-shell-focus-area="main"] [class~="electron:bg-surface"][class*="rounded-tl-lg"]`).filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0);
+ if(!backgroundActive||!settings.length)add('host.settings-paint','manual','Open a native Settings page with a supported background active to inspect its actual shell paint; controls and cards keep their own style contracts.');
+ else {const painted=unexpectedPaint(settings);add('host.settings-paint',painted.length?'issue':'passed',painted.length?`Native Settings shell has unexpected paint: ${painted.join(' | ')}`:'Mounted native Settings shell and its generated layers are transparent. Other pages, themes and transitions remain separate scenarios.');}
+ const backdrop=inspectComposerBackdrop(document);
+ add('host.composer-backdrop',backdrop.status,backdrop.detail);
+ const sidePanel=inspectSidePanelOpacity(document);
+ add('host.side-panel-paint',sidePanel.status,sidePanel.detail);
  return {checks,documentVersion:manifest.version??null};
 }

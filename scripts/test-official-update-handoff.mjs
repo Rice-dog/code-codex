@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {build} from '../packages/explorer-ui/node_modules/esbuild/lib/main.js';
+const out=await build({stdin:{contents:"export {wrapOfficialUpdateService} from './packages/explorer-ui/src/official-update-service.ts'",resolveDir:process.cwd(),sourcefile:'wrapper-test-entry.ts'},bundle:true,platform:'node',format:'esm',write:false});
+const {wrapOfficialUpdateService}=await import('data:text/javascript;base64,'+Buffer.from(out.outputFiles[0].text).toString('base64'));
+const events=[];const update=function(value){events.push(['install',this===native,value]);return Promise.resolve('native-result')};
+const native=new Proxy(function(){},{get(_t,p){if(p==='installUpdate')return update;if(p==='checkForUpdates')return 'unchanged'}});
+const service={appUpdates:native};const dispose=wrapOfficialUpdateService(service,async()=>events.push(['prepared']));
+assert.equal(await service.appUpdates.installUpdate('argument'),'native-result');assert.deepEqual(events,[['prepared'],['install',true,'argument']]);assert.equal(service.appUpdates.checkForUpdates,'unchanged');dispose();assert.equal(service.appUpdates,native);
+const bad=wrapOfficialUpdateService(service,async()=>{throw Error('worker unavailable')});await assert.rejects(service.appUpdates.installUpdate(),/worker unavailable/);assert.equal(events.length,2);bad();
+const cleanup=wrapOfficialUpdateService(service,async()=>{});const replacement={installUpdate(){}};service.appUpdates=replacement;cleanup();assert.equal(service.appUpdates,replacement);
+let release,prepared=0,calls=0;
+const gate=new Promise(resolve=>release=resolve);
+const repeated={appUpdates:{installUpdate(){calls++;return 'native'}}};
+const releaseRepeated=wrapOfficialUpdateService(repeated,()=>{prepared++;return gate});
+const first=repeated.appUpdates.installUpdate(),second=repeated.appUpdates.installUpdate();assert.equal(prepared,1);release();assert.deepEqual(await Promise.all([first,second]),['native','native']);assert.equal(calls,2);releaseRepeated();
+let lateReady;const late={appUpdates:{installUpdate(){throw Error('must not dispatch')}}};const lateDispose=wrapOfficialUpdateService(late,()=>new Promise(r=>lateReady=r));const stale=late.appUpdates.installUpdate();lateDispose();lateReady();await assert.rejects(stale,/entry was replaced/);
+console.log('PASS: native callable RPC receiver/args/result; prepare ordering/failure; concurrent preparation reuse; late disposal; cleanup ownership');

@@ -55,15 +55,21 @@ fn parse_worker_reply(reply: &str, reset: bool) -> Result<Outcome, String> {
 pub(crate) async fn resolve(executable: &Path) -> Result<Outcome, String> {
     let _directory = crate::startup_recovery_ui::begin()?;
     let executable = executable.to_owned();
-    let result = tokio::task::spawn_blocking(move || invoke(Some(&executable), false))
+    let result = tokio::task::spawn_blocking(move || invoke(Some(&executable), false, false))
         .await
         .map_err(|_| "Startup recovery worker failed".to_owned())?;
     if matches!(result, Ok(Outcome::Cancelled)) { crate::startup_recovery_ui::cancelled(); }
     result
 }
 
+pub(crate) async fn resolve_after_update(executable:&Path)->Result<Outcome,String>{
+    let _directory=crate::startup_recovery_ui::begin()?;
+    let image=executable.to_owned();
+    tokio::task::spawn_blocking(move||invoke(Some(&image),false,true)).await.map_err(|e|e.to_string())?
+}
+
 pub(crate) fn reset() -> Result<(), String> {
-    match invoke(None, true)? {
+    match invoke(None, true, false)? {
         Outcome::Ready => Ok(()),
         _ => {
             Err("Automatic restart permission was not cleared; retry when recovery is idle".into())
@@ -71,10 +77,10 @@ pub(crate) fn reset() -> Result<(), String> {
     }
 }
 
-fn invoke(executable: Option<&Path>, reset: bool) -> Result<Outcome, String> {
+fn invoke(executable: Option<&Path>, reset: bool, update_recovery: bool) -> Result<Outcome, String> {
     #[cfg(not(windows))]
     {
-        let _ = (executable, reset);
+        let _ = (executable, reset, update_recovery);
         Err("Existing-instance recovery is available on Windows only".into())
     }
     #[cfg(windows)]
@@ -102,6 +108,7 @@ fn invoke(executable: Option<&Path>, reset: bool) -> Result<Outcome, String> {
         command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand"])
             .arg(STANDARD.encode(bytes))
             .env("CLE_RESTART_PREFERENCE", path)
+            .env("CLE_UPDATE_RESTART_ALLOWED", if update_recovery {"1"} else {"0"})
             .env("CLE_RESTART_MODE", if reset { "reset" } else { "resolve" })
             .env("CLE_RESTART_HELPER", std::env::current_exe().map_err(|e| format!("Native helper location: {e}"))?)
             .env("CLE_RESTART_WARNING", crate::gui_support::localization::text(

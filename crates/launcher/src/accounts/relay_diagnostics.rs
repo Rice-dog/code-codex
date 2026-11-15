@@ -69,6 +69,29 @@ pub(super) fn request_state(value:&Value)->Option<Value> {
         "modelFingerprint":value["model"].as_str().map(fingerprint),"generating":value["generate"]!=false}))
 }
 
+/// Fixed small metadata only. Compare the actual header maps already used by
+/// transport, without changing forwarding or hashing the request body.
+pub(super) fn routing_metadata(input:&reqwest::header::HeaderMap, output:&reqwest::header::HeaderMap)->Value {
+    let mut fields=json!({});
+    for name in ["session-id","thread-id","session_id","conversation_id","x-codex-turn-metadata","x-codex-session-id"] {
+        let project=|headers:&reqwest::header::HeaderMap| headers.get(name).map(|v|json!({"bytes":v.as_bytes().len(),"fingerprint":(v.as_bytes().len()<=1024).then(||format!("{:x}",Sha256::digest(v.as_bytes())))}));
+        if input.contains_key(name)||output.contains_key(name) {fields[name]=json!({"incoming":project(input),"forwarded":project(output)});}
+    }
+    fields
+}
+
+/// Called on already-parsed terminal events only. Unit fields are numeric token
+/// counts, not quota percentages or a billing estimate; missing stays unknown.
+pub(super) fn response_usage(value:&Value)->Option<Value> {
+    let response=if value["object"]=="response" {value} else if matches!(value["type"].as_str(),Some("response.completed"|"response.failed"|"response.incomplete")) {&value["response"]} else {return None};
+    let usage=response.get("usage").filter(|v|v.is_object())?;
+    let number=|path:&str|usage.pointer(path).and_then(Value::as_u64);
+    Some(json!({"responseFingerprint":response["id"].as_str().map(fingerprint),
+        "inputUnits":number("/input_tokens"),"cachedInputUnits":number("/input_tokens_details/cached_tokens"),
+        "outputUnits":number("/output_tokens"),"reasoningOutputUnits":number("/output_tokens_details/reasoning_tokens"),
+        "totalUnits":number("/total_tokens"),"unit":"tokens","billingInferred":false}))
+}
+
 /// Diagnostic budgets never affect forwarding. Missing samples are explicit.
 pub(super) fn opaque_summary(items: &[Value]) -> Option<Value> {
     let mut count = 0usize;
@@ -121,6 +144,25 @@ impl ErrorBody {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn usage_and_route_metadata_are_bounded_private_and_observational() {
+        let mut input=reqwest::header::HeaderMap::new();
+        input.insert("session-id","PRIVATE_SESSION".parse().unwrap());
+        input.insert("thread-id","PRIVATE_THREAD".parse().unwrap());
+        input.insert("session_id","PRIVATE_COMPAT".parse().unwrap());
+        input.insert("authorization","Bearer PRIVATE_AUTH".parse().unwrap());
+        let mut output=reqwest::header::HeaderMap::new();output.insert("session_id",input["session_id"].clone());
+        let metadata=routing_metadata(&input,&output);
+        assert!(metadata["session-id"]["forwarded"].is_null());
+        assert_eq!(metadata["session_id"]["incoming"],metadata["session_id"]["forwarded"]);
+        let event=json!({"type":"response.completed","response":{"id":"PRIVATE_RESPONSE","output":[{"text":"PRIVATE_OUTPUT"}],"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":90},"output_tokens":12,"output_tokens_details":{"reasoning_tokens":8},"total_tokens":112}}});
+        let original=event.clone();let usage=response_usage(&event).unwrap();assert_eq!(event,original);
+        assert_eq!(usage["cachedInputUnits"],90);assert_eq!(usage["reasoningOutputUnits"],8);
+        let safe=crate::runtime_log::redaction::value(json!({"metadata":metadata,"usage":usage}));
+        assert_eq!(safe["usage"]["inputUnits"],100);assert!(!safe.to_string().contains("PRIVATE_"));
+        assert!(response_usage(&json!({"type":"response.created","response":event["response"]})).is_none());
+        assert!(response_usage(&json!({"type":"response.completed","response":{}})).is_none());
+        assert!(response_usage(&json!({"object":"response","usage":{"input_tokens":"secret"}})).unwrap()["inputUnits"].is_null());
+    }
     #[test] fn known_context_errors_are_distinct_from_auth_quota_and_unknown_text(){
         assert_eq!(failure_class(&json!({"error":{"code":"context_length_exceeded","message":"secret prompt"}})),"context-limit");
         assert_eq!(failure_class(&json!({"response":{"error":{"code":"token_expired"}}})),"authentication");

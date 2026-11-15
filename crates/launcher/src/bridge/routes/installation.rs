@@ -46,6 +46,14 @@ fn installed_root() -> io::Result<PathBuf> {
 }
 
 impl NativeBridge {
+    pub(super) async fn official_update_prepare(&self,params:Value,epoch:u64)->Result<Value,BridgeError>{
+        if !params.as_object().is_some_and(serde_json::Map::is_empty){return Err(BridgeError::invalid_request())}
+        self.ensure_epoch(epoch)?;installed_root().map_err(|e|BridgeError::new("UPDATE_HANDOFF_INSTALLATION",e.to_string()))?;
+        let endpoint=self.inner.accounts.native_endpoint().ok_or_else(||BridgeError::new("UPDATE_HANDOFF_DISCONNECTED","The official update endpoint is unavailable"))?;
+        crate::official_update::schedule(endpoint.port()).await.map_err(|e|BridgeError::new("UPDATE_HANDOFF_PREPARE",e))?;
+        Ok(json!({"prepared":true}))
+    }
+
     pub(super) async fn installation_restart(&self,params:Value,epoch:u64)->Result<Value,BridgeError>{
         if !params.as_object().is_some_and(serde_json::Map::is_empty){return Err(BridgeError::invalid_request());}
         self.ensure_epoch(epoch)?;

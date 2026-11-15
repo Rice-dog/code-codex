@@ -1,25 +1,25 @@
-# Code-Codex v0.6.20
+# Code-Codex v0.6.26
 
 ## 简体中文
 
-累计更新范围：上一公开软件版本 **v0.6.13 → v0.6.20**。[完整源码比较](https://github.com/Rice-dog/code-codex/compare/v0.6.13...v0.6.20)。
+累计更新范围：上一公开软件版本 **v0.6.20 → v0.6.26**。[完整源码比较](https://github.com/Rice-dog/code-codex/compare/v0.6.20...v0.6.26)。
 
-- **Unicode 路径安装修复**：快捷方式改用 Windows 原生 Unicode Shell 接口读写，改善中文及其他非 ASCII 用户目录下的安装、升级与恢复（#59）。
-- **启动助手修复**：激活助手在构建时预编译，启动时从内存加载，移除用户临时目录中的 C# 动态编译，解决非 ASCII TEMP 路径相关失败来源（#60）。
-- **新增光谱点阵帷幕背景**：提供参数面板与默认参数，点击波纹跟随鼠标在帷幕表面的位置；也可在启动动画的插件背景选源中使用。
-- **复用背景参数面板**：帷幕与字符背景共用参数控件、分组及重置交互；未变化的插件保留原独立版本和有效缓存。
-- **宿主适配维护**：更新实际依赖登记与部分页面、主题能力适配。未知官方变化仍需按检查报告验收。
+- **官方更新接续**：新增官方更新交接与 Windows 包注册事件接续，修复旧进程退出早于新版注册完成时过早结束交接的问题。普通关闭或取消更新不触发更新重启；不会强行终止正在运行的官方会话。
+- **独立 Runtime 更新识别**：更新报告同时记录官方桌面包与 PrimaryRuntime 注册变化，即使桌面版本未变也能识别 Runtime 更新。复用官方 MSIX 文件目录与声明的 SHA-256，减少不必要的文件读取，并区分声明指纹与本地完整性验证。
+- **文件树与分栏布局**：修复文件树展开/折叠后，右侧分栏导致主对话文字及输入框被裁切的布局问题（#84 对应场景），保留单栏和全屏分栏的原生尺寸行为。
+- **透明度修复**：处理输入框底部及渐变伪元素的重复黑底；PR/项目摘要、右侧 New tab 等面板复用现有“右侧工具栏”不透明度设置，支持 0–100%，保留原生控件和媒体内容。
+- **可复用兼容检查**：共用背景绘制检查，覆盖元素、伪元素、重新挂载及分栏；按实际挂载状态区分通过、问题和待验收。规则更新与宿主版本更新分别记录，历史报告保持原样。
 
-安装包沿用已在本机构建、安装并核对字节的核心，本次另核对公开插件资源、安装包白名单和 SHA-256；不运行 CI。Unicode 路径的本机检查不等于原报告者全部系统环境均已验收；真实官方冷启动及所有历史升级组合仍有未验证范围。#84 尚未确认为修复，本次不关闭或宣称解决。
+已复用本机构建、安装并热激活验证的制品，16 个安装组件逐一与包内 SHA-256 核对，29 个独立插件包保持原版本和字节。针对性本地测试及当前窗口检查通过；现场检查为 17 项通过、1 项待验收。真实官方升级、卸载及所有客户端版本组合没有全部实测；未挂载的设置页仍需单独验收。未运行 CI。
 
 ## English
 
-Cumulative changes from the previous public software release, **v0.6.13 → v0.6.20**. [Full source comparison](https://github.com/Rice-dog/code-codex/compare/v0.6.13...v0.6.20).
+Cumulative changes from the previous public software release, **v0.6.20 → v0.6.26**. [Full source comparison](https://github.com/Rice-dog/code-codex/compare/v0.6.20...v0.6.26).
 
-- **Unicode installation paths**: Shortcut reads and writes now use native Windows Unicode Shell interfaces, improving installation, upgrade and restoration in Chinese and other non-ASCII user directories (#59).
-- **Startup helper**: The activation helper is compiled at build time and loaded from memory at startup. Removing runtime C# compilation in the user TEMP directory eliminates that source of non-ASCII TEMP failures (#60).
-- **Spectral Drape background**: Added a parameter panel and defaults, with click ripples positioned on the drape surface under the pointer. The effect is also available as a plugin background source for startup animation.
-- **Shared background parameter panel**: Spectral Drape and ASCII Tiles reuse controls, groups and reset interactions. Unchanged plugins retain their independent versions and valid caches.
-- **Host compatibility maintenance**: Updated dependency registrations and selected page/theme capability adapters. Unknown official changes still require acceptance using the compatibility report.
+- **Official-update handoff**: Added an update handoff with Windows package-registration events, fixing premature completion when the old process exits before the new package is registered. Ordinary closure or a cancelled update does not trigger an update relaunch; active official sessions are not forcibly terminated.
+- **Independent Runtime detection**: Reports now track both desktop packages and PrimaryRuntime registrations, detecting Runtime updates even when the desktop version is unchanged. Official MSIX file catalogs and declared SHA-256 values reduce unnecessary file reads; declared fingerprints remain distinct from local integrity verification.
+- **File tree and split panes**: Fixed conversation text and composer clipping when the file tree is expanded/collapsed with a right-hand split pane, covering the corresponding #84 scenario. Single-pane and full-view native sizing are preserved.
+- **Opacity fixes**: Removed redundant black backing from composer footer layers and gradient pseudo-elements. PR/project summaries and right-hand New tab panels reuse the existing Side panel opacity setting from 0–100%, preserving native controls and media content.
+- **Reusable compatibility checks**: Shared paint inspection covers elements, pseudo-elements, remounts and split layouts. Mounted evidence distinguishes passed checks, issues and manual acceptance. Rule revisions and host updates are recorded separately; historical reports remain unchanged.
 
-Packages reuse the core already built, installed and byte-checked locally; publication separately verifies public plugin resources, package allowlists and SHA-256, without CI. Local Unicode-path checks do not certify every reporter environment; real official cold startup and all historical upgrade combinations retain unvalidated scope. Issue #84 is not claimed fixed or closed. 
+Artifacts reuse the build already installed and hot-activated locally. All 16 installed components match package SHA-256 values; 29 independent plugin packages retain their versions and bytes. Targeted local tests and current-window checks passed, with 17 checks passed and one requiring manual acceptance. Real official upgrades, uninstall scenarios and every client-version combination have not all been exercised; unmounted Settings pages require separate acceptance. No CI was run.

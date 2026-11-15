@@ -1,4 +1,8 @@
+import {recordCaughtRuntimeError} from './runtime-operations';
+import {installOfficialUpdateHandoff} from './official-update-handoff';
 import {nativeSettingsBackgroundCss} from './native-background-surfaces';
+import {NATIVE_COMPOSER_BACKDROP_CSS} from './native-composer-backdrop';
+import {NATIVE_SIDE_PANEL_OPACITY_CSS} from './native-side-panel-opacity';
 import { optionalPluginExport } from './utility-plugin-facade';
 import { monitorStartupReadiness } from './startup-readiness';
 import { getBootstrapConfig } from "./bridge";
@@ -61,6 +65,14 @@ html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horiz
 const CURRENT_LAYOUT_EXPLORER_SELECTOR = `${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:workspace-row"]`;
 const CURRENT_LAYOUT_HEADER_LEFT_PROPERTY = "--code-codex-current-layout-header-left";
 const SHELL_LAYOUT_CSS = `
+${NATIVE_COMPOSER_BACKDROP_CSS}
+${NATIVE_SIDE_PANEL_OPACITY_CSS}
+/* Native split motion width is based on the shell, before our inline tree.
+ * Let the native frame fit its actual viewport; preserve native single/full views. */
+${CURRENT_LAYOUT_EXPLORER_SELECTOR} + :has(${MAIN_SURFACE_SELECTOR}) ${MAIN_SURFACE_SELECTOR} [data-app-shell-workspace-layout="split"][data-app-shell-right-panel-full-width="false"] > [class*="MainContentFrame-"] {
+  max-width: 100% !important;
+}
+
 /* The new page shell keeps the conversation title in a fixed body header,
  * outside the flex row that our file tree widens. Shift that header by the
  * measured panel width; the legacy title lives inside main and is untouched. */
@@ -742,3 +754,5 @@ export function installInjector(): void {
   if (document.body) start();
   else document.addEventListener("DOMContentLoaded", start, { once: true });
 }
+
+void installOfficialUpdateHandoff(()=>requestApplicationMenu('explorer.official.update.prepare')).catch(error=>recordCaughtRuntimeError('official update handoff',error));

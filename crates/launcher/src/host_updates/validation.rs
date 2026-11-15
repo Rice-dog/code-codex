@@ -36,7 +36,7 @@ fn anchor(dir: &Path) -> io::Result<(String, Value)> {
         let candidate_id = item.file_name().to_string_lossy().into_owned();
         let candidate_path = id_path(dir, &candidate_id)?;
         let r = read_json(&candidate_path.join("report.json"))?;
-        if r["version"] == report["version"] && r["package"] == report["package"] && r["type"] == "update" && r["observedMs"].as_u64().unwrap_or(0) > selected_time {
+        if r["version"] == report["version"] && r["package"] == report["package"] && r["runtimes"] == report["runtimes"] && r["type"] == "update" && r["observedMs"].as_u64().unwrap_or(0) > selected_time {
             selected_time = r["observedMs"].as_u64().unwrap_or(0);
             selected = (candidate_id, r);
         }

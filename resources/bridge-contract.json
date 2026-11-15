@@ -227,6 +227,10 @@
     {
       "name": "explorer.host.updates.retry",
       "effect": "diagnostic-write"
+    },
+    {
+      "name": "explorer.official.update.prepare",
+      "effect": "external-ui"
     }
   ]
 }

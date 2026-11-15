@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 19,
+  "revision": 25,
   "rules": [
     {
       "id": "layout",
@@ -14,7 +14,9 @@
       "tests": [
         "scripts/test-codex-layout.mjs",
         "scripts/test-account-selector.mjs",
-        "scripts/test-account-thread-identity.mjs"
+        "scripts/test-account-thread-identity.mjs",
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-native-split-layout.mjs"
       ],
       "tokens": [
         "data-app-shell-workspace",
@@ -23,23 +25,29 @@
         "data-app-shell-main-surface",
         "data-app-action-sidebar-thread-active",
         "aria-hidden",
-        "inert"
+        "inert",
+        "data-app-shell-workspace-layout",
+        "data-app-shell-right-panel-full-width",
+        "MainContentFrame"
       ],
       "paths": [],
       "checks": [
         "Existing/new/unknown composer layouts, missing and ambiguous anchors, navigation and disposal.",
-        "Collapsed inert/aria-hidden sidebar rows do not compete with the active thread; A/B retain independent saved connections, true multiple active IDs remain ambiguous, and New Chat keeps draft selection."
+        "Collapsed inert/aria-hidden sidebar rows do not compete with the active thread; A/B retain independent saved connections, true multiple active IDs remain ambiguous, and New Chat keeps draft selection.",
+        "Native right split with expanded/collapsed file tree and narrow/wide panes keeps the main transcript and composer inside its actual viewport; single-pane/full-width and tree removal restore native sizing."
       ],
       "automatedChecks": [
         "package.inventory",
         "host.layout",
         "host.composer",
-        "regression.layout"
+        "regression.layout",
+        "host.split-layout"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "Open an existing conversation and New Chat. Confirm the file tree follows the correct workspace and the composer remains usable.",
-        "Navigate away/back and close the view. Confirm there is one tree and no stale controls."
+        "Navigate away/back and close the view. Confirm there is one tree and no stale controls.",
+        "Open Side chat, resize the split, expand/collapse the file tree and inspect the first characters and composer. Close the split and confirm native single-pane sizing."
       ]
     },
     {
@@ -100,7 +108,8 @@
       "automatedChecks": [
         "package.inventory",
         "host.interfaces",
-        "regression.interfaces"
+        "regression.interfaces",
+        "regression.account-behavior"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
@@ -149,32 +158,56 @@
         "packages/explorer-ui/src/native-background-surfaces.ts",
         "packages/explorer-ui/src/plugin-host/backgrounds/spectral-drape.ts",
         "packages/explorer-ui/src/effects/spectral-drape/model.ts",
-        "packages/explorer-ui/src/features/plugin-settings/parameter-panel.ts"
+        "packages/explorer-ui/src/features/plugin-settings/parameter-panel.ts",
+        "packages/explorer-ui/src/inject.ts",
+        "packages/explorer-ui/src/native-composer-backdrop.ts",
+        "packages/explorer-ui/src/surface-opacity-runtime.ts",
+        "packages/explorer-ui/src/host-update-probes.ts",
+        "packages/explorer-ui/src/host-paint-inspection.ts",
+        "packages/explorer-ui/src/native-side-panel-opacity.ts"
       ],
       "tests": [
         "scripts/test-appearance-adapter.mjs",
         "scripts/test-conversation-mask.mjs",
-        "scripts/test-spectral-drape.mjs"
+        "scripts/test-spectral-drape.mjs",
+        "scripts/test-native-composer-backdrop.mjs",
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-native-side-panel-opacity.mjs"
       ],
       "tokens": [
         "app.appearance.get",
         "app.appearance.set",
         "MainContentTopFade",
-        "run-app-action-in-primary-window"
+        "run-app-action-in-primary-window",
+        "data-thread-scroll-footer",
+        "thread-scroll-container",
+        "thread-composer-bottom-inset",
+        "data-code-codex-ui-mask-active",
+        "data-summary-panel-variant",
+        "data-summary-panel-density",
+        "data-app-shell-compact-page-gutter",
+        "data-new-tab-scroll-root"
       ],
       "paths": [],
       "checks": [
         "Light/dark native theme, background activation/deactivation and unchanged controls/media.",
         "Spectral Drape uses shared ManagedBackgroundController, independent Worker first-frame, native settings surface transparency and theme lease. Test download without activation, parameter/reset persistence, shared ASCII panel, reduced-motion/paused idle, startup copy and cleanup; no account/switch checks or new waits.",
-        "Spectral click uses visible folded-surface NDC and CSS offset/DPR-independent pointer coordinates; offset canvas multi-point uniform regression. Saved live defaults and dot SVG icon match panel; startup animation selector includes spectral. Brush path stays unchanged."
+        "Spectral click uses visible folded-surface NDC and CSS offset/DPR-independent pointer coordinates; offset canvas multi-point uniform regression. Saved live defaults and dot SVG icon match panel; startup animation selector includes spectral. Brush path stays unchanged.",
+        "With Surface active, inspect visible native footer and its decorative parent backgrounds including generated ::before/::after. Detect opaque color or gradient even when composer and conversation alpha are zero. Inactive/unmounted/cached pages are manual; legitimate conversation masks and native content are excluded.",
+        "Simulate native footer replacement and tree fold/unfold widths in dark/light at 0/intermediate/100 alpha. Verify unchanged draft/input alpha and out-of-scope content; disabling or disposing restores native decoration. Real-host fold/unfold separately.",
+        "Reusable paint inspection checks background color/image and generated before/after layers on contract-owned surfaces; legitimate controls/cards remain native. Exercise fold/reopen/remount, theme and active/inactive states with preserved drafts; unavailable real pages stay manual.",
+        "Mounted native summary and right-panel gutter/New tab backings follow utility opacity once at 0/mid/100; controls, webviews, terminal and media remain native. Dark/light, remount and deactivate restore use isolated fixtures; unmounted panels remain manual."
       ],
       "automatedChecks": [
         "package.inventory",
-        "host.theme"
+        "host.theme",
+        "host.composer-backdrop",
+        "host.side-panel-paint"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
-        "With a background enabled, inspect light and dark themes, then disable it. Confirm native controls and media retain their geometry."
+        "With a background enabled, inspect light and dark themes, then disable it. Confirm native controls and media retain their geometry.",
+        "Collapse then expand the file tree with a background and Surface enabled. Inspect the full width below the native composer at zero and intermediate alpha; a theme token pass alone does not certify transparent paint."
       ]
     },
     {
@@ -286,22 +319,43 @@
         "crates/launcher/src/discovery.rs",
         "crates/launcher/src/process_guard.rs",
         "crates/launcher/resources/package-activation.cs",
-        "crates/launcher/build.rs"
+        "crates/launcher/build.rs",
+        "crates/launcher/src/official_update.rs",
+        "packages/explorer-ui/src/official-update-handoff.ts",
+        "packages/explorer-ui/src/official-update-service.ts",
+        "crates/launcher/src/official_update_registration.rs",
+        "crates/launcher/src/host_updates/runtime.rs",
+        "crates/launcher/src/host_updates/version_gate.rs",
+        "crates/launcher/src/host_updates/scan.rs"
       ],
       "tests": [
         "scripts/test-startup-conflict-native.ps1",
-        "crates/launcher/src/process_guard.rs"
+        "crates/launcher/src/process_guard.rs",
+        "scripts/test-official-update-handoff.mjs",
+        "crates/launcher/src/host_updates/tests.rs"
       ],
-      "tokens": [],
+      "tokens": [
+        "appUpdates",
+        "installUpdate",
+        "installUpdatesIfAvailable",
+        "readRegistration",
+        "app.relaunch"
+      ],
       "paths": [
         "ChatGPT.exe",
         "Codex.exe",
         "AppxManifest.xml",
-        "resources/app-update.yml"
+        "resources/app-update.yml",
+        "CodexPrimaryRuntime",
+        "runtime-registration/metadata.json"
       ],
       "checks": [
         "Trusted package identity, native launch ownership, old/new/unknown versions and uninstall cleanup.",
-        "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance."
+        "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance.",
+        "Official update installUpdate entry retains native confirmation/deployment; only a verified newer package after retained original process exit triggers handoff. New window must have one working tree and Bridge. Cancel/failed/same-version/ordinary close must not relaunch. Real update acceptance is separate from static matching.",
+        "PackageUpdating subscription precedes readiness; matching newer same-family terminal completion gates discovery after original exit; unrelated/progress/error and completion-before-exit cases retain explicit boundaries.",
+        "Unchanged desktop plus changed official PrimaryRuntime registration triggers the existing background ledger; unchanged component identities traverse no files. Inventory newest registered Runtime distribution, record all registrations, reuse unchanged desktop entries. Discovery failure preserves baseline; old side-by-side contents and actual backend selection are not certified. Runtime files use official MSIX declared whole-file SHA-256 and path dependency mapping; direct catalog/manifest/runtime metadata reads and missing-hash fallback are separate from full local integrity verification. Native XML positive/missing/invalid/duplicate/DTD and real sampled declared hashes require checks.",
+        "Analysis refresh anchors only an update with matching desktop package and Runtime registration set; other Runtime generations cannot supply behavioral evidence."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -310,7 +364,9 @@
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "At a convenient idle time close and launch the official client using Code-Codex. Confirm native identity and tree readiness.",
-        "Uninstall/cleanup requires a separate disposable installation; do not uninstall the active user installation."
+        "Uninstall/cleanup requires a separate disposable installation; do not uninstall the active user installation.",
+        "On an idle test installation click the official update control once. After package deployment, verify the final managed window has one ready tree, the original project and a responding Bridge. Check the native startup backend as well as renderer readiness; a surviving CDP port alone is insufficient. Failed/canceled/same-version exits must not relaunch.",
+        "During a real user-triggered update correlate registration-listening, registration-started, original-exited, registration-completed and relaunched; registration may finish after old PID exits. Never accept same-version snapshot during active deployment as cancellation."
       ]
     },
     {
@@ -331,7 +387,11 @@
         "packages/explorer-ui/src/app/composition.ts",
         "packages/explorer-ui/src/features/accounts/legacy-handoff.ts",
         "crates/launcher/resources/package-activation.cs",
-        "crates/launcher/build.rs"
+        "crates/launcher/build.rs",
+        "crates/launcher/src/official_update.rs",
+        "packages/explorer-ui/src/official-update-handoff.ts",
+        "packages/explorer-ui/src/official-update-service.ts",
+        "crates/launcher/src/official_update_registration.rs"
       ],
       "tests": [
         "crates/launcher/src/accounts/startup.rs",
@@ -375,7 +435,9 @@
         "New Chat refuses inference before the native thread binding and accepts it after binding on the same listener. Cover official/API routes, existing and new chats, disabled/re-enabled plugin and network reconnect separately; real provider success and timing require actual host/service acceptance.",
         "Same-version retired native bindings cannot cancel current startup, claim document ownership or release the working endpoint again; include legacy slot assignment, failed unreleased candidate, current binding reconnection and new-document reset. This is local lifecycle admission only: no added account switch/auth/quota reads, retry or waiting.",
         "Within one startup transport operation reuse the verified descriptor and HTTP client across status/route/bind. Preserve listener ownership, capability/proof, active-request rejection, legacy/API fallback, failed replies and default restore; no descriptor is cached across operations.",
-        "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance."
+        "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance.",
+        "Official update installUpdate entry retains native confirmation/deployment; only a verified newer package after retained original process exit triggers handoff. New window must have one working tree and Bridge. Cancel/failed/same-version/ordinary close must not relaunch. Real update acceptance is separate from static matching.",
+        "PackageUpdating subscription precedes readiness; matching newer same-family terminal completion gates discovery after original exit; unrelated/progress/error and completion-before-exit cases retain explicit boundaries."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -388,7 +450,8 @@
       "manualSteps": [
         "At idle, restart with the plugin enabled, open an existing conversation and New Chat, then select a verified child; confirm fast switching and original permission/tool behavior.",
         "In two disposable conversations choose the same account, switch one, then close one. Confirm the other retains its own account/context and still works.",
-        "Separately test disable/re-enable and a network reconnect. Confirm no cross-conversation routing, duplicate send or stale owner."
+        "Separately test disable/re-enable and a network reconnect. Confirm no cross-conversation routing, duplicate send or stale owner.",
+        "During a real user-triggered update correlate registration-listening, registration-started, original-exited, registration-completed and relaunched; registration may finish after old PID exits. Never accept same-version snapshot during active deployment as cancellation."
       ]
     },
     {
@@ -491,7 +554,8 @@
       "automatedChecks": [
         "package.inventory",
         "host.quota",
-        "host.composer"
+        "host.composer",
+        "regression.account-behavior"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
@@ -564,7 +628,8 @@
         "package.inventory",
         "host.interfaces",
         "host.composer",
-        "regression.models"
+        "regression.models",
+        "regression.account-behavior"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
@@ -577,7 +642,8 @@
       "feature": "Shared native settings and secondary navigation background contracts",
       "sources": [
         "packages/explorer-ui/src/native-background-surfaces.ts",
-        "packages/explorer-ui/src/custom-background.ts"
+        "packages/explorer-ui/src/custom-background.ts",
+        "packages/explorer-ui/src/host-paint-inspection.ts"
       ],
       "tests": [
         "scripts/test-appearance-adapter.mjs",
@@ -596,11 +662,13 @@
       "paths": [],
       "checks": [
         "Settings shared shell/groups including display:contents wrappers, secondary pages and inline header pseudo backgrounds.",
-        "Three background attributes, light/dark, disable restoration; protect dialogs/menus/media/conversation masks and native control geometry."
+        "Three background attributes, light/dark, disable restoration; protect dialogs/menus/media/conversation masks and native control geometry.",
+        "Reusable paint inspection checks background color/image and generated before/after layers on contract-owned surfaces; legitimate controls/cards remain native. Exercise fold/reopen/remount, theme and active/inactive states with preserved drafts; unavailable real pages stay manual."
       ],
       "automatedChecks": [
         "package.inventory",
-        "host.theme"
+        "host.theme",
+        "host.settings-paint"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
