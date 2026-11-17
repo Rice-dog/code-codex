@@ -1,3 +1,4 @@
+import {positionPluginPanel} from '../../core/layout/plugin-panel';
 import {icons} from '../../icons';
 import type {BackgroundCommands} from '../../contracts/appearance';
 import type {DarkBackgroundPluginId} from '../../contracts/explorer-model';
@@ -53,7 +54,7 @@ export class ParameterSettingsController {
  get open():boolean{return this.#panel.matches(':popover-open');}
  show():void{this.ports.closeOthers();this.#panel.showPopover();this.#trigger.setAttribute('aria-expanded','true');this.position();this.#panel.querySelector<HTMLButtonElement>(`.${this.config.slug}-close`)?.focus();}
  close(focus=false):void{if(this.open)this.#panel.hidePopover();this.#trigger.setAttribute('aria-expanded','false');if(focus)this.#trigger.focus();}
- position():void{if(!this.open)return;const card=this.#trigger.closest('article')!.getBoundingClientRect(),edge=12,gap=8,width=Math.min(344,innerWidth-edge*2);this.#panel.style.width=`${width}px`;this.#panel.style.maxHeight=`${innerHeight-edge*2}px`;const left=card.right+gap+width<=innerWidth-edge?card.right+gap:Math.max(edge,innerWidth-edge-width);this.#panel.dataset.side=left===card.right+gap?'right':'overlay';this.#panel.style.left=`${Math.round(left)}px`;this.#panel.style.top=`${Math.round(Math.max(edge,Math.min(card.top,innerHeight-edge-Math.min(this.#panel.scrollHeight,innerHeight-edge*2))))}px`;}
+ position():void{positionPluginPanel(this.#panel,this.#trigger);}
  render():void{
   const {runtime}=this.ports,enabled=this.ports.enabled();
   this.#button.closest('article')!.setAttribute('aria-busy',String(runtime.pending));

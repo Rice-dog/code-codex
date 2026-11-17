@@ -348,6 +348,18 @@
         "background",
         "preview"
       ]
+    },
+    {
+      "id": "lan-remote",
+      "name": "LAN Remote",
+      "category": "developer-tools",
+      "api": 1,
+      "version": "1.0.3",
+      "releaseTag": "plugin-assets-2026-11-15",
+      "capabilities": [
+        "developer-tools",
+        "lan-remote"
+      ]
     }
   ]
 }

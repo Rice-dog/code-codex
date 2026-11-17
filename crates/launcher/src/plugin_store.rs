@@ -192,10 +192,10 @@ fn valid_package(p: &Package) -> bool {
         && p.asset.ends_with(".js")
         && p.relative_path == p.asset
         && p.resources.len() <= MAX_RESOURCES
-        && p.total_size() <= MAX_PACKAGE
+        && p.total_size() <= package_budget(p)
         && p.resources.iter().all(|r| {
             r.size > 0
-                && r.size <= MAX_SCRIPT
+                && r.size <= if p.id == "lan-remote" && r.kind == "native" { 64 * 1024 * 1024 } else { MAX_SCRIPT }
                 && valid_hash(&r.sha256)
                 && (r.release_tag.is_empty() || valid_release_tag(&r.release_tag))
                 && trusted_asset(p, &r.asset)
@@ -203,6 +203,7 @@ fn valid_package(p: &Package) -> bool {
                 && r.relative_path.rsplit('/').next() == Some(r.asset.as_str())
                 && paths.insert(&r.relative_path)
                 && match r.kind.as_str() {
+                    "native" => p.id == "lan-remote" && r.asset.ends_with("-x64.exe"),
                     "script" | "worker" => r.asset.ends_with(".js"),
                     "style" => r.asset.ends_with(".css"),
                     "wasm" => r.asset.ends_with(".wasm"),
@@ -269,13 +270,31 @@ fn dependency_order<'a>(
     }
     let mut ordered = Vec::new();
     visit(packages, id, &mut Vec::new(), &mut ordered)?;
-    if ordered.iter().map(|p| p.total_size()).sum::<usize>() > MAX_PACKAGE {
+    let budget = ordered.iter().map(|p| package_budget(p)).max().unwrap_or(MAX_PACKAGE);
+    if ordered.iter().map(|p| p.total_size()).sum::<usize>() > budget {
         return Err(error(
             "PLUGIN_TOO_LARGE",
             "The plugin dependency closure exceeds the bounded load budget.",
         ));
     }
     Ok(ordered)
+}
+fn package_budget(p: &Package) -> usize {
+    if p.id == "lan-remote" { 72 * 1024 * 1024 } else { MAX_PACKAGE }
+}
+
+/// The only executable plugin capability. Its path and identity are catalog-owned.
+pub(crate) fn lan_engine() -> Result<PathBuf, BridgeError> {
+    let p = package("lan-remote")?;
+    let root = cache_root()?;
+    let engines: Vec<_> = p.assets().into_iter().filter(|p| p.kind == "native").collect();
+    let expected=format!("CodeCodex-plugin-lan-remote-{}-x64.exe",p.version);
+    let viewer=format!("CodeCodex-plugin-lan-remote-{}-viewer-x64.exe",p.version);
+    if engines.len()!=2 || !engines.iter().any(|p|p.asset==expected) || !engines.iter().any(|p|p.asset==viewer) {
+        return Err(error("REMOTE_ENGINE_MISSING", "The LAN plugin requires its pinned room/host and viewer engines."));
+    }
+    for engine in &engines {read_asset(&root,engine)?;}
+    Ok(path(&root,engines.iter().find(|p|p.asset==expected).expect("validated room engine")))
 }
 fn package(id: &str) -> Result<Package, BridgeError> {
     catalog()?
@@ -395,7 +414,7 @@ fn verify_parents(root: &Path, file: &Path, create: bool) -> Result<(), BridgeEr
 }
 fn verify(p: &Package, bytes: &[u8]) -> Result<(), BridgeError> {
     if bytes.len() != p.size
-        || bytes.len() > MAX_SCRIPT
+        || bytes.len() > if p.id == "lan-remote" && p.kind == "native" { 64 * 1024 * 1024 } else { MAX_SCRIPT }
         || format!("{:x}", Sha256::digest(bytes)) != p.sha256
     {
         return Err(error(
@@ -411,6 +430,7 @@ fn verify(p: &Package, bytes: &[u8]) -> Result<(), BridgeError> {
         ));
     }
     match p.kind.as_str() {
+        "native" if p.id == "lan-remote" && native_x64(bytes) => return Ok(()),
         "image" | "thumbnail" if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => return Ok(()),
         "wasm" if bytes.starts_with(b"\0asm\x01\0\0\0") => return Ok(()),
         "binary" if !p.mime_type.is_empty() && p.mime_type.len() <= 128 => return Ok(()),
@@ -429,6 +449,11 @@ fn verify(p: &Package, bytes: &[u8]) -> Result<(), BridgeError> {
         )
     })?;
     Ok(())
+}
+fn native_x64(bytes: &[u8]) -> bool {
+    if !bytes.starts_with(b"MZ") || bytes.len() < 64 { return false; }
+    let offset=u32::from_le_bytes(bytes[60..64].try_into().expect("fixed DOS field")) as usize;
+    bytes.get(offset..offset.saturating_add(6)) == Some(b"PE\0\0\x64\x86".as_slice())
 }
 pub(crate) fn sources(id: &str) -> Result<Vec<String>, BridgeError> {
     let packages = catalog()?;
@@ -667,6 +692,21 @@ pub(crate) fn status() -> Result<Value, BridgeError> {
 }
 fn source_available(root: &Path, p: &Package) -> bool {
     let current = path(root, p);
+    // Market status is an availability projection, not permission to execute.
+    // Avoid rehashing the large native binary on every existing market refresh;
+    // sources()/lan_engine() still verify its actual bytes before load/launch.
+    if p.id == "lan-remote" && p.kind == "native" {
+        type Stamp = (String, u64, std::time::SystemTime, bool);
+        static VERIFIED: OnceLock<Mutex<HashMap<PathBuf, Stamp>>> = OnceLock::new();
+        let Ok(meta)=std::fs::symlink_metadata(&current) else {return false;};
+        let Ok(modified)=meta.modified() else {return false;};
+        if !meta.is_file() || meta.file_type().is_symlink() || meta.len()!=p.size as u64 {return false;}
+        let Ok(mut verified)=VERIFIED.get_or_init(Default::default).lock() else {return false;};
+        if let Some((hash,size,time,ok))=verified.get(&current)
+            && hash==&p.sha256 && *size==meta.len() && *time==modified {return *ok;}
+        let ok=read_verified_file(root,&current,p).is_ok();
+        verified.insert(current,(p.sha256.clone(),meta.len(),modified,ok));return ok;
+    }
     // A current malformed entry must not be silently bypassed by legacy data.
     if std::fs::symlink_metadata(&current).is_ok() {
         return read_verified_file(root, &current, p).is_ok();
@@ -1190,6 +1230,24 @@ pub(crate) fn import_directory(directory: &Path) -> Result<Value, BridgeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lan_native_capability_is_scoped_and_execution_rechecks_cached_bytes() {
+        let mut bytes=vec![0u8;MAX_SCRIPT+1024];bytes[..2].copy_from_slice(b"MZ");
+        bytes[60..64].copy_from_slice(&64u32.to_le_bytes());bytes[64..70].copy_from_slice(b"PE\0\0\x64\x86");
+        let mut p=fixture_package(&bytes);p.id="lan-remote".into();p.kind="native".into();
+        p.asset="CodeCodex-plugin-lan-remote-1.0.0-x64.exe".into();p.relative_path=p.asset.clone();
+        assert!(verify(&p,&bytes).is_ok());
+        let mut forbidden=p.clone();forbidden.id="other-plugin".into();assert!(verify(&forbidden,&bytes).is_err());
+        let root=tempfile::tempdir().unwrap();let file=test_path(root.path(),&p);std::fs::write(&file,&bytes).unwrap();
+        assert!(source_available(root.path(),&p));let original=std::fs::metadata(&file).unwrap().modified().unwrap();
+        bytes[0]=b'X';std::fs::write(&file,&bytes).unwrap();
+        std::fs::File::options().write(true).open(&file).unwrap().set_times(std::fs::FileTimes::new().set_modified(original)).unwrap();
+        // A metadata-only market projection is never an execution grant.
+        assert!(source_available(root.path(),&p));assert!(read_asset(root.path(),&p).is_err());
+        let mut parent=fixture_package(b"entry");parent.id="lan-remote".into();parent.asset="CodeCodex-plugin-lan-remote-1.0.0.js".into();parent.relative_path=parent.asset.clone();
+        parent.resources.push(Resource{asset:p.asset,relative_path:p.relative_path,kind:"native".into(),size:p.size,sha256:p.sha256,release_tag:String::new(),image:None,mime_type:String::new()});
+        assert!(valid_package(&parent));parent.id="other-plugin".into();assert!(!valid_package(&parent));
+    }
     fn test_path(root: &Path, p: &Package) -> PathBuf {
         let file = path(root, p);
         verify_parents(root, &file, true).unwrap();

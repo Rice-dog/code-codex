@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 26,
+  "revision": 31,
   "rules": [
     {
       "id": "layout",
@@ -253,10 +253,19 @@
       "feature": "Bridge, module loading and host runtime",
       "sources": [
         "crates/launcher/src/bootstrap.rs",
-        "crates/cdp-client/src/lib.rs"
+        "crates/cdp-client/src/lib.rs",
+        "crates/launcher/src/bridge/router.rs",
+        "crates/launcher/src/lan_remote.rs",
+        "crates/launcher/src/plugin_store.rs",
+        "packages/explorer-ui/src/lan-remote.ts",
+        "packages/explorer-ui/src/lan-remote-runtime.ts",
+        "packages/explorer-ui/src/core/layout/plugin-panel.ts"
       ],
       "tests": [
-        "scripts/test-host-capabilities.mjs"
+        "scripts/test-host-capabilities.mjs",
+        "scripts/test-lan-remote-ui.mjs",
+        "scripts/test-lan-remote-native.py",
+        "crates/launcher/src/lan_remote.rs"
       ],
       "tokens": [
         "mcp-request",
@@ -268,7 +277,8 @@
         "resources/app.asar"
       ],
       "checks": [
-        "Trusted module discovery and bridge fields; missing/ambiguous contracts; cancellation and resource release."
+        "Trusted module discovery and bridge fields; missing/ambiguous contracts; cancellation and resource release.",
+        "LAN Remote reuses authenticated Bridge/epoch and owned market popovers. Check six-digit broadcast create/join and explicit IPv4 join as separate inputs to the same Bridge action. Address join requires the same room code and host approval, and no match must not create a room. Reject public or malformed destinations. UI fixtures cover shared Beta labels, bilingual field labels/placeholders/help, no idle status row, visible progress/errors, and unchanged single-command keyboard actions. Native loopback covers approval, rejection, desktop/files and revoke; real two-device overlay reachability and OS firewall behavior are outside official package scanning."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -278,7 +288,8 @@
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
-        "In a disposable conversation verify one native request and cancellation. Confirm disconnect/unknown outcome is reported without automatic replay."
+        "In a disposable conversation verify one native request and cancellation. Confirm disconnect/unknown outcome is reported without automatic replay.",
+        "With two consenting PCs on one private LAN: create/join the same room, reject then approve, verify screen and input, transfer a disposable file, disconnect, disable and close Codex. Confirm access ends and no listener/helper survives. Static official-interface matches do not certify this external native protocol."
       ]
     },
     {
@@ -420,6 +431,7 @@
         "parent_thread_id",
         "thread-id",
         "session-id",
+        "x-codex-turn-state",
         "CODEX_CLI_PATH",
         "CODEX_APP_RUNTIME_CLI_PATH",
         "--print-startup-config",
@@ -432,6 +444,7 @@
         "Enabled cold launch versus disabled/not-installed launch; shared official backend spawn contract and native proxy/TLS transport.",
         "Root/subagent ownership, mismatched identity, missing lineage, active request and cancelled/failed startup; no alternate-account fallback.",
         "Existing plugin disable/re-enable behavior and session settings remain unchanged.",
+        "Official relay keeps native session-id/thread-id through HTTP and WebSocket and returns upstream x-codex-turn-state when present. Third-party API routes must not receive or return those headers; account switching still cancels the old connection.",
         "Native packaged cold launch preserves package identity through its registered execution alias and honors CODEX_CLI_PATH before startup config and actor creation; disabled plugin uses unchanged shell activation.",
         "Native stdio wrapper preserves CLI arguments, startup config, JSONL, tools and permissions; control endpoint and thread lineage preserve owner, active-request and disable/re-enable behavior. Legacy inspector path remains supported.",
         "Native cold startup, initial official request, first account switch, backend exit, network reconnect and core hot handoff require separate observation. Static token matching does not certify runtime behavior.",
@@ -449,13 +462,15 @@
         "host.interfaces",
         "package.modules",
         "host.ownership",
-        "regression.interfaces"
+        "regression.interfaces",
+        "regression.account-relay-headers"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "At idle, restart with the plugin enabled, open an existing conversation and New Chat, then select a verified child; confirm fast switching and original permission/tool behavior.",
         "In two disposable conversations choose the same account, switch one, then close one. Confirm the other retains its own account/context and still works.",
         "Separately test disable/re-enable and a network reconnect. Confirm no cross-conversation routing, duplicate send or stale owner.",
+        "On a deliberate official-account request after a switch or reconnect, compare original and forwarded session/thread fingerprints and observe cached/total input tokens. Keep account, model and context comparable; a cache miss alone does not identify a relay regression.",
         "During a real user-triggered update correlate registration-listening, registration-started, original-exited, registration-completed and relaunched; registration may finish after old PID exits. Never accept same-version snapshot during active deployment as cancellation."
       ]
     },

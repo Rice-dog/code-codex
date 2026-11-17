@@ -231,6 +231,10 @@
     {
       "name": "explorer.official.update.prepare",
       "effect": "external-ui"
+    },
+    {
+      "name": "explorer.lan.request",
+      "effect": "mode-dependent; explicit LAN broadcast or IPv4 room join/control actions, no automatic replay"
     }
   ]
 }

@@ -152,6 +152,12 @@ pub(crate) async fn run(endpoint: Option<CdpEndpoint>, force: bool, cancel: Opti
     if !force && index_path.is_file() && read_json(&index_path)?["identity"] == identity { return status(&dir); }
     if cancel.as_ref().is_some_and(|c|c.is_cancelled()) { return Ok(json!({"status":"cancelled"})); }
     let mut checks = vec![check("package.inventory",if report["complete"]==true{"passed"}else{"issue"},"inventory-integrity",if report["complete"]==true{"The recorded official inventory is complete. This is not functional validation."}else{"The inventory is incomplete; removed files and no-impact results cannot be certified."})];
+    let relay = crate::accounts::check_relay_header_contract();
+    checks.push(check("regression.account-relay-headers", if relay {"passed"} else {"issue"}, "local-synthetic-contract", if relay {
+        "The production header policy preserved official session/thread and turn state and kept them out of API routing. No account or upstream was contacted."
+    } else {
+        "The production header policy failed the official-routing or API-isolation fixture. Review the relay before switching accounts."
+    }));
     let manifest = tokio::task::spawn_blocking(crate::accounts::host::discover_modules).await;
     match manifest {
         Ok(Ok(manifest)) if manifest["version"]==report["version"] => {

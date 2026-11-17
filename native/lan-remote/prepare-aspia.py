@@ -55,7 +55,7 @@ def prepare(root):
         '#include "base/net/tcp_channel.h"\n#include "base/net/tcp_server.h"\n#include <cstdio>')
     source = replace_once(source, 'void PortableUserWorker::onPrepare()\n{', '''void PortableUserWorker::onPrepare()
 {
-    if (direct_port_)
+    if (direct_users_)
     {
         // The room owns approval. Keep the existing message projection object,
         // but do not start its GUI attachment timer or the cloud RouterManager.
@@ -65,14 +65,17 @@ def prepare(root):
         direct_server_->setUserList(direct_users_);
         connect(direct_server_, &TcpServer::sig_newConnection, this, [this]()
         {
-            while (direct_server_->hasReadyConnections())
+            while (direct_server_->hasReadyConnections()) {
                 startClient(direct_server_->nextReadyConnection(), QString(), 0);
+                std::fputs("{\\"event\\":\\"session-connected\\"}\\n", stdout);
+                std::fflush(stdout);
+            }
         });
         return;
     }''')
     source = replace_once(source, 'void PortableUserWorker::onStart()\n{', '''void PortableUserWorker::onStart()
 {
-    if (direct_port_)
+    if (direct_users_)
     {
         if (!direct_server_->start(direct_port_, direct_iface_))
         {
@@ -80,7 +83,7 @@ def prepare(root):
             QMetaObject::invokeMethod(QCoreApplication::instance(), &QCoreApplication::quit, Qt::QueuedConnection);
             return;
         }
-        std::fputs("{\\"event\\":\\"listening\\"}\\n", stdout);
+        std::fprintf(stdout, "{\\"event\\":\\"listening\\",\\"port\\":%u}\\n", unsigned(direct_server_->localPort()));
         std::fflush(stdout);
         return;
     }''')
@@ -99,6 +102,13 @@ def prepare(root):
         '    PortableUserWorker* user_worker = CoreApplication::findWorker<PortableUserWorker>();\n'
         '    user_worker->setDirectRoom(users, port, iface);')
     wiring += body + '    return application.exec();\n}\n'
+    tcp_header = root / 'source/base/net/tcp_server.h'
+    tcp_source = tcp_header.read_text(encoding='utf-8')
+    if hashlib.sha256(tcp_source.replace('\r\n', '\n').encode('utf-8')).hexdigest() != 'e5d36dd70847b42549473c96a65316ab5a99880b98df8effebea3510abd23140':
+        raise RuntimeError('REMOTE_BUILD_SOURCE: The TCP server header is not the reviewed source.')
+    tcp_source = replace_once(tcp_source, '    bool hasReadyConnections();',
+        '    quint16 localPort() const { return acceptor_.local_endpoint().port(); }\n\n    bool hasReadyConnections();')
+    tcp_header.write_text(tcp_source, encoding='utf-8', newline='\n')
     (root / header_path).write_text(header, encoding='utf-8', newline='\n')
     (root / source_path).write_text(source, encoding='utf-8', newline='\n')
     (root / 'source/code_codex_worker_wiring.inc').write_text(wiring, encoding='utf-8', newline='\n')

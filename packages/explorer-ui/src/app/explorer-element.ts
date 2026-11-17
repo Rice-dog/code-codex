@@ -1,3 +1,4 @@
+import {LanRemotePlugin,lanRemoteCardMarkup,lanRemotePanelMarkup} from '../lan-remote';
 import {ShallowOceanSettingsController,shallowOceanCardMarkup,shallowOceanPanelMarkup} from '../features/plugin-settings/shallow-ocean';
 import {getShallowOceanBackgroundController} from '../plugin-host/backgrounds/shallow-ocean';
 import {ID as SHALLOW_OCEAN_ID} from '../effects/shallow-ocean/model';
@@ -166,6 +167,7 @@ export class CodeCodexElement extends HTMLElement {
     get #settingsPanels(): PanelCoordinator {
       if(!this.#settingsPanelsValue){
         const panels=new PanelCoordinator();
+        panels.register('lan-remote',focus=>this.#lanRemote.close(focus));
         panels.register('shallow-ocean',focus=>this.#shallowOceanSettings.close(focus));
         panels.register('ascii-tiles',focus=>this.#asciiTilesSettings.close(focus));
         panels.register('spectral-drape',focus=>this.#spectralDrapeSettings.close(focus));
@@ -343,6 +345,7 @@ export class CodeCodexElement extends HTMLElement {
     #shallowOceanInitialization:Promise<void>|undefined;
     readonly #surfaceOpacity: SurfaceOpacityPlugin;
     #multiAccount: MultiAccountPlugin;
+    #lanRemote: LanRemotePlugin;
 
     readonly #tracker = new ActiveThreadTracker();
     readonly #changeTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -622,7 +625,7 @@ export class CodeCodexElement extends HTMLElement {
                 <div class="preview-market-section-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
               </section>
               <section class="preview-market-section" id="cle-developer-tools-section" role="tabpanel" data-preview-market-section="developer-tools" hidden>
-                <div class="preview-market-section-list">${gitHistoryCardMarkup()}${multiAccountCardMarkup()}</div>
+                <div class="preview-market-section-list">${gitHistoryCardMarkup()}${multiAccountCardMarkup()}${lanRemoteCardMarkup()}</div>
               </section>
             </div>
           </div>
@@ -652,18 +655,22 @@ export class CodeCodexElement extends HTMLElement {
       ${pixelSculptPanelMarkup()}
       ${blinkingSquaresPanelMarkup()}
       ${startupTransitionPanelMarkup()}
-      ${spectralDrapePanelMarkup()}${shallowOceanPanelMarkup()}${asciiTilesPanelMarkup()}${surfaceOpacityPanelMarkup(bilingualLabelMarkup)}${multiAccountPanelMarkup()}
+      ${spectralDrapePanelMarkup()}${shallowOceanPanelMarkup()}${asciiTilesPanelMarkup()}${surfaceOpacityPanelMarkup(bilingualLabelMarkup)}${multiAccountPanelMarkup()}${lanRemotePanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
         applyPluginCardIcons(this.#shadow);
         const ownerForAscii=this;
         this.#asciiTilesSettings=new AsciiTilesSettingsController({shadow:this.#shadow,runtime:this.#asciiTilesRuntime,actions:{toggle:id=>this.#backgroundActions.toggle(id),deactivate:id=>this.#backgroundActions.deactivate(id),initialize:(id,generation)=>this.#backgroundActions.initialize(id,generation),get busy(){return ownerForAscii.#backgroundActions.busy;}},enabled:()=>this.#enabledAppearancePlugins.has(ASCII_TILES_BACKGROUND_PLUGIN_ID),closeOthers:()=>{this.#settingsPanels.closeOthers('ascii-tiles');this.#surfaceOpacity.close();
+        this.#lanRemote?.close();
         this.#multiAccount.close();},notice:message=>this.#showActionNotice(message,'error')});
         this.#spectralDrapeSettings=new SpectralDrapeSettingsController({shadow:this.#shadow,runtime:this.#spectralDrapeRuntime,actions:{toggle:id=>this.#backgroundActions.toggle(id),deactivate:id=>this.#backgroundActions.deactivate(id),initialize:(id,generation)=>this.#backgroundActions.initialize(id,generation),get busy(){return ownerForAscii.#backgroundActions.busy;}},enabled:()=>this.#enabledAppearancePlugins.has(SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID),closeOthers:()=>{this.#settingsPanels.closeOthers('spectral-drape');this.#surfaceOpacity.close();
+        this.#lanRemote?.close();
         this.#multiAccount.close();},notice:message=>this.#showActionNotice(message,'error')});
         this.#shallowOceanSettings=new ShallowOceanSettingsController({shadow:this.#shadow,runtime:this.#shallowOceanRuntime,actions:{toggle:id=>this.#backgroundActions.toggle(id),deactivate:id=>this.#backgroundActions.deactivate(id),initialize:(id,generation)=>this.#backgroundActions.initialize(id,generation),get busy(){return ownerForAscii.#backgroundActions.busy;}},enabled:()=>this.#enabledAppearancePlugins.has(SHALLOW_OCEAN_ID),closeOthers:()=>{this.#settingsPanels.closeOthers('shallow-ocean');this.#surfaceOpacity.close();
+        this.#lanRemote?.close();
         this.#multiAccount.close();},notice:message=>this.#showActionNotice(message,'error')});
+        this.#lanRemote = new LanRemotePlugin(this.#shadow,message=>this.#showActionNotice(message,"error"),()=>{this.#settingsPanels.closeOthers('lan-remote');this.#surfaceOpacity.close();this.#multiAccount.close();this.#customBackground?.close();this.#startupSettings.closeStartupTransition();});
         this.#multiAccount = new MultiAccountPlugin(this.#shadow,message=>this.#showActionNotice(message,"error"));
         this.#surfaceOpacity = new SurfaceOpacityPlugin(this.#shadow, (zh, en) => this.#backgroundText(zh, en), message => this.#showActionNotice(message, "error"));
         this.#fileactionsSettings.frame = this.#required<HTMLElement>(".frame");
@@ -1107,6 +1114,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#spectralDrapeInitialization=this.#shallowOceanInitialization?.then(()=>this.#backgroundActions.initialize(SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID,appearanceInitializationGeneration));
         this.#surfaceOpacity.start();
         this.#multiAccount.start();
+        this.#lanRemote.start();
         this.#nativeWindowBackground.applied = undefined;
         this.#nativeWindowBackground.error = undefined;
         this.#renderPreviewMarket();
@@ -1177,6 +1185,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#spectralDrapeInitialization=undefined;
         this.#shallowOceanInitialization=undefined;
         this.#surfaceOpacity.stop();
+        this.#lanRemote.dispose();
         this.#multiAccount.stop();
         this.#fileactionsSettings.closeContextMenu(false);
         this.#closePreviewMarket(false);
@@ -1604,6 +1613,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#spectralDrapeSettings.render();
         this.#shallowOceanSettings.render();
         this.#surfaceOpacity.render();
+        this.#lanRemote.render();
         this.#multiAccount.render();
         const language = this.#backgroundSettingsLanguage;
         const english = language === "en";
@@ -2134,6 +2144,7 @@ export class CodeCodexElement extends HTMLElement {
         if (this.#asciiTilesSettings.containsEvent(event))return;
         if (this.#spectralDrapeSettings.containsEvent(event))return;
         if (this.#shallowOceanSettings.containsEvent(event))return;
+        if(this.#lanRemote.containsEvent(event))return;
         if(this.#multiAccount.containsEvent(event))return;
         if (this.#surfaceOpacity.containsEvent(event))
             return;
@@ -2141,6 +2152,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#spectralDrapeSettings.close();
         this.#shallowOceanSettings.close();
         this.#surfaceOpacity.close();
+        this.#lanRemote?.close();
         this.#multiAccount.close();
         const path = event.composedPath();
         if (!path.includes(this.#required<HTMLElement>("#cle-startupTransition-settings")) && !path.includes(this.#required<HTMLElement>(".startupTransition-settings-trigger")))
@@ -2223,6 +2235,7 @@ export class CodeCodexElement extends HTMLElement {
     #onWindowKeyDown = (event: KeyboardEvent): void => {
         if (event.key !== "Escape")
             return;
+        if(this.#lanRemote.open){event.preventDefault();event.stopImmediatePropagation();this.#lanRemote.close(true);return;}
         if (this.#shallowOceanSettings.open) {
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -2562,6 +2575,7 @@ export class CodeCodexElement extends HTMLElement {
         return refresh;
     }
     #onNotification(method: string, params: unknown): void {
+        if(method==='explorer.lan.state'){this.#lanRemote.accept(params);return;}
         if (method === "explorer.update.progress") {
             const value = asRecord(params);
             if (!value || !this.#updatesSettings.updateInstallPending || value.latestVersion !== this.#updatesSettings.updateCandidate?.latestVersion)
@@ -3304,6 +3318,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#spectralDrapeSettings.close();
         this.#shallowOceanSettings.close();
         this.#surfaceOpacity.close();
+        this.#lanRemote?.close();
         this.#multiAccount.close();
         this.#startupSettings.closeStartupTransition();
         this.#blinkingsquaresSettings.closeBlinkingSquares();
@@ -3345,12 +3360,13 @@ export class CodeCodexElement extends HTMLElement {
             return;
         if (id.endsWith('-preview'))
             this.#enabledPreviewers.delete(`code-codex.${id}`);
-        else if (id !== 'surface-opacity' && id !== 'codex-startup-transition' && id !== 'git-history') {
+        else if (id !== 'surface-opacity' && id !== 'codex-startup-transition' && id !== 'git-history' && id !== 'lan-remote') {
             this.#enabledAppearancePlugins.delete(id === 'transparent-background' ? 'code-codex.transparent-background' : `code-codex.${id === 'mountain' ? 'layered-mountain' : id}-background`);
         }
     }
     #backgroundPackageMarket: BackgroundPackageMarket | undefined;
     #connectPackageMarket(bridge: WorkspaceBridge): void {
+        this.#lanRemote.connect(bridge);
         connectBackgroundPackages((method, params, timeout) => bridge.request(method, params, timeout));
         this.#backgroundPackageMarket?.dispose();
         this.#backgroundPackageMarket = new BackgroundPackageMarket(this.#shadow, bridge, message => this.#showActionNotice(message, 'error'), async (id, intent) => {
@@ -3435,6 +3451,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#spectralDrapeSettings.render();
         this.#shallowOceanSettings.render();
         this.#surfaceOpacity.render();
+        this.#lanRemote.render();
         this.#multiAccount.render();
         this.#startupSettings.renderStartupTransition();
         this.#blinkingsquaresSettings.renderBlinkingSquares();

@@ -832,5 +832,46 @@
     "sha256": "5236aaaa21b71ab2a32df2831c6919c0e9ff1c5476db92b7e00a39ff6b658136",
     "resources": [],
     "source": "https://github.com/Rice-dog/code-codex"
+  },
+  {
+    "id": "lan-remote",
+    "name": "LAN Remote",
+    "category": "developer-tools",
+    "api": 1,
+    "version": "1.0.3",
+    "releaseTag": "plugin-assets-2026-11-15",
+    "capabilities": [
+      "developer-tools",
+      "lan-remote"
+    ],
+    "asset": "CodeCodex-plugin-lan-remote-1.0.3.js",
+    "relativePath": "CodeCodex-plugin-lan-remote-1.0.3.js",
+    "size": 21041,
+    "sha256": "244cee07744f0058fd1249bd2eb017ad09f61092a6c6742c14600e4a5cdabdfc",
+    "resources": [
+      {
+        "asset": "CodeCodex-plugin-lan-remote-1.0.3-x64.exe",
+        "relativePath": "resources/CodeCodex-plugin-lan-remote-1.0.3-x64.exe",
+        "kind": "native",
+        "size": 36130816,
+        "sha256": "9c676ab980cb19170e086ede943fe56afdfaab21b969c0ef0bece5d99ab7c9e5"
+      },
+      {
+        "asset": "CodeCodex-plugin-lan-remote-1.0.3-viewer-x64.exe",
+        "relativePath": "resources/CodeCodex-plugin-lan-remote-1.0.3-viewer-x64.exe",
+        "kind": "native",
+        "size": 37540352,
+        "sha256": "66a95d6f3afe64c58a9ec99373550d7a4ff2ef38804333687977e4f5662a5302"
+      },
+      {
+        "asset": "CodeCodex-plugin-lan-remote-1.0.3-COPYING.txt",
+        "relativePath": "resources/CodeCodex-plugin-lan-remote-1.0.3-COPYING.txt",
+        "kind": "binary",
+        "mimeType": "text/plain",
+        "size": 34939,
+        "sha256": "5735febb4249f2fea35481266e47668eb890404f83714ec3d12f68e80c95d72f"
+      }
+    ],
+    "source": "https://github.com/Rice-dog/code-codex"
   }
 ]

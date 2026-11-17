@@ -146,6 +146,8 @@ pub struct NativeBridge {
 }
 
 struct BridgeInner {
+    lan_remote: StdMutex<Option<Arc<crate::lan_remote::Engine>>>,
+    lan_remote_start: Mutex<()>,
     accounts: crate::accounts::AccountService,
     resolver: Option<AppServerClient>,
     manual_workspace: Option<Arc<Workspace>>,
@@ -187,6 +189,25 @@ struct ActiveContext {
 }
 
 impl NativeBridge {
+    async fn lan_request(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        let action=crate::lan_remote::validate(&params)?;
+        self.ensure_epoch(epoch)?;
+        let _starting=self.inner.lan_remote_start.lock().await;
+        self.ensure_epoch(epoch)?;
+        let current=lock_unpoisoned(&self.inner.lan_remote).as_ref().filter(|engine|!engine.is_closed()).cloned();
+        if current.is_none() && matches!(action,crate::lan_remote::Action::Status{}|crate::lan_remote::Action::Stop{}) {
+            return Ok(json!({"role":"idle","phase":"idle","room":"","pending":[],"connected":false,"error":""}));
+        }
+        let engine=if let Some(engine)=current {engine} else {
+            if !matches!(action,crate::lan_remote::Action::Open{..}) {return Err(BridgeError::new("REMOTE_ROOM_CLOSED","Open a LAN room first."));}
+            let engine=crate::lan_remote::Engine::start(self.inner.notification_sender.read().await.clone(),epoch).await?;
+            self.ensure_epoch(epoch)?;
+            *lock_unpoisoned(&self.inner.lan_remote)=Some(engine.clone());engine
+        };
+        let result=engine.request(params,||self.ensure_epoch(epoch).is_ok()).await;
+        if matches!(action,crate::lan_remote::Action::Stop{}) {engine.cancel();}
+        result
+    }
     pub fn connect_accounts(&self,endpoint:cdp_client::CdpEndpoint){self.inner.accounts.connect(endpoint);}
 
     async fn account_request(&self,params:Value,epoch:u64)->Result<Value,BridgeError>{
@@ -216,6 +237,8 @@ impl NativeBridge {
     ) -> Self {
         Self {
             inner: Arc::new(BridgeInner {
+                lan_remote: StdMutex::new(None),
+                lan_remote_start: Mutex::new(()),
                 accounts: crate::accounts::AccountService::default(),
                 resolver,
                 manual_workspace,

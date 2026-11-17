@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.6.27-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.6.33-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,7 +28,7 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前版本 **v0.6.27** 汇总自上一公开软件版本 **v0.6.20** 以来的改进：官方更新后的接续、独立 Runtime 更新识别、文件树与分栏布局修复，以及输入框和子面板透明度适配。完整累计更新和验证范围见 [发布说明](releases/README.md)。
+当前版本 **v0.6.33** 汇总自上一公开软件版本 **v0.6.27** 以来的改进：新增局域网远控插件（测试），支持房间码或房主地址申请加入、房主审批、原生远程桌面和文件传输；统一中英文设置说明并补充兼容检查。完整累计更新和验证范围见 [发布说明](releases/README.md)。
 
 有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。
 
@@ -44,15 +44,15 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.6.27-x64-setup.exe`
-- 备选：`CodeCodex-0.6.27-x64.msi`
-- 便携包：`CodeCodex-0.6.27-x64.zip`
+- 推荐：`CodeCodex-0.6.33-x64-setup.exe`
+- 备选：`CodeCodex-0.6.33-x64.msi`
+- 便携包：`CodeCodex-0.6.33-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.6.27-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.6.33-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -71,7 +71,7 @@ v0.5.21 及更早公开版采用找不到原生入口时才创建独立入口的
 
 ### 集中目录与自定义安装
 
-EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.6.27-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
+EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.6.33-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
 
 - `versions/`：不可变程序版本；`integration/`：快捷方式与安装事务。
 - `data/`：文件树设置、插件参数与用户图片/视频；官方 Codex 账号、聊天、项目文件仍由官方客户端管理。
@@ -113,14 +113,14 @@ EXE 成功安装后保留当前版本与实际上一版，安全清理更旧的�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.6.27
+./scripts/package.ps1 -Version 0.6.33
 ```
 
 生成结果会写入 `releases/`。
 
 ## 所有插件按需下载
 
-Preview Market 中展示 **27 个独立下载插件**：Appearance 16 个、File Preview 10 个、Tools 1 个。核心安装包保留文件树、基础文本预览与编辑、市场和设置框架、权限检查与运行日志；插件的实际渲染、预览、启动播放器和工具实现不再内置。
+Preview Market 提供 Appearance、File Preview、Tools 三类独立下载插件。核心安装包保留文件树、基础文本预览与编辑、市场和设置框架、权限检查与运行日志；插件的实际渲染、预览、启动播放器和工具实现不再内置。
 
 打开 Preview Market，先点击 **Download**；下载和校验完成后点击 **Enable**，即可在当前 Codex 窗口使用，无需重启。下载不会自动启用插件或打开设置。参数按钮在完整插件包可用后使用；UI Surface Opacity 仍要求先实际启用一个背景插件。
 
@@ -313,7 +313,7 @@ releases/              已生成的可下载安装包
 
 ## 许可证
 
-[MIT](LICENSE)。第三方效果的来源、修改内容和许可证边界见[第三方声明](THIRD_PARTY_NOTICES_ZH_CN.md)。
+核心采用 [MIT](LICENSE)。可选局域网远控原生程序基于 Aspia，采用 GPL-3.0-or-later，对应源码和许可证见[远控指南](docs/lan-remote.md)。第三方效果的来源、修改内容和许可证边界见[第三方声明](THIRD_PARTY_NOTICES_ZH_CN.md)。
 
 
 开发时，UI组合位于 `packages/explorer-ui/src/app/`，类型合同、基础生命周期、领域控制器、插件宿主和公共组件分别位于 `contracts/`、`core/`、`features/`、`plugin-host/`、`components/`。根入口兼容导出不承载新功能。独立插件按 `resources/plugin-definitions.json` 和分发锁复用校验过的资产；应用升版不自动改变插件独立版本/tag。实际插件源码变化需显式重建并审核字节身份。

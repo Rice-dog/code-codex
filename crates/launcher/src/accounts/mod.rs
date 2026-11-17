@@ -28,6 +28,8 @@ mod stopping;
 mod outcome;
 mod relay;
 mod relay_diagnostics;
+
+pub(crate) fn check_relay_header_contract() -> bool { relay::check_relay_header_contract() }
 mod context_handoff;
 mod context_recovery;
 mod official_context;
