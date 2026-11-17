@@ -33,7 +33,7 @@ private:
 // Kept as one shared pipeline: no replacement capture, codec, file or input engine.
 #include "code_codex_worker_wiring.inc"
 
-int main(int argc, char** argv)
+int remoteHostMain(int argc, char** argv)
 {
     char input[4096];
     if (!std::fgets(input, sizeof(input), stdin)) return 2;
@@ -52,7 +52,7 @@ int main(int argc, char** argv)
     const auto port = config.value("port").toInt();
     QHostAddress iface;
     if (!iface.setAddress(address) || iface.protocol() != QAbstractSocket::IPv4Protocol ||
-        port < 1 || port > 65535 || !User::isValidUserName(username) || !User::isValidPassword(password) ||
+        port < 0 || port > 65535 || !User::isValidUserName(username) || !User::isValidPassword(password) ||
         !config.value("files").isBool())
         return 2;
     User user = User::create(username, password);

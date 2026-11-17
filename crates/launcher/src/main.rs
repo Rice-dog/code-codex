@@ -14,6 +14,7 @@ use gui_support::localization;
 mod launch_recovery;
 mod network_diagnostics;
 mod plugin_store;
+mod lan_remote;
 mod process_diagnostics;
 mod process_guard;
 #[cfg(windows)]

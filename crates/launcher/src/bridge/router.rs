@@ -44,6 +44,7 @@ impl BridgeHandler for NativeBridge {
         let result = async {
             self.ensure_epoch(epoch)?;
             match request.method.as_str() {
+                "explorer.lan.request" => self.lan_request(request.params, epoch).await,
                 "explorer.accounts.request"=>self.account_request(request.params,epoch).await,
                 "explorer.storage.request" => {
                   let context=crate::renderer_storage::request_context(&request.params);
@@ -247,6 +248,7 @@ impl BridgeHandler for NativeBridge {
 
     fn invalidate_lifecycle(&self) {
         self.inner.lifecycle_epoch.fetch_add(1, Ordering::AcqRel);
+        if let Some(engine) = lock_unpoisoned(&self.inner.lan_remote).take() { engine.cancel(); }
         if self.inner.window_transparency.restore().is_err() {
             tracing::warn!(event = "window_transparency_restore_failed");
         }

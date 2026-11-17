@@ -16,9 +16,10 @@ export async function fingerprintBuildMetadata(root,id) {
  return result;
 }
 export async function additionalBuildInputs(root,p) {
- const builder=p.id==='spectral-drape'?'build-spectral-drape.mjs':p.id==='shallow-ocean'?'build-shallow-ocean.mjs':p.id==='ascii-tiles'?'build-ascii-tiles.mjs':p.id==='custom-background'?'build-custom-background.mjs':p.id==='codex-startup-transition'?'build-startup-package.mjs':p.category==='file-preview'?'file-preview-packages.mjs':p.capabilities?.includes('background')?'background-packages.mjs':'utility-packages.mjs';
+ const builder=p.id==='lan-remote'?'build-lan-remote.mjs':p.id==='spectral-drape'?'build-spectral-drape.mjs':p.id==='shallow-ocean'?'build-shallow-ocean.mjs':p.id==='ascii-tiles'?'build-ascii-tiles.mjs':p.id==='custom-background'?'build-custom-background.mjs':p.id==='codex-startup-transition'?'build-startup-package.mjs':p.category==='file-preview'?'file-preview-packages.mjs':p.capabilities?.includes('background')?'background-packages.mjs':'utility-packages.mjs';
  const files=['scripts/'+builder,'scripts/build.mjs','scripts/rebuild-plugins.mjs','scripts/plugin-source-definition.mjs','scripts/plugin-build-inputs.mjs','scripts/plugin-distribution.mjs','../../THIRD_PARTY_NOTICES_EN.md'];
  if(["glow-horizon", "black-hole", "heavenly-cloud", "aurora-ionosphere", "milky-way", "mountain", "cloud-train", "blinking-squares", "particle-image", "pixel-sculpt", "markdown-preview", "csv-preview", "diagram-preview", "image-preview", "video-preview", "pdf-preview", "audio-preview", "office-preview", "notebook-preview", "model-preview"].includes(p.id))files.push('../../resources/plugin-banners/'+p.id+'.txt');
+ if(p.id==='lan-remote')files.push('../../artifacts/lan-remote-native/code_codex_lan_remote.exe','../../artifacts/lan-remote-native/code_codex_remote_viewer.exe','../../artifacts/lan-remote-native/build-manifest.json',...['CMakeLists.txt','project-hook.cmake','host.cc','viewer.cc','viewer-main.cc','room.cc','room_state.h','prepare-aspia.py','build.ps1','COPYING','README.md'].map(name=>'../../native/lan-remote/'+name));
  if(p.id==='codex-startup-transition')files.push('src/startup-transition.css');
  if(p.capabilities?.includes('background'))files.push('scripts/build-background-worker.mjs');
  if(p.id==='pixel-sculpt')files.push('src/pixel-sculpt-default.png');

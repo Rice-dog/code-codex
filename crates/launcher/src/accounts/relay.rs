@@ -26,6 +26,7 @@ static QUOTA_REVISION: AtomicUsize = AtomicUsize::new(1);
 static ROUTE_SEQUENCE: AtomicUsize = AtomicUsize::new(1);
 const MAX_BODY: usize = 32 * 1024 * 1024;
 const UPSTREAM: &str = "https://chatgpt.com/backend-api/codex";
+const TURN_STATE_HEADER: &str = "x-codex-turn-state";
 #[derive(Default)]
 pub(super) struct Routes {
     routes: Mutex<HashMap<String, Arc<Route>>>,
@@ -563,7 +564,7 @@ impl Route {
             return reject(&mut io,426,"ACCOUNT_API_HTTP_REQUIRED: This Responses connection uses HTTP streaming. Re-select it before sending.").await;
         }
         let headers = if api.is_some(){api_headers(&request.headers,&auth)?}else{upstream_headers(&request.headers, &auth)?};
-        operation.event("account.relay.routing-metadata","observed",super::relay_diagnostics::routing_metadata(&request.headers,&headers));
+        let routing = super::relay_diagnostics::routing_metadata(&request.headers, &headers);
         let mut builder = self
             .client
             .request(
@@ -606,7 +607,7 @@ impl Route {
         if selection.cancel.is_cancelled() {
             return Err(fault("credential-selection-superseded"));
         }
-        operation.event("account.relay.phase","observed",json!({"stage":"upstream-send","requestAcceptance":"unknown"}));
+        operation.event("account.relay.phase","observed",json!({"stage":"upstream-send","requestAcceptance":"unknown","routing":routing}));
         let mut response = match builder.send().await {
             Ok(response) => response,
             Err(error) => {
@@ -616,7 +617,9 @@ impl Route {
                 return Err(fault("upstream-connect"));
             }
         };
-        operation.event("account.relay.response","received",json!({"stage":"upstream-response","status":response.status().as_u16(),"correlation":super::relay_diagnostics::correlation(response.headers()),"taskReplayed":false}));
+        let mut response_turn_header = String::new();
+        let turn_state_included = append_turn_state(&mut response_turn_header, response.headers(), api.is_none());
+        operation.event("account.relay.response","received",json!({"stage":"upstream-response","status":response.status().as_u16(),"correlation":super::relay_diagnostics::correlation(response.headers()),"stickyTurn":{"upstreamPresent":response.headers().contains_key(TURN_STATE_HEADER),"includedInLocalHeaders":turn_state_included},"taskReplayed":false}));
         if response.status().is_server_error() {
             operation.event("account.relay.upstream-http", "failed", json!({"stage":"upstream-http-status","status":response.status().as_u16(),"requestAccepted":"unknown","taskReplayed":false}));
         }
@@ -641,11 +644,14 @@ impl Route {
                 return Err(fault("websocket-accept"));
             }
             self.observe_headers(response.headers());
+            let mut handshake = format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n");
+            handshake.push_str(&response_turn_header);
+            handshake.push_str("\r\n");
             let upstream = response
                 .upgrade()
                 .await
                 .map_err(|_| fault("websocket-upgrade"))?;
-            io.write_all(format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n").as_bytes()).await.map_err(|_|fault("websocket-client"))?;
+            io.write_all(handshake.as_bytes()).await.map_err(|_|fault("websocket-client"))?;
             let mut config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
             config.max_message_size = Some(MAX_BODY);
             config.max_frame_size = Some(MAX_BODY);
@@ -676,7 +682,7 @@ impl Route {
             .get("content-type")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("application/json");
-        let mut correlation = String::new();
+        let mut correlation = response_turn_header;
         for name in [
             "retry-after",
             "x-request-id",
@@ -899,6 +905,16 @@ pub(super) fn parse_header_paths(raw: &str, authority: &str, key: &str, paths: &
         websocket,
     })
 }
+// Return the native turn-scoped routing value to the client; the relay never stores it.
+fn append_turn_state(output: &mut String, headers: &HeaderMap, official: bool) -> bool {
+    if !official { return false; }
+    let Some(value) = headers.get(TURN_STATE_HEADER).and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+    use std::fmt::Write;
+    write!(output, "{TURN_STATE_HEADER}: {value}\r\n").is_ok()
+}
+
 fn upstream_headers(input: &HeaderMap, auth: &Value) -> Result<HeaderMap> {
     let mut out = HeaderMap::new();
     for (name, value) in input {
@@ -911,6 +927,8 @@ fn upstream_headers(input: &HeaderMap, auth: &Value) -> Result<HeaderMap> {
                 | "openai-beta"
                 | "originator"
                 | "version"
+                | "session-id"
+                | "thread-id"
                 | "session_id"
                 | "conversation_id"
                 | "sec-websocket-key"
@@ -951,6 +969,27 @@ fn api_headers(input:&HeaderMap,auth:&Value)->Result<HeaderMap>{
     out.insert("authorization",HeaderValue::from_str(&format!("Bearer {}",auth["accessToken"].as_str().ok_or_else(||fault("api-credential-token"))?)).map_err(|_|fault("api-credential-header"))?);
     Ok(out)
 }
+/// Explicit update-validation probe. Only synthetic headers, using production policy.
+pub(super) fn check_relay_header_contract() -> bool {
+    const NATIVE: [&str; 4] = ["session-id", "thread-id", "session_id", TURN_STATE_HEADER];
+    let mut input = HeaderMap::new();
+    for (name, value) in NATIVE.into_iter().zip(["fixture-session", "fixture-thread", "fixture-legacy", "fixture-state"]) {
+        input.insert(name, HeaderValue::from_static(value));
+    }
+    input.insert("cookie", HeaderValue::from_static("fixture-cookie"));
+    let auth = json!({"accessToken":"fixture-token","chatgptAccountId":"fixture-account"});
+    let (Ok(official), Ok(api)) = (upstream_headers(&input, &auth), api_headers(&input, &auth)) else {
+        return false;
+    };
+    let mut response = String::new();
+    NATIVE.into_iter().all(|name| official.get(name) == input.get(name) && !api.contains_key(name))
+        && !official.contains_key("cookie") && !api.contains_key("cookie")
+        && !append_turn_state(&mut response, &input, false) && response.is_empty()
+        && !append_turn_state(&mut response, &HeaderMap::new(), true) && response.is_empty()
+        && append_turn_state(&mut response, &input, true)
+        && response == "x-codex-turn-state: fixture-state\r\n"
+}
+
 fn api_body(bytes:&[u8],settings:&super::api::Settings)->Result<Vec<u8>>{
     let mut body:Value=serde_json::from_slice(bytes).map_err(|_|AccountError::new("ACCOUNT_API_BODY","The Responses request body is invalid. No upstream request was sent."))?;
     let object=body.as_object_mut().ok_or_else(||fault("api-body-object"))?;
@@ -1345,12 +1384,12 @@ mod tests {
             for (name,path) in [("A","/A/v1/responses"),("B","/B/v1/responses/compact"),("official","/official/responses")] {
                 let (socket,_)=listener.accept().await.unwrap();let mut io=BufReader::new(socket);let raw=read_header(&mut io).await.unwrap();
                 assert!(raw.starts_with(&format!("POST {path} ")));assert!(!raw.to_lowercase().contains("cookie:"));
-                if name!="official"{assert!(raw.contains(&format!("authorization: Bearer synthetic-{name}")));assert!(!raw.contains("chatgpt-account-id"));assert!(!raw.contains("host-secret"));assert!(!raw.contains("x-codex-test"));}
-                else{assert!(raw.contains("authorization: Bearer fixture-host"));assert!(raw.contains("chatgpt-account-id: host"));assert!(!raw.contains("synthetic-"));}
+                if name!="official"{assert!(raw.contains(&format!("authorization: Bearer synthetic-{name}")));assert!(!raw.contains("chatgpt-account-id"));assert!(!raw.contains("host-secret"));assert!(!raw.contains("x-codex-test"));assert!(!raw.contains("session-id:"));assert!(!raw.contains("thread-id:"));assert!(!raw.contains("x-codex-turn-state:"));}
+                else{assert!(raw.contains("authorization: Bearer fixture-host"));assert!(raw.contains("chatgpt-account-id: host"));assert!(!raw.contains("synthetic-"));assert!(raw.contains("session-id: native-session"));assert!(raw.contains("thread-id: native-thread"));assert!(raw.contains("x-codex-turn-state: native-request-state"));}
                 let length=raw.lines().find_map(|s|s.to_lowercase().strip_prefix("content-length:").map(|s|s.trim().parse::<usize>().unwrap())).unwrap();let mut bytes=vec![0;length];io.read_exact(&mut bytes).await.unwrap();let body:Value=serde_json::from_slice(&bytes).unwrap();
                 if name!="official"{assert_eq!(body["model"],format!("model-{name}"));assert!(body.get("previous_response_id").is_none());assert!(body.get("prompt_cache_key").is_none());assert_eq!(body["tools"][0]["name"],"test_tool");}
                 else{assert_eq!(body["model"],"official-model");}
-                io.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nx-codex-primary-used-percent: 10\r\nx-codex-primary-window-minutes: 300\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+                io.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nx-codex-primary-used-percent: 10\r\nx-codex-primary-window-minutes: 300\r\nx-codex-turn-state: fixture-state\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
             }
         });
         let client=reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).build().unwrap();
@@ -1360,11 +1399,16 @@ mod tests {
             if name=="B"{route.commit_credential(Route::prepare_api("api-b".into(),super::super::api::Settings::parse(&format!("http://{address}/B/v1"),"model-B").unwrap(),"synthetic-B".into()).unwrap());}
             if name=="official"{route.commit_credential(credential("host"));}
             let path=if name=="B"{"/responses/compact"}else{"/responses"};
-            let response=client.post(format!("{url}{path}")).header("authorization","Bearer host-secret").header("chatgpt-account-id","host-secret").header("cookie","host-secret").header("x-codex-test","host-private").json(&json!({"model":"official-model","previous_response_id":"private-prior-id","prompt_cache_key":"private-cache-id","tools":[{"type":"function","name":"test_tool","parameters":{}}],"input":[]})).send().await.unwrap();
-            assert_eq!(response.status(),200);assert_eq!(response.text().await.unwrap(),"{}");if name!="official"{assert!(route.status()["quota"].is_null());}
+            let response=client.post(format!("{url}{path}")).header("authorization","Bearer host-secret").header("chatgpt-account-id","host-secret").header("cookie","host-secret").header("x-codex-test","host-private").header("session-id","native-session").header("thread-id","native-thread").header(TURN_STATE_HEADER,"native-request-state").json(&json!({"model":"official-model","previous_response_id":"private-prior-id","prompt_cache_key":"private-cache-id","tools":[{"type":"function","name":"test_tool","parameters":{}}],"input":[]})).send().await.unwrap();
+            assert_eq!(response.status(),200);assert_eq!(response.headers().contains_key(TURN_STATE_HEADER),name=="official");assert_eq!(response.text().await.unwrap(),"{}");if name!="official"{assert!(route.status()["quota"].is_null());}
         }
         backend.await.unwrap();assert_eq!(route.base_url,url);route.close();
     }
+    #[test]
+    fn update_probe_exercises_live_relay_header_policy() {
+        assert!(check_relay_header_contract());
+    }
+
     #[test] fn api_configuration_contains_no_key_and_api_headers_exclude_official_identity(){
         let settings=super::super::api::Settings::parse("https://example.invalid/v1","model").unwrap();let json=serde_json::to_string(&settings).unwrap();assert!(!json.contains("key"));
         let mut input=HeaderMap::new();input.insert("authorization",HeaderValue::from_static("Bearer official"));input.insert("chatgpt-account-id",HeaderValue::from_static("official-id"));input.insert("openai-organization",HeaderValue::from_static("official-org"));
@@ -1485,7 +1529,7 @@ mod tests {
         let response=client.post(format!("{}/responses",route.base_url)).body("{}").send().await.unwrap();assert_eq!(response.status(),502);assert_eq!(response.text().await.unwrap(),"{}");backend.await.unwrap();route.close();
     }
     #[tokio::test]
-    async fn http_route_reuses_one_listener_and_attributes_quota_without_host_cache_headers() {
+    async fn official_http_preserves_native_routing_and_turn_state_across_account_switch() {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
             .unwrap();
@@ -1500,6 +1544,10 @@ mod tests {
                     expected.to_ascii_lowercase()
                 )));
                 assert!(raw.contains(&format!("chatgpt-account-id: {expected}")));
+                assert!(raw.contains("session-id: native-session"));
+                assert!(raw.contains("thread-id: native-thread"));
+                assert!(raw.contains("session_id: legacy-session"));
+                assert!(raw.contains("x-codex-turn-state: native-request-state"));
                 assert!(!raw.contains("cookie:"));
                 let length = raw
                     .lines()
@@ -1512,7 +1560,7 @@ mod tests {
                 let mut body = vec![0; length];
                 io.read_exact(&mut body).await.unwrap();
                 assert_eq!(body, b"{\"fixture\":true}");
-                io.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nx-codex-primary-used-percent: 41\r\nx-codex-primary-window-minutes: 300\r\nx-codex-primary-reset-at: {}\r\nConnection: close\r\n\r\n{{}}",now()+3600).as_bytes()).await.unwrap();
+                io.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nx-codex-primary-used-percent: 41\r\nx-codex-primary-window-minutes: 300\r\nx-codex-primary-reset-at: {}\r\nx-codex-turn-state: state-{expected}\r\nConnection: close\r\n\r\n{{}}",now()+3600).as_bytes()).await.unwrap();
             }
         });
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
@@ -1535,6 +1583,10 @@ mod tests {
                 .post(format!("{}/responses", route.base_url))
                 .header("authorization", "Bearer host")
                 .header("cookie", "host-cookie")
+                .header("session-id", "native-session")
+                .header("thread-id", "native-thread")
+                .header("session_id", "legacy-session")
+                .header(TURN_STATE_HEADER, "native-request-state")
                 .body("{\"fixture\":true}")
                 .send()
                 .await
@@ -1545,6 +1597,7 @@ mod tests {
                     .headers()
                     .contains_key("x-codex-primary-used-percent")
             );
+            assert_eq!(result.headers()[TURN_STATE_HEADER].to_str().unwrap(), format!("state-{expected}"));
             assert_eq!(result.text().await.unwrap(), "{}");
             assert_eq!(route.connection(), expected);
             assert_eq!(
@@ -1568,7 +1621,17 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let backend = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
-            let mut ws=tokio_tungstenite::accept_hdr_async(socket,|request:&tokio_tungstenite::tungstenite::handshake::server::Request,response:tokio_tungstenite::tungstenite::handshake::server::Response|{assert_eq!(request.headers()["authorization"],"Bearer fixture-B");assert_eq!(request.headers()["chatgpt-account-id"],"B");Ok(response)}).await.unwrap();
+            use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+            let mut ws = tokio_tungstenite::accept_hdr_async(socket, |request: &Request, mut response: Response| {
+                assert_eq!(request.headers()["authorization"], "Bearer fixture-B");
+                assert_eq!(request.headers()["chatgpt-account-id"], "B");
+                assert_eq!(request.headers()["session-id"], "native-session");
+                assert_eq!(request.headers()["thread-id"], "native-thread");
+                assert_eq!(request.headers()[TURN_STATE_HEADER], "native-request-state");
+                response.headers_mut().insert(TURN_STATE_HEADER, HeaderValue::from_static("native-result-state"));
+                response.headers_mut().insert("set-cookie", HeaderValue::from_static("fixture=private"));
+                Ok(response)
+            }).await.unwrap();
             assert_eq!(
                 ws.next().await.unwrap().unwrap().to_text().unwrap(),
                 "{\"type\":\"response.create\"}"
@@ -1596,12 +1659,16 @@ mod tests {
             .await
             .map(|s| (s, ()))
             .unwrap();
-        let (mut ws, _) = tokio_tungstenite::client_async(
-            route.base_url.replace("http://", "ws://") + "/responses",
-            socket,
-        )
-        .await
-        .unwrap();
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = (route.base_url.replace("http://", "ws://") + "/responses")
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert("session-id", HeaderValue::from_static("native-session"));
+        request.headers_mut().insert("thread-id", HeaderValue::from_static("native-thread"));
+        request.headers_mut().insert(TURN_STATE_HEADER, HeaderValue::from_static("native-request-state"));
+        let (mut ws, response) = tokio_tungstenite::client_async(request, socket).await.unwrap();
+        assert_eq!(response.headers()[TURN_STATE_HEADER], "native-result-state");
+        assert!(!response.headers().contains_key("set-cookie"));
         ws.send(Message::Text("{\"type\":\"response.create\"}".into()))
             .await
             .unwrap();

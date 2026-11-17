@@ -1,27 +1,27 @@
 ﻿[
     {
-        "assetName":  "CodeCodex-0.6.27-x64-setup.exe",
-        "path":  "CodeCodex-0.6.27-x64-setup.exe",
-        "size":  22015789,
-        "sha256":  "457ec2d35cf1a1588d5011d3a1e52cf6979f488c92affa590906263af9e7576b"
+        "assetName":  "CodeCodex-0.6.33-x64-setup.exe",
+        "path":  "CodeCodex-0.6.33-x64-setup.exe",
+        "size":  22084360,
+        "sha256":  "b652994bb58d22367c64b1d843b0f54a0ad97442f8a464ec46db5d4eb6110e1d"
     },
     {
-        "assetName":  "CodeCodex-0.6.27-x64.msi",
-        "path":  "CodeCodex-0.6.27-x64.msi",
-        "size":  12582912,
-        "sha256":  "25762f6d57a8f1aab4e1b38fd773b3cc8a9cac255f36e7b3a2e2881be10d3f21"
+        "assetName":  "CodeCodex-0.6.33-x64.msi",
+        "path":  "CodeCodex-0.6.33-x64.msi",
+        "size":  12648448,
+        "sha256":  "bf35dd3c9158a2195514a6c7f0f3b7713d2060a1bdeff03be5d5d6ac87efc4b7"
     },
     {
-        "assetName":  "CodeCodex-0.6.27-x64.zip",
-        "path":  "CodeCodex-0.6.27-x64.zip",
-        "size":  16102165,
-        "sha256":  "c682ff6c82680ae887fb0daa0eb19879a84568cde3bad8cc5e24ee8832aa0e4f"
+        "assetName":  "CodeCodex-0.6.33-x64.zip",
+        "path":  "CodeCodex-0.6.33-x64.zip",
+        "size":  16170736,
+        "sha256":  "b5ee3f971b76b11de2413806a46655d1e0ceb6ac018a92c3980769ff7cc4e5cd"
     },
     {
         "assetName":  "Uninstall-CodeCodex.exe",
         "path":  "Uninstall-CodeCodex.exe",
-        "size":  2749440,
-        "sha256":  "64426189ef6ba7c0cfea3a795839417cb7ddd7bf5d0086fbafa687cc6d051b4e"
+        "size":  2754048,
+        "sha256":  "c5c70815b7c09d966d4225afd7bb6621281ceb469279e16efcdbdb4a8b912d79"
     },
     {
         "releaseTag":  "plugin-assets-2026-11-01",
@@ -346,9 +346,37 @@
         "sha256":  "5236aaaa21b71ab2a32df2831c6919c0e9ff1c5476db92b7e00a39ff6b658136"
     },
     {
-        "assetName":  "CodeCodex-plugin-catalog-0.6.27.json",
+        "releaseTag":  "plugin-assets-2026-11-15",
+        "assetName":  "CodeCodex-plugin-lan-remote-1.0.3-x64.exe",
+        "path":  "plugins/developer-tools/lan-remote/resources/CodeCodex-plugin-lan-remote-1.0.3-x64.exe",
+        "size":  36130816,
+        "sha256":  "9c676ab980cb19170e086ede943fe56afdfaab21b969c0ef0bece5d99ab7c9e5"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-15",
+        "assetName":  "CodeCodex-plugin-lan-remote-1.0.3-viewer-x64.exe",
+        "path":  "plugins/developer-tools/lan-remote/resources/CodeCodex-plugin-lan-remote-1.0.3-viewer-x64.exe",
+        "size":  37540352,
+        "sha256":  "66a95d6f3afe64c58a9ec99373550d7a4ff2ef38804333687977e4f5662a5302"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-15",
+        "assetName":  "CodeCodex-plugin-lan-remote-1.0.3-COPYING.txt",
+        "path":  "plugins/developer-tools/lan-remote/resources/CodeCodex-plugin-lan-remote-1.0.3-COPYING.txt",
+        "size":  34939,
+        "sha256":  "5735febb4249f2fea35481266e47668eb890404f83714ec3d12f68e80c95d72f"
+    },
+    {
+        "releaseTag":  "plugin-assets-2026-11-15",
+        "assetName":  "CodeCodex-plugin-lan-remote-1.0.3.js",
+        "path":  "plugins/developer-tools/lan-remote/CodeCodex-plugin-lan-remote-1.0.3.js",
+        "size":  21041,
+        "sha256":  "244cee07744f0058fd1249bd2eb017ad09f61092a6c6742c14600e4a5cdabdfc"
+    },
+    {
+        "assetName":  "CodeCodex-plugin-catalog-0.6.33.json",
         "path":  "plugins/catalog.json",
-        "size":  28892,
-        "sha256":  "7002a6ea9733254a4b2e6b3256f2f4ada8830e5d01640b04ee235662db874d33"
+        "size":  30375,
+        "sha256":  "b472f12fd16c4013c309b43b89ede320fb7a06e3ac3284746c35b41d6b5d4ac0"
     }
 ]

@@ -67,7 +67,7 @@ fn stale_engine_rules_and_version_are_separate_from_inventory_freshness() {
 }
 #[test]
 fn registry_check_references_resolve_and_manual_steps_are_concrete() {
- let ids=["package.inventory","package.modules","host.interfaces","host.quota","host.layout","host.split-layout","host.menu","host.composer","host.theme","host.composer-backdrop","host.models","host.ownership","regression.interfaces","regression.layout","regression.models","regression.account-behavior","host.settings-paint","host.side-panel-paint","host.tree-rail-paint"];
+ let ids=["package.inventory","package.modules","host.interfaces","host.quota","host.layout","host.split-layout","host.menu","host.composer","host.theme","host.composer-backdrop","host.models","host.ownership","regression.interfaces","regression.layout","regression.models","regression.account-behavior","regression.account-relay-headers","host.settings-paint","host.side-panel-paint","host.tree-rail-paint"];
  for r in registry()["rules"].as_array().unwrap() {
   assert!(!r["automatedChecks"].as_array().unwrap().is_empty());
   for id in r["automatedChecks"].as_array().unwrap(){assert!(ids.contains(&id.as_str().unwrap()),"{id}");}

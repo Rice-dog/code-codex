@@ -69,15 +69,21 @@ pub(super) fn request_state(value:&Value)->Option<Value> {
         "modelFingerprint":value["model"].as_str().map(fingerprint),"generating":value["generate"]!=false}))
 }
 
-/// Fixed small metadata only. Compare the actual header maps already used by
-/// transport, without changing forwarding or hashing the request body.
-pub(super) fn routing_metadata(input:&reqwest::header::HeaderMap, output:&reqwest::header::HeaderMap)->Value {
-    let mut fields=json!({});
-    for name in ["session-id","thread-id","session_id","conversation_id","x-codex-turn-metadata","x-codex-session-id"] {
-        let project=|headers:&reqwest::header::HeaderMap| headers.get(name).map(|v|json!({"bytes":v.as_bytes().len(),"fingerprint":(v.as_bytes().len()<=1024).then(||format!("{:x}",Sha256::digest(v.as_bytes())))}));
-        if input.contains_key(name)||output.contains_key(name) {fields[name]=json!({"incoming":project(input),"forwarded":project(output)});}
-    }
-    fields
+/// Compare the already-selected headers once, without hashing or retaining any value.
+pub(super) fn routing_metadata(input: &reqwest::header::HeaderMap, output: &reqwest::header::HeaderMap) -> Value {
+    let status = |name| match (input.get(name), output.get(name)) {
+        (None, None) => "absent",
+        (Some(_), None) => "omitted",
+        (None, Some(_)) => "added",
+        (Some(a), Some(b)) if a == b => "preserved",
+        (Some(_), Some(_)) => "changed",
+    };
+    json!({
+        "nativeSession": status("session-id"),
+        "nativeThread": status("thread-id"),
+        "legacySession": status("session_id"),
+        "stickyTurn": status("x-codex-turn-state")
+    })
 }
 
 /// Called on already-parsed terminal events only. Unit fields are numeric token
@@ -150,15 +156,20 @@ impl ErrorBody {
         input.insert("thread-id","PRIVATE_THREAD".parse().unwrap());
         input.insert("session_id","PRIVATE_COMPAT".parse().unwrap());
         input.insert("authorization","Bearer PRIVATE_AUTH".parse().unwrap());
-        let mut output=reqwest::header::HeaderMap::new();output.insert("session_id",input["session_id"].clone());
+        let mut output=reqwest::header::HeaderMap::new();
+        output.insert("session_id",input["session_id"].clone());
+        output.insert("thread-id","PRIVATE_CHANGED_THREAD".parse().unwrap());
         let metadata=routing_metadata(&input,&output);
-        assert!(metadata["session-id"]["forwarded"].is_null());
-        assert_eq!(metadata["session_id"]["incoming"],metadata["session_id"]["forwarded"]);
+        assert_eq!(metadata, json!({"nativeSession":"omitted","nativeThread":"changed","legacySession":"preserved","stickyTurn":"absent"}));
         let event=json!({"type":"response.completed","response":{"id":"PRIVATE_RESPONSE","output":[{"text":"PRIVATE_OUTPUT"}],"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":90},"output_tokens":12,"output_tokens_details":{"reasoning_tokens":8},"total_tokens":112}}});
         let original=event.clone();let usage=response_usage(&event).unwrap();assert_eq!(event,original);
         assert_eq!(usage["cachedInputUnits"],90);assert_eq!(usage["reasoningOutputUnits"],8);
         let safe=crate::runtime_log::redaction::value(json!({"metadata":metadata,"usage":usage}));
-        assert_eq!(safe["usage"]["inputUnits"],100);assert!(!safe.to_string().contains("PRIVATE_"));
+        assert_eq!(safe["usage"]["inputUnits"],100);
+        let projected=crate::runtime_log::redaction::value(metadata);
+        assert_eq!(projected["nativeSession"],"omitted");
+        assert_eq!(projected["nativeThread"],"changed");
+        assert!(!projected.to_string().contains("PRIVATE_"));assert!(!safe.to_string().contains("PRIVATE_"));
         assert!(response_usage(&json!({"type":"response.created","response":event["response"]})).is_none());
         assert!(response_usage(&json!({"type":"response.completed","response":{}})).is_none());
         assert!(response_usage(&json!({"object":"response","usage":{"input_tokens":"secret"}})).unwrap()["inputUnits"].is_null());
