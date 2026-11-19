@@ -82,14 +82,20 @@ fn check(id: &str, status: &str, scope: &str, detail: &str) -> Value {
 fn summarize(report: &Value, executed: &[Value]) -> Value {
     summarize_with_registry(report, executed, registry())
 }
-fn summarize_with_registry(report: &Value, executed: &[Value], registry: Value) -> Value {
-    let mut checks = executed.to_vec();
+fn affected_rules<'a>(report: &Value, registry: &'a Value) -> (bool, Vec<&'a Value>) {
     let known: BTreeSet<_> = report["changes"].as_array().into_iter().flatten().flat_map(|c| c["dependencyIds"].as_array().into_iter().flatten().filter_map(Value::as_str)).chain(report["analysisDependencyIds"].as_array().into_iter().flatten().filter_map(Value::as_str)).collect();
     let unknown = report["changes"].as_array().into_iter().flatten().any(|c| c["dependencyIds"].as_array().is_none_or(Vec::is_empty));
+    let rules = registry["rules"].as_array().into_iter().flatten()
+        .filter(|rule| unknown || rule["id"].as_str().is_some_and(|id| known.contains(id)))
+        .collect();
+    (unknown, rules)
+}
+fn summarize_with_registry(report: &Value, executed: &[Value], registry: Value) -> Value {
+    let mut checks = executed.to_vec();
+    let (unknown, rules) = affected_rules(report, &registry);
     let mut features = Vec::new();
-    for rule in registry["rules"].as_array().into_iter().flatten() {
+    for rule in rules {
         let id = rule["id"].as_str().unwrap_or("");
-        if !unknown && !known.contains(id) { continue; }
         let auto: Vec<_> = rule["automatedChecks"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
         let mut feature_checks = Vec::new();
         for requested in auto {
@@ -116,7 +122,7 @@ fn summarize_with_registry(report: &Value, executed: &[Value], registry: Value) 
     let count = |state: &str| changes.iter().filter(|c| c["status"] == state).count();
     let counts = json!({"all":changes.len(),"noImpact":count("no_impact"),"passed":count("passed"),"issues":count("issue"),"manual":count("manual"),"manualGroups":features.iter().filter(|f|f["checks"].as_array().is_some_and(|c|c.iter().any(|c|c["status"]=="manual"))).count()+usize::from(unknown)});
     let check_counts = json!({"passed":checks.iter().filter(|c|c["status"]=="passed").count(),"issues":checks.iter().filter(|c|c["status"]=="issue").count(),"manual":checks.iter().filter(|c|c["status"]=="manual").count()});
-    json!({"changes":changes,"features":features,"automatedChecks":checks,"counts":counts,"checkCounts":check_counts,"unknownChangesRequireReview":unknown,"coverage":"Executed package/host contracts and behavioral scenarios are reported independently. Development scripts are candidates, not automatically certified tests. No login, account mutation, inference, navigation or provider billing was performed."})
+    json!({"changes":changes,"features":features,"automatedChecks":checks,"counts":counts,"checkCounts":check_counts,"unknownChangesRequireReview":unknown,"coverage":"Live host reads, isolated mounted regressions and full behavioral acceptance are reported independently. Isolated probes use production styles or markup without opening or scrolling user surfaces. No login, account mutation, inference, navigation or provider billing was performed."})
 }
 fn markdown(result: &Value) -> String {
     let mut s = format!("# Official Codex compatibility validation\n\nReport: {}. Official version: {}.\n\n{} recorded changes: {} no impact, {} passed, {} found issues, {} require manual acceptance.\n\nAutomatic checks: {} passed, {} found issues, {} unavailable. Partial checks do not mean a full functional pass.\n\nRules: {}; engine: {}.\n\n{}\n\n## Executed automatic checks\n\n",result["identity"]["reportId"],result["version"],result["counts"]["all"],result["counts"]["noImpact"],result["counts"]["passed"],result["counts"]["issues"],result["counts"]["manual"],result["checkCounts"]["passed"],result["checkCounts"]["issues"],result["checkCounts"]["manual"],result["identity"]["registryHash"],result["identity"]["engineHash"],result["coverage"].as_str().unwrap_or(""));
@@ -163,7 +169,12 @@ pub(crate) async fn run(endpoint: Option<CdpEndpoint>, force: bool, cancel: Opti
         Ok(Ok(manifest)) if manifest["version"]==report["version"] => {
             checks.push(check("package.modules","passed","actual-installed-package","Production ASAR/module discovery accepted the current official package and entrypoint inventory."));
             if let Some(endpoint) = endpoint {
-                let expression = format!("(async()=>{{{};return await codeCodexHostUpdateProbe.probeHostUpdate({});}})()",include_str!("../../../../packages/explorer-ui/dist/host-update-probes.js"),manifest);
+                let dependency_registry = registry();
+                let background: BTreeSet<_> = affected_rules(&report, &dependency_registry).1
+                    .into_iter().flat_map(|rule| rule["automatedChecks"].as_array().into_iter().flatten())
+                    .filter_map(Value::as_str).filter(|id| id.starts_with("background.")).collect();
+                let options = json!({"version": env!("CARGO_PKG_VERSION"), "background": background});
+                let expression = format!("(async()=>{{{};return await codeCodexHostUpdateProbe.probeHostUpdate({},{});}})()",include_str!("../../../../packages/explorer-ui/dist/host-update-probes.js"),manifest,options);
                 match crate::accounts::host::evaluate(endpoint,&expression).await {
                     Ok(value) => {
                         for c in value["checks"].as_array().into_iter().flatten() { checks.push(c.clone()); }

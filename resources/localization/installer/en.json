@@ -107,5 +107,7 @@
   "uninstall.caea4c0f6e71": "Uninstall could not start. No files have been removed.",
   "uninstall.e193bda44355": "UNINSTALLING",
   "uninstall.ec14d2b22c37": "Delete settings, downloaded plugins and local media",
-  "uninstall.fe199528850a": "Uninstall"
+  "uninstall.fe199528850a": "Uninstall",
+  "setup.activation.ready": "The open Codex interface has been updated.",
+  "setup.activation.pending": "Files are installed. The open Codex interface has not confirmed the update yet."
 }

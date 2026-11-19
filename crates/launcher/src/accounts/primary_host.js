@@ -15,22 +15,11 @@
    if(page>=64)throw Error('ACCOUNT_NATIVE_LOADED_BOUND');
    stage='idle-list';const list=await read(()=>manager.sendRequest('thread/loaded/list',{limit:256,...(cursor?{cursor}:{})},{timeoutMs:8000}));
    if(!Array.isArray(list?.data)||list.data.some(id=>typeof id!=='string')||list.nextCursor!=null&&typeof list.nextCursor!=='string')throw Error('ACCOUNT_NATIVE_LOADED_PROTOCOL');
-   for(const id of list.data){stage='idle-thread';const state=await read(()=>manager.getThreadExecutionState(id));if(typeof state?.inProgress!=='boolean')throw Error('ACCOUNT_RPC_STATE_UNKNOWN');if(state.inProgress)throw Error('ACCOUNT_TURN_ACTIVE');count++;}
+   for(const id of list.data){stage='idle-thread';const state=await read(()=>manager.getThreadExecutionState(id));let active=state?.inProgress;if(typeof active!=='boolean'){const native=await read(()=>manager.sendRequest('thread/read',{threadId:id,includeTurns:false},{timeoutMs:8000}));const status=native?.thread?.status?.type;if(status==='idle')active=false;else if(status==='active')active=true;else throw Error('ACCOUNT_RPC_STATE_UNKNOWN');}if(active)throw Error('ACCOUNT_TURN_ACTIVE');count++;}
    if(!list.nextCursor)break;if(seen.has(list.nextCursor))throw Error('ACCOUNT_NATIVE_LOADED_CURSOR');seen.add(list.nextCursor);cursor=list.nextCursor;
   }
   if(p.mode==='check')return {idle:true,checkedThreads:count};
-  if(p.mode!=='start')throw Error('ACCOUNT_PRIMARY_PROTOCOL');
-  window[slot]?.dispose?.();
-   const observation={operationId:p.operationId,loginId:'',finished:false,success:false,expired:false,dispose(){clearTimeout(this.timer);this.lease?.[Symbol.dispose]?.();this.client?.[Symbol.dispose]?.();this.lease=undefined;this.client=undefined;},lease:undefined,client:manager.dup(),timer:undefined};
-  window[slot]=observation;
-  stage='authorization-listener';try{observation.lease=await deadline.call(()=>manager.subscribe({type:'notification',key:{hostId:'local'},methods:['account/login/completed'],listener:message=>{if(message.params?.loginId!==observation.loginId)return;observation.finished=true;observation.success=message.params.success===true;observation.dispose();}}),{code:'ACCOUNT_PRIMARY_OBSERVATION_TIMEOUT',onLate:lease=>lease?.[Symbol.dispose]?.()});}catch{observation.dispose();throw Error('ACCOUNT_PRIMARY_OBSERVATION');}
-  observation.timer=setTimeout(()=>{observation.expired=true;observation.dispose();},300000);
-  // Standard managed OAuth preserves official persistence and refresh behavior.
-  stage='authorization-request';
-  let result;try{result=await read(()=>{authorizationRequested=true;return manager.sendRequest('account/login/start',{type:'chatgpt',appBrand:'codex',useHostedLoginSuccessPage:false},{timeoutMs:8000});});}catch(error){observation.dispose();throw error;}
-  observation.loginId=result?.loginId??'';
-  if(result?.type!=='chatgpt'||typeof result.loginId!=='string'||typeof result.authUrl!=='string'){observation.dispose();throw Error('ACCOUNT_PRIMARY_LOGIN_PROTOCOL');}
-  return {loginId:result.loginId,authUrl:result.authUrl,checkedThreads:count};
+  throw Error('ACCOUNT_PRIMARY_PROTOCOL');
  }catch(error){return {failure:{code:String(error?.message??'').match(/^ACCOUNT_[A-Z_]+\b/)?.[0]??'ACCOUNT_PRIMARY_RPC',stage,checkedThreads:count,authorizationRequested,rpcCode:Number.isSafeInteger(error?.code)?error.code:null}};}
  finally{deadline.dispose();for(const capability of [manager,opened,service])try{capability?.[Symbol.dispose]?.();}catch{}}
 })()

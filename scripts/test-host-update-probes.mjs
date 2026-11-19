@@ -35,7 +35,7 @@ try{
  assert.equal(state('host.interfaces'),'manual');checks.push('Unobserved official module is never executed merely to run a test');
  assert.equal(state('host.split-layout'), 'manual');
  await browser.evaluate(`window[Symbol.for('code-codex:account-host-profile:v1')]=originalProfile`);
- await browser.evaluate(`document.querySelector('main').innerHTML='<div data-app-shell-workspace-layout="split" data-app-shell-right-panel-full-width="false" style="width:240px;overflow:hidden"><div class="MainContentFrame-fixture" style="width:520px;min-width:100%;margin-left:-280px"><p>Native transcript</p></div></div>'`);
+ await browser.evaluate(`document.querySelector('main').innerHTML='<div data-app-shell-workspace-layout="split" data-app-shell-right-panel-full-width="false" style="width:240px;overflow:hidden"><div class="MainContentFrame-fixture" style="width:520px;min-width:100%;margin-left:-280px"><p>Native transcript</p></div></div><aside data-app-shell-focus-area="right-panel">Panel</aside>'`);
  r=await run();assert.equal(state('host.split-layout'),'issue');
  await browser.evaluate(`const f=document.querySelector('.MainContentFrame-fixture');f.style.maxWidth='100%';f.style.marginLeft='0px'`);
  r=await run();assert.equal(state('host.split-layout'),'passed');checks.push('Mounted native split geometry distinguishes clipping, fitting and unmounted cases without mutation');
@@ -60,5 +60,29 @@ try{
  await browser.evaluate(`document.documentElement.removeAttribute('data-code-codex-particle-image-background')`);r=await run();assert.equal(state('host.settings-paint'),'manual');
  await browser.evaluate(`document.querySelector('main').remove();document.querySelector('[role=menubar]').remove();document.documentElement.style.setProperty('--color-text','');document.querySelector('style').remove();`);
  r=await browser.evaluate(`probe.probeHostUpdate({initial:[],shared:[]})`);assert.equal(state('host.layout'),'manual');assert.equal(state('host.menu'),'manual');assert.equal(state('host.theme'),'manual');checks.push('Unmounted views and unavailable theme tokens stay manual');
+ const backgroundIds=['background.market-layout','background.split-layout','background.composer-backdrop','background.side-panel-paint','background.tree-rail-paint','background.settings-paint'];
+ const shellCSS=readFileSync(resolve(ui,'src/inject.ts'),'utf8');
+ const productionMarket=readFileSync(resolve(ui,'src/components/styles/status-and-market.ts'),'utf8').split('`')[1];
+ const productionSide=readFileSync(resolve(ui,'src/native-side-panel-opacity.ts'),'utf8');
+ assert.match(shellCSS,/max-width: 100% !important/);
+ assert.match(productionSide,/background-color:transparent !important/);
+ const backgroundSetup=await build({stdin:{resolveDir:ui,contents:`import {styles} from './src/styles';import {NATIVE_COMPOSER_BACKDROP_CSS} from './src/native-composer-backdrop';import {NATIVE_SIDE_PANEL_OPACITY_CSS} from './src/native-side-panel-opacity';window.updateFixtureStyles={styles,NATIVE_COMPOSER_BACKDROP_CSS,NATIVE_SIDE_PANEL_OPACITY_CSS};`},bundle:true,format:'iife',write:false});
+ await browser.evaluate(backgroundSetup.outputFiles[0].text);
+ await browser.evaluate(`(()=>{const owner=Symbol.for('code-codex:document-connection-owner:v2');window[owner]={version:'test',pending:false};const host=document.createElement('div');host.dataset.codeCodexOwned='true';host.attachShadow({mode:'open'});const styles=window.updateFixtureStyles;const css=document.createElement('style');css.textContent=styles.styles;host.shadowRoot.append(css);host.shadowRoot.innerHTML += '<button class="collapsed-tab">Expand</button><div class="preview-market-popover" hidden><div class="preview-market-list">'+['appearance','file-preview','developer-tools'].map(value=>'<section data-preview-market-section="'+value+'" class="preview-market-section"><div style="height:450px">Fixture cards</div></section>').join('')+'</div></div>';document.body.append(host);const shell=document.createElement('style');shell.dataset.codeCodexShellLayout='test';shell.textContent=styles.NATIVE_COMPOSER_BACKDROP_CSS+styles.NATIVE_SIDE_PANEL_OPACITY_CSS+'[data-code-codex-owned][data-placement=inline]+div main [data-app-shell-workspace-layout=split]>[class*=MainContentFrame-]{max-width:100%!important}';document.head.append(shell);window.probeTree=host;})()`);
+ assert.ok(productionMarket.includes('overflow: auto'));
+ const beforeBackground=await browser.evaluate(`({dom:document.documentElement.outerHTML,market:probeTree.shadowRoot.innerHTML,scroll:window.scrollY})`);
+ const runBackground=(ids=backgroundIds)=>browser.evaluate(`probe.probeHostUpdate({initial:[],shared:[]},{version:'test',background:${JSON.stringify(ids)}})`);
+ r=await runBackground();
+ for(const id of backgroundIds)assert.equal(state(id),'passed',JSON.stringify(r.checks.find(c=>c.id===id)));
+ assert.equal(state('host.market-scroll'),'manual');assert.equal(state('host.split-layout'),'manual');
+ assert.deepEqual(await browser.evaluate(`({dom:document.documentElement.outerHTML,market:probeTree.shadowRoot.innerHTML,scroll:window.scrollY})`),beforeBackground);
+ assert.equal(await browser.evaluate(`document.querySelectorAll('[data-code-codex-update-sandbox]').length`),0);
+ checks.push('Six background mounts independently validate production markup/styles and clean up without changing user DOM, focus, or scroll');
+ await browser.evaluate(`probeTree.shadowRoot.querySelector('style').textContent += '.preview-market-list[data-preview-market-category=developer-tools]{overflow-y:hidden!important}'`);
+ r=await runBackground(['background.market-layout']);assert.equal(state('background.market-layout'),'issue');assert.equal(r.checks.filter(c=>c.scope==='isolated-mounted-regression').length,1);checks.push('One blocked market category fails, and unrelated isolated checks are not run');
+ await browser.evaluate(`window[Symbol.for('code-codex:document-connection-owner:v2')].pending=true;window.delayedProbe=probe.probeHostUpdate({initial:[],shared:[]},{version:'test',background:[]}).then(r=>{window.delayedDone=true;return r;});void 0;`);
+ assert.notEqual(await browser.evaluate('window.delayedDone'),true);
+ await browser.evaluate(`window[Symbol.for('code-codex:document-connection-owner:v2')].pending=false;window.dispatchEvent(new Event('code-codex:update-mount-ready'));`);
+ r=await browser.evaluate('window.delayedProbe');assert.equal(state('host.ownership'),'passed');checks.push('A late owner is validated once when its existing mount signal arrives');
  const result={scope:'isolated browser fixtures; not real-host acceptance',passed:checks.length,checks};writeFileSync(resolve(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{await browser.close();await new Promise(r=>server.close(r));}

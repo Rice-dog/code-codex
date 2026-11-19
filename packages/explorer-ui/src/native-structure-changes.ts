@@ -11,6 +11,26 @@ const NATIVE_STRUCTURE=[
  'div.flex.h-full.w-full.bg-surface',
 ].join(',');
 const THREAD_ATTRIBUTE_TARGET='[data-thread-id],[data-task-id],[data-conversation-id],[data-app-action-sidebar-thread-id],[data-sidebar-destination],[data-app-shell-active-page],a[href]';
+export const OWNED_ROOT_CONNECTED='code-codex:owned-root-connected';
+/** One native observer per document, including during view-only hot upgrades. */
+export function observeNativeStructure(listener:()=>void):{disconnect():void}{
+ const key=Symbol.for('code-codex:native-structure-observer:v1');
+ const host=window as unknown as Record<symbol,{listeners:Set<()=>void>;observer:MutationObserver}|undefined>;
+ let shared=host[key];
+ if(!shared){
+  const listeners=new Set<()=>void>();
+  const observer=new MutationObserver(records=>{if(nativeStructureChanged(records))for(const callback of [...listeners])try{callback();}catch(error){queueMicrotask(()=>{throw error;});}});
+  observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:[
+   'aria-current','aria-selected','data-selected','data-state','data-thread-id','data-task-id','data-conversation-id',
+   'data-app-action-sidebar-thread-id','data-app-action-sidebar-thread-active','data-app-action-sidebar-thread-host-id',
+   'data-app-action-sidebar-thread-kind','data-above-composer-conversation-id','data-response-annotation-conversation',
+   'data-app-shell-active-page','data-sidebar-destination','href',
+  ]});
+  shared=host[key]={listeners,observer};
+ }
+ const current=shared,callback=()=>listener();current.listeners.add(callback);
+ return {disconnect(){current.listeners.delete(callback);if(!current.listeners.size){current.observer.disconnect();if(host[key]===current)delete host[key];}}};
+}
 export function nativeStructureChanged(records: readonly MutationRecord[]): boolean {
  for(const record of records){
   const target=record.target instanceof Element?record.target:record.target.parentElement;

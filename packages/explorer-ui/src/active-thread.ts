@@ -9,7 +9,7 @@ import {
   plausibleThreadId,
 } from "./adapters/codex-26.715";
 import { isHomeWorkspaceView } from "./home-view";
-import { nativeStructureChanged } from './native-structure-changes';
+import { observeNativeStructure } from './native-structure-changes';
 
 const ROUTE_EVENT = "code-codex:route";
 const EXPLICIT_EVENT = "code-codex:thread-change";
@@ -119,7 +119,7 @@ export function resolveActiveThread(root: ParentNode = document): string | null 
 }
 
 export class ActiveThreadTracker {
-  #observer: MutationObserver | undefined;
+  #observer: {disconnect():void} | undefined;
   #listener: ((threadId: string | null, homeView: boolean) => void) | undefined;
   #last: string | null | undefined;
   #lastHomeView: boolean | undefined;
@@ -138,30 +138,7 @@ export class ActiveThreadTracker {
     window.addEventListener(ROUTE_EVENT, this.#schedule);
     window.addEventListener(EXPLICIT_EVENT, this.#onExplicit as EventListener);
 
-    this.#observer = new MutationObserver(records => { if(nativeStructureChanged(records))this.#schedule(); });
-    this.#observer.observe(document.documentElement, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: [
-        "aria-current",
-        "aria-selected",
-        "data-selected",
-        "data-state",
-        "data-thread-id",
-        "data-task-id",
-        "data-conversation-id",
-        "data-app-action-sidebar-thread-id",
-        "data-app-action-sidebar-thread-active",
-        "data-app-action-sidebar-thread-host-id",
-        "data-app-action-sidebar-thread-kind",
-        "data-above-composer-conversation-id",
-        "data-response-annotation-conversation",
-        "data-app-shell-active-page",
-        "data-sidebar-destination",
-        "href",
-      ],
-    });
+    this.#observer = observeNativeStructure(this.#schedule);
     this.#emit();
   }
 

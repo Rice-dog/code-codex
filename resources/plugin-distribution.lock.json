@@ -859,12 +859,12 @@
         "name": "UI Surface Opacity",
         "category": "appearance",
         "api": 1,
-        "version": "1.0.14",
-        "releaseTag": "plugin-assets-2026-11-01",
-        "asset": "CodeCodex-plugin-surface-opacity-1.0.14.js",
-        "relativePath": "CodeCodex-plugin-surface-opacity-1.0.14.js",
-        "size": 17959,
-        "sha256": "92e90bc1ccdf98844b756cc5f88022009f0c8b8c5bd0367aac4bedf7767cc797",
+        "version": "1.0.15",
+        "releaseTag": "plugin-assets-2026-11-18",
+        "asset": "CodeCodex-plugin-surface-opacity-1.0.15.js",
+        "relativePath": "CodeCodex-plugin-surface-opacity-1.0.15.js",
+        "size": 17760,
+        "sha256": "67045bbda04d59abe5399074d5bf7a2c6b08ed9922db132ed2b68ec77984d6fd",
         "resources": [],
         "capabilities": [
           "appearance"
@@ -872,7 +872,7 @@
         "source": "https://github.com/Rice-dog/code-codex"
       },
       "inputs": {
-        "src/surface-opacity-runtime.ts": "210e762c09430faee6977f5fa73c28ec178eeeeba37994ec128865edf1ae9c69",
+        "src/surface-opacity-runtime.ts": "29f58d507e74ea562772fa04ac919290ef41382b1b23648c25b175d9b10c71e6",
         "scripts/utility-packages.mjs": "5486dceccd9e1e03e48101873e4fd3b583a4a4b3185342c3e906b83d2c9e5a3e",
         "scripts/build.mjs": "9fd94f2b13e355bb05022114f4ab964cc4d50e609d069dab9416280635af5f19",
         "scripts/rebuild-plugins.mjs": "24c3caee45d12e427ac268da637ad20fc98d1e0a132a850a02a065358a253ac5",
@@ -883,7 +883,7 @@
       },
       "inputFormat": "lf-v1",
       "buildMetadata": {
-        "definition": "bfe4cc131ccf25bb618b6fc59d3d256428a5bcfc0040db1451646c4a715c8e91",
+        "definition": "c11102054a11ef7965a8365a2f76e1abe4c000e41170b7c52640a089a686c3d8",
         "compiler": "0.25.12"
       },
       "artifactRoot": "releases/plugins/appearance/surface-opacity"
@@ -2603,12 +2603,12 @@
         "name": "Multi-account Tasks",
         "category": "developer-tools",
         "api": 1,
-        "version": "1.0.110",
-        "releaseTag": "plugin-assets-2026-11-10",
-        "asset": "CodeCodex-plugin-multi-account-1.0.110.js",
-        "relativePath": "CodeCodex-plugin-multi-account-1.0.110.js",
-        "size": 220664,
-        "sha256": "2dccb07707f5f8448160e24262371fb634acf815703e0bf31abf742f4d2d1f04",
+        "version": "1.0.113",
+        "releaseTag": "plugin-assets-2026-11-18",
+        "asset": "CodeCodex-plugin-multi-account-1.0.113.js",
+        "relativePath": "CodeCodex-plugin-multi-account-1.0.113.js",
+        "size": 220731,
+        "sha256": "c71f313890d75b283fe74228f917dfbfeeb6dc6894587d602a5fc8b968342ec5",
         "resources": [],
         "capabilities": [
           "developer-tools"
@@ -2629,7 +2629,7 @@
         "src/features/accounts/error-presentation.ts": "51cc93522bd42241cfffa6d134a0dcfa8e357edeb6acc167dfa663495f3f2b8b",
         "src/features/accounts/quota-view.ts": "717fcdc55e01edab3e81353452938788b0a654dcf5d4c86af5d3cafd8f3467c1",
         "src/features/accounts/account-list.ts": "c9f4e69b897477d3df014bc826be659169d1388ae05ec60389ce47f82d63fd51",
-        "src/core/document-capability-owner.ts": "bea6f3385f9de02267c0df4f7d865acf7fd6553c6e4b31819d4a6bfdfaeb0006",
+        "src/core/document-capability-owner.ts": "ef1f33c0a48762c63cc03c2c4a309d45ffe3d2439c7c9445fdf4d48da634cf90",
         "src/features/accounts/transport.ts": "6928c2fc5ec99263cb5f1eb37aeb4ea3971b58bfc652391c9ca080e8a7cbbdec",
         "src/host/bridge/accounts.ts": "406bece803285bf21babe8651bf6f593d10543a6298b9ac4922ae65dc8f5eb5a",
         "src/features/accounts/native-model-menu.ts": "56a882d9f129d81e95bc89c8d74204a2754751d051c25fe77ca96e4134e10659",
@@ -2648,8 +2648,8 @@
         "src/native-login-observation.ts": "1461c0451c0328adc5ed28456fad70581b7bcb533c4b615a58f0038afa3ebd7a",
         "src/native-login.ts": "c531b3088ee1644a36e6f5e40473488c965c8c6cdf2fb30a20aaa9405cc7a1fd",
         "src/home-view.ts": "146f4f42a5c6306136196321e55ed0322128461dea2e60ab04b8fc9b50c71f59",
-        "src/native-structure-changes.ts": "d341c0a907f0ea3642d9118a879de8e824f0df31d4f06dced01f95800128e216",
-        "src/active-thread.ts": "6cd04727575b99da874176b39ad90c3cc7342f70aa8ff9536c05d3017a86b141",
+        "src/native-structure-changes.ts": "16bc6202a9e17319581c1ca62bdc5182645fed3eda522f0d9ceaea3a4f7c2e3c",
+        "src/active-thread.ts": "242bce229c9ed5fadb2dc20e3c93e493a3e75507de81c19f9688365104675429",
         "src/features/accounts/stream-recovery.ts": "03261f031573391754bd456d1e76f832c44951a30988230c983a84273f05ec5e",
         "src/features/accounts/quota.ts": "543a1a0738bb0114595aadb710e2f574cb9d5f933a17b131f98ab9eb204b499b",
         "src/features/accounts/session-guard.ts": "7c37e0265566e820e3095fb948db5f04f61de3410ed31a02c0de9ac1d5466b0d",
@@ -2658,8 +2658,8 @@
         "src/features/accounts/draft-routing.ts": "e2b83a48443804dcb03e093a58a55adfe38934e64a22e49f7eec550df64702dd",
         "src/features/accounts/native-adapter.ts": "8740a58c46512d62dd01536be158f44aacdd40998fceaa06cd579518b8406966",
         "src/components/application-dialog.ts": "30d7674bbde26d94bc2e994a780e4871ef2706484f6c9e702e37012669361c43",
-        "src/features/accounts/primary-status.ts": "15487eaf5f044bc99249170848d41b3d5458886e86e97f22db818f326ee243a2",
-        "src/multi-account-runtime.ts": "dd91972122c8677ac85e8c5575d9ef44f507c41cf87900cc36b618ed36eee94d",
+        "src/features/accounts/primary-status.ts": "94433808ddb03d724d3b2b7ad2d392494de9b708247565ab05dcf4aa0f8269e3",
+        "src/multi-account-runtime.ts": "2e9641de3d893eb526034a151e1f65b93819e7c1ac4146c7d437fde67f53a0b5",
         "scripts/utility-packages.mjs": "5486dceccd9e1e03e48101873e4fd3b583a4a4b3185342c3e906b83d2c9e5a3e",
         "scripts/build.mjs": "9fd94f2b13e355bb05022114f4ab964cc4d50e609d069dab9416280635af5f19",
         "scripts/rebuild-plugins.mjs": "24c3caee45d12e427ac268da637ad20fc98d1e0a132a850a02a065358a253ac5",
@@ -2670,7 +2670,7 @@
       },
       "inputFormat": "lf-v1",
       "buildMetadata": {
-        "definition": "8c1f2927b15f662094e82c30213be4aca2ff15b86b691448e6fdfbad7ea16888",
+        "definition": "4a1ff1d124e30167f8ff92b021fde40c1c52374cf228d18d4747e0e63e4d504d",
         "compiler": "0.25.12"
       },
       "artifactRoot": "releases/plugins/developer-tools/multi-account"
@@ -2813,13 +2813,6 @@
       "sha256": "bc7cb572cb182284861290f941721f65620491844477598ce308f94e0b89ecea"
     },
     {
-      "id": "multi-account",
-      "tag": "plugin-assets-2026-11-10",
-      "name": "CodeCodex-plugin-multi-account-1.0.110.js",
-      "size": 220664,
-      "sha256": "2dccb07707f5f8448160e24262371fb634acf815703e0bf31abf742f4d2d1f04"
-    },
-    {
       "id": "codex-startup-transition",
       "tag": "plugin-assets-2026-11-11",
       "name": "CodeCodex-plugin-codex-startup-transition-1.1.33.js",
@@ -2860,6 +2853,20 @@
       "name": "CodeCodex-plugin-lan-remote-1.0.3-COPYING.txt",
       "size": 34939,
       "sha256": "5735febb4249f2fea35481266e47668eb890404f83714ec3d12f68e80c95d72f"
+    },
+    {
+      "id": "surface-opacity",
+      "tag": "plugin-assets-2026-11-18",
+      "name": "CodeCodex-plugin-surface-opacity-1.0.15.js",
+      "size": 17760,
+      "sha256": "67045bbda04d59abe5399074d5bf7a2c6b08ed9922db132ed2b68ec77984d6fd"
+    },
+    {
+      "id": "multi-account",
+      "tag": "plugin-assets-2026-11-18",
+      "name": "CodeCodex-plugin-multi-account-1.0.113.js",
+      "size": 220731,
+      "sha256": "c71f313890d75b283fe74228f917dfbfeeb6dc6894587d602a5fc8b968342ec5"
     }
   ]
 }

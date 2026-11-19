@@ -24,7 +24,8 @@ import {
 } from "./adapters/codex-26.715";
 import { isHomeWorkspaceView } from "./home-view";
 import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground, isNativeLoginView } from "./native-login";
-import {nativeStructureChanged} from './native-structure-changes';
+import {observeNativeStructure} from './native-structure-changes';
+import {UPDATE_MOUNT_READY} from './host-update-mount';
 import { SURFACE_OPACITY_NATIVE_CSS } from "./surface-opacity";
 import {
   clearExplorerDismissalForSession,
@@ -312,7 +313,7 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] [data-code-codex-glow-horizon-layer] 
 }
 `;
 
-let remountObserver: MutationObserver | undefined;
+let remountObserver: {disconnect():void} | undefined;
 let remountFrame: number | undefined;
 let remountEnabled = true;
 let dismissListenerInstalled = false;
@@ -598,6 +599,7 @@ export function injectExplorer(): CodeCodexElement | null {
     backgroundHost.dataset.codeCodexOwned = "true";
     backgroundHost.setHomeViewActive(false);
     if (!backgroundHost.isConnected) document.body.append(backgroundHost);
+    window.dispatchEvent(new Event(UPDATE_MOUNT_READY));
     return backgroundHost;
   }
   const mount = chooseMount();
@@ -627,6 +629,7 @@ export function injectExplorer(): CodeCodexElement | null {
   else mount.parent.append(explorer);
   explorer.reconcileMainPreview(mount.mainSurface);
   reconcileCurrentLayoutHeader(explorer, mount.strategy);
+  window.dispatchEvent(new Event(UPDATE_MOUNT_READY));
   return explorer;
 }
 
@@ -717,11 +720,7 @@ function scheduleMountReconciliation(): void {
 
 function installRemountObserver(): void {
   if (remountObserver || !document.documentElement || !remountEnabled) return;
-  remountObserver = new MutationObserver(records => {if(nativeStructureChanged(records))scheduleMountReconciliation();});
-  remountObserver.observe(document.documentElement, {
-    childList: true, subtree: true, attributes: true,
-    attributeFilter: ["data-app-shell-active-page", "aria-current", "data-sidebar-destination"],
-  });
+  remountObserver = observeNativeStructure(scheduleMountReconciliation);
   if (!dismissListenerInstalled) {
     dismissListenerInstalled = true;
     window.addEventListener(DISMISS_EVENT, disableRemount);

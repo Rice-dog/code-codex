@@ -1,4 +1,4 @@
-import {unexpectedPaint} from './host-paint-inspection';
+import {inspectCollapsedTreePaint,inspectSettingsPaint,inspectSplitLayout,mountedExplorer,runBackgroundChecks,waitForUpdateMount} from './host-update-background';
 import {quotaRemaining} from './features/accounts/quota';
 import {AccountContinuationCycle,continueAfterQuota,isQuotaExhausted} from './features/accounts/auto-continue';
 // Separate, on-demand read-only entry. Never imported by the switch/send path.
@@ -9,18 +9,20 @@ import {capabilities as nativeQuotaCapabilities} from './features/accounts/nativ
 import {inspectComposerBackdrop} from './native-composer-backdrop';
 import {inspectSidePanelOpacity} from './native-side-panel-opacity';
 
+export {inspectCollapsedTreePaint} from './host-update-background';
+
 type Check={id:string;status:'passed'|'issue'|'manual';scope:string;detail:string};
-export function inspectCollapsedTreePaint(root:Document):Pick<Check,'status'|'detail'> {
- const alpha=getComputedStyle(root.documentElement).getPropertyValue('--code-codex-mask-tree').trim();
- const rails=Array.from(root.querySelectorAll<HTMLElement>('[data-code-codex-owned="true"][data-collapsed="true"]')).flatMap(h=>Array.from(h.shadowRoot?.querySelectorAll<HTMLElement>('.collapsed-tab')??[])).filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility==='visible';});
- if(!root.documentElement.hasAttribute('data-code-codex-ui-mask-active')||!alpha||!rails.length)return {status:'manual',detail:'Collapse the file tree with UI Surface Opacity and a background active to inspect its expand rail.'};
- const bad=rails.some(e=>{const s=getComputedStyle(e),parts=s.backgroundColor.match(/^rgba?\(([^)]+)\)$/)?.[1]?.split(',').map(Number);return !parts||Math.abs((parts[3]??1)-Number(alpha))>.005||s.backgroundImage!=='none';});
- return {status:bad?'issue':'passed',detail:bad?'Collapsed file-tree expand rail does not follow the file-tree opacity.':'Mounted collapsed file-tree expand rail follows the file-tree opacity.'};
+export function inspectMarketScroll(root:Document):Pick<Check,'status'|'detail'> {
+ const lists=Array.from(root.querySelectorAll<HTMLElement>('[data-code-codex-owned="true"]')).flatMap(h=>Array.from(h.shadowRoot?.querySelectorAll<HTMLElement>('.preview-market-list')??[])).filter(e=>!e.hidden&&e.getBoundingClientRect().height>0);
+ if(!lists.length)return {status:'manual',detail:'Open Plugin Market to inspect its native scroll container; wheel, keyboard and scrollbar interaction need their separate scenario.'};
+ const blocked=lists.some(e=>!['auto','scroll'].includes(getComputedStyle(e).overflowY));
+ return {status:blocked?'issue':'passed',detail:blocked?'The mounted plugin list blocks native vertical scrolling.':'The mounted plugin list permits native vertical scrolling. This read-only check does not move it.'};
 }
-export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];documentVersion:string|null}>{
+export async function probeHostUpdate(manifest:any, options?:{version:string;background:string[]}):Promise<{checks:Check[];documentVersion:string|null}>{
  const checks:Check[]=[];
  const add=(id:string,status:Check['status'],detail:string,scope='actual-host-read-only')=>checks.push({id,status,scope,detail});
  if(location.href!=='app://-/index.html')return {checks:[{id:'host.document',status:'manual',scope:'actual-host-read-only',detail:'The qualified official main document is not available.'}],documentVersion:null};
+ const readiness = options ? waitForUpdateMount(options.version) : undefined;
  // Controlled regressions reuse production functions in private objects and
  // detached DOM, so future update checks execute the negative cases too.
  const assert=(v:unknown)=>{if(!v)throw Error('probe regression');};
@@ -80,16 +82,11 @@ export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];docu
  catch(error:any){const stage=error?.stage;add('host.interfaces',stage==='role-selection'?'issue':'manual',stage==='role-selection'?'The initialized official modules do not satisfy production role uniqueness/required methods.':'Official module qualification could not complete in this document. Recheck after the native page is ready.');}
  if(profile?.contractRevision===2){try{const c=await nativeQuotaCapabilities(profile.initial);add('host.quota','passed',`Production quota capability discovery accepted ${c.gates.length} gate references and the native refresh effect. No subscriptions were changed.`);}catch(error){const stage=String(error).match(/stage=([a-z-]+)/)?.[1];const unavailable=['semantic-roles','source-budget','module-budget'].includes(stage??'');add('host.quota',unavailable?'manual':'issue',unavailable?'Quota role initialization was not established in this page. Recheck in a mounted native composer.':'Production quota capability discovery rejected the initialized native runtime. No subscriptions were changed.');}}
  else add('host.quota','manual','The numbered native quota runtime is not initialized in this document. Check a mounted composer before judging compatibility.');
+ await readiness;
  const mains=activePageElements(document,MAIN_SURFACE_SELECTOR);
  add('host.layout',mains.length===0?'manual':codex26715Adapter.qualifiesRenderer(document)?'passed':'issue',mains.length===0?'No native workspace is mounted; check an existing conversation and New Chat.':'Production workspace qualification checked active-page ownership, native rail and main surface.');
- // Inspect only the active main viewport, never a cached page or side-chat frame.
- const split=mains.flatMap(main=>Array.from(main.querySelectorAll<HTMLElement>('[data-app-shell-workspace-layout="split"][data-app-shell-right-panel-full-width="false"]'))).filter(view=>view.getBoundingClientRect().width>0);
- const frames=split.flatMap(view=>Array.from(view.children).filter((child):child is HTMLElement=>child instanceof HTMLElement&&/MainContentFrame[-_]/.test(child.className)).map(frame=>({view,frame})));
- if(frames.length===1){
-  const {view,frame}=frames[0]!,v=view.getBoundingClientRect(),f=frame.getBoundingClientRect();
-  const fits=f.left>=v.left-1&&f.right<=v.right+1;
-  add('host.split-layout',fits?'passed':'issue',`Mounted main split frame ${fits?'fits':'extends beyond'} its viewport; leftOverflow=${Math.max(0,v.left-f.left).toFixed(2)}px; rightOverflow=${Math.max(0,f.right-v.right).toFixed(2)}px. No panel was opened.`);
- }else add('host.split-layout','manual','A unique visible native split viewport/frame is not mounted. Open a right-side panel and recheck with the tree expanded and collapsed.');
+ const split = inspectSplitLayout(document);
+ add('host.split-layout',split.status,split.detail);
  const menubar=document.querySelector('[role="menubar"]');
  const triggers=menubar?.querySelectorAll('button[id^="application-menu-trigger-"][id$="-menu"]');
  add('host.menu',!menubar?'manual':triggers?.length?'passed':'issue',!menubar?'The native menu bar is not mounted.':'Native menu triggers and their owning menubar were inspected without opening menus.');
@@ -102,22 +99,23 @@ export async function probeHostUpdate(manifest:any):Promise<{checks:Check[];docu
   add('host.composer',owners.length===1?'passed':'issue','Mounted native composer owner and optional busy/disabled prop contracts were inspected. This does not certify quota projection or remote Send.');
   try{const picker=pickerOf(chain);add('host.models',Array.isArray(picker.models)?'passed':'issue','Production native model-picker prop discovery executed on the mounted owner. It did not select a model or alter the query cache.');}catch{add('host.models','manual','The native picker data component is not mounted until its menu opens. Open the native model menu, then recheck.');}
  }catch{add('host.composer','manual','The mounted anchor is not attached to a current native React owner. Check again in a native conversation.');add('host.models','manual','The mounted native React picker owner was unavailable.');}
- const owner=(window as any)[Symbol.for('code-codex:document-connection-owner:v2')];
- const retired=(window as any)[Symbol.for('code-codex:retired-document-bindings:v1')];
- add('host.ownership',!owner||owner.pending?'manual':retired?.has?.(owner.nativeBinding)?'issue':'passed',!owner||owner.pending?'Document ownership has not completed in this page. Recheck when the file tree is ready.':'The current document owner is committed and its binding is not retired. No handoff was requested.');
  // Styles are read only. Settings and background transitions are separate
  // manual scenarios when those pages/modes are not mounted.
  const style=getComputedStyle(document.documentElement);
  add('host.theme',style.getPropertyValue('--color-text').trim()||style.getPropertyValue('--color-token-text-primary').trim()?'passed':'manual','Current native theme tokens were inspected; light/dark transitions and Settings pages still require their own scenarios.');
- const backgroundActive=['data-code-codex-particle-image-background','data-code-codex-glow-horizon-background'].some(a=>document.documentElement.hasAttribute(a));
- const settings=activePageElements<HTMLElement>(document,`${MAIN_SURFACE_SELECTOR} [data-app-shell-focus-area="main"] [class~="electron:bg-surface"][class*="rounded-tl-lg"]`).filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0);
- if(!backgroundActive||!settings.length)add('host.settings-paint','manual','Open a native Settings page with a supported background active to inspect its actual shell paint; controls and cards keep their own style contracts.');
- else {const painted=unexpectedPaint(settings);add('host.settings-paint',painted.length?'issue':'passed',painted.length?`Native Settings shell has unexpected paint: ${painted.join(' | ')}`:'Mounted native Settings shell and its generated layers are transparent. Other pages, themes and transitions remain separate scenarios.');}
+ const settings=inspectSettingsPaint(document);
+ add('host.settings-paint',settings.status,settings.detail);
  const backdrop=inspectComposerBackdrop(document);
  add('host.composer-backdrop',backdrop.status,backdrop.detail);
  const sidePanel=inspectSidePanelOpacity(document);
  add('host.side-panel-paint',sidePanel.status,sidePanel.detail);
  const treeRail=inspectCollapsedTreePaint(document);
  add('host.tree-rail-paint',treeRail.status,treeRail.detail);
+ const owner=(window as any)[Symbol.for('code-codex:document-connection-owner:v2')];
+ const retired=(window as any)[Symbol.for('code-codex:retired-document-bindings:v1')];
+ add('host.ownership',!owner||owner.pending?'manual':retired?.has?.(owner.nativeBinding)?'issue':'passed',!owner||owner.pending?'Document ownership has not completed in this page. Recheck when the file tree is ready.':'The current document owner is committed and its binding is not retired. No handoff was requested.');
+ const marketScroll=inspectMarketScroll(document);
+ add('host.market-scroll',marketScroll.status,marketScroll.detail);
+ if(options)checks.push(...runBackgroundChecks(new Set(options.background),mountedExplorer()));
  return {checks,documentVersion:manifest.version??null};
 }

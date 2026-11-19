@@ -6,7 +6,7 @@ const stages:Record<string,string>={
  'target-verify':'accounts.primaryTargetVerify','primary-backup':'accounts.primaryBackup',
  'backup-verify':'accounts.primaryBackupVerify','authorization-start':'accounts.primaryAuthStart',
  'authorization-open':'accounts.primaryAuthOpen','authorization-wait':'accounts.primaryWaiting',
- 'identity-confirm':'accounts.primaryIdentityConfirm',
+ 'identity-confirm':'accounts.primaryIdentityConfirm','internal-switch':'accounts.primaryInternalSwitch',
 };
 /** Ordinary progress is localized; failure evidence and recovery remain English. */
 export function primaryStatusText(value:PrimarySwitch|null|undefined):string {

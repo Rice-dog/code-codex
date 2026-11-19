@@ -374,6 +374,7 @@ catch {
 }
 
 Save-CodeCodexInstallReport 'passed'
+Write-Host ('CODECODEX_ACTIVATION_STATE='+$script:ActivationReport.outcome)
 Write-Host "Code-Codex managed shortcut: $managedShortcut"
 Write-Host "Installed Code-Codex $Version. Open the managed desktop shortcut to start Codex with Code-Codex."
 }

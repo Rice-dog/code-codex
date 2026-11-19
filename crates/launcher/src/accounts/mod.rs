@@ -15,6 +15,7 @@ mod preparing;
 mod session;
 mod retention;
 mod primary;
+mod primary_transport;
 mod shared;
 mod usage;
 mod queries;
@@ -229,7 +230,7 @@ impl AccountService {
                 "The native host account changed. Refresh the connection list before continuing.",
             ));
         }
-        if matches!(action.as_str(),"primary.start"|"primary.cancel"|"primary.status") {return primary::request(self,endpoint,&owner,&params,&current).await;}
+        if matches!(action.as_str(),"primary.start"|"primary.promote"|"primary.cancel"|"primary.status") {return primary::request(self,endpoint,&owner,&params,&current).await;}
         let client_id=params.get("preparationId").map(|v|v.as_str().filter(|s|s.len()==32&&s.bytes().all(|c|c.is_ascii_hexdigit())).ok_or_else(||AccountError::protocol("Invalid account preparation identity."))).transpose()?;
         if matches!(action.as_str(),"native.cancel"|"draft.cancel") {if let Some(id)=client_id{let pending=self.controls.cancel(&owner.id,id)?;draft::cancel_preparation(self,&owner.id,id);return Ok(json!({"cancelRequested":pending,"turnInterrupted":false}));}}
         let progress_key = if matches!(action.as_str(),"shared.prepare"|"shared.status"|"native.prepare"|"native.ensure"|"native.detach"|"native.cancel") {Some(format!("{}:{}",owner.id,identifier(&params,"conversationId")?))}else{None};
@@ -861,7 +862,7 @@ fn validate_fields(params: &Value, action: &str) -> Result<()> {
         "info" | "release" | "session.end" | "primary.cancel" | "primary.status" => &[],
         "session.policy" => &["followLogout"],
         "connections.reorder" => &["connectionIds"],
-        "primary.start" => &["connectionId"],
+        "primary.start" | "primary.promote" => &["connectionId"],
         "shared.prepare" => &["conversationId", "connectionId", "settings"],
         "native.prepare" | "native.ensure" => &["conversationId", "connectionId","preparationId"],
         "native.detach" => &["conversationId"],

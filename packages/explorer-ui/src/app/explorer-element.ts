@@ -860,6 +860,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#marqueeElement = this.#required<HTMLElement>(".tree-marquee");
     }
     connectedCallback(): void {
+        this.dispatchEvent(new CustomEvent('code-codex:owned-root-connected',{bubbles:true,composed:true}));
         if (this.#connected)
             return;
         this.#connected = true;
@@ -3240,6 +3241,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#updatesSettings.closeUpdateDialog(false);
         this.#previewMarketOpen = true;
         this.#previewMarketPopover.hidden = false;
+        this.#backgroundPackageMarket?.refresh();
         this.#previewMarketButton.setAttribute("aria-expanded", "true");
         this.#renderPreviewMarket();
         this.#selectPreviewMarketCategory("appearance", false);

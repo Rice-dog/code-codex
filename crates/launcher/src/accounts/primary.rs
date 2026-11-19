@@ -1,4 +1,4 @@
-//! Managed official GUI login: preserve the former identity, then verify OAuth outcome.
+//! Native primary handoff: preserve managed authorization and reuse official login.
 use super::{AccountError,AccountService,Connection,Result,Worker,credentials,host,retention};
 use cdp_client::CdpEndpoint;
 use serde::{Deserialize,Serialize};
@@ -54,6 +54,7 @@ fn recover_observation(root:&Path,p:&mut Pending,value:&Value)->Result<bool>{
 }
 pub(super) async fn refresh_status(endpoint:CdpEndpoint,root:&Path,owner:&host::Owner)->Result<()> {
  let Some(mut p)=read(root)?else{return Ok(())};if !matches!(p.state.as_str(),"pending"|"interrupted")||p.source_owner!=owner.id||!p.authorization_requested{return Ok(())}
+ if p.stage=="internal-switch"&&p.login_id.is_empty(){return Ok(())}
  let value=official(endpoint,json!({"mode":"observation"})).await?;
  // The official identity can change before the bridge awaiting login/start
  // returns. Recover only this exact operation's observation; never replay OAuth.
@@ -123,6 +124,7 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
  let outcome:Result<Value>=async {
  // A verified idle native route lock also prevents a concurrent account prepare.
  require_plugin_idle(service).await?;
+ let transport=super::startup::primary_capability(endpoint).await?;
  official(endpoint,json!({"mode":"check"})).await?;
  update(&root,&mut saved,Some("route-restore"))?;
  let _route_lock=super::native_route::restore(service,endpoint,owner).await?;
@@ -133,16 +135,15 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
  let selected=state.registry.connections.iter().find(|c|c.id==id&&c.email.is_some()).cloned().ok_or_else(||AccountError::new("ACCOUNT_CONNECTION","The selected authorized account is unavailable."))?;
  let generation=state.generation.clone();drop(all);
  update(&root,&mut saved,Some("target-verify"))?;
- let worker=super::credential_worker::acquire(service,&root,&owner.id,&id,current).await?;
- let observed=worker.request("account/read",json!({"refreshToken":false})).await?;
- if observed["account"]["email"].as_str().is_none_or(|e|!selected.email.as_ref().is_some_and(|s|s.eq_ignore_ascii_case(e))){return Err(AccountError::new("ACCOUNT_CREDENTIAL_IDENTITY","The selected account must be verified before becoming primary."))}
+ // The native handoff validates the managed target once before login. Reuse
+ // its stored selection here instead of a duplicate network account/read.
  let backup_id=super::nonce();let backup_home=root.join(&backup_id);
  update(&root,&mut saved,Some("primary-backup"))?;
  credentials::snapshot_managed(&credentials::official_home()?,&backup_home)?;
  let backup=match Worker::spawn(&backup_home).await {Ok(w)=>w,Err(e)=>{let _=credentials::delete(&backup_home);return Err(e)}};
  update(&root,&mut saved,Some("backup-verify"))?;
- let verified=backup.request("account/read",json!({"refreshToken":false})).await;backup.stop_checked().await?;
- if !verified.as_ref().ok().and_then(|v|v["account"]["email"].as_str()).is_some_and(|e|e.eq_ignore_ascii_case(&owner.label)){let _=credentials::delete(&backup_home);return Err(AccountError::new("ACCOUNT_PRIMARY_BACKUP","The former primary authorization could not be verified. The current login was not changed."))}
+ let verified=credentials::managed(&backup,&owner.label).await;backup.stop_checked().await?;
+ if verified.is_err(){let _=credentials::delete(&backup_home);return Err(AccountError::new("ACCOUNT_PRIMARY_BACKUP","The former primary authorization could not be verified. The current login was not changed."))}
  let former=Connection{id:backup_id,label:owner.label.clone(),email:Some(owner.label.clone()),plan:owner.plan.clone(),api:None};
  let remembered={let all=service.state.lock().await;let state=all.get(&owner.id).filter(|s|s.generation==generation&&s.registry.connections.iter().any(|c|c.id==id&&c.email==selected.email)).ok_or_else(||AccountError::new("ACCOUNT_PRIMARY_STALE","The primary-account target changed during verification. No authorization was requested."))?;let mut values=state.registry.connections.clone();values.push(former);values};
  retention::remember(&root,&remembered)?;
@@ -152,16 +153,19 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
  if service.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).values().any(|v|v.snapshot()["status"]=="preparing"){return Err(AccountError::new("ACCOUNT_REQUEST_BUSY","An execution preparation raced the primary-account handoff. The existing login was retained; finish preparation before trying again."))}
  require_plugin_idle(service).await?;
  if !current()||host::observe(endpoint).await?.id!=owner.id{return Err(AccountError::new("ACCOUNT_OWNER_CHANGED","The official identity changed before authorization. No login was requested."))}
- saved.authorization_requested=true;update(&root,&mut saved,Some("authorization-start"))?;
-  let value=official_value(endpoint,json!({"mode":"start","operationId":saved.operation_id})).await?;
- if value["failure"]["authorizationRequested"]==false {saved.authorization_requested=false;}
- let value=response(value)?;
- saved.login_id=value["loginId"].as_str().unwrap_or("").to_owned();update(&root,&mut saved,Some("authorization-open"))?;
- if let Err(e)=super::open_authorization(value["authUrl"].as_str().unwrap_or("")){let _=official(endpoint,json!({"mode":"cancel","loginId":saved.login_id})).await;return Err(e)}
- update(&root,&mut saved,Some("authorization-wait"))?;
- Ok(json!({"pending":true,"targetEmail":selected.email,"authorizationRequired":true}))
+ // Only the target credential worker is stopped; no turn or unrelated worker
+ // is replayed. The launch-owned native transport retains the refresh source.
+ let source=retention::home(&root,&id)?;
+ let worker={let mut all=service.state.lock().await;all.get_mut(&owner.id).and_then(|state|state.workers.remove(&id))};
+ if let Some(worker)=worker{worker.stop_checked().await?;}
+ saved.authorization_requested=true;update(&root,&mut saved,Some("internal-switch"))?;
+ let receipt=super::startup::primary_switch(&transport,&source,&backup_home,&saved.target_email,&saved.operation_id).await?;
+ if receipt["restored"]==true {saved.authorization_requested=receipt["loginDispatched"]==true;saved.state="failed".into();return Err(AccountError::new("ACCOUNT_PRIMARY_RESTORED","Internal switching failed before a confirmed identity change. The original managed authorization was restored; no login was replayed."))}
+ if receipt["completed"]!=true||receipt["persistent"]!=true||receipt["browserOpened"]!=false{return Err(AccountError::new("ACCOUNT_PRIMARY_PROTOCOL","The native primary switch did not confirm its complete contract."))}
+ saved.state="completed".into();update(&root,&mut saved,Some("identity-confirm"))?;
+ Ok(json!({"completed":true,"pending":false,"targetEmail":selected.email,"authorizationRequired":false}))
  }.await;
- match outcome {Ok(v)=>Ok(v),Err(error)=>{saved.state=if !saved.login_id.is_empty(){"pending"}else if saved.authorization_requested{"interrupted"}else{"failed"}.into();saved.error_code=Some(error.code.clone());let _=update(&root,&mut saved,None);Err(AccountError::new(&error.code,format!("{} stage={}; operationId={}; elapsedMs={}; formerPrimaryPreserved={}; {}",error.message,saved.stage,saved.operation_id,now().saturating_sub(saved.started_at_ms),saved.former_primary_preserved,recovery(&saved))))}}
+ match outcome {Ok(v)=>Ok(v),Err(error)=>{saved.state=if error.code=="ACCOUNT_PRIMARY_RESTORED"{"failed"}else if !saved.login_id.is_empty(){"pending"}else if saved.authorization_requested{"interrupted"}else{"failed"}.into();saved.error_code=Some(error.code.clone());let _=update(&root,&mut saved,None);Err(AccountError::new(&error.code,format!("{} stage={}; operationId={}; elapsedMs={}; formerPrimaryPreserved={}; {}",error.message,saved.stage,saved.operation_id,now().saturating_sub(saved.started_at_ms),saved.former_primary_preserved,recovery(&saved))))}}
 }
 
 #[cfg(test)] mod tests {

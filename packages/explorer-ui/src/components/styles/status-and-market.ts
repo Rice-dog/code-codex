@@ -197,24 +197,6 @@ export const style4 = String.raw`  .statusbar {
     padding: 8px;
     overflow: auto;
   }
-  .preview-market-list[data-preview-market-category="developer-tools"] {
-    padding-right: 18px;
-    overflow-y: hidden;
-  }
-  .preview-market-list[data-preview-market-category="developer-tools"]::after {
-    position: absolute;
-    z-index: 2;
-    top: 8px;
-    right: 2px;
-    bottom: 8px;
-    width: 10px;
-    background: var(--cle-scroll-thumb);
-    background-clip: padding-box;
-    border: 2px solid transparent;
-    border-radius: 999px;
-    content: "";
-    pointer-events: none;
-  }
   .preview-market-section {
     display: grid;
     gap: 6px;

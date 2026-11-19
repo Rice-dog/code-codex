@@ -199,7 +199,7 @@ export class MultiAccountPlugin {
    if(action==='primary.start'){
     if(!await this.#dialog.confirm(t('accounts.primaryTitle')+' · '+(info.connections.find(c=>c.id===id)?.email??''),'accounts.primaryConfirm'))return;
     check();this.#watchPrimary(false);this.#primaryPollEpoch++;this.#primaryPolling=false;this.#primaryStarting=true;this.#primaryStatus=undefined;this.#primaryReadError='';this.render();if(adapter?.status().busy)throw Error('ACCOUNT_TURN_ACTIVE: Finish all tasks before changing the primary account.');
-     try{primaryRequested=true;await requestAccounts({action,owner:info.owner.id,connectionId:id});await this.#refresh(true);}
+     try{primaryRequested=true;await requestAccounts({action:'primary.promote',owner:info.owner.id,connectionId:id});await this.#refresh(true);}
      catch(error){
       // Changing the official identity intentionally retires its old Bridge.
       // Verify the result through the current connection instead of replaying

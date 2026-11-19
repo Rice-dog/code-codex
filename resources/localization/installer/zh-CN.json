@@ -107,5 +107,7 @@
   "uninstall.caea4c0f6e71": "无法开始卸载，尚未移除任何文件。",
   "uninstall.e193bda44355": "正在卸载",
   "uninstall.ec14d2b22c37": "删除设置、已下载插件和本地媒体",
-  "uninstall.fe199528850a": "卸载"
+  "uninstall.fe199528850a": "卸载",
+  "setup.activation.ready": "当前 Codex 界面已更新。",
+  "setup.activation.pending": "文件已安装，当前 Codex 界面尚未确认更新。"
 }

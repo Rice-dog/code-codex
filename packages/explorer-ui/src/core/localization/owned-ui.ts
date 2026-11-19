@@ -7,7 +7,7 @@ const contentLabels='.markdown-body[aria-label],.git-diff-reader[aria-label],.no
 export function localizeOwnedUi(root: HTMLElement|ShadowRoot): () => void {
   const originals=new WeakMap<Node,{ source: string; rendered: string }>();
   const attributes=new WeakMap<Element,Map<string,{ source: string; rendered: string }>>();
-  const queue=new Set<Node>(); let scheduled=false,disposed=false;
+  const queue=new Map<Node,boolean>(); let scheduled=false,disposed=false;
   const node=(n: Node) => {
     if(n.nodeType===Node.TEXT_NODE) {
       if(n.parentElement?.closest(skip)||n.parentElement?.closest('[data-plugin-name],[data-i18n-key]')) return;
@@ -51,8 +51,16 @@ export function localizeOwnedUi(root: HTMLElement|ShadowRoot): () => void {
     const walker=document.createTreeWalker(n,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{ acceptNode: item => { if(item instanceof Element&&item.matches(skip)&&!item.matches('input,textarea')) { if(item.matches(contentLabels)) node(item); return NodeFilter.FILTER_REJECT; } return NodeFilter.FILTER_ACCEPT; } });
     while(walker.nextNode()) node(walker.currentNode);
   };
-  const flush=() => { scheduled=false; if(disposed) return; const nodes=[...queue]; queue.clear(); for(const n of nodes) if(n===root||n.isConnected) visit(n); };
-  const observer=new MutationObserver(records => { for(const r of records) { if(r.type==='childList') for(const n of r.addedNodes) queue.add(n); else queue.add(r.target); } if(queue.size&&!scheduled) { scheduled=true; queueMicrotask(flush); } });
+  const flush=() => {
+    scheduled=false;if(disposed)return;const nodes=new Map(queue);queue.clear();
+    for(const [n,deep] of nodes){
+      if(n!==root&&!n.isConnected)continue;
+      let ancestor=n.parentNode;while(ancestor&&nodes.get(ancestor)!==true)ancestor=ancestor.parentNode;
+      if(ancestor)continue;
+      if(deep)visit(n);else node(n);
+    }
+  };
+  const observer=new MutationObserver(records => { for(const r of records) { if(r.type==='childList') for(const n of r.addedNodes) queue.set(n,true); else if(!queue.has(r.target))queue.set(r.target,false); } if(queue.size&&!scheduled) { scheduled=true; queueMicrotask(flush); } });
   visit(root); observer.observe(root,{ subtree: true,childList: true,characterData: true,attributes: true,attributeFilter: ['title','aria-label','placeholder','aria-valuetext'] });
   const unsubscribe=subscribeLanguage(() => visit(root));
   return () => { disposed=true; observer.disconnect(); unsubscribe(); queue.clear(); };

@@ -67,12 +67,21 @@ fn stale_engine_rules_and_version_are_separate_from_inventory_freshness() {
 }
 #[test]
 fn registry_check_references_resolve_and_manual_steps_are_concrete() {
- let ids=["package.inventory","package.modules","host.interfaces","host.quota","host.layout","host.split-layout","host.menu","host.composer","host.theme","host.composer-backdrop","host.models","host.ownership","regression.interfaces","regression.layout","regression.models","regression.account-behavior","regression.account-relay-headers","host.settings-paint","host.side-panel-paint","host.tree-rail-paint"];
- for r in registry()["rules"].as_array().unwrap() {
-  assert!(!r["automatedChecks"].as_array().unwrap().is_empty());
-  for id in r["automatedChecks"].as_array().unwrap(){assert!(ids.contains(&id.as_str().unwrap()),"{id}");}
-  assert!(!r["manualReason"].as_str().unwrap().is_empty());assert!(!r["manualSteps"].as_array().unwrap().is_empty());
- }
+    let native = include_str!("validation.rs");
+    let browser = include_str!("../../../../packages/explorer-ui/src/host-update-probes.ts");
+    let background = include_str!("../../../../packages/explorer-ui/src/host-update-background.ts");
+    for rule in registry()["rules"].as_array().unwrap() {
+        let automatic = rule["automatedChecks"].as_array().unwrap();
+        assert!(!automatic.is_empty());
+        for id in automatic {
+            let id = id.as_str().unwrap();
+            let browser_call = format!("add('{id}',");
+            assert!(native.contains(&format!("check(\"{id}\",")) || browser.contains(&browser_call)
+                || background.contains(&browser_call), "Missing check: {id}");
+        }
+        assert!(!rule["manualReason"].as_str().unwrap().is_empty());
+        assert!(!rule["manualSteps"].as_array().unwrap().is_empty());
+    }
 }
 #[test]
 fn report_ids_cannot_escape_the_ledger() {

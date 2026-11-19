@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncReadExt, AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
 
@@ -198,6 +198,7 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
         None
     };
     let mut child = command.spawn().map_err(|_| failure("backend-spawn"))?;
+    let transport=super::primary_transport::Transport::new(child.stdin.take().unwrap());
     if let Some(listener) = listener {
         p["brokerPid"] = json!(std::process::id());
         let official = parent_pid();
@@ -216,6 +217,7 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
             .map_err(|_| failure("local-client"))?;
         let state = state.clone();
         let p = p.clone();
+        let transport=transport.clone();
         tokio::spawn(async move {
             while let Ok((stream, address)) = listener.accept().await {
                 if !address.ip().is_loopback() {
@@ -223,61 +225,43 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
                 }
                 let (state, p, client, direct) =
                     (state.clone(), p.clone(), client.clone(), direct.clone());
+                let transport=transport.clone();
                 tokio::spawn(async move {
-                    let _ = serve(stream, state, p, official, client, direct).await;
+                    let _ = serve(stream, state, p, official, client, direct,transport).await;
                 });
             }
         });
     }
-    let mut input = child.stdin.take().unwrap();
     let mut output = child.stdout.take().unwrap();
+    let input_transport=transport.clone();
     let stdin = tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut tokio::io::stdin(), &mut input).await;
+        let mut input=BufReader::new(tokio::io::stdin());let mut line=Vec::new();
+        if !serving {let mut bytes=vec![0;64*1024];loop {let n=input.read(&mut bytes).await.unwrap_or(0);if n==0{break}if input_transport.forward(&bytes[..n]).await.is_err(){break}}return}
+        loop {line.clear();if input.read_until(b'\n',&mut line).await.unwrap_or(0)==0{break}if input_transport.forward(&line).await.is_err(){break}line.fill(0);}
     });
     let stdout = tokio::spawn(async move {
-        let mut target = tokio::io::stdout();
-        let mut bytes = vec![0u8; 64 * 1024];
-        let mut line = Vec::new();
-        let mut dropping = false;
+        let mut target=tokio::io::stdout();
+        if !serving {tokio::io::copy(&mut output,&mut target).await.map_err(|_|failure("backend-forward"))?;return Ok(())}
+        let mut bytes=vec![0u8;64*1024];let mut line=Vec::new();let mut passthrough=false;
         loop {
-            let n = output
-                .read(&mut bytes)
-                .await
-                .map_err(|_| failure("backend-read"))?;
-            if n == 0 {
-                break;
-            }
-            for segment in bytes[..n].split_inclusive(|b| *b == b'\n') {
-                if !dropping {
-                    if line.len() + segment.len() > 1024 * 1024 {
-                        line.clear();
-                        dropping = true;
-                    } else {
-                        line.extend_from_slice(segment);
+            let n=output.read(&mut bytes).await.map_err(|_|failure("backend-read"))?;if n==0{break}
+            for segment in bytes[..n].split_inclusive(|b|*b==b'\n') {
+                if !passthrough&&line.len()+segment.len()>1024*1024 {target.write_all(&line).await.map_err(|_|failure("backend-forward"))?;line.clear();passthrough=true;}
+                if passthrough {target.write_all(segment).await.map_err(|_|failure("backend-forward"))?;} else {line.extend_from_slice(segment);}
+                if segment.last()==Some(&b'\n') {
+                    if !passthrough {
+                        let consumed=if let Ok(v)=serde_json::from_slice::<Value>(&line){
+                            let thread=if v["method"]=="thread/started"{&v["params"]["thread"]}else{&v["result"]["thread"]};state.lock().unwrap().remember(thread);transport.consume(&v)
+                        }else{false};
+                        if !consumed{target.write_all(&line).await.map_err(|_|failure("backend-forward"))?;}
                     }
-                }
-                if segment.last() == Some(&b'\n') {
-                    if !dropping {
-                        if let Ok(v) = serde_json::from_slice::<Value>(&line) {
-                            let thread = if v["method"] == "thread/started" {
-                                &v["params"]["thread"]
-                            } else {
-                                &v["result"]["thread"]
-                            };
-                            state.lock().unwrap().remember(thread);
-                        }
-                    }
-                    line.clear();
-                    dropping = false;
+                    line.fill(0);line.clear();passthrough=false;
                 }
             }
-            target
-                .write_all(&bytes[..n])
-                .await
-                .map_err(|_| failure("backend-forward"))?;
-            target.flush().await.map_err(|_| failure("backend-flush"))?;
+            target.flush().await.map_err(|_|failure("backend-flush"))?;
         }
-        Ok::<_, AccountError>(())
+        if !line.is_empty(){target.write_all(&line).await.map_err(|_|failure("backend-forward"))?;target.flush().await.map_err(|_|failure("backend-flush"))?;}
+        Ok::<_,AccountError>(())
     });
     let exit = child.wait().await.map_err(|_| failure("backend-exit"))?;
     stdin.abort();
@@ -290,7 +274,7 @@ fn control(s: &mut State, v: &Value, p: &Value, official: u32) -> Result<Value> 
     match v["action"].as_str() {
         Some("status") => {
             return Ok(
-                json!({"schema":1,"pid":official,"rendererPort":p["rendererPort"],"ready":true,"spawns":1,"enabled":s.enabled,"routeCount":s.routes.len(),"blockedCount":s.blocked.len()}),
+                json!({"schema":1,"pid":official,"rendererPort":p["rendererPort"],"ready":true,"spawns":1,"enabled":s.enabled,"routeCount":s.routes.len(),"blockedCount":s.blocked.len(),"primarySwitch":1}),
             );
         }
         Some("route") if thread.is_some() => {
@@ -404,6 +388,7 @@ async fn serve(
     official: u32,
     client: reqwest::Client,
     direct: reqwest::Client,
+    transport:Arc<super::primary_transport::Transport>,
 ) -> Result<()> {
     let mut io = BufReader::new(stream);
     let raw = relay::read_header(&mut io).await?;
@@ -439,9 +424,11 @@ async fn serve(
         io.read_exact(&mut body)
             .await
             .map_err(|_| failure("control-read"))?;
-        let reply = serde_json::from_slice(&body)
-            .map_err(|_| failure("control-json"))
-            .and_then(|v| control(&mut state.lock().unwrap(), &v, &p, official));
+        let reply=match serde_json::from_slice::<Value>(&body) {
+            Ok(v) if v["action"]=="primary-switch"=>transport.switch(&v).await,
+            Ok(v)=>control(&mut state.lock().unwrap(),&v,&p,official),
+            Err(_)=>Err(failure("control-json")),
+        };
         return match reply {
             Ok(v) => {
                 let body = v.to_string();

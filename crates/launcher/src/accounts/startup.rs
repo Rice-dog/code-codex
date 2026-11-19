@@ -116,6 +116,19 @@ async fn ready_descriptor(endpoint:CdpEndpoint)->Result<Option<(Value,reqwest::C
  if status["schema"]!=1||status["pid"]!=v["pid"]||status["rendererPort"]!=endpoint.port()||status["ready"]!=true||!status["spawns"].as_u64().is_some_and(|v|v>0){return Err(error("backend-startup-unverified"));}
  Ok(Some((v,client)))
 }
+pub(super) async fn primary_capability(endpoint:CdpEndpoint)->Result<Value> {
+ let Some(v)=descriptor(endpoint).await?else{return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","Internal primary switching requires a launch-owned native connection. No login or credential was changed."))};
+ let status=control(&control_client()?,&v,json!({"action":"status"})).await?;
+ if status["schema"]!=1||status["pid"]!=v["pid"]||status["rendererPort"]!=endpoint.port()||status["ready"]!=true||status["primarySwitch"]!=1{return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","The running native connection predates internal primary switching. Restart Codex once after active tasks finish. No login or credential was changed."))}Ok(v)
+}
+pub(super) async fn primary_switch(v:&Value,source:&std::path::Path,backup:&std::path::Path,email:&str,operation:&str)->Result<Value>{
+ let client=reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(45)).build().map_err(|_|error("primary-client"))?;
+ let response=client.post(format!("http://localhost:{}/{}/control",v["port"].as_u64().unwrap(),v["key"].as_str().unwrap())).header("x-code-codex-control",v["control"].as_str().unwrap()).json(&json!({"action":"primary-switch","source":source,"backup":backup,"email":email,"operationId":operation})).send().await.map_err(|_|AccountError::new("ACCOUNT_PRIMARY_OUTCOME_UNKNOWN","Native primary handoff did not return a receipt. Verify the current identity before retrying; the login was not replayed."))?;
+ let success=response.status().is_success();let bytes=response.bytes().await.map_err(|_|error("primary-receipt"))?;
+ if bytes.len()>8192{return Err(error("primary-receipt-bound"))}
+ if !success{return Err(AccountError::new("ACCOUNT_PRIMARY_NATIVE",String::from_utf8_lossy(&bytes).into_owned()))}
+ serde_json::from_slice(&bytes).map_err(|_|error("primary-receipt-json"))
+}
 pub(crate) async fn verify_launch(endpoint:CdpEndpoint)->Result<bool>{
  let Some(v)=descriptor(endpoint).await?else{return Ok(false)};
  let client=control_client()?;
