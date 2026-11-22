@@ -10,9 +10,9 @@ const {NativeAccountAdapter}=await import(pathToFileURL(resolve(out,'fixture.mjs
 let assetMode=false,resetFault=false;const quota=n=>({...(assetMode?{ordinaryUsageAllowed:n>0,rateLimitResetCredits:{availableCount:1,credits:[{id:'fixture-card',grantedAt:1,expiresAt:null,resetType:'codexRateLimits',status:'available'}]}}:{}),rateLimits:{...(assetMode?{credits:{balance:'15',hasCredits:true,unlimited:false}}:{credits:{balance:'0',hasCredits:false,unlimited:false}}),limitId:'codex',primary:{usedPercent:100-n,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:n===0?100:20,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
 const wait=async f=>{for(let i=0;i<150;i++){if(f())return;await new Promise(r=>setTimeout(r,10));}throw Error('Native route fixture did not settle');};
 const state={owner:{id:'owner',label:'host@test'},profile:{initial:'./assets/app-initial-fixture.js',shared:'./assets/app-shared-fixture.js'},connections:[{id:'B',email:'b@test'},{id:'C',email:'c@test'}],selected:{task:'host'},sharedConversations:[],activeConversations:[],nativeRouting:true,nativeRoutes:{}};
-let routeQuota;let notification,admit,active=false,failPrepare=false,failEnsure=false,ensureGate;const calls=[],starts=[],remaining={host:84,B:0,C:0};
+let routeQuota;const defaultModel='gpt-6.1-sol';let model=defaultModel,effort='high',modelWrites=0;let notification,admit,active=false,failPrepare=false,failEnsure=false,ensureGate;const calls=[],starts=[],remaining={host:84,B:0,C:0};
 const lease=()=>({dup(){return this},onRpcBroken(){},[Symbol.dispose](){}});
-const manager={...lease(),registerReplayAdmission(f){admit=f;return Promise.resolve(lease());},subscribe(p){notification=p.listener;return Promise.resolve(lease());},getThreadExecutionState:async()=>({inProgress:active,latestModel:'gpt-6.1-sol',latestReasoningEffort:'high'}),startTurnWithOutcome:async(id,operation)=>{starts.push({id,selected:state.nativeRoutes[id]??'host',operation});active=true;notification({method:'turn/started',params:{threadId:id,turn:{id:'automatic-'+starts.length}}});return 'accepted';}};
+const manager={...lease(),registerReplayAdmission(f){admit=f;return Promise.resolve(lease());},subscribe(p){notification=p.listener;return Promise.resolve(lease());},getThreadExecutionState:async()=>({inProgress:active,latestModel:model,latestReasoningEffort:effort}),updateThreadSettingsForNextTurn:async(_id,value)=>{assert(!active);model=value.model;effort=value.effort;modelWrites++;return true;},startTurnWithOutcome:async(id,operation)=>{starts.push({id,selected:state.nativeRoutes[id]??'host',operation});active=true;notification({method:'turn/started',params:{threadId:id,turn:{id:'automatic-'+starts.length}}});return 'accepted';}};
 const registry={...lease(),subscribe(_id,f){queueMicrotask(()=>f({status:'ready',manager}));return Promise.resolve(lease());}};
 const services={appServerManagers:registry,executionHosts:{},clientCoordination:{},appActions:{}},subscribers=new Set();
 const dispatcher={subscribe(_type,f){subscribers.add(f);return()=>subscribers.delete(f)},dispatchMessage(_type,m){queueMicrotask(()=>{for(const f of subscribers)f({message:{...(resetFault&&m.request.method==='account/rateLimitResetCredit/consume'?{error:{code:-32601}}:{}),id:m.request.id,result:m.request.method==='account/rateLimitResetCredit/consume'?{outcome:'reset'}:quota(remaining.host)}})})}};
@@ -63,11 +63,31 @@ try{
  const first=adapter.usage.consumeCard('B','fixture-card',crypto.randomUUID());const second=adapter.usage.consumeCard('B','fixture-card',crypto.randomUUID());assert.strictEqual(first,second);assert.equal(await first,'reset');assert.equal(calls.filter(c=>c.action==='reset.consume').length,1);checks.push('Explicit child reset uses selected ID and a single retained idempotent redemption');
  await adapter.usage.assetActions.toggle('B');remaining.B=50;await adapter.prepareSend();checks.push('Included usage remains usable with credit permission disabled');resetFault=true;await assert.rejects(()=>adapter.usage.assetActions.consume('host','fixture-card',crypto.randomUUID()),/ACCOUNT_RESET_FAILED: stage=official-response; rpcCode=-32601/);checks.push('Official reset RPC failure exposes its own stage and code instead of a quota-read error');resetFault=false;assetMode=false;
 
+ await adapter.select('B');adapter.setAutoContinue(true);remaining.C=60;
+ active=true;notification({method:'turn/started',params:{threadId:'task',turn:{id:'deferred-rotation'}}});
+ const beforeSelection=calls.length;
+ await adapter.select('C');await adapter.select('host');
+ assert.equal(adapter.status().selected,'host');assert.equal(adapter.status().executionSelected,'B');
+ assert(!calls.slice(beforeSelection).some(p=>p.action.startsWith('native.')));
+ globalThis.rpcThread='other';assert.equal(adapter.status().selected,'host');assert(!adapter.status().deferredSelection);delete globalThis.rpcThread;
+ active=false;notification({method:'turn/completed',params:{threadId:'task',turn:{id:'deferred-rotation',status:'failed',error:{codexErrorInfo:'usageLimitExceeded'}}}});
+ await wait(()=>starts.length===2);assert.equal(starts[1].selected,'C');assert.equal(starts[1].operation.request.model,defaultModel);assert.equal(adapter.status().selected,'host');
+ active=false;notification({method:'turn/completed',params:{threadId:'task',turn:{id:'automatic-2',status:'completed'}}});
+ await wait(()=>!adapter.status().busy);await admit('task');assert.equal(state.nativeRoutes.task,undefined);assert.equal(state.selected.task,'host');
+ checks.push('In-flight picks do not route or cancel quota traversal; owned turn uses B then C, queued manual admission uses the last host choice only');
+ adapter.setAutoContinue(false);state.connections.push({id:'API',label:'API',api:{baseUrl:'http://localhost:1',model:'api-one',models:['api-one','api-two']}});adapter.updateInfo(structuredClone(state));
+ await adapter.select('B');active=true;notification({method:'turn/started',params:{threadId:'task',turn:{id:'deferred-model'}}});
+ await adapter.select('API');assert(await adapter.selectApiModel('API','api-two'));
+ assert.equal(adapter.status().pendingModel,'api-two');assert.equal(modelWrites,0);assert.equal(state.nativeRoutes.task,'B');
+ active=false;notification({method:'turn/completed',params:{threadId:'task',turn:{id:'deferred-model',status:'interrupted'}}});
+ await adapter.prepareSend();assert.equal(state.nativeRoutes.task,'API');assert.equal(model,'api-two');assert.equal(modelWrites,1);assert(!adapter.status().pendingModel);
+ checks.push('A picked API model remains local during the old turn and applies once on next manual send after confirmed stop');
+ await adapter.select('B');
  active=true;notification({method:'turn/started',params:{threadId:'task',turn:{id:'stale-active'}}});active=false;await adapter.useOfficialIdentity();assert.equal(state.nativeRoutes.task,undefined);assert.equal(adapter.diagnostics().enabled,false);checks.push('Disable rechecks a stale observed turn, detaches only after actual idle, and disables');
 }finally{adapter.endSession();}
 state.selected.task='B';state.nativeRoutes={};active=false;
 const restored=new NativeAccountAdapter(request,structuredClone(state),()=>{},async()=>({services,dispatcher}));await restored.start();
-try{await wait(()=>state.nativeRoutes.task==='B');assert.equal(restored.status().selected,'B');assert.equal(starts.length,1);checks.push('Cold startup prepares a saved child preference when its native conversation is idle, without sending inference');}finally{restored.endSession();}
+try{await wait(()=>state.nativeRoutes.task==='B');assert.equal(restored.status().selected,'B');assert.equal(starts.length,2);checks.push('Cold startup prepares a saved child preference when its native conversation is idle, without sending inference');}finally{restored.endSession();}
 state.nativeRoutes={};active=true;const previous=calls.filter(p=>p.action==='native.prepare').length;
 const running=new NativeAccountAdapter(request,structuredClone(state),()=>{},async()=>({services,dispatcher}));await running.start();
 try{await new Promise(r=>setTimeout(r,450));assert.equal(calls.filter(p=>p.action==='native.prepare').length,previous);checks.push('Cold startup never reroutes a native turn that is already running');}finally{running.endSession();active=false;}

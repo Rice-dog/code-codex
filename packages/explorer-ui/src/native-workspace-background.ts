@@ -7,12 +7,13 @@ export const NATIVE_WORKSPACE_BACKING_SELECTOR =
   '[data-app-shell-surface-backing="true"].pointer-events-none';
 export const NATIVE_PAGE_FRAME_SELECTOR =
   '[data-app-shell-frame="true"][data-app-shell-page-surface="true"]';
+export const NATIVE_TURN_CHANGE_HEADER = '[class~="group/turn-diff-header"]';
 export const NATIVE_TURN_CHANGE_CARD_SELECTOR =
-  `${MAIN_SURFACE_SELECTOR} div:has(> [class~="group/turn-diff-header"])`;
+  `${MAIN_SURFACE_SELECTOR} div:has(> ${NATIVE_TURN_CHANGE_HEADER})`;
 const TURN_CHANGE_ROWS = `${NATIVE_TURN_CHANGE_CARD_SELECTOR} [class~="group/turn-diff-file-row"]`;
 export const NATIVE_TURN_CHANGE_ROW_SELECTOR =
   `${TURN_CHANGE_ROWS} > :is(.contents,[data-state]) > button`;
-const WRAPPED_TURN_CHANGE_ROW = `${TURN_CHANGE_ROWS} > [data-state]:not(.contents) > button`;
+const WRAPPED_TURN_CHANGE_ROW = `${MAIN_SURFACE_SELECTOR} [class~="group/turn-diff-file-row"] > [data-state]:not(.contents) > button`;
 const MASK_SCOPE = 'html[data-code-codex-ui-mask-active]';
 export const NATIVE_SECONDARY_LAYOUT = '[data-app-shell-main-content-layout]:is([data-app-shell-main-content-layout="default"],[data-app-shell-main-content-layout="full-bleed"])';
 export const NATIVE_SECONDARY_STICKY_HEADER = `${MAIN_SURFACE_SELECTOR} [data-app-shell-focus-area="main"] [data-app-shell-inline-page-header] [data-sticky]:is([data-collapsible],[data-expand-search])`;

@@ -1,4 +1,5 @@
 import { icons } from "./icons";
+import {NATIVE_TURN_CHANGE_CARD} from "./native-paint-markers";
 
 const STORAGE_KEY = "code-codex.surface-opacity.v1";
 const ACTIVE_ATTRIBUTE = "data-code-codex-ui-mask-active";
@@ -156,21 +157,21 @@ html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-sh
  * Match the observed semantic group token, not localized titles or hashes.
  * File rows and expanded diff backings must not compound the card alpha.
  * Icon tiles share this single backing; glyphs, actions and focus stay native. */
-html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) {
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [${NATIVE_TURN_CHANGE_CARD}] {
   background-color:color-mix(in srgb,var(--color-surface-elevated-secondary,rgb(30,31,35)) calc(var(--code-codex-mask-changes) * 100%),transparent) !important;
   background-image:none !important;
 }
-html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) > [class*="--codex-diffs-surface-override:"] {
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [${NATIVE_TURN_CHANGE_CARD}] > [class*="--codex-diffs-surface-override:"] {
   --codex-diffs-surface-override:transparent !important;
 }
 html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [class~="group/turn-diff-header"] > span > span[class~="size-10"]:has(> svg) {
   background-color:transparent !important;
   background-image:none !important;
 }
-html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) [class~="group/turn-diff-file-row"] > .contents > button {
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [class~="group/turn-diff-file-row"] > .contents > button {
   background-color:transparent !important;
 }
-html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) [class~="group/turn-diff-file-row"] > .contents > button:hover {
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [class~="group/turn-diff-file-row"] > .contents > button:hover {
   background-color:color-mix(in srgb,var(--color-background-primary-ghost-hover,rgba(128,128,128,.12)) 60%,transparent) !important;
 }
 /* Conversation already has one continuous mask. Native scroll-edge helpers

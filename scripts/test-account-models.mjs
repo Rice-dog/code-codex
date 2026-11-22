@@ -23,7 +23,7 @@ const Context=createContext(w.client);
 w.modelState={selected:'host',busy:false,preparing:false,conversationId:'one'};
 w.info={connections:[{id:'api',api:{model:'official-a'}}]};
 w.adapter={apiChoice:()=>undefined,status:()=>w.modelState,info:w.info,apiModels:async()=>({models:['official-a','vendor/custom'],selected:w.info.connections[0].api.model}),selectApiModel:async(id:string,model:string)=>{if(w.fail)throw Error('test rejection');w.selections.push([id,model]);w.info.connections[0].api.model=model;}};
-function Picker(props:any){return React.createElement(React.Fragment,null,React.createElement('button',{id:'native','data-composer-navigation-target':'reasoning','aria-controls':props.open?'native-menu':undefined,onClick:()=>props.onOpenChange(!props.open)},props.model),props.open&&React.createElement('div',{id:'native-menu',role:'menu',className:'official-menu'},props.models.map((m:any)=>React.createElement('button',{key:m.model,role:'menuitemradio',className:'official-row','aria-checked':props.model===m.model,onClick:()=>{props.onSelectModel(m.model,'high');props.onOpenChange(false)}},m.displayName))));}
+function Picker(props:any){return React.createElement(React.Fragment,null,React.createElement('button',{id:'native','data-composer-navigation-target':'reasoning','aria-controls':props.open?'native-menu':undefined,onClick:()=>props.onOpenChange(!props.open)},React.createElement('span',{'data-model-selection-label':props.model},React.createElement('span',null,props.model))),props.open&&React.createElement('div',{id:'native-menu',role:'menu',className:'official-menu'},props.models.map((m:any)=>React.createElement('button',{key:m.model,role:'menuitemradio',className:'official-row','aria-checked':props.model===m.model,onClick:()=>{props.onSelectModel(m.model,'high');props.onOpenChange(false)}},m.displayName))));}
 function Host(){useContext(Context);const data=useSyncExternalStore(l=>{listener.add(l);return()=>listener.delete(l)},()=>query.state.data);const transformed=observer.getOptimisticResult({select:nativeSelect}).data;const [selected,setSelected]=useState('official-b'),[open,setOpen]=useState(false);
 // Mirrors the official capability reader that caused the previous host crash.
 for(const m of data.data)m.availableAccessPrograms?.cyber.includes('daybreakRed');
@@ -57,6 +57,19 @@ await check('Late API directory cannot overwrite official data',`(async()=>{let 
 await check('Ambiguous native cache fails before any mutation',`(()=>{cache.getAll=()=>[q,{...q}];modelState.selected='api';const before=q.state.data;update();const ok=notices.some(n=>n.includes('query-selection'))&&q.state.data===before;modelState.selected='host';update();cache.getAll=()=>[q];return ok;})()`);
 await check('Missing native data contract is isolated and leaves official control intact',`(()=>{const b=document.createElement('button');let rejected=false;try{new NativePort(b)}catch(e){rejected=String(e).includes('react-anchor')}return rejected&&!!document.querySelector('#native');})()`);
 await check('Saving a revised model list refreshes the same connection and removes excluded native entries',`(async()=>{${wait}adapter.apiModels=async()=>({models:info.connections[0].api.models,selected:'vendor/custom'});info.connections[0].api.models=['vendor/custom','vendor/other'];modelState.selected='api';update();${wait}info.connections[0].api.models=['vendor/custom'];update();${wait}return q.state.data.data.map(m=>m.model).join(',')==='vendor/custom'&&q.observers[0].getCurrentResult().data.models.length===1;})()`);
+await check('Deferred model updates the existing label without applying native settings to the running turn',`(async()=>{
+ info.connections[0].api.models=['vendor/custom','vendor/other'];update();${wait}
+ const nativeBefore=nativeSelections.length,defaultModel=info.connections[0].api.model;
+ modelState.busy=true;modelState.deferredSelection=true;
+ const select=adapter.selectApiModel;adapter.selectApiModel=async(_id,model)=>{modelState.pendingModel=model;return true;};
+ try{
+  document.querySelector('#native').click();${wait}document.querySelectorAll('.official-row')[1].click();${wait}
+  return nativeSelections.length===nativeBefore&&info.connections[0].api.model===defaultModel
+   &&document.querySelector('[data-model-selection-label]').dataset.codeCodexModelPreview==='vendor/other'&&!document.querySelector('#native-menu');
+ }finally{
+  adapter.selectApiModel=select;delete modelState.pendingModel;delete modelState.deferredSelection;modelState.busy=false;update();
+ }
+})()`);
 await check('Disposal leaves no custom model menu or stylesheet',`(()=>{selector.dispose();return !document.querySelector('[data-code-codex-api-model-menu],[data-code-codex-api-model-label]')&&document.querySelectorAll('style').length===styleCount;})()`);
 await writeFile(resolve(out,'result.json'),JSON.stringify({passed:true,checks,scope:'Isolated React host and query cache; official capability reader regression. No live account or inference requests.'},null,2));console.log(JSON.stringify({passed:true,checks}));
 }finally{await browser.close();await new Promise(r=>server.close(r));}

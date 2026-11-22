@@ -130,12 +130,15 @@ export class NativeComposerQuota {
  }
  #selection():{id:string;blocked:boolean}|undefined{
   const status=this.adapter.status(),info=this.adapter.info;
-  if(info.owner.id!==this.#owner||!status.active||!status.supported||status.sendBlocked||status.selected==='host')return;
-  const connection=info.connections.find(c=>c.id===status.selected);
+  const id=status.busy?status.executionSelected??status.selected:status.selected;
+  if(info.owner.id!==this.#owner||!status.active||!status.supported||status.sendBlocked||id==='host')return;
+  const connection=info.connections.find(c=>c.id===id);
   if(!connection||!connection.api&&!connection.email||connection.reauthorizationRequired)return;
-  if(status.conversationId&&info.nativeRoutes?.[status.conversationId]!==status.selected)return;
-  const q=this.adapter.usage.remaining(status.selected);
-  return {id:status.selected,blocked:!connection.api&&!this.adapter.usage.creditAllowed(status.selected)&&(q.fiveHour===0||q.weekly===0)};
+  // A deferred choice can update the idle composer's quota preview. Actual
+  // delivery still requires the prepared, authenticated route.
+  if(status.conversationId&&info.nativeRoutes?.[status.conversationId]!==id&&!(status.deferredSelection&&!status.busy))return;
+  const q=this.adapter.usage.remaining(id);
+  return {id,blocked:!connection.api&&!this.adapter.usage.creditAllowed(id)&&(q.fiveHour===0||q.weekly===0)};
  }
  #projecting():boolean{return !!this.#root?.isConnected&&this.adapter.status().conversationId===this.#conversation&&!this.#root.closest('[data-app-shell-active-page="false"],[aria-hidden="true"]')&&!!this.#selection();}
  update(anchor:HTMLButtonElement|undefined):void{

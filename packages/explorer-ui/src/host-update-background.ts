@@ -2,6 +2,7 @@ import {UPDATE_MOUNT_READY} from './host-update-mount';
 import {inspectComposerBackdrop} from './native-composer-backdrop';
 import {inspectSidePanelOpacity} from './native-side-panel-opacity';
 import {nativeSettingsBackgroundCss} from './native-background-surfaces';
+import {NativePaintTargets} from './native-paint-targets';
 import {CONVERSATION_TRANSPARENCY_SELECTOR,NATIVE_CONVERSATION_TOP_FADE_SELECTOR,NATIVE_PAGE_FRAME_SELECTOR,NATIVE_TURN_CHANGE_CARD_SELECTOR,NATIVE_TURN_CHANGE_ROW_SELECTOR,NATIVE_WORKSPACE_BACKING_SELECTOR,NATIVE_WORKSPACE_SELECTOR} from './native-workspace-background';
 import {BACKGROUND_SURFACE_ATTRIBUTES} from './components/styles/background-surfaces';
 import {unexpectedPaint} from './host-paint-inspection';
@@ -262,6 +263,7 @@ export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLEle
         <div data-app-shell-focus-area="main"><div class="electron:bg-surface rounded-tl-lg contract-viewport contract-paint"></div></div>
       </main><aside class="contract-viewport contract-paint" data-app-shell-focus-area="right-panel"><div class="contract-paint contract-viewport" data-new-tab-scroll-root></div></aside></div>`;
     doc.body.append(stage);
+    const paintTargets=new NativePaintTargets(doc);paintTargets.update();
     add('background.split-layout',()=>inspectSplitLayout(doc));
     add('background.composer-backdrop',()=>inspectComposerBackdrop(doc));
     add('background.conversation-top-paint',()=>inspectConversationTopPaint(doc));
@@ -333,6 +335,7 @@ export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLEle
       if (inspectSplitLayout(doc).status !== 'manual') return {status:'issue',detail:'The closed split was reported as mounted.'};
       panel.hidden = false;
       split.setAttribute('data-app-shell-workspace-layout','split');
+      paintTargets.update();
       if (inspectSplitLayout(doc).status !== 'passed') return {status:'issue',detail:'The opened split clipped its conversation frame.'};
       doc.body.append(summary);
       for (const alpha of [1,.5,0]) {

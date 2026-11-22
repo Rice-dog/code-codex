@@ -22,6 +22,7 @@ export function pickerOf(chain:any[],ids?:string[]):Picker{
 export class NativeModelMenuPort {
  #query:any;#client:any;#release:()=>void;#original:any;#projected:any;#updatedAt:number;
  #leases=new Map<any,{set:any;optimistic:any;restoreSet:any;restoreOptimistic:any;wrap:(fn:any)=>any}>();
+ #previewLabel:HTMLElement|undefined;
  #ids:string[]=[];#selected='';#catalog=new Map<string,Model>();#active=true;#writing=false;#refreshPending=false;
  constructor(private readonly anchor:HTMLButtonElement,private readonly notice:(error:string)=>void=()=>{}){
   const chain=nativeFiberChain(anchor),picker=pickerOf(chain),clients=new Set<any>();
@@ -74,6 +75,12 @@ export class NativeModelMenuPort {
  models():Model[]{return this.#ids.map(id=>this.#catalog.get(id)!);}
  menu():HTMLElement|null{const id=this.anchor.getAttribute('aria-controls');return id?document.getElementById(id):null;}
  close():void{try{this.picker().onOpenChange(false);}catch{}}
+ preview(model?:string):void{
+  const label=model?this.anchor.querySelector<HTMLElement>('[data-model-selection-label]')??undefined:undefined;
+  if(label!==this.#previewLabel)this.#previewLabel?.removeAttribute('data-code-codex-model-preview');
+  this.#previewLabel=label;
+  if(label&&model){const text=this.#catalog.get(model)?.displayName??model;if(label.dataset.codeCodexModelPreview!==text)label.dataset.codeCodexModelPreview=text;}
+ }
  apply(ids:string[],selected:string):void{
   if(!ids.length||ids.length>256||new Set(ids).size!==ids.length||!ids.includes(selected)||ids.some(id=>typeof id!=='string'||!id.trim()))throw unavailable('catalog-contract');
   this.#ids=[...ids];this.#selected=selected;
@@ -86,7 +93,7 @@ export class NativeModelMenuPort {
   p.onSelectModel(model,effort);if(complete){p.onSelectModelOption?.();p.onSelectComplete?.();p.onOpenChange(false);}
  }
  dispose():void{
-  this.#active=false;this.#release();
+  this.preview();this.#active=false;this.#release();
   for(const [observer,lease]of this.#leases){
    if(observer.setOptions===lease.set)observer.setOptions=lease.restoreSet;
    if(observer.getOptimisticResult===lease.optimistic)observer.getOptimisticResult=lease.restoreOptimistic;

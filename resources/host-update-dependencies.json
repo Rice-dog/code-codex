@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 58,
+  "revision": 59,
   "rules": [
     {
       "id": "layout",
@@ -19,6 +19,7 @@
         "packages/explorer-ui/src/background-package-market.ts",
         "packages/explorer-ui/src/components/plugin-shortcuts.ts",
         "packages/explorer-ui/src/host-update-background.ts",
+        "packages/explorer-ui/src/native-paint-targets.ts",
         "packages/explorer-ui/src/host-update-mount.ts",
         "packages/explorer-ui/src/welcome-surface.ts",
         "packages/explorer-ui/src/first-run-welcome.ts",
@@ -217,7 +218,8 @@
       "id": "models",
       "feature": "Native model picker and API catalogs",
       "sources": [
-        "packages/explorer-ui/src/features/accounts/native-model-menu.ts"
+        "packages/explorer-ui/src/features/accounts/native-model-menu.ts",
+        "packages/explorer-ui/src/features/accounts/model-selector.ts"
       ],
       "tests": [
         "scripts/test-account-models.mjs",
@@ -231,6 +233,7 @@
       ],
       "paths": [],
       "checks": [
+        "During an active turn, defer the API model locally and apply it only at the next manual send. Preserve the native popup and normal display.",
         "API saved model subset and default; native model/effort selection; official catalog restore; missing or ambiguous capability.",
         "Saved API model/default remains on the API route after reopening. Catalog success with provider failure, invalid key, unsupported model and stream interruption are distinct. Switching to official restores native catalog and effort, including late API catalog completion."
       ],
@@ -846,6 +849,7 @@
       "paths": [],
       "checks": [
         "Send-to-thinking transition, composer/control replacement, readable busy state and first-switch preparation hint.",
+        "While Thinking, pick another account, verify Stop, tool approval and automatic continuation still target the active route, then confirm the last choice takes effect for a manual send in the same conversation. Verify account and official-model popup responsiveness with backgrounds and opacity active.",
         "Stable account identity across ordering/navigation, late RPC/closed panel cleanup and activity admission.",
         "Track narrowly scoped permissions-label CSS including compact composer-footer container queries. Desktop layout and browser-window variants must be reported independently."
       ],

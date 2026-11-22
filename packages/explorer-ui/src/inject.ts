@@ -3,6 +3,7 @@ import {recordCaughtRuntimeError} from './runtime-operations';
 import {installOfficialUpdateHandoff} from './official-update-handoff';
 import {nativeSettingsBackgroundCss} from './native-background-surfaces';
 import {NATIVE_WORKSPACE_BACKGROUND_CSS} from './native-workspace-background';
+import {NativePaintTargets} from './native-paint-targets';
 import {NATIVE_COMPOSER_BACKDROP_CSS} from './native-composer-backdrop';
 import {NATIVE_SIDE_PANEL_OPACITY_CSS} from './native-side-panel-opacity';
 import { optionalPluginExport } from './utility-plugin-facade';
@@ -27,13 +28,11 @@ import {
   qualifiedAppShellForMain,
   qualifiedWorkspaceRowForMain,
   SPLIT_MAIN_VIEW_SELECTOR,
-  SPLIT_MAIN_FRAME_SELECTOR,
 } from "./adapters/codex-26.715";
 import { isHomeWorkspaceView } from "./home-view";
 import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground, isNativeLoginView } from "./native-login";
 import {observeNativeStructure} from './native-structure-changes';
 import {UPDATE_MOUNT_READY} from './host-update-mount';
-import { SURFACE_OPACITY_NATIVE_CSS } from "./surface-opacity";
 import {
   clearExplorerDismissalForSession,
   dismissExplorerForSession,
@@ -78,7 +77,7 @@ ${NATIVE_SIDE_PANEL_OPACITY_CSS}
 ${NATIVE_WORKSPACE_BACKGROUND_CSS}
 /* Native split motion width is based on the shell, before our inline tree.
  * Let the native frame fit its actual viewport; preserve native single/full views. */
-${CURRENT_LAYOUT_EXPLORER_SELECTOR} + :has(${MAIN_SURFACE_SELECTOR}) ${MAIN_SURFACE_SELECTOR} ${SPLIT_MAIN_VIEW_SELECTOR} > ${SPLIT_MAIN_FRAME_SELECTOR} {
+${CURRENT_LAYOUT_EXPLORER_SELECTOR} + * ${MAIN_SURFACE_SELECTOR} ${SPLIT_MAIN_VIEW_SELECTOR} > [data-code-codex-native-split-frame] {
   max-width: 100% !important;
 }
 
@@ -107,12 +106,12 @@ html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horiz
   background-clip: border-box !important;
 }
 
-html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:main-content-clip"] + :has(> ${MAIN_SURFACE_SELECTOR}) > ${MAIN_SURFACE_SELECTOR} {
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:main-content-clip"] + * > ${MAIN_SURFACE_SELECTOR} {
   border-left-color: transparent !important;
   background-clip: border-box !important;
 }
 
-html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:workspace-row"] + :has(${MAIN_SURFACE_SELECTOR}) ${MAIN_SURFACE_SELECTOR} {
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:workspace-row"] + * ${MAIN_SURFACE_SELECTOR} {
   border-left-color: transparent !important;
   background-clip: border-box !important;
 }
@@ -321,6 +320,7 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] [data-code-codex-glow-horizon-layer] 
 }
 `;
 
+const nativePaintTargets=new NativePaintTargets(document);
 let remountObserver: {disconnect():void} | undefined;
 let remountFrame: number | undefined;
 let remountEnabled = true;
@@ -511,7 +511,7 @@ function installParticleBackgroundStyle(): void {
     style.dataset.codeCodexParticleBackground = "v1";
     (document.head ?? document.documentElement).append(style);
   }
-  const css = PARTICLE_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS + SURFACE_OPACITY_NATIVE_CSS;
+  const css = PARTICLE_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS;
   if (style.textContent !== css) style.textContent = css;
 }
 
@@ -522,7 +522,7 @@ function installGlowHorizonBackgroundStyle(): void {
     style.dataset.codeCodexGlowHorizonBackground = "v1";
     (document.head ?? document.documentElement).append(style);
   }
-  const css = GLOW_HORIZON_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS + SURFACE_OPACITY_NATIVE_CSS;
+  const css = GLOW_HORIZON_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS;
   if (style.textContent !== css) style.textContent = css;
 }
 
@@ -596,6 +596,7 @@ const applicationMenuActions = {
 };
 
 export function injectExplorer(): CodeCodexElement | null {
+  nativePaintTargets.update();
   if (document.body) observeCodexRuntime();
   reconcileLoginBackground();
   reconcileApplicationMenu(applicationMenuActions);
@@ -655,6 +656,7 @@ export function injectExplorer(): CodeCodexElement | null {
 function retireRemountObserver(): void {
   remountObserver?.disconnect();
   remountObserver = undefined;
+  nativePaintTargets.clear();
   if (remountFrame !== undefined) cancelAnimationFrame(remountFrame);
   remountFrame = undefined;
   if (dismissListenerInstalled) {

@@ -23,6 +23,7 @@ const arrow='<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
 const phaseLabel=(phase?:string)=>t(phase==='check-quota'?'accounts.autoChecking':phase==='queued'?'accounts.switchQueued':phase==='validate-settings'||phase==='native-history'?'accounts.switchChecking':phase==='credentials'||phase==='authenticate'?'accounts.switchConnecting':phase==='tool-runtime'?'accounts.switchTools':phase==='apply-permissions'?'accounts.switchPermissions':phase==='commit-selection'||phase==='ready'?'accounts.switchFinishing':'accounts.switchConversation');
 const CSS=`${accountQuotaCss}${planBadgeCss}[data-code-codex-account-send-locked]{opacity:.4;cursor:progress}[data-code-codex-account-selector]{display:inline-flex;align-items:center;min-width:0;-webkit-app-region:no-drag}[data-code-codex-account-selector] button[data-account-trigger]{display:inline-flex;align-items:center;justify-content:center;max-width:310px;gap:6px;padding:4px 8px;font-size:14px;line-height:18px}[data-code-codex-account-selector] .account-quota{font-size:9px;line-height:10px;min-width:0}[data-code-codex-account-selector] .account-chevron{display:inline-flex;align-items:center;justify-content:center;flex:0 0 12px;width:12px;height:18px;line-height:0}[data-code-codex-account-selector] .account-chevron svg{display:block;width:12px;height:12px}[data-code-codex-account-selector] .account-email{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-avatar{display:inline-grid;place-items:center;flex:none;width:18px;height:18px;border-radius:50%;font:inherit;font-size:10px;font-weight:500;line-height:1;background:color-mix(in srgb,currentColor 12%,transparent);color:inherit}[data-code-codex-account-popup]{position:fixed;inset:auto;margin:0;padding:6px;min-width:min(300px,calc(100vw - 24px));max-width:min(334px,calc(100vw - 24px));max-height:min(420px,calc(100vh - 24px));overflow:auto;border:1px solid var(--color-border,rgba(128,128,128,.18));border-radius:12px;background:var(--color-codex-application-menu,#f8f8f9);color:var(--app-color-foreground-application-menu,#1a1c1f);box-shadow:0 4px 12px rgba(0,0,0,.25);font:400 14px/20px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-app-region:no-drag}[data-code-codex-account-popup] [data-account-id]{display:flex;align-items:center;gap:10px;width:100%;min-height:38px;padding:7px 10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:start;cursor:pointer}[data-code-codex-account-popup] [data-account-id]:hover,[data-code-codex-account-popup] [data-account-id]:focus-visible{outline:0;background:var(--color-background-primary-ghost-hover,rgba(128,128,128,.1))}[data-code-codex-account-popup] .account-email{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}[data-code-codex-account-popup] .account-avatar{width:22px;height:22px;font-size:11px}[data-code-codex-account-popup] [data-account-check]{margin-inline-start:auto;width:17px;height:17px;display:inline-flex;align-items:center;flex:none}[data-code-codex-account-popup] [data-account-id][aria-disabled=true]{cursor:default}[data-account-trigger]{color:var(--color-text-primary,#1a1c1f)!important;opacity:1!important;position:relative}[data-account-trigger] .account-quota{opacity:1}`;
 
+const ANCHORED_POPUP_CSS=`[data-account-trigger]{anchor-name:--code-codex-composer-account}[data-code-codex-account-popup][data-account-anchored]{position-anchor:--code-codex-composer-account;position-area:top span-right;justify-self:start;margin:0 8px 6px 0;position-try-fallbacks:--code-codex-account-menu-end,flip-block,--code-codex-account-menu-end flip-block}@position-try --code-codex-account-menu-end{position-area:top span-left;justify-self:end;margin:0 0 6px 8px}[data-code-codex-model-preview] > span{display:none}[data-code-codex-model-preview]::before{content:attr(data-code-codex-model-preview)}`;
 const ROW_CSS=`[data-code-codex-account-popup]{width:min(334px,calc(100vw - 24px));box-sizing:border-box}[data-code-codex-account-popup] [data-account-id]{display:grid;grid-template-columns:22px minmax(0,1fr) 25px;gap:10px;min-height:68px;padding:4px 10px;box-sizing:border-box}[data-code-codex-account-popup] .account-details{display:grid;gap:0;min-width:0}[data-code-codex-account-popup] .account-details .account-quota{font-size:11px;line-height:14px}[data-code-codex-account-popup] .account-feedback{display:block;min-height:12px;font-size:11px;line-height:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}[data-code-codex-account-popup] .account-feedback[data-first-switch]{white-space:normal;overflow-wrap:anywhere}[data-code-codex-account-popup] [data-account-check]{margin:0;justify-self:end;justify-content:center}[data-code-codex-account-popup] [data-account-id][data-account-preparing]{background:color-mix(in srgb,var(--color-text-accent,#1683cf) 9%,transparent)}[data-account-preparing] [data-account-check],[data-account-preparing] .account-feedback{color:var(--color-text-accent,#1683cf)}[data-account-error] .account-feedback{color:var(--color-text-secondary,inherit);white-space:normal;overflow-wrap:anywhere}.account-switch-spinner{display:block;width:13px;height:13px;border:1.5px solid color-mix(in srgb,currentColor 20%,transparent);border-top-color:currentColor;border-radius:50%;box-sizing:border-box;animation:account-switch-spin .9s linear infinite}@keyframes account-switch-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.account-switch-spinner{animation:none}}`;
 
 /** A document-owned native-style control; market disposal cannot remove it. */
@@ -62,7 +63,7 @@ export class ComposerAccountSelector {
   this.#feedback.textContent=t('accounts.error.notSent')+' '+accountActionMessage(message);mount.append(this.#feedback);clearTimeout(this.#feedbackTimer);
   this.#feedbackTimer=setTimeout(()=>this.#feedback?.remove(),8000);
  }
- #blockSend():boolean {const status=this.adapter.status();if(status.sendBlocked){this.#report(status.error??'ACCOUNT_EXECUTION_UNSUPPORTED: The requested execution account is not ready. No turn was sent.');return true;}return !!status.preparing;}
+ #blockSend(status=this.adapter.status()):boolean {if(status.sendBlocked){this.#report(status.error??'ACCOUNT_EXECUTION_UNSUPPORTED: The requested execution account is not ready. No turn was sent.');return true;}return !!status.preparing;}
  #root():Element|undefined{
   const root=this.#anchor?.isConnected?this.#anchor.closest(COMPOSER):null;if(root&&!root.closest(EXCLUDED))return root;
   if(this.#composerRoot?.isConnected&&!this.#composerRoot.closest(EXCLUDED)&&this.#mountConversation===this.adapter.status().conversationId)return this.#composerRoot;
@@ -118,13 +119,15 @@ export class ComposerAccountSelector {
  #sendGate(event:Event,target?:HTMLButtonElement):void{
   if(this.#approvedSend)return;
   const reject=()=>{event.preventDefault();event.stopImmediatePropagation();};
-  if(this.#sendPreparing||this.#blockSend()){reject();return;}
-  if(!this.adapter.requiresSendPreparation?.())return;
+  const status=this.adapter.status();
+  if(this.#sendPreparing||this.#blockSend(status)){reject();return;}
+  // The host owns enqueue/steer while its current turn is active.
+  if(status.busy||!this.adapter.requiresSendPreparation?.())return;
   reject();const buttons=target?[target]:activePageElements<HTMLButtonElement>(document,SEND).filter(b=>this.#belongs(b)&&b.checkVisibility());
   const fields=this.#editors();
   const button=buttons.length===1?buttons[0]:undefined;
   if(!button||fields.length!==1){runtimeEvent('accounts','account.send','blocked',{stage:'composer-qualification',editors:fields.length,buttons:buttons.length,taskSent:false});this.#report('ACCOUNT_SEND_CONTROL_UNAVAILABLE: The native composer could not be verified. No message was sent.');return;}
-  const field=fields[0]!,id=this.adapter.status().conversationId,epoch=++this.#sendEpoch;
+  const field=fields[0]!,id=status.conversationId,epoch=++this.#sendEpoch;
   const fingerprint=(editor:HTMLElement)=>JSON.stringify([editor instanceof HTMLTextAreaElement?editor.value:editor.innerHTML,[...(editor.closest('form')??editor.parentElement)?.querySelectorAll('img,[data-attachment-id]')??[]].map(n=>[n.getAttribute('src'),n.getAttribute('data-attachment-id')])]);
   const before=fingerprint(field),started=performance.now();this.#sendPreparing=true;
   void this.adapter.prepareSend().then(async()=>{
@@ -179,10 +182,13 @@ export class ComposerAccountSelector {
   if(!this.#host){
    const host=this.#host=document.createElement('span');host.dataset.codeCodexAccountSelector='';
    const button=this.#button=document.createElement('button');button.type='button';button.dataset.accountTrigger='';button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','false');
-   button.addEventListener('click',()=>this.#popup?.matches(':popover-open')?this.close():this.open());
-   button.addEventListener('keydown',event=>{if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();event.stopPropagation();this.open();}});
-   host.append(button);const style=this.#style=document.createElement('style');style.dataset.accountSelectorStyle='';style.textContent=CSS+ROW_CSS;document.head.append(style);
-   const popup=this.#popup=document.createElement('div');popup.dataset.codeCodexAccountPopup='';popup.setAttribute('popover','manual');popup.setAttribute('role','menu');popup.setAttribute('aria-label',t('accounts.selector'));document.body.append(popup);
+   button.addEventListener('click',event=>this.#popup?.matches(':popover-open')?this.close():this.open(event.detail===0));
+   button.addEventListener('keydown',event=>{if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();event.stopPropagation();this.open(true);}else if(event.key==='Escape'&&this.#popup?.matches(':popover-open')){event.preventDefault();event.stopPropagation();this.close();}});
+   host.append(button);const style=this.#style=document.createElement('style');style.dataset.accountSelectorStyle='';style.textContent=CSS+ANCHORED_POPUP_CSS+ROW_CSS;document.head.append(style);
+   const popup=this.#popup=document.createElement('div');popup.dataset.codeCodexAccountPopup='';popup.setAttribute('popover','manual');popup.setAttribute('role','menu');popup.setAttribute('aria-label',t('accounts.selector'));
+   popup.toggleAttribute('data-account-anchored',globalThis.CSS.supports('position-area','top span-right')&&globalThis.CSS.supports('position-try-fallbacks','flip-block'));
+   popup.addEventListener('toggle',()=>{if(popup.matches(':popover-open'))this.requestUpdate();});
+   document.body.append(popup);
    popup.addEventListener('keydown',event=>{const options=[...popup.querySelectorAll<HTMLElement>('[data-account-id]')];let at=options.indexOf(document.activeElement as HTMLButtonElement);if(event.key==='Escape'){event.preventDefault();event.stopPropagation();this.close();button.focus();}else if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();event.stopPropagation();at=event.key==='Home'?0:event.key==='End'?options.length-1:(at+(event.key==='ArrowDown'?1:-1)+options.length)%options.length;options[at]?.focus();}});
   }
   const mount=this.#mount;
@@ -197,7 +203,7 @@ export class ComposerAccountSelector {
   if(button.dataset.email!==email){button.dataset.email=email;const text=document.createElement('span');text.className='account-email';text.textContent=email;const chevron=document.createElement('span');chevron.className='account-chevron';chevron.innerHTML=arrow;button.replaceChildren(avatar(email),text,quotaElement(status.selected),chevron);}
   const quota=button.querySelector<HTMLElement>('.account-quota');if(quota){if(quota.dataset.accountQuota!==status.selected)quota.dataset.accountQuota=status.selected;if(selected?.api){delete quota.dataset.quotaSignature;if(quota.hasChildNodes())quota.replaceChildren();quota.hidden=true;}else{quota.hidden=false;updateQuota(quota,this.adapter.usage);}}
   if(status.supported&&selected&&!selected.api)this.adapter.usage?.refresh([status.selected]);
-  if(this.#popup?.matches(':popover-open')){this.adapter.usage?.refresh(choices.map(c=>c.id));this.#renderMenu();}
+  if(this.#popup?.matches(':popover-open')){this.adapter.usage?.refresh(choices.map(c=>c.id));this.#renderMenu(choices,status);}
  };
  #syncSendLocks(preparing:boolean):void {
   if(preparing){if(!this.#sendDirty)return;this.#sendDirty=false;for(const button of activePageElements<HTMLButtonElement>(document,SEND).filter(b=>this.#belongs(b)&&b.checkVisibility())){
@@ -207,8 +213,8 @@ export class ComposerAccountSelector {
    if(button.hasAttribute('data-code-codex-account-send-locked')){button.inert=previous.inert;if(previous.aria===null)button.removeAttribute('aria-disabled');else button.setAttribute('aria-disabled',previous.aria);delete button.dataset.codeCodexAccountSendLocked;}
   }this.#sendLocks.clear();this.#sendDirty=true;}
  }
- #renderMenu():void{
-  const popup=this.#popup!,status=this.adapter.status(),choices=this.#choices();
+ #renderMenu(choices=this.#choices(),status=this.adapter.status()):void{
+  const popup=this.#popup!;
   if(this.#rowFailure?.conversationId!==status.conversationId)this.#rowFailure=undefined;
   const target=status.preparing&&status.selectionTarget&&status.selectionTarget.conversationId===status.conversationId?status.selectionTarget.id:undefined;
   const signature=JSON.stringify([choices,status.selected,status.busy,target,status.preparation?.phase,this.#rowFailure,this.adapter.usage?.revision,getLocale(),Math.floor(Date.now()/60000)]);
@@ -226,12 +232,12 @@ export class ComposerAccountSelector {
    const identityLine=document.createElement('span');identityLine.className='account-identity-line';identityLine.append(email,planBadge(choice.plan));details.append(identityLine,quota,feedback);item.append(avatar(choice.email),details,check);
    item.addEventListener('keydown',event=>{if(event.target===item&&(event.key==='Enter'||event.key===' ')){event.preventDefault();item!.click();}});
    item.addEventListener('click',()=>{
-     if(this.adapter.status().preparing)return;const conversationId=this.adapter.status().conversationId;this.#rowFailure=undefined;
+     const current=this.adapter.status();if(current.preparing&&!current.deferredSelection)return;const conversationId=current.conversationId;this.#rowFailure=undefined;
     void this.adapter.select(choice.id).then(()=>this.update(),error=>{this.#rowFailure={id:choice.id,conversationId,code:accountErrorCode(error)};this.notice(String(error));this.update();});this.update();
    });
    }
    const preparing=choice.id===target,failed=this.#rowFailure?.id===choice.id;
-   set(item,'aria-checked',String(choice.id===status.selected));set(item,'aria-disabled',String(status.busy));set(item,'aria-busy',String(preparing));
+   set(item,'aria-checked',String(choice.id===status.selected));set(item,'aria-disabled',String(status.busy&&!status.deferredSelection));set(item,'aria-busy',String(preparing));
    if(item.hasAttribute('data-account-preparing')!==preparing)item.toggleAttribute('data-account-preparing',preparing);
    if(item.hasAttribute('data-account-error')!==!!failed)item.toggleAttribute('data-account-error',!!failed);
    const email=item.querySelector<HTMLElement>('.account-email')!;if(email.textContent!==choice.email)email.textContent=choice.email;
@@ -246,12 +252,23 @@ export class ComposerAccountSelector {
   }
   for(const item of existing.values())item.remove();
  }
- open():void{
-  if(!this.#button||this.#button.disabled)return;this.adapter.usage?.refresh(this.#choices().map(c=>c.id));this.#renderMenu();const popup=this.#popup!;popup.showPopover();this.#button.setAttribute('aria-expanded','true');this.#button.dataset.state='open';
-  const a=this.#button.getBoundingClientRect(),b=popup.getBoundingClientRect();popup.style.left=Math.max(12,Math.min(innerWidth-b.width-12,a.left))+'px';popup.style.top=(a.top-b.height-6>=12?a.top-b.height-6:Math.min(innerHeight-b.height-12,a.bottom+6))+'px';
-  (popup.querySelector<HTMLButtonElement>('[aria-checked="true"]')??popup.querySelector<HTMLElement>('[data-account-id]'))?.focus();
-  clearTimeout(this.#timer);this.#timer=setTimeout(this.#menuTick,60000-Date.now()%60000+10);
+ open(focus=false):void{
+  const button=this.#button,popup=this.#popup;
+  if(!button||button.disabled||!popup)return;
+  if(!popup.matches(':popover-open')){
+   const anchored=popup.hasAttribute('data-account-anchored'),anchor=anchored?undefined:button.getBoundingClientRect();
+   this.#renderMenu();
+   button.setAttribute('aria-expanded','true');
+   popup.showPopover();
+   if(anchor){
+    const {width,height}=popup.getBoundingClientRect();
+    popup.style.left=Math.max(12,Math.min(innerWidth-width-12,anchor.left))+'px';
+    popup.style.top=(anchor.top-height-6>=12?anchor.top-height-6:Math.min(innerHeight-height-12,anchor.bottom+6))+'px';
+   }
+   this.#timer=setTimeout(this.#menuTick,60000-Date.now()%60000+10);
+  }
+  if(focus)(popup.querySelector<HTMLElement>('[aria-checked="true"]')??popup.querySelector<HTMLElement>('[data-account-id]'))?.focus({preventScroll:true});
  }
- close():void{clearTimeout(this.#timer);if(this.#popup?.matches(':popover-open'))this.#popup.hidePopover();if(this.#button?.getAttribute('aria-expanded')!=='false')this.#button?.setAttribute('aria-expanded','false');if(this.#button&&this.#button.dataset.state!=='closed')this.#button.dataset.state='closed';}
+ close():void{clearTimeout(this.#timer);if(this.#button?.getAttribute('aria-expanded')==='true')this.#button.setAttribute('aria-expanded','false');if(this.#popup?.matches(':popover-open'))this.#popup.hidePopover();}
  dispose():void{this.#quota.dispose();this.#models.dispose();this.#syncSendLocks(false);this.#disposed=true;clearTimeout(this.#timer);clearTimeout(this.#feedbackTimer);if(this.#frame!==undefined)cancelAnimationFrame(this.#frame);this.#observer.disconnect();this.#unsubscribe();this.#abort.abort();window.removeEventListener(ACCOUNT_UI_CHANGED,this.requestUpdate);this.close();this.#host?.remove();this.#popup?.remove();this.#style?.remove();this.#feedback?.remove();}
 }
