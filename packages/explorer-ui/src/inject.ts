@@ -1,10 +1,15 @@
+import { BACKGROUND_HANDOFF_ATTRIBUTE, BACKGROUND_HANDOFF_COLOR } from './components/styles/background-surfaces';
 import {recordCaughtRuntimeError} from './runtime-operations';
 import {installOfficialUpdateHandoff} from './official-update-handoff';
 import {nativeSettingsBackgroundCss} from './native-background-surfaces';
+import {NATIVE_WORKSPACE_BACKGROUND_CSS} from './native-workspace-background';
+import {NativePaintTargets} from './native-paint-targets';
 import {NATIVE_COMPOSER_BACKDROP_CSS} from './native-composer-backdrop';
 import {NATIVE_SIDE_PANEL_OPACITY_CSS} from './native-side-panel-opacity';
 import { optionalPluginExport } from './utility-plugin-facade';
 import { monitorStartupReadiness } from './startup-readiness';
+import { disposeWelcome, openWelcomeFromMenu, reconcileFirstRunWelcome } from './first-run-welcome';
+import { disposeQuickTour, openQuickTour } from './quick-tour';
 import { getBootstrapConfig } from "./bridge";
 import { prepareStartupTransitionHandoff, getEarlyStartupTransition } from "./startup-transition-plugin";
 import { reconcileApplicationMenu } from "./application-menu";
@@ -18,14 +23,16 @@ import {
   activePageElements,
   isTemporaryLocalThreadAlias,
   MAIN_SURFACE_SELECTOR,
+  NATIVE_FIXED_TITLEBAR_SELECTOR,
   plausibleThreadId,
   qualifiedAppShellForMain,
   qualifiedWorkspaceRowForMain,
+  SPLIT_MAIN_VIEW_SELECTOR,
 } from "./adapters/codex-26.715";
 import { isHomeWorkspaceView } from "./home-view";
 import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground, isNativeLoginView } from "./native-login";
-import {nativeStructureChanged} from './native-structure-changes';
-import { SURFACE_OPACITY_NATIVE_CSS } from "./surface-opacity";
+import {observeNativeStructure} from './native-structure-changes';
+import {UPDATE_MOUNT_READY} from './host-update-mount';
 import {
   clearExplorerDismissalForSession,
   dismissExplorerForSession,
@@ -67,23 +74,23 @@ const CURRENT_LAYOUT_HEADER_LEFT_PROPERTY = "--code-codex-current-layout-header-
 const SHELL_LAYOUT_CSS = `
 ${NATIVE_COMPOSER_BACKDROP_CSS}
 ${NATIVE_SIDE_PANEL_OPACITY_CSS}
+${NATIVE_WORKSPACE_BACKGROUND_CSS}
 /* Native split motion width is based on the shell, before our inline tree.
  * Let the native frame fit its actual viewport; preserve native single/full views. */
-${CURRENT_LAYOUT_EXPLORER_SELECTOR} + :has(${MAIN_SURFACE_SELECTOR}) ${MAIN_SURFACE_SELECTOR} [data-app-shell-workspace-layout="split"][data-app-shell-right-panel-full-width="false"] > [class*="MainContentFrame-"] {
+${CURRENT_LAYOUT_EXPLORER_SELECTOR} + * ${MAIN_SURFACE_SELECTOR} ${SPLIT_MAIN_VIEW_SELECTOR} > [data-code-codex-native-split-frame] {
   max-width: 100% !important;
 }
 
 /* The new page shell keeps the conversation title in a fixed body header,
  * outside the flex row that our file tree widens. Shift that header by the
  * measured panel width; the legacy title lives inside main and is untouched. */
-html:has(${CURRENT_LAYOUT_EXPLORER_SELECTOR}:not([data-home-view-hidden])) header:has([data-app-shell-titlebar-content]):not([data-app-shell-active-page="false"] *) {
+html:has(${CURRENT_LAYOUT_EXPLORER_SELECTOR}:not([data-home-view-hidden])) ${NATIVE_FIXED_TITLEBAR_SELECTOR}:not([data-app-shell-active-page="false"] *) {
   left: var(${CURRENT_LAYOUT_HEADER_LEFT_PROPERTY}) !important;
 }
 
-/* The row begins above the native sidebar and conversation surface by 8px. */
+/* The injected tree fills the workspace; the native content owns its inset. */
 ${CURRENT_LAYOUT_EXPLORER_SELECTOR} {
-  margin-top: 8px;
-  height: calc(100% - 8px) !important;
+  height: 100% !important;
   min-height: 0;
 }
 
@@ -99,12 +106,12 @@ html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horiz
   background-clip: border-box !important;
 }
 
-html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:main-content-clip"] + :has(> ${MAIN_SURFACE_SELECTOR}) > ${MAIN_SURFACE_SELECTOR} {
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:main-content-clip"] + * > ${MAIN_SURFACE_SELECTOR} {
   border-left-color: transparent !important;
   background-clip: border-box !important;
 }
 
-html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:workspace-row"] + :has(${MAIN_SURFACE_SELECTOR}) ${MAIN_SURFACE_SELECTOR} {
+html:is([data-code-codex-particle-image-background], [data-code-codex-glow-horizon-background]) body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-collapsed="true"][data-mount-strategy="known:workspace-row"] + * ${MAIN_SURFACE_SELECTOR} {
   border-left-color: transparent !important;
   background-clip: border-box !important;
 }
@@ -125,19 +132,20 @@ ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"][data-mount-strategy="known:m
 }
 `;
 
+const PARTICLE_SURFACE_ROOT = `html:is([${PARTICLE_BACKGROUND_ATTRIBUTE}],[${BACKGROUND_HANDOFF_ATTRIBUTE}])`;
 const PARTICLE_BACKGROUND_CSS = `
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] {
-  background-color: var(${PARTICLE_BACKGROUND_COLOR_PROPERTY}, #000) !important;
+${PARTICLE_SURFACE_ROOT} {
+  background-color: var(${PARTICLE_BACKGROUND_COLOR_PROPERTY}, var(${BACKGROUND_HANDOFF_COLOR}, #000)) !important;
   --code-codex-particle-ui-surface: rgba(11, 12, 15, .58);
   --code-codex-particle-ui-surface-strong: rgba(16, 17, 20, .66);
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body {
+${PARTICLE_SURFACE_ROOT} body {
   isolation: isolate;
   background-color: transparent !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
+${PARTICLE_SURFACE_ROOT} body :is(
   main.main-surface,
   [data-app-shell-main-surface="default"]
 ) {
@@ -154,7 +162,7 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
  */
 ${nativeSettingsBackgroundCss(PARTICLE_BACKGROUND_ATTRIBUTE)}
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
+${PARTICLE_SURFACE_ROOT} body :is(
   aside.app-shell-left-panel,
   aside[data-testid="app-shell-floating-left-panel"].bg-surface,
   aside[data-app-shell-focus-area="right-panel"]
@@ -162,7 +170,7 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
   background-color: var(--code-codex-particle-ui-surface-strong) !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
+${PARTICLE_SURFACE_ROOT} body :is(
   aside[data-app-shell-focus-area="right-panel"] .bg-surface,
   [data-app-shell-header-edge-scroll],
   .thread-scroll-container[data-app-action-timeline-scroll]
@@ -172,38 +180,38 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body :is(
 
 /* Project conversations place the composer fade in the thread scroll content,
  * beside the footer rather than inside it. Cover both native layouts. */
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body .thread-scroll-container[data-app-action-timeline-scroll] [class*="bg-gradient-to-t"],
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-thread-scroll-footer="true"] [class*="bg-gradient-to-t"],
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body [data-above-composer-portal] [class*="bg-gradient-to-t"] {
+${PARTICLE_SURFACE_ROOT} body .thread-scroll-container[data-app-action-timeline-scroll] [class*="bg-gradient-to-t"],
+${PARTICLE_SURFACE_ROOT} body [data-thread-scroll-footer="true"] [class*="bg-gradient-to-t"],
+${PARTICLE_SURFACE_ROOT} body [data-above-composer-portal] [class*="bg-gradient-to-t"] {
   background-image: none !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"] {
+${PARTICLE_SURFACE_ROOT} body ${OWNED_EXPLORER_SELECTOR}[data-placement="inline"] {
   position: relative !important;
   z-index: 3 !important;
   opacity: 1 !important;
   visibility: visible !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] body ${OWNED_EXPLORER_SELECTOR}[data-placement="drawer"] {
+${PARTICLE_SURFACE_ROOT} body ${OWNED_EXPLORER_SELECTOR}[data-placement="drawer"] {
   z-index: 2147483000 !important;
   opacity: 1 !important;
   visibility: visible !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] [data-code-codex-particle-layer] {
+${PARTICLE_SURFACE_ROOT} [data-code-codex-particle-layer] {
   position: fixed !important;
   inset: 0 !important;
   width: 100vw !important;
   height: 100vh !important;
   z-index: -1 !important;
   pointer-events: none !important;
-  background: var(${PARTICLE_BACKGROUND_COLOR_PROPERTY}, #000);
+  background: var(${PARTICLE_BACKGROUND_COLOR_PROPERTY}, var(${BACKGROUND_HANDOFF_COLOR}, #000));
   contain: strict;
   overflow: hidden !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] [data-code-codex-particle-layer] > :is(
+${PARTICLE_SURFACE_ROOT} [data-code-codex-particle-layer] > :is(
   .code-codex-particle-source,
   .code-codex-particle-canvas
 ) {
@@ -215,18 +223,18 @@ html[${PARTICLE_BACKGROUND_ATTRIBUTE}] [data-code-codex-particle-layer] > :is(
   pointer-events: none !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-particle-source {
+${PARTICLE_SURFACE_ROOT} .code-codex-particle-source {
   object-fit: contain !important;
   filter: grayscale(1) !important;
   user-select: none !important;
   will-change: opacity, transform;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-particle-canvas {
+${PARTICLE_SURFACE_ROOT} .code-codex-particle-canvas {
   z-index: 2 !important;
 }
 
-html[${PARTICLE_BACKGROUND_ATTRIBUTE}] .code-codex-black-hole-canvas[hidden] {
+${PARTICLE_SURFACE_ROOT} .code-codex-black-hole-canvas[hidden] {
   display: none !important;
 }
 `;
@@ -312,7 +320,8 @@ html[${GLOW_HORIZON_BACKGROUND_ATTRIBUTE}] [data-code-codex-glow-horizon-layer] 
 }
 `;
 
-let remountObserver: MutationObserver | undefined;
+const nativePaintTargets=new NativePaintTargets(document);
+let remountObserver: {disconnect():void} | undefined;
 let remountFrame: number | undefined;
 let remountEnabled = true;
 let dismissListenerInstalled = false;
@@ -502,7 +511,7 @@ function installParticleBackgroundStyle(): void {
     style.dataset.codeCodexParticleBackground = "v1";
     (document.head ?? document.documentElement).append(style);
   }
-  const css = PARTICLE_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS + SURFACE_OPACITY_NATIVE_CSS;
+  const css = PARTICLE_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS;
   if (style.textContent !== css) style.textContent = css;
 }
 
@@ -513,7 +522,7 @@ function installGlowHorizonBackgroundStyle(): void {
     style.dataset.codeCodexGlowHorizonBackground = "v1";
     (document.head ?? document.documentElement).append(style);
   }
-  const css = GLOW_HORIZON_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS + SURFACE_OPACITY_NATIVE_CSS;
+  const css = GLOW_HORIZON_BACKGROUND_CSS + PAGE_SURFACE_BACKGROUND_CSS + LOGIN_BACKGROUND_CSS;
   if (style.textContent !== css) style.textContent = css;
 }
 
@@ -526,7 +535,18 @@ function revealExplorer(): CodeCodexElement | null {
   return explorer;
 }
 
+function startQuickTour(): void {
+  openQuickTour({
+    explorerRoot: () => document.querySelector(EXPLORER_TAG)?.shadowRoot ?? null,
+    ...(isHomeWorkspaceView() ? { revealExplorer } : {}),
+  });
+}
+
 const applicationMenuActions = {
+  openQuickTour: () => {
+    disposeQuickTour();
+    openWelcomeFromMenu(getBootstrapConfig().welcomeBanner ?? '', startQuickTour);
+  },
   getLoginStartup: () => {
     return requestApplicationMenu<import('./contracts/login-startup').LoginStartupStatus>('explorer.login.startup.get');
   },
@@ -576,6 +596,7 @@ const applicationMenuActions = {
 };
 
 export function injectExplorer(): CodeCodexElement | null {
+  nativePaintTargets.update();
   if (document.body) observeCodexRuntime();
   reconcileLoginBackground();
   reconcileApplicationMenu(applicationMenuActions);
@@ -598,6 +619,7 @@ export function injectExplorer(): CodeCodexElement | null {
     backgroundHost.dataset.codeCodexOwned = "true";
     backgroundHost.setHomeViewActive(false);
     if (!backgroundHost.isConnected) document.body.append(backgroundHost);
+    window.dispatchEvent(new Event(UPDATE_MOUNT_READY));
     return backgroundHost;
   }
   const mount = chooseMount();
@@ -627,12 +649,14 @@ export function injectExplorer(): CodeCodexElement | null {
   else mount.parent.append(explorer);
   explorer.reconcileMainPreview(mount.mainSurface);
   reconcileCurrentLayoutHeader(explorer, mount.strategy);
+  window.dispatchEvent(new Event(UPDATE_MOUNT_READY));
   return explorer;
 }
 
 function retireRemountObserver(): void {
   remountObserver?.disconnect();
   remountObserver = undefined;
+  nativePaintTargets.clear();
   if (remountFrame !== undefined) cancelAnimationFrame(remountFrame);
   remountFrame = undefined;
   if (dismissListenerInstalled) {
@@ -717,11 +741,7 @@ function scheduleMountReconciliation(): void {
 
 function installRemountObserver(): void {
   if (remountObserver || !document.documentElement || !remountEnabled) return;
-  remountObserver = new MutationObserver(records => {if(nativeStructureChanged(records))scheduleMountReconciliation();});
-  remountObserver.observe(document.documentElement, {
-    childList: true, subtree: true, attributes: true,
-    attributeFilter: ["data-app-shell-active-page", "aria-current", "data-sidebar-destination"],
-  });
+  remountObserver = observeNativeStructure(scheduleMountReconciliation);
   if (!dismissListenerInstalled) {
     dismissListenerInstalled = true;
     window.addEventListener(DISMISS_EVENT, disableRemount);
@@ -730,6 +750,8 @@ function installRemountObserver(): void {
 
 export function installInjector(): void {
   if (!claimRuntimeOwnership()) return;
+  disposeWelcome();
+  disposeQuickTour();
   const startupSplashActive = getBootstrapConfig().startupSplashActive === true;
   prepareStartupTransitionHandoff(startupSplashActive);
   window.__codeCodexInject = injectExplorer;
@@ -747,8 +769,11 @@ export function installInjector(): void {
     }
     installRemountObserver();
     void startupTransitionPromise.then((startupTransition) => {
-      if (!startupTransition) return;
-      monitorStartupReadiness(startupTransition);
+      if (startupTransition) monitorStartupReadiness(startupTransition);
+      if (window.__codeCodexInject === injectExplorer) {
+        const { welcomePending, welcomeBanner } = getBootstrapConfig();
+        reconcileFirstRunWelcome(welcomePending ? welcomeBanner : undefined, startQuickTour);
+      }
     });
   };
   if (document.body) start();

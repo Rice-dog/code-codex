@@ -6,6 +6,19 @@ function unique(entries,role){const values=new Map();for(const e of entries)if(!
 export function dispatcherRole(namespace){return unique(Object.entries(namespace).filter(([,v])=>v&&method(v,'subscribe')&&method(v,'dispatchMessage')).map(([key,value])=>({key,value})),'dispatcher');}
 function managerMethod(value,name){if(method(value.prototype,name))return true;for(let p=value.prototype,depth=0;p&&p!==Object.prototype&&depth<8;p=Object.getPrototypeOf(p),depth++){const ctor=Object.getOwnPropertyDescriptor(p,'constructor')?.value;if(typeof ctor==='function'&&new RegExp('\\b'+name+'\\s*=').test(Function.prototype.toString.call(ctor)))return true;}return false;}
 export function managerRole(namespace){return unique(Object.entries(namespace).filter(([,v])=>typeof v==='function'&&v.prototype&&['getConversation','startTurn','getStreamRole','onNotification','onRequest'].every(k=>method(v.prototype,k))&&['executeTurnStart','sendAppServerResponse'].every(k=>managerMethod(v,k))).map(([key,value])=>({key,value})),'conversation-manager');}
+export function nativeAccountServices(namespace){
+ return [...new Set(Object.values(namespace))].filter(value=>{
+  if(!value||typeof value!=='object')return false;
+  const fields=Object.getOwnPropertyDescriptors(value);
+  return fields.appServerManagers?.value&&fields.executionHosts?.value&&fields.appActions?.value;
+ });
+}
+export function rpcManagerService(namespace,methods=['dup','subscribe']){
+ const services=new Set(nativeAccountServices(namespace).map(scope=>scope.appServerManagers)
+  .filter(service=>methods.every(name=>typeof service[name]==='function')));
+ if(services.size>1)throw failure('role-selection','rpc-manager-service',services.size);
+ return [...services][0];
+}
 // Numbered Rspack entries expose the existing runtime. Only already initialized
 // modules are inspected: never require an arbitrary factory or execute source.
 const numberedPath=/^\.\/assets\/[0-9]+\.[A-Za-z0-9_-]+\.js$/;
@@ -63,8 +76,11 @@ export async function qualifyNumberedHost(manifest,load=path=>import(/* @vite-ig
   let namespace;try{namespace=await load(path);}catch{throw failure('module-import','runtime',0);}
   if(!runtimeFrom(namespace))continue;
   const initial=path+'#cc-host=initial',shared=path+'#cc-host=shared';
-  const manager=managerRole(await loadHostNamespace(initial,load)),dispatcher=dispatcherRole(await loadHostNamespace(shared,load));
-  matches.push({version:String(manifest.version??'unknown').slice(0,64),initial,shared,managerExport:manager.key,senderExport:'',dispatcherExport:dispatcher.key,actions:[path+'#cc-host=actions'],appearance:[path+'#cc-host=appearance'],compatibility:'capabilities',contractRevision:2});
+  const sharedNamespace=await loadHostNamespace(shared,load);
+  const dispatcher=dispatcherRole(sharedNamespace);
+  const service=rpcManagerService(sharedNamespace,['dup','open','subscribe']);
+  const managerExport=service?'':managerRole(await loadHostNamespace(initial,load)).key;
+  matches.push({version:String(manifest.version??'unknown').slice(0,64),initial,shared,managerExport,senderExport:'',dispatcherExport:dispatcher.key,actions:[path+'#cc-host=actions'],appearance:[path+'#cc-host=appearance'],compatibility:'capabilities',contractRevision:2});
  }
  if(matches.length!==1)throw failure('runtime-selection','runtime',matches.length);
  return Object.freeze(matches[0]);

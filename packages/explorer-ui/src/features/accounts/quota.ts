@@ -36,6 +36,9 @@ export function quotaResetTimes(raw:unknown,now=Date.now()):QuotaResetTimes {
  return {fiveHour:reset(300),weekly:reset(10080)};
 }
 interface Snapshot {raw?:unknown;phase:'loading'|'ready'|'unavailable';checkedAt:number;lastSuccessAt?:number|undefined;nextRead:number;error?:string;}
+type CreditDecision='allowed'|'exhausted'|'unknown';
+const assetRefreshMs=300000;
+const noSpendableCredits=(assets:Partial<AccountAssets>)=>assets.unlimited===false&&(assets.hasCredits===false||assets.balance!=null&&Number(assets.balance)===0);
 /** Owner-scoped, memory-only and shared by both views. Two reads at most; no inference. */
 export class AccountUsageStore {
  #redemptions=new Map<string,Promise<string>>();
@@ -61,6 +64,7 @@ export class AccountUsageStore {
  #activeReads=new Map<string,number>();
  #acceptedAt=new Map<string,number>();
  #cachedVersions=new Map<string,string>();
+ #creditEvidence=new Map<string,{ordinaryUntil:number;ordinaryDenied:boolean;noCreditsUntil:number}>();
  #suspended=false;
  #readSequence=0;
  revision=0;
@@ -68,8 +72,29 @@ export class AccountUsageStore {
  remaining(id:string):QuotaRemaining {const value=this.#values.get(id);return value?.raw?quotaRemaining(value.raw,this.now()):{fiveHour:null,weekly:null};}
  resetTimes(id:string):QuotaResetTimes {const cached=this.#resets.get(id),now=this.now();const valid=(value:number|null|undefined)=>value&&value*1000>now?value:null;return {fiveHour:valid(cached?.fiveHour),weekly:valid(cached?.weekly)};}
  diagnostics(id:string):Readonly<Snapshot>|undefined{return this.#values.get(id);}
+ sendCreditDecision(id:string):CreditDecision {
+  const proof=this.#creditEvidence.get(id),now=this.now();
+  if(!proof)return 'unknown';
+  if(proof.noCreditsUntil>now||proof.ordinaryUntil>now)return 'allowed';
+  return proof.ordinaryDenied?'exhausted':'unknown';
+ }
+ forgetCreditEvidence(id:string):void{this.#creditEvidence.delete(id);}
+ retryUnavailable(ids:readonly string[]):void {
+  const failed=ids.filter(id=>this.#values.get(id)?.phase==='unavailable');
+  for(const id of failed)this.#dirty.add(id);
+  this.refresh(failed);
+ }
  suspend(value:boolean):void{this.#suspended=value;if(!value)this.#pump();}
- markUsed(id:string):void{this.#inUse.add(id);this.#activeReads.set(id,this.now());}
+ markUsed(id:string):void{this.#inUse.add(id);this.#activeReads.set(id,this.now());const proof=this.#creditEvidence.get(id);if(proof)proof.ordinaryUntil=0;}
+ /** A foreground caller must use the same observation ordering as the background queue. */
+ async observeRead(id:string,read:()=>Promise<unknown>):Promise<unknown>{
+  const epoch=this.#observations.get(id)??0;
+  const raw=await read();
+  if(this.#disposed)return undefined;
+  if((this.#observations.get(id)??0)!==epoch)return this.#values.get(id)?.raw;
+  this.observe(id,raw);
+  return raw;
+ }
  observe(id:string,raw:unknown):void{
   if(this.#disposed)return;
   const before=this.#presentation(id);
@@ -97,7 +122,7 @@ export class AccountUsageStore {
   let updated=false;
   for(const id of new Set(ids)){
    const resetDue=this.#values.get(id)?.phase==='ready'&&(this.#values.get(id)?.nextRead??Infinity)<=this.now();
-   if(this.#inUse.has(id)&&!resetDue&&this.now()-(this.#activeReads.get(id)??this.now())<30000)continue;
+   if(this.#inUse.has(id)&&!resetDue&&!this.#dirty.has(id)&&this.now()-(this.#activeReads.get(id)??this.now())<30000)continue;
    const existing=this.#values.get(id);if(existing&&(existing.phase==='loading'||(existing.nextRead>this.now()&&!this.#dirty.has(id)&&!this.#inUse.has(id))))continue;
    if(existing?.phase==='unavailable'&&existing.nextRead>this.now()&&!this.#dirty.has(id))continue;
    if(this.#inUse.has(id))this.#activeReads.set(id,this.now());
@@ -114,7 +139,7 @@ export class AccountUsageStore {
     this.#accept(id,raw,this.now(),true);this.diagnostic(id,'completed',{stage:'quota-read',operationId,complete:this.#values.get(id)?.phase==='ready'});
    },error=>{
     if(this.#disposed||(this.#observations.get(id)??0)!==observation)return;
-    const code=accountErrorCode(error),retryMs=300000;
+    const code=accountErrorCode(error),retryMs=/\b(?:ERR_NETWORK_CHANGED|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ECONNRESET|ECONNREFUSED|ENOTFOUND)\b|networkObservation=(?:DNS|TLS|PROXY|CONNECTION)|error sending request|network error/i.test(String(error))?30000:300000;
     const previous=this.#values.get(id);
     this.#values.set(id,{...(previous?.raw?{raw:previous.raw}:{}),lastSuccessAt:previous?.lastSuccessAt,phase:'unavailable',checkedAt:this.now(),nextRead:this.now()+retryMs,error:code+': '+String(error)});
     this.diagnostic(id,'failed',{stage:'quota-read',retryMs,cached:!!previous?.raw,errorCode:code,error:String(error)});
@@ -122,7 +147,8 @@ export class AccountUsageStore {
   }
  }
  #accept(id:string,raw:unknown,observedAt=this.now(),officialRead=false):void{
-    const assetUpdate=projectAssets(raw),due=this.#assetDeadlines.get(id)??{credits:observedAt+300000,cards:observedAt+300000};
+    const assetUpdate=projectAssets(raw),due=this.#assetDeadlines.get(id)??{credits:observedAt+assetRefreshMs,cards:observedAt+assetRefreshMs};
+    const proof=this.#creditEvidence.get(id)??{ordinaryUntil:0,ordinaryDenied:false,noCreditsUntil:0};
     if(officialRead||Object.hasOwn(assetUpdate,'balance'))due.credits=observedAt+300000;
     if(officialRead||Object.hasOwn(assetUpdate,'availableCount'))due.cards=observedAt+300000;
     this.#assetDeadlines.set(id,due);
@@ -130,9 +156,16 @@ export class AccountUsageStore {
     this.#acceptedAt.set(id,observedAt);
     if(this.#inUse.has(id))this.#activeReads.set(id,observedAt);
     const now=this.now(),projected=projectQuota(raw),response=object(projected),bucket=object(response.rateLimits),resets=[bucket,...Object.values(object(response.rateLimitsByLimitId)).map(object)].flatMap(b=>[object(b.primary).resetsAt,object(b.secondary).resetsAt]).filter((v):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v*1000>now).map(v=>v*1000+500);
-    const observed=quotaResetTimes(projected,now),remaining=quotaRemaining(projected,now),previous=this.resetTimes(id),old=this.#values.get(id);
+    const resetTimes=quotaResetTimes(projected,now),remaining=quotaRemaining(projected,now),previous=this.resetTimes(id),old=this.#values.get(id);
+    if(Object.hasOwn(response,'ordinaryUsageAllowed')){
+      proof.ordinaryUntil=response.ordinaryUsageAllowed===true?Math.min(observedAt+assetRefreshMs,...resets):0;
+      proof.ordinaryDenied=response.ordinaryUsageAllowed===false;
+    }else if(remaining.fiveHour===0||remaining.weekly===0){proof.ordinaryUntil=0;}
+    if(noSpendableCredits(assetUpdate))proof.noCreditsUntil=observedAt+assetRefreshMs;
+    else if(assetUpdate.unlimited===true||assetUpdate.hasCredits===true||assetUpdate.balance!=null)proof.noCreditsUntil=0;
+    this.#creditEvidence.set(id,proof);
     const complete=remaining.fiveHour!==null&&remaining.weekly!==null;
-    const keep=(key:keyof QuotaResetTimes)=>remaining[key]===100&&observed[key]===null?null:previous[key]??observed[key];
+    const keep=(key:keyof QuotaResetTimes)=>remaining[key]===100&&resetTimes[key]===null?null:previous[key]??resetTimes[key];
     const cached={fiveHour:keep('fiveHour'),weekly:keep('weekly')};this.#resets.set(id,cached);
     resets.push(...(this.assets(id).cards??[]).map(c=>c.expiresAt).filter((v):v is number=>v!==null&&v*1000>now).map(v=>v*1000+500));
     resets.push(...Object.values(cached).filter((v):v is number=>v!==null).map(v=>v*1000+500));
@@ -142,5 +175,5 @@ export class AccountUsageStore {
     this.#values.set(id,{phase:complete?'ready':'unavailable',raw:effective,checkedAt:observedAt,lastSuccessAt:complete?observedAt:old?.lastSuccessAt,nextRead:complete?Math.min(observedAt+300000,due.credits,due.cards,...resets):now+30000,...complete?{}:{error:'ACCOUNT_USAGE_INCOMPLETE: The quota response did not contain both valid windows. Cached values may be shown; retry in 30 seconds.'}});
     if(!complete||old?.phase==='unavailable')this.diagnostic(id,complete?'recovered':'incomplete',{stage:'quota-validation',retryMs:complete?null:30000,cached:!!old?.raw,lastSuccessAt:complete?now:old?.lastSuccessAt,errorCode:complete?null:'ACCOUNT_USAGE_INCOMPLETE'});
  }
- dispose():void{this.#disposed=true;this.#queue=[];this.#values.clear();this.#assetValues.clear();this.#assetDeadlines.clear();this.#redemptions.clear();this.#resets.clear();this.#observations.clear();this.#activeReads.clear();this.#acceptedAt.clear();this.#cachedVersions.clear();this.#dirty.clear();this.#inUse.clear();}
+ dispose():void{this.#disposed=true;this.#queue=[];this.#values.clear();this.#assetValues.clear();this.#assetDeadlines.clear();this.#redemptions.clear();this.#resets.clear();this.#observations.clear();this.#activeReads.clear();this.#acceptedAt.clear();this.#cachedVersions.clear();this.#creditEvidence.clear();this.#dirty.clear();this.#inUse.clear();}
 }

@@ -123,8 +123,8 @@ try{
   check('optimized default preserves the original flower image composition',provenance,provenance.startup.width===512&&provenance.startup.height===512&&provenance.meanRGBError<15);
   const seeded=await evaluate('fixtureStorageSnapshot()');
   const catalog=await evaluate('imageStartupFixture.STARTUP_BACKGROUNDS');
-  const expectedSourceIds=[...packageCatalog.filter(p=>p.capabilities.includes('background')&&p.capabilities.includes('startup')).map(p=>p.id),'ascii-tiles'];
-  check('startup catalog includes all declared sources and the legacy ASCII startup factory',catalog,new Set(catalog.map(([id])=>id)).size===expectedSourceIds.length&&expectedSourceIds.every(id=>catalog.some(([value])=>id===value)));
+  const expectedSourceIds=[...packageCatalog.filter(p=>p.capabilities.includes('background')&&p.capabilities.includes('startup')).map(p=>p.id),'ascii-tiles','spectral-drape','shallow-ocean'];
+  check('startup catalog includes all declared and host-supplied startup sources',catalog,new Set(catalog.map(([id])=>id)).size===expectedSourceIds.length&&expectedSourceIds.every(id=>catalog.some(([value])=>id===value)));
   for(const id of ['particle-image','pixel-sculpt']){
     await evaluate(`(()=>{const target=document.createElement('div');target.className='test-source';target.dataset.fixtureCase=${JSON.stringify(id)};document.body.append(target);window.fixtureTarget=target;window.sourceErrors=[];window.renderer=imageStartupFixture.mountStartupBackground(target,${JSON.stringify(id)},message=>{if(message)sourceErrors.push(message)});window.sourceReady=false;window.sourceError=null;window.sourceDrawsAtReady=0;Promise.resolve(renderer.ready).then(()=>{sourceDrawsAtReady=fixtureDraws[${JSON.stringify(id)}]??0;sourceReady=true},error=>sourceError=String(error));window.immediateSourceState={ready:sourceReady,draws:fixtureDraws[${JSON.stringify(id)}]??0,error:sourceError}})()`);
     const immediate=await evaluate('immediateSourceState');
@@ -177,7 +177,7 @@ try{
   await evaluate(`(()=>{const e=document.querySelector('${tag}');e.openPreviewMarket();${shadow}.querySelector('[data-appearance-plugin="code-codex.startup-transition"]').scrollIntoView({block:'center'});${shadow}.querySelector('.startupTransition-settings-trigger').click()})()`);await delay(250);
   const expectedSourceNames=packageCatalog.filter(p=>expectedSourceIds.includes(p.id)).map(p=>p.name);
   const market=await evaluate(`(()=>{const s=${shadow};return {market:[...s.querySelectorAll('[data-appearance-plugin] h4')].map(e=>e.textContent).filter(name=>name.endsWith(' Background')&&name!=='Transparent Background'),options:[...s.querySelector('#cle-startupTransition-background').options].map(o=>({id:o.value,name:o.textContent}))}})()`);
-  check('real startup selector matches current declared and legacy ASCII sources including Custom',market,market.options.length===expectedSourceIds.length&&expectedSourceNames.every(name=>market.market.includes(name))&&expectedSourceIds.every(id=>market.options.some(option=>option.id===id))&&market.options.every(option=>market.market.includes(option.name)));
+  check('real startup selector matches declared and host-supplied sources',market,market.options.length===expectedSourceIds.length&&expectedSourceNames.every(name=>market.market.includes(name))&&expectedSourceIds.every(id=>market.options.some(option=>option.id===id))&&market.options.every(option=>market.market.includes(option.name)));
   const uiSettingsBefore=await evaluate('fixtureStorageSnapshot()');
   for(const id of ['particle-image','pixel-sculpt']){
     await evaluate(`(()=>{const s=${shadow},source=s.querySelector('#cle-startupTransition-source'),select=s.querySelector('#cle-startupTransition-background');source.value='background';source.dispatchEvent(new Event('change',{bubbles:true}));select.value=${JSON.stringify(id)};select.dispatchEvent(new Event('change',{bubbles:true}))})()`);await delay(1500);
@@ -222,8 +222,19 @@ try{
   const fallback=await evaluate(`({stage:window.__CODE_CODEX_EARLY_STARTUP_STATUS__?.stage,draws:fixtureDraws['pixel-default-no-gallery']??0,samples:fixturePixelSamples['pixel-default-no-gallery']??[],phase:window[Symbol.for('code-codex:startup-transition:controller:v1')]?.phase,minimum:window[Symbol.for('code-codex:startup-transition:controller:v1')]?.minimumRemainingMs,host:!!document.querySelector('body>.code-codex-startup-host')})`);
   report.defaultPixelFallback=fallback;
   check('actual early bundle renders default flower with no saved Pixel gallery',fallback,fallback.stage==='playing'&&fallback.draws>0&&fallback.host&&fallback.phase==='loading'&&fallback.minimum>3000);
-  check('default fallback draws real multicolor relief pixels',fallback.samples,new Set(fallback.samples.map(rgba=>rgba.join(','))).size>3);
-  await screenshot('pixel-sculpt-default-actual-early-bundle');
+  // Verify the composed output: the instrumented main-thread canvas can
+  // contain only the clear frame when the relief is painted by the worker.
+  let composedColors=0, composed;
+  for(let attempt=0;attempt<24&&composedColors<=3;attempt++){
+    composed=await command('Page.captureScreenshot',{format:'png'});
+    composedColors=await evaluate(`(async()=>{const bytes=Uint8Array.from(atob(${JSON.stringify(composed.data)}),c=>c.charCodeAt(0));
+      const bitmap=await createImageBitmap(new Blob([bytes],{type:'image/png'}));const canvas=new OffscreenCanvas(24,24);const context=canvas.getContext('2d');
+      context.drawImage(bitmap,bitmap.width/4,bitmap.height/4,bitmap.width/2,bitmap.height/2,0,0,24,24);bitmap.close();const data=context.getImageData(0,0,24,24).data;
+      const colors=new Set();for(let i=0;i<data.length;i+=4)colors.add(data[i]+','+data[i+1]+','+data[i+2]);return colors.size;})()`);
+    if(composedColors<=3)await delay(100);
+  }
+  writeFileSync(join(directory,'pixel-sculpt-default-actual-early-bundle.png'),Buffer.from(composed.data,'base64'));
+  check('default fallback draws real multicolor relief pixels',composedColors,composedColors>3);
   await evaluate(`window[Symbol.for('code-codex:startup-transition:controller:v1')].dispose()`);await delay(150);
   const fallbackDisposed=await evaluate(`({host:!!document.querySelector('body>.code-codex-startup-host'),held:window[Symbol.for('code-codex:background-startup-hold:v1')]?.active,urls:fixtureURLs.size})`);
   check('default fallback disposal releases startup and preserves existing empty library/settings',{disposed:fallbackDisposed,before:fallbackBefore,after:await evaluate('fixtureStorageSnapshot()')},!fallbackDisposed.host&&!fallbackDisposed.held&&fallbackDisposed.urls===0&&JSON.stringify(await evaluate('fixtureStorageSnapshot()'))===JSON.stringify(fallbackBefore));

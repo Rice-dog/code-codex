@@ -42,6 +42,17 @@ fn unknown_resource_and_unknown_code_are_not_harmless() {
  let r=summarize_with_registry(&json!({"complete":true,"changes":[{"path":"image.png","category":"no_known_plugin_dependency","dependencyIds":[]},{"path":"new.js","dependencyIds":[]}]}),&checks(),registry_fixture());
  assert_eq!(r["counts"]["manual"],2);assert_eq!(r["counts"]["noImpact"],0);assert_eq!(r["features"].as_array().unwrap().len(),3);
 }
+#[test]
+fn complete_feature_coverage_does_not_depend_on_reported_file_matches() {
+ let r=summarize_with_registry(&json!({"complete":true,"changes":[{"path":"ok.js","dependencyIds":["ok"]}]}),&checks(),registry_fixture());
+ assert_eq!(r["changes"][0]["status"],"passed");
+ let features=r["features"].as_array().unwrap();
+ assert_eq!(features.len(),3);
+ assert_eq!(features[0]["affected"],true);
+ assert_eq!(features[1]["affected"],false);
+ assert_eq!(features[1]["status"],"issue");
+ assert_eq!(features[2]["checks"][1]["status"],"manual");
+}
 fn report_dir(dir:&Path,id:&str,kind:&str,time:u64)->PathBuf {
  let p=dir.join("reports").join(id);fs::create_dir_all(&p).unwrap();
  atomic(&p.join("report.json"),&json!({"version":"new","package":"official","type":kind,"observedMs":time,"complete":true})).unwrap();
@@ -67,12 +78,22 @@ fn stale_engine_rules_and_version_are_separate_from_inventory_freshness() {
 }
 #[test]
 fn registry_check_references_resolve_and_manual_steps_are_concrete() {
- let ids=["package.inventory","package.modules","host.interfaces","host.quota","host.layout","host.split-layout","host.menu","host.composer","host.theme","host.composer-backdrop","host.models","host.ownership","regression.interfaces","regression.layout","regression.models","regression.account-behavior","regression.account-relay-headers","host.settings-paint","host.side-panel-paint","host.tree-rail-paint"];
- for r in registry()["rules"].as_array().unwrap() {
-  assert!(!r["automatedChecks"].as_array().unwrap().is_empty());
-  for id in r["automatedChecks"].as_array().unwrap(){assert!(ids.contains(&id.as_str().unwrap()),"{id}");}
-  assert!(!r["manualReason"].as_str().unwrap().is_empty());assert!(!r["manualSteps"].as_array().unwrap().is_empty());
- }
+    let native = include_str!("validation.rs");
+    let browser = include_str!("../../../../packages/explorer-ui/src/host-update-probes.ts");
+    let background = include_str!("../../../../packages/explorer-ui/src/host-update-background.ts");
+    for rule in registry()["rules"].as_array().unwrap() {
+        let automatic = rule["automatedChecks"].as_array().unwrap();
+        assert!(!automatic.is_empty());
+        for id in automatic {
+            let id = id.as_str().unwrap();
+            let browser_call = format!("add('{id}',");
+            assert!(native.contains(&format!("check(\"{id}\",")) || browser.contains(&browser_call)
+                || browser.contains(&format!("regression('{id}',"))
+                || background.contains(&browser_call), "Missing check: {id}");
+        }
+        assert!(!rule["manualReason"].as_str().unwrap().is_empty());
+        assert!(!rule["manualSteps"].as_array().unwrap().is_empty());
+    }
 }
 #[test]
 fn report_ids_cannot_escape_the_ledger() {

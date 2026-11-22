@@ -93,6 +93,9 @@ export interface FlatTreeRow {
 }
 
 export interface BootstrapConfig {
+  welcomePending?: boolean;
+  activationEpoch?: number;
+  welcomeBanner?: string;
   language?: import('../i18n').LanguagePreference;
   token?: string;
   binding?: string;

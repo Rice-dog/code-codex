@@ -2,9 +2,10 @@
 use super::{AccountError, AccountService, Result, host, preparation, relay};
 use cdp_client::CdpEndpoint;
 use serde_json::{Value, json};
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::{Path,PathBuf}, sync::Arc, time::Duration};
 
-// Only endpoint state, never URLs/capabilities or auth. Survives renderer pin loss.
+// A loaded actor belongs to the official process, not the current account or
+// renderer document. Keep endpoint-state evidence across owner/pin changes.
 async fn host_generation(endpoint:CdpEndpoint)->Result<String>{
     use sha2::Digest;
     let discovery=cdp_client::TargetDiscovery::new().map_err(|_|AccountError::new("ACCOUNT_ROUTE_GENERATION","Official process generation discovery is unavailable."))?;
@@ -14,14 +15,20 @@ async fn host_generation(endpoint:CdpEndpoint)->Result<String>{
     if url.scheme()!="ws"||url.host_str()!=Some("127.0.0.1")||url.port()!=Some(endpoint.port())||!url.path().starts_with("/devtools/browser/"){return Err(AccountError::new("ACCOUNT_ROUTE_GENERATION","Official process generation did not match the verified endpoint."));}
     Ok(format!("{:x}",sha2::Sha256::digest(raw.as_bytes())))
 }
-fn route_history(root:&Path,epoch:&str)->Result<Value>{
-    let path=root.join("native-route-state.json");
-    if !path.exists(){return Ok(json!({}));}
+fn read_route_history(path:&Path,epoch:&str)->Result<Option<Value>>{
+    if !path.exists(){return Ok(None);}
     let metadata=path.symlink_metadata().map_err(|_|AccountError::new("ACCOUNT_ROUTE_STATE","Route recovery state cannot be inspected."))?;
     if !metadata.is_file()||metadata.file_type().is_symlink()||metadata.len()>65536{return Err(AccountError::new("ACCOUNT_ROUTE_STATE","Route recovery state is redirected or exceeds its bound."));}
     let value:Value=serde_json::from_slice(&std::fs::read(path).map_err(|_|AccountError::new("ACCOUNT_ROUTE_STATE","Route recovery state cannot be read."))?).map_err(|_|AccountError::new("ACCOUNT_ROUTE_STATE","Route recovery state is invalid."))?;
     if value["schema"]!=1||!value["hostEpoch"].as_str().is_some_and(|v|v.len()==64&&v.bytes().all(|b|b.is_ascii_hexdigit()))||!value["threads"].as_object().is_some_and(|v|v.len()<=256&&v.iter().all(|(k,v)|!k.is_empty()&&k.len()<=128&&matches!(v.as_str(),Some("relay"|"default"|"pending")))){return Err(AccountError::new("ACCOUNT_ROUTE_STATE","Route recovery state does not satisfy schema1."));}
-    Ok(if value["hostEpoch"]==epoch{value["threads"].clone()}else{json!({})})
+    Ok((value["hostEpoch"]==epoch).then(||value["threads"].clone()))
+}
+fn journal_path(owner_root:&Path)->PathBuf {
+    owner_root.parent().expect("owner directory has an account root").join("native-route-state.json")
+}
+fn route_history(owner_root:&Path,epoch:&str)->Result<Value>{
+    if let Some(history)=read_route_history(&journal_path(owner_root),epoch)?{return Ok(history);}
+    Ok(read_route_history(&owner_root.join("native-route-state.json"),epoch)?.unwrap_or_else(||json!({})))
 }
 fn save_route_state(root:&Path,epoch:&str,thread:&str,mode:Option<&str>)->Result<()> {
     let mut state=route_history(root,epoch)?;
@@ -29,7 +36,10 @@ fn save_route_state(root:&Path,epoch:&str,thread:&str,mode:Option<&str>)->Result
         if state.as_object().unwrap().len()>=256&&!state.as_object().unwrap().contains_key(thread){return Err(AccountError::new("ACCOUNT_ROUTE_STATE_LIMIT","Route recovery state reached256 conversations; no endpoint was changed."));}
         state[thread]=json!(mode);
     }else{state.as_object_mut().unwrap().remove(thread);}
-    crate::renderer_storage::atomic(&root.join("native-route-state.json"),&json!({"schema":1,"hostEpoch":epoch,"threads":state})).map_err(|_|AccountError::new("ACCOUNT_ROUTE_STATE","Route recovery state could not be saved. No preparation was accepted."))
+    crate::renderer_storage::atomic(&journal_path(root),&json!({"schema":1,"hostEpoch":epoch,"threads":state})).map_err(|_|AccountError::new("ACCOUNT_ROUTE_STATE","Route recovery state could not be saved. No preparation was accepted."))
+}
+pub(super) async fn note_draft_route(root:&Path,endpoint:CdpEndpoint,thread:&str)->Result<()> {
+    save_route_state(root,&host_generation(endpoint).await?,thread,Some("relay"))
 }
 
 async fn native(endpoint: CdpEndpoint, params: Value) -> Result<Value> {
@@ -398,17 +408,22 @@ fn stale() -> AccountError {
 
 #[cfg(test)] mod tests {
     use super::*;
-    #[test] fn recovery_state_survives_pin_loss_and_is_scoped_to_official_process(){
+    #[test] fn recovery_state_survives_owner_and_pin_loss_in_the_same_official_process(){
         let root=tempfile::tempdir().unwrap();let first="a".repeat(64);let next="b".repeat(64);
-        save_route_state(root.path(),&first,"thread-one",Some("pending")).unwrap();
-        assert_eq!(route_history(root.path(),&first).unwrap()["thread-one"],"pending");
-        save_route_state(root.path(),&first,"thread-one",Some("relay")).unwrap();assert_eq!(route_history(root.path(),&first).unwrap()["thread-one"],"relay");
-        assert_eq!(route_history(root.path(),&next).unwrap(),json!({}));
-        save_route_state(root.path(),&first,"thread-one",Some("default")).unwrap();assert_eq!(route_history(root.path(),&first).unwrap()["thread-one"],"default");
-        let text=std::fs::read_to_string(root.path().join("native-route-state.json")).unwrap();assert!(!text.contains("http"));assert!(!text.contains("capability"));
+        let owner=root.path().join("first-owner");let replacement=root.path().join("second-owner");
+        std::fs::create_dir(&owner).unwrap();std::fs::create_dir(&replacement).unwrap();
+        std::fs::write(owner.join("native-route-state.json"),json!({"schema":1,"hostEpoch":first,"threads":{"old-thread":"relay"}}).to_string()).unwrap();
+        save_route_state(&owner,&first,"thread-one",Some("pending")).unwrap();
+        assert_eq!(route_history(&replacement,&first).unwrap()["thread-one"],"pending");
+        assert_eq!(route_history(&replacement,&first).unwrap()["old-thread"],"relay");
+        save_route_state(&owner,&first,"thread-one",Some("relay")).unwrap();assert_eq!(route_history(&replacement,&first).unwrap()["thread-one"],"relay");
+        assert_eq!(route_history(&owner,&next).unwrap(),json!({}));
+        save_route_state(&replacement,&first,"thread-one",Some("default")).unwrap();assert_eq!(route_history(&owner,&first).unwrap()["thread-one"],"default");
+        let text=std::fs::read_to_string(journal_path(&owner)).unwrap();assert!(!text.contains("http"));assert!(!text.contains("capability"));
     }
     #[test] fn malformed_recovery_state_is_not_treated_as_default_execution(){
-        let root=tempfile::tempdir().unwrap();std::fs::write(root.path().join("native-route-state.json"),b"{}").unwrap();
-        assert_eq!(route_history(root.path(),&"a".repeat(64)).unwrap_err().code,"ACCOUNT_ROUTE_STATE");
+        let root=tempfile::tempdir().unwrap();let owner=root.path().join("owner");
+        std::fs::write(journal_path(&owner),b"{}").unwrap();
+        assert_eq!(route_history(&owner,&"a".repeat(64)).unwrap_err().code,"ACCOUNT_ROUTE_STATE");
     }
 }

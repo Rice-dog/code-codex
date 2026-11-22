@@ -211,10 +211,81 @@ pub(super) fn snapshot_managed(source:&Path,destination:&Path)->Result<()> {
     })();
     if result.is_err(){let _=delete(destination);}result
 }
+/// Replace only managed authorization. Callers preserve a verified native backup
+/// and hold the primary operation lane; project/config/history files are untouched.
+pub(super) fn replace_managed(source:&Path,destination:&Path)->Result<()> {
+    workspace_service::application_paths::validate_directory_path(source).map_err(|_|AccountError::protocol("Credential source is redirected."))?;
+    workspace_service::application_paths::validate_directory_path(destination).map_err(|_|AccountError::protocol("Credential destination is redirected."))?;
+    if !["auth.json","secrets/codex_auth.age"].iter().any(|n|source.join(n).is_file()){return Err(AccountError::new("ACCOUNT_PRIMARY_STORAGE","Managed authorization is unavailable."))}
+    // Stage every file before touching the destination. No credential text enters
+    // error bodies, command arguments or ordinary account storage.
+    let mut staged=Vec::new();
+    for name in ["auth.json","secrets/codex_auth.age"] {
+        let input=source.join(name);let output=destination.join(name);
+        if !input.exists(){staged.push((output,None));continue}
+        let meta=crate::renderer_storage::regular(&input).map_err(|_|AccountError::protocol("Credential source failed validation."))?;
+        if meta.len()>128*1024{return Err(AccountError::protocol("Credential source exceeds its bound."))}
+        workspace_service::application_paths::validate_directory_path(input.parent().unwrap()).map_err(|_|AccountError::protocol("Credential source directory is redirected."))?;
+        super::directory(output.parent().unwrap())?;
+        if output.exists(){crate::renderer_storage::regular(&output).map_err(|_|AccountError::protocol("Credential destination is redirected."))?;}
+        use std::io::Write;
+        let mut file=tempfile::NamedTempFile::new_in(output.parent().unwrap()).map_err(|_|AccountError::protocol("Credential staging failed."))?;
+        #[cfg(windows)] {
+            use std::os::windows::fs::OpenOptionsExt;
+            use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ,WRITE_DAC,FILE_SHARE_READ,FILE_SHARE_WRITE,FILE_SHARE_DELETE};
+            let mut acl=std::fs::OpenOptions::new().access_mode(FILE_GENERIC_READ|WRITE_DAC).share_mode(FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE).open(file.path()).map_err(|_|AccountError::protocol("Credential ACL could not be opened."))?;
+            crate::discovery::set_protected_dacl(&mut acl,"D:P(A;;FA;;;OW)(A;;FA;;;SY)").map_err(|_|AccountError::protocol("Credential staging could not be restricted."))?;
+        }
+        let mut bytes=std::fs::read(input).map_err(|_|AccountError::protocol("Credential source could not be read."))?;
+        let result=file.write_all(&bytes);bytes.fill(0);result.map_err(|_|AccountError::protocol("Credential staging failed."))?;
+        file.as_file().sync_all().map_err(|_|AccountError::protocol("Credential staging failed."))?;
+        staged.push((output,Some(file)));
+    }
+    #[cfg(windows)] {
+        use windows_sys::Win32::Security::Credentials::{CredReadW,CredWriteW,CredDeleteW,CredFree,CREDENTIALW};
+        for (input,output) in targets(source)?.iter().zip(targets(destination)?) {unsafe{
+            let mut ptr:*mut CREDENTIALW=std::ptr::null_mut();
+            if CredReadW(input.as_ptr(),1,0,&mut ptr)==0 {
+                if windows_sys::Win32::Foundation::GetLastError()!=1168{return Err(AccountError::protocol("Native credential key could not be read."))}
+                if CredDeleteW(output.as_ptr(),1,0)==0&&windows_sys::Win32::Foundation::GetLastError()!=1168{return Err(AccountError::protocol("Old native credential key could not be removed."))}
+                continue
+            }
+            let mut value=std::ptr::read(ptr);value.TargetName=output.as_ptr() as *mut u16;
+            let written=CredWriteW(&value,0);
+            if value.CredentialBlobSize>0&&!value.CredentialBlob.is_null(){std::slice::from_raw_parts_mut(value.CredentialBlob,value.CredentialBlobSize as usize).fill(0)}
+            CredFree(ptr.cast());if written==0{return Err(AccountError::protocol("Native credential key transfer failed."))}
+        }}
+    }
+    for (output,file) in staged {if let Some(file)=file {file.persist(output).map_err(|_|AccountError::protocol("Managed credential commit failed."))?;}else if output.exists(){std::fs::remove_file(output).map_err(|_|AccountError::protocol("Old managed credential removal failed."))?;}}
+    let marker=destination.join("managed-auth-source.json");
+    let store = if source.join("auth.json").is_file() { "file" } else { "keyring" };
+    crate::renderer_storage::atomic(&marker,&json!({"schema":1,"store":store}))
+        .map_err(|_|AccountError::protocol("Credential storage mode could not be saved."))?;
+    Ok(())
+}
 pub(super) fn storage_mode(home:&Path)->Result<&'static str>{
  let marker=home.join("managed-auth-source.json");if !marker.exists(){return Ok("keyring")}
  let value=crate::renderer_storage::read_json(&marker,1024).map_err(|_|AccountError::protocol("Managed credential storage marker could not be read."))?;
- if value["schema"]==1&&value["store"]=="file"{Ok("file")}else{Err(AccountError::protocol("Managed credential storage marker is invalid."))}
+ match (value["schema"].as_u64(),value["store"].as_str()){
+  (Some(1),Some("file"))=>Ok("file"),
+  (Some(1),Some("keyring"))=>Ok("keyring"),
+  _=>Err(AccountError::protocol("Managed credential storage marker is invalid.")),
+ }
+}
+
+/// Only a committed managed transfer chooses the native store at next launch.
+/// An ordinary login that replaced the material takes precedence over a stale marker.
+pub(super) fn primary_launch_store(home: &Path) -> Option<&'static str> {
+    if !home.join("managed-auth-source.json").is_file() {
+        return None;
+    }
+    let file = home.join("auth.json").is_file();
+    let encrypted = home.join("secrets/codex_auth.age").is_file();
+    match (storage_mode(home).ok()?, file, encrypted) {
+        ("file", true, _) => Some("file"),
+        ("keyring", false, true) => Some("keyring"),
+        _ => None,
+    }
 }
 pub fn delete(home: &Path) -> Result<()> {
     workspace_service::application_paths::validate_directory_path(home)
@@ -256,6 +327,46 @@ pub fn delete(home: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn managed_transfer_and_restore_preserve_unrelated_profile_data(){
+        let d=tempfile::tempdir().unwrap();let old=d.path().join("old");let new=d.path().join("new");let live=d.path().join("live");
+        for home in [&old,&new,&live]{std::fs::create_dir_all(home).unwrap();}
+        std::fs::write(old.join("auth.json"),b"synthetic-old").unwrap();std::fs::write(new.join("auth.json"),b"synthetic-new").unwrap();std::fs::write(live.join("auth.json"),b"synthetic-old").unwrap();
+        std::fs::write(live.join("config.toml"),b"keep-config").unwrap();std::fs::write(live.join("history.jsonl"),b"keep-history").unwrap();
+        replace_managed(&new,&live).unwrap();assert_eq!(std::fs::read(live.join("auth.json")).unwrap(),b"synthetic-new");assert_eq!(storage_mode(&live).unwrap(),"file");
+        replace_managed(&old,&live).unwrap();assert_eq!(std::fs::read(live.join("auth.json")).unwrap(),b"synthetic-old");
+        assert_eq!(std::fs::read(live.join("config.toml")).unwrap(),b"keep-config");assert_eq!(std::fs::read(live.join("history.jsonl")).unwrap(),b"keep-history");
+    }
+    #[test]
+    fn primary_launch_reuses_committed_store_but_not_a_stale_selection() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("official");
+        let keyring_home = temp.path().join("keyring");
+        let secrets = keyring_home.join("secrets");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&secrets).unwrap();
+        std::fs::write(secrets.join("codex_auth.age"), b"synthetic").unwrap();
+        std::fs::write(home.join("auth.json"), b"former-primary").unwrap();
+        assert_eq!(primary_launch_store(&home), None);
+        replace_managed(&keyring_home, &home).unwrap();
+        assert_eq!(primary_launch_store(&home), Some("keyring"));
+        assert!(!home.join("auth.json").exists());
+        std::fs::write(home.join("auth.json"), b"desktop-login").unwrap();
+        assert_eq!(primary_launch_store(&home), None);
+        let file_home = temp.path().join("file");
+        std::fs::create_dir_all(&file_home).unwrap();
+        std::fs::write(file_home.join("auth.json"), b"promoted-file").unwrap();
+        replace_managed(&file_home, &home).unwrap();
+        assert_eq!(primary_launch_store(&home), Some("file"));
+        std::fs::remove_file(home.join("auth.json")).unwrap();
+        assert_eq!(primary_launch_store(&home), None);
+    }
+    #[test]
+    fn unavailable_or_oversized_transfer_does_not_touch_existing_authorization(){
+        let d=tempfile::tempdir().unwrap();let source=d.path().join("source");let live=d.path().join("live");std::fs::create_dir(&source).unwrap();std::fs::create_dir(&live).unwrap();std::fs::write(live.join("auth.json"),b"synthetic-old").unwrap();
+        assert!(replace_managed(&source,&live).is_err());assert_eq!(std::fs::read(live.join("auth.json")).unwrap(),b"synthetic-old");
+        std::fs::write(source.join("auth.json"),vec![b'x';128*1024+1]).unwrap();assert!(replace_managed(&source,&live).is_err());assert_eq!(std::fs::read(live.join("auth.json")).unwrap(),b"synthetic-old");
+    }
     #[tokio::test]
     #[ignore="Explicit local non-mutating primary credential snapshot validation; no inference or official login writes."]
     async fn managed_primary_snapshot_is_readable_without_changing_the_original(){

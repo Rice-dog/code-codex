@@ -44,6 +44,11 @@ fixtures.inactiveOnly = `<button data-app-shell-sidebar-trigger></button><div da
 const nestedShell = (content, marker = 'data-app-shell-workspace="true"') => `<button data-app-shell-sidebar-trigger></button><div data-app-shell-workspace-row="true"><div ${marker}>${content}</div></div>`;
 const nestedRail = '<aside class="app-shell-left-panel"></aside>';
 fixtures.currentNested = nestedShell(`<div style="position:absolute;pointer-events:none"></div>${nestedRail}${page(true, 'thread_current_001')}`);
+const historyPage = page(true, 'thread_current_001').replace('_MainContentClip_gs442_2','contents windows:flex windows:flex-1 windows:overflow-hidden').replace('<main ','<main data-codex-history-swipe-page="true" ');
+fixtures.currentHistory = nestedShell(nestedRail + historyPage);
+fixtures.historyWithoutMarker = fixtures.currentHistory.replace('data-codex-history-swipe-page="true"', '');
+fixtures.historyWithoutWrapper = fixtures.currentHistory.replace('contents windows:flex','arbitrary windows:flex');
+fixtures.historyWrongOrder = nestedShell(historyPage + nestedRail);
 fixtures.currentNestedCached = nestedShell(`${nestedRail}${page(true, 'thread_current_001')}${page(false, 'thread_cached_002')}`);
 fixtures.nestedNoMarker = nestedShell(`${nestedRail}${page(true, 'thread_current_001')}`, '');
 fixtures.nestedTooDeep = nestedShell(`<div>${nestedRail}${page(true, 'thread_current_001')}</div>`);
@@ -63,6 +68,11 @@ fixtures.featureDuplicateRail = featureRail + featureRail + featureShell;
 const login = '<div class="flex h-full w-full items-center justify-center overflow-hidden bg-surface pb-6 text-default"><div class="flex w-[340px] flex-col items-center gap-8"><svg></svg><h1>Sign in to ChatGPT</h1><button>Continue to sign in</button></div></div>';
 fixtures.nativeLogin = login;
 fixtures.nativeLoginChinese = login.replace('Sign in to ChatGPT','登录 ChatGPT').replace('Continue to sign in','继续登录');
+const columnLogin = '<div data-desktop-login-surface class="flex h-full w-full flex-col overflow-y-auto bg-surface"><div class="flex w-[340px] flex-col justify-center"><div><svg></svg><h1>Sign in</h1></div><div><button type="button">Continue</button></div></div></div>';
+fixtures.nativeLoginColumn = columnLogin;
+fixtures.loginColumnWithoutMarker = columnLogin.replace('data-desktop-login-surface','');
+fixtures.loginColumnWithoutButton = columnLogin.replace('<button type="button">Continue</button>','');
+fixtures.loginColumnDuplicate = columnLogin + login;
 fixtures.loginDuplicate = login + login;
 fixtures.loginWithRail = featureRail + login;
 fixtures.loginMissingButton = login.replace('<button>Continue to sign in</button>','');
@@ -79,6 +89,8 @@ for (const [name, markup] of Object.entries(fixtures)) {
     [data-app-shell-active-page=true] { display: contents; }
     [data-app-shell-active-page=false] { display: none; }
     ._MainContentClip_gs442_2 { display: flex; flex: 1; }
+    .contents { display: contents; }
+    .contents:has(> main) { display: flex; flex: 1; }
     .content-holder { display: flex; flex: 1; }
     aside { width: 300px; flex: none; }
     main { flex: 1; }
@@ -154,6 +166,10 @@ for (const [name, markup] of Object.entries(fixtures)) {
     assert.equal(result.diagnostic.workspaceContainerMatch, true);
     assert.equal(result.diagnostic.outerDirectRailCount, 0);
     assert.equal(result.diagnostic.directRailCount, 1);
+  }
+  if (name === 'currentHistory') {
+    assert.equal(result.diagnostic.historyMainSurface, true);
+    assert.equal(result.diagnostic.mainContentClip, false);
   }
   assert.equal(result.legacy, name === "old", `${name}: legacy layout`);
   assert.equal(result.current, name.startsWith("current"), `${name}: current layout`);

@@ -71,7 +71,8 @@ function Get-RestartCandidate([string]$Image) {
     if ($roots.Count -ne 1) { throw 'More than one official Codex browser process is running; no process was closed' }
     $record = $roots[0]
     if ([string]::IsNullOrWhiteSpace($record.CommandLine)) { throw 'Official process command line is unavailable' }
-    if ($record.CommandLine -match '(?i)(?:^|\s)--remote-debugging-port(?:=|\s+)') {
+    $managed = $record.CommandLine -match '(?i)(?:^|\s)--remote-debugging-port(?:=|\s+)'
+    if ($managed -and $env:CLE_UPDATE_RESTART_ALLOWED -ne '1') {
         return [pscustomobject]@{Managed=$true;Process=$null;Pid=[int]$record.ProcessId;Created=0L}
     }
     $process = [Diagnostics.Process]::GetProcessById([int]$record.ProcessId)
@@ -86,7 +87,7 @@ function Get-RestartCandidate([string]$Image) {
         $caller = [Diagnostics.Process]::GetCurrentProcess()
         try { if ($process.SessionId -ne $caller.SessionId) { throw 'Codex belongs to a different Windows session' } }
         finally { $caller.Dispose() }
-        return [pscustomobject]@{Managed=$false;Process=$process;Pid=[int]$record.ProcessId;Created=$created}
+        return [pscustomobject]@{Managed=$managed;Process=$process;Pid=[int]$record.ProcessId;Created=$created}
     } catch { $process.Dispose(); throw }
 }
 
@@ -181,6 +182,80 @@ function Show-RestartConfirmation {
     } finally { $dialog.Timer.Dispose(); $dialog.Form.Dispose() }
 }
 
+function Invoke-OfficialRestartQuitMenu($Candidate, $Windows) {
+    if ($Candidate.Process.HasExited) { return }
+    if (@($Windows | Where-Object {$_.visible -and -not $_.enabled}).Count) { throw 'Codex has an active modal dialog; no further shutdown was requested' }
+    $Candidate.Process.Refresh()
+    $handle = $Candidate.Process.MainWindowHandle
+    $eligible = @($Windows | Where-Object {$_.handle -eq $handle.ToInt64() -and $_.visible -and $_.enabled -and -not $_.owned -and $_.class -ceq 'Chrome_WidgetWin_1'})
+    if ($handle -eq [IntPtr]::Zero -or $eligible.Count -ne 1) { throw 'No verified Codex main window for the native Quit menu' }
+    Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+    $target = [Windows.Automation.AutomationElement]::FromHandle($handle)
+    if (-not $target -or $target.Current.ProcessId -ne $Candidate.Pid) { throw 'Codex window ownership changed before Quit' }
+    if (-not ('CodeCodexOfficialQuitMenu' -as [type])) {
+        $references = @([Windows.Automation.AutomationElement].Assembly.Location, [Windows.Automation.AutomationIdentifier].Assembly.Location)
+        Add-Type -ReferencedAssemblies $references -TypeDefinition @"
+using System;
+using System.Threading;
+using System.Windows.Automation;
+
+public static class CodeCodexOfficialQuitMenu {
+    private static readonly Condition FileMenu = new PropertyCondition(AutomationElement.AutomationIdProperty, "application-menu-trigger-file-menu");
+    private static readonly Condition Menu = new PropertyCondition(AutomationElement.AutomationIdProperty, "application-menu-content");
+    private static readonly Condition MenuItem = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem);
+
+    public static void Invoke(AutomationElement window, int pid) {
+        AutomationElement file = window.FindFirst(TreeScope.Descendants, FileMenu);
+        if (file == null || file.Current.ProcessId != pid || !file.Current.IsEnabled)
+            throw new InvalidOperationException("The official File menu is not available.");
+        var expand = (ExpandCollapsePattern)file.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+        bool opened = expand.Current.ExpandCollapseState != ExpandCollapseState.Expanded;
+        using (var changed = new AutoResetEvent(false)) {
+            StructureChangedEventHandler notify = (sender, args) => {
+                try { changed.Set(); } catch (ObjectDisposedException) {}
+            };
+            Automation.AddStructureChangedEventHandler(window, TreeScope.Subtree, notify);
+            bool invoked = false;
+            try {
+                if (opened) expand.Expand();
+                var deadline = DateTime.UtcNow.AddSeconds(2);
+                while (true) {
+                    AutomationElement menu = window.FindFirst(TreeScope.Descendants, Menu);
+                    if (menu != null && menu.Current.ProcessId == pid
+                        && expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) {
+                        AutomationElement quit = null;
+                        foreach (AutomationElement item in menu.FindAll(TreeScope.Children, MenuItem)) {
+                            if (!item.Current.Name.EndsWith(" Ctrl+Q", StringComparison.Ordinal)
+                                || item.Current.ProcessId != pid || !item.Current.IsEnabled) continue;
+                            if (quit != null) throw new InvalidOperationException("The official Quit item is ambiguous.");
+                            quit = item;
+                        }
+                        if (quit != null) {
+                            ((InvokePattern)quit.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
+                            invoked = true;
+                            return;
+                        }
+                    }
+                    var remaining = deadline - DateTime.UtcNow;
+                    if (remaining <= TimeSpan.Zero || !changed.WaitOne(remaining))
+                        throw new InvalidOperationException("The official File menu did not expose its Quit item.");
+                }
+            } finally {
+                Automation.RemoveStructureChangedEventHandler(window, notify);
+                if (opened && !invoked) {
+                    try {
+                        if (expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) expand.Collapse();
+                    } catch (ElementNotAvailableException) {}
+                }
+            }
+        }
+    }
+}
+"@
+    }
+    [CodeCodexOfficialQuitMenu]::Invoke($target, $Candidate.Pid)
+}
+
 function Invoke-NativeRestartClose($Candidate, [string]$Image) {
     $helper = $env:CLE_RESTART_HELPER
     foreach ($path in @($helper, $Image)) {
@@ -191,6 +266,7 @@ function Invoke-NativeRestartClose($Candidate, [string]$Image) {
     $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = $helper
     $info.Arguments = 'startup-recovery-window --pid ' + $Candidate.Pid + ' --created-ms ' + $Candidate.Created + ' --image "' + $Image + '" --close'
+    if ($env:CLE_UPDATE_RESTART_ALLOWED -eq '1') { $info.Arguments += ' --after-official-update' }
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true
@@ -216,8 +292,15 @@ function Invoke-NativeRestartClose($Candidate, [string]$Image) {
         $report = ConvertFrom-Json -InputObject $reply
         if ($report.schema -ne 1 -or $report.pid -ne $Candidate.Pid -or $report.createdMs -ne $Candidate.Created -or
             $report.readOnly -isnot [bool] -or $report.readOnly -or
-            $report.force -isnot [bool] -or $report.force -or
-            (-not $report.shutdownRequested -and -not $report.exited)) { throw 'Invalid native shutdown response' }
+            $report.force -isnot [bool] -or $report.force) { throw 'Invalid native shutdown response' }
+        if ($env:CLE_UPDATE_RESTART_ALLOWED -eq '1' -and $report.PSObject.Properties['failureCode'] -and
+            $report.failureCode -eq 351 -and -not $report.shutdownRequested -and -not $report.exited) {
+            Publish-RestartUiPhase 'closing' 'Requesting Codex Quit' 'Restart Manager returned Windows error 351. Invoking the verified official File menu Quit command without sending keyboard input.'
+            Invoke-OfficialRestartQuitMenu $Candidate $report.windows
+            $script:officialUpdateQuitRequested=$true
+            return
+        }
+        if (-not $report.shutdownRequested -and -not $report.exited) { throw 'Invalid native shutdown response' }
     } finally { $worker.Dispose() }
 }
 
@@ -251,6 +334,7 @@ function Invoke-RestartRecovery([string]$Image, [string]$PreferencePath) {
     $candidate = Get-RestartCandidate $Image
     if ($null -eq $candidate) { return 'ready' }
     $updateRecovery = $env:CLE_UPDATE_RESTART_ALLOWED -eq '1'
+    $script:officialUpdateQuitRequested=$false
     if ($candidate.Managed -and -not $updateRecovery) { return 'managed' }
     try {
         $automatic = ($env:CLE_UPDATE_RESTART_ALLOWED -eq '1') -or (Read-RestartPreference $PreferencePath)
@@ -287,6 +371,7 @@ function Invoke-RestartRecovery([string]$Image, [string]$PreferencePath) {
                 return 'ready-preference-warning'
             }
         }
+        if ($script:officialUpdateQuitRequested) { return 'ready-official-menu' }
         return 'ready'
     } finally { $candidate.Process.Dispose() }
 }

@@ -39,7 +39,7 @@ async checkStartupVersion(): Promise<void> {
   updateDialogOpen = false;
   updateInstallPending = false;
 
-  constructor(private readonly host: UpdatesControllerPorts) { }
+  constructor(private readonly host: UpdatesControllerPorts,private readonly event=runtimeEvent) { }
   startupUpdateStarted=false;
   updateCheckOperation=0;
   cancelUpdateCheck(): void {
@@ -77,14 +77,14 @@ async checkStartupVersion(): Promise<void> {
     this.updateCheckSummary="Checking GitHub for the latest release…";
     this.host.renderStatus();
     if(!automatic) this.host.showActionProgress(this.updateCheckSummary);
-    runtimeEvent("renderer","version check","started",{ automatic });
+    this.event("renderer","version check","started",{ automatic });
 
     try {
       const result=normalizeUpdateCheckResult(await bridge.request<unknown>(automatic? "explorer.update.startup":"explorer.update.check",{}));
       if(operation!==this.updateCheckOperation||!this.host.connected||bridge!==this.host.bridge) return;
 
       this.updateCheckPresentation=result.status;
-      runtimeEvent("renderer","version check",result.status,{ automatic,currentVersion: result.currentVersion,latestVersion: result.latestVersion });
+      this.event("renderer","version check",result.status,{ automatic,currentVersion: result.currentVersion,latestVersion: result.latestVersion });
       if(result.status==="updateAvailable") {
         this.updateCheckSummary=`Code-Codex v${result.latestVersion} is available. You are using v${result.currentVersion}.`;
         this.updateCandidate=result;
@@ -104,7 +104,7 @@ async checkStartupVersion(): Promise<void> {
       if(operation!==this.updateCheckOperation||!this.host.connected||bridge!==this.host.bridge) return;
       this.updateCheckPresentation="error";
       this.updateCheckSummary=updateCheckError(error);
-      runtimeEvent("renderer","version check","failed",{ automatic,code: errorCode(error),...runtimeErrorDetails(error) });
+      this.event("renderer","version check","failed",{ automatic,code: errorCode(error),...runtimeErrorDetails(error) });
       if(automatic) this.host.versionFeedback.show("error");
       else this.host.showActionNotice(this.updateCheckSummary,"error");
     } finally {

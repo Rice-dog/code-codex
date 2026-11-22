@@ -7,6 +7,8 @@ export const ACTIVE_LOCAL_THREAD_SELECTOR = '[data-app-action-sidebar-thread-id]
 export const COMPOSER_THREAD_SELECTOR = "[data-above-composer-conversation-id]";
 export const RESPONSE_THREAD_SELECTOR = "[data-response-annotation-conversation]";
 export const MAIN_SURFACE_SELECTOR = 'main:is(.main-surface, [data-app-shell-main-surface="default"])';
+export const SPLIT_MAIN_VIEW_SELECTOR = '[data-app-shell-workspace-layout="split"][data-app-shell-right-panel-full-width="false"]';
+export const SPLIT_MAIN_FRAME_SELECTOR = ':is([class*="MainContentFrame-"],[class*="MainContentFrame_"],div:has([data-app-shell-focus-area="main"]))';
 
 /** Codex keeps inactive pages mounted from 26.928 onward. They are not
  * competing renderers, thread signals, or mount targets. Older shells have
@@ -68,7 +70,10 @@ export function qualifiedWorkspaceRowForMain(
   const workspace = workspaces[0]!;
   if (activePageElements(workspace, MAIN_SURFACE_SELECTOR).length !== 1 ||
     !workspace.contains(main) || children.indexOf(rails[0]!) >= children.indexOf(workspace)) return null;
-  if (!main.parentElement?.className.includes("MainContentClip")) return null;
+  const wrapper = main.parentElement;
+  const historySurface = main.matches('[data-app-shell-main-surface="default"][data-codex-history-swipe-page="true"]')
+    && wrapper?.matches('div.contents');
+  if (!wrapper?.className.includes("MainContentClip") && !historySurface) return null;
   return { row, workspace };
 }
 
@@ -152,3 +157,4 @@ export const codex26715Adapter: RendererAdapter = Object.freeze({
     return annotationConsensusThreadId(root);
   },
 });
+export const NATIVE_FIXED_TITLEBAR_SELECTOR = ':is(header:has([data-app-shell-titlebar-content]),header[data-app-shell-titlebar="true"][data-pip-obstacle="app-shell-header"])';

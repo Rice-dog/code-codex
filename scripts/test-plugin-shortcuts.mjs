@@ -57,7 +57,7 @@ try{
  await check('Production navigation rejects hidden cards',`navigations.length===navigationCount`);
  await run(`n.querySelector('article').hidden=false;navigation.open('multi-account');n.querySelector('article').hidden=true;${settle}`);
  await check('A card hidden before the deferred settings open cannot be opened',`navigations.length===navigationCount`);
- await check('Actual account markup stays bound but hidden under market styling',`(()=>{const host=document.createElement('div');document.body.append(host);const r=host.attachShadow({mode:'open'});r.innerHTML='<style>'+api.style4+'.preview-extension{display:grid}</style>'+api.multiAccountCardMarkup();const card=r.querySelector('article'),ok=card.hidden&&getComputedStyle(card).display==='none'&&card.querySelector('.accounts-enable')!==null&&card.querySelector('.accounts-settings-trigger')!==null;host.remove();return ok;})()`);
+ await check('Restored account markup remains visible with its existing controls',`(()=>{const host=document.createElement('div');document.body.append(host);const r=host.attachShadow({mode:'open'});r.innerHTML='<style>'+api.style4+'.preview-extension{display:grid}</style>'+api.multiAccountCardMarkup();const card=r.querySelector('article'),ok=!card.hidden&&getComputedStyle(card).display!=='none'&&card.querySelector('.accounts-enable')!==null&&card.querySelector('.accounts-settings-trigger')!==null;host.remove();return ok;})()`);
  await run(`s.querySelector('article').hidden=false;${settle}`);
  await check('Unhiding restores a pinned shortcut without recreating its saved preference',`s.querySelector('[data-plugin-shortcut=multi-account]')!==null&&localStorage.getItem(api.PLUGIN_PINS_KEY)===pinsBeforeHidden`);
  await run(`detach();detachPins()`);

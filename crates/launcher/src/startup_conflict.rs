@@ -13,14 +13,23 @@ pub(crate) fn window_operation(
     created_ms: u64,
     image: &Path,
     close: bool,
+    after_official_update: bool,
 ) -> std::process::ExitCode {
+    if after_official_update { crate::runtime_log::begin("official-update-close"); }
     #[cfg(windows)]
-    let result = windows::operate(pid, created_ms, image, close);
+    let result = windows::operate(pid, created_ms, image, close, after_official_update);
     #[cfg(not(windows))]
     let result: Result<serde_json::Value, String> = {
         let _ = (pid, created_ms, image, close);
         Err("Native startup recovery requires Windows".into())
     };
+    if after_official_update {
+        let details = match &result {
+            Ok(value) => serde_json::json!({"targetPid":pid,"method":value.get("method"),"failureCode":value.get("failureCode"),"requestSent":value["shutdownRequested"],"exitedAtReturn":value["exited"]}),
+            Err(error) => serde_json::json!({"targetPid":pid,"error":error}),
+        };
+        crate::runtime_log::record("launcher","official update close",if result.is_ok() {"returned"} else {"failed"},details);
+    }
     match result {
         Ok(value) => {
             println!("{value}");
@@ -150,7 +159,13 @@ fn invoke(executable: Option<&Path>, reset: bool, update_recovery: bool) -> Resu
                 reason.trim()
             ));
         }
-        parse_worker_reply(&String::from_utf8_lossy(&output.stdout), reset)
+        let reply = String::from_utf8_lossy(&output.stdout);
+        if update_recovery && reply.trim() == "ready-official-menu" {
+            crate::runtime_log::record("launcher","official update handoff","native-quit-exited",
+                serde_json::json!({"method":"official-file-menu","previousOsCode":351}));
+            return Ok(Outcome::Ready);
+        }
+        parse_worker_reply(&reply, reset)
     }
 }
 
@@ -191,4 +206,4 @@ mod tests {
 }
 
 #[cfg(windows)]
-pub(crate) fn close_for_restart(pid:u32,created_ms:u64,image:&Path)->Result<serde_json::Value,String>{windows::operate(pid,created_ms,image,true)}
+pub(crate) fn close_for_restart(pid:u32,created_ms:u64,image:&Path)->Result<serde_json::Value,String>{windows::operate(pid,created_ms,image,true,false)}

@@ -29,6 +29,11 @@ function consumeBootstrap(): Readonly<BootstrapConfig> {
         ...(typeof source.manualWorkspace === "boolean" ? { manualWorkspace: source.manualWorkspace } : {}),
         ...(typeof source.startupSplashActive === "boolean" ? { startupSplashActive: source.startupSplashActive } : {}),
         ...(typeof source.centralizedStorage === "boolean" ? { centralizedStorage: source.centralizedStorage } : {}),
+        ...(source.welcomePending === true ? { welcomePending: true } : {}),
+        ...(typeof source.activationEpoch === 'number' && Number.isSafeInteger(source.activationEpoch)
+          ? { activationEpoch: source.activationEpoch } : {}),
+        ...(typeof source.welcomeBanner === 'string' && source.welcomeBanner.startsWith('data:image/webp;base64,')
+          ? { welcomeBanner: source.welcomeBanner } : {}),
         ...(source.language && typeof source.language === 'object' ? { language: source.language } : {}),
       }
     : {};

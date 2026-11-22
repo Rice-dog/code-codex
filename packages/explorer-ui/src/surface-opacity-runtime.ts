@@ -1,4 +1,5 @@
 import { icons } from "./icons";
+import {NATIVE_TURN_CHANGE_CARD} from "./native-paint-markers";
 
 const STORAGE_KEY = "code-codex.surface-opacity.v1";
 const ACTIVE_ATTRIBUTE = "data-code-codex-ui-mask-active";
@@ -42,16 +43,16 @@ function readPreferences(): Preferences {
 export class SurfaceOpacityPlugin {
   #preferences = readPreferences();
   #observer: MutationObserver | undefined;
-  #styleObserver:MutationObserver|undefined;
-  #styleFrame:number|undefined;
   #previewHosts=new Set<Element>();
   #styledPreviews=new WeakSet<ShadowRoot>();
   #bound = false;
   #ownsPresentation = false;
+  #previewConnected=(event:Event)=>{const node=event.composedPath()[0];if(node instanceof Element&&node.localName.startsWith('code-codex-main-preview-')){this.#previewHosts.add(node);this.#flushPreviews();}};
   constructor(private readonly shadow: ShadowRoot, private readonly text: (zh:string,en:string)=>string, private readonly notice:(message:string)=>void) {}
   #element<T extends HTMLElement>(selector:string): T { return this.shadow.querySelector<T>(selector)!; }
   #backgroundActive():boolean { return BACKGROUND_ATTRIBUTES.some(a=>document.documentElement.hasAttribute(a)); }
   start():void {
+    if(this.#observer){this.render();return;}
     this.#installStyles();
     if (!this.#bound) {
       this.#bound=true;
@@ -79,27 +80,19 @@ export class SurfaceOpacityPlugin {
       });
       this.#element('.surface-opacity-reset').addEventListener('click',()=>{this.#preferences.values=defaults().values;this.#save();this.render();});
     }
-    this.#observer?.disconnect();
     this.#observer=new MutationObserver(()=>this.render());
     this.#observer.observe(document.documentElement,{attributes:true,attributeFilter:BACKGROUND_ATTRIBUTES});
-    this.#styleObserver?.disconnect();this.#styleObserver=new MutationObserver(records=>{
-      for(const record of records)for(const node of record.addedNodes)this.#findPreviews(node);
-      if(!this.#previewHosts.size||this.#styleFrame!==undefined)return;
-      this.#styleFrame=requestAnimationFrame(()=>{this.#styleFrame=undefined;this.#flushPreviews();});
-    });
-    this.#styleObserver.observe(document.body,{childList:true,subtree:true});
+    document.addEventListener('code-codex:owned-root-connected',this.#previewConnected);
+    // One initial discovery also covers a preview created by an older core.
+    // Subsequent previews announce their own mount; response insertions do not scan.
+    for(const el of document.querySelectorAll('main *'))if(el.localName.startsWith('code-codex-main-preview-'))this.#previewHosts.add(el);
+    this.#flushPreviews();
     this.render();
   }
   #installStyles():void {
     const add=(root:Document|ShadowRoot,key:string,text:string)=>{let style=root.querySelector<HTMLStyleElement>('style[data-code-codex-plugin-style="'+key+'"]');if(!style){style=document.createElement('style');style.dataset.codeCodexPluginStyle=key;(root instanceof Document?root.head:root).append(style);}if(style.textContent!==text)style.textContent=text;};
     add(document,'surface-opacity-native',SURFACE_OPACITY_NATIVE_CSS);
     add(this.shadow,'surface-opacity-tree',SURFACE_OPACITY_TREE_CSS);
-    this.#findPreviews(document.body);this.#flushPreviews();
-  }
-  #findPreviews(node:Node):void{
-    if(!(node instanceof Element))return;
-    const inspect=(el:Element)=>{if(el.localName.startsWith('code-codex-main-preview-')&&(!el.shadowRoot||!this.#styledPreviews.has(el.shadowRoot)))this.#previewHosts.add(el);};
-    inspect(node);for(const child of node.querySelectorAll('*'))inspect(child);
   }
   #flushPreviews():void{
     for(const el of this.#previewHosts){const root=el.shadowRoot;if(!el.isConnected||!root||this.#styledPreviews.has(root))continue;
@@ -153,7 +146,7 @@ export class SurfaceOpacityPlugin {
   }
   containsEvent(event:Event):boolean {return event.composedPath().includes(this.#element('.surface-opacity-panel'))||event.composedPath().includes(this.#element('.surface-opacity-settings-trigger'));}
   close():void {const panel=this.#element('.surface-opacity-panel');if(panel.matches(':popover-open'))panel.hidePopover();}
-  stop():void {this.close();this.#observer?.disconnect();this.#observer=undefined;this.#styleObserver?.disconnect();this.#styleObserver=undefined;if(this.#styleFrame!==undefined)cancelAnimationFrame(this.#styleFrame);this.#styleFrame=undefined;this.#previewHosts.clear();if(this.#ownsPresentation){document.documentElement.removeAttribute(ACTIVE_ATTRIBUTE);for(const r of MASK_REGIONS)document.documentElement.style.removeProperty('--code-codex-mask-'+r.key);this.#ownsPresentation=false;}}
+  stop():void {this.close();this.#observer?.disconnect();this.#observer=undefined;document.removeEventListener('code-codex:owned-root-connected',this.#previewConnected);this.#previewHosts.clear();if(this.#ownsPresentation){document.documentElement.removeAttribute(ACTIVE_ATTRIBUTE);for(const r of MASK_REGIONS)document.documentElement.style.removeProperty('--code-codex-mask-'+r.key);this.#ownsPresentation=false;}}
 }
 
 export const SURFACE_OPACITY_NATIVE_CSS = `
@@ -164,21 +157,21 @@ html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-sh
  * Match the observed semantic group token, not localized titles or hashes.
  * File rows and expanded diff backings must not compound the card alpha.
  * Icon tiles share this single backing; glyphs, actions and focus stay native. */
-html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) {
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [${NATIVE_TURN_CHANGE_CARD}] {
   background-color:color-mix(in srgb,var(--color-surface-elevated-secondary,rgb(30,31,35)) calc(var(--code-codex-mask-changes) * 100%),transparent) !important;
   background-image:none !important;
 }
-html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) > [class*="--codex-diffs-surface-override:"] {
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [${NATIVE_TURN_CHANGE_CARD}] > [class*="--codex-diffs-surface-override:"] {
   --codex-diffs-surface-override:transparent !important;
 }
 html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [class~="group/turn-diff-header"] > span > span[class~="size-10"]:has(> svg) {
   background-color:transparent !important;
   background-image:none !important;
 }
-html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) [class~="group/turn-diff-file-row"] > .contents > button {
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [class~="group/turn-diff-file-row"] > .contents > button {
   background-color:transparent !important;
 }
-html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) div:has(> [class~="group/turn-diff-header"]) [class~="group/turn-diff-file-row"] > .contents > button:hover {
+html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]) [class~="group/turn-diff-file-row"] > .contents > button:hover {
   background-color:color-mix(in srgb,var(--color-background-primary-ghost-hover,rgba(128,128,128,.12)) 60%,transparent) !important;
 }
 /* Conversation already has one continuous mask. Native scroll-edge helpers

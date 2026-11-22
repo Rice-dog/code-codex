@@ -18,6 +18,10 @@ const server=createServer((req,res)=>{
  if(url.pathname==='/seam.js'){res.setHeader('Content-Type','text/javascript');res.end(seam);return;}
  if(url.pathname.endsWith('.js')){
   res.setHeader('Content-Type','text/javascript');
+  if(url.pathname==='/assets/123.appearance.js'){
+   res.end(`function runtime(){};runtime.c={site:{exports:{service:{appActions:window.fixtureServices.appActions,executionHosts:{},appServerManagers:{}}}}};runtime.m={site:function(){const appServices=0,setAppServices=0;}};runtime.e=()=>{};runtime.C=()=>{};export{runtime};`);
+   return;
+  }
   if(url.pathname==='/app-initial-import-failure.js'){res.statusCode=404;res.end('unavailable');return;}
   if(url.pathname.includes('run-app-action-in-primary-window-'))res.end(dispatcher+'export{dispatch as differentName,dispatch as alias};');
   else if(scenario==='legacy')res.end(legacy);
@@ -63,6 +67,20 @@ try{
  check('independent native inventory fixes that exact discovery gap without account startup',await ev(`(async()=>{window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:[],appearance:['./run-app-action-in-primary-window-independent.js']};return (await fixture.readCodexAppearanceTheme())==='light'&&!window[Symbol.for('code-codex:account-host-profile:v1')];})()`));
  check('independent role hints survive resource buffer eviction',await ev(`(async()=>{performance.clearResourceTimings();return !!(await fixture.discoverCodexAppearanceAdapter()).runAction;})()`));
  check('independent hints reject external query fragment and unrelated roles',await ev(`(()=>{window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:[],appearance:['https://untrusted.invalid/run-app-action-in-primary-window-x.js','/run-app-action-in-primary-window-x.js?bad=1','/run-app-action-in-primary-window-x.js#bad','/unrelated.js']};performance.clearResourceTimings();return fixture.findCodexAppearanceActionModules().length===0;})()`));
+ await page('missing');
+ check('numbered runtime reads and restores Appearance without the retired coordinator',await ev(`(async()=>{
+   window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:[],appearance:[],runtimes:['./assets/123.appearance.js']};
+   if (await fixture.readCodexAppearanceTheme()!=='light') return false;
+   await fixture.writeCodexAppearanceTheme('dark');
+   const dark=fixture.codexDarkThemeApplied();
+   await fixture.writeCodexAppearanceTheme('light');
+   return dark&&mode==='light'&&calls.length===3;
+ })()`));
+ check('two qualified native Appearance scopes refuse before executing an action',await ev(`(()=>{
+   const scope={appActions:fixtureServices.appActions,executionHosts:{},appServerManagers:{}};
+   try {fixture.selectCodexAppearanceAdapter({scope,duplicate:{...scope}});return false;}
+   catch(e){return e.message.includes('CC-APPEARANCE-ADAPTER-002')&&calls.length===3;}
+ })()`));
  await page('missing');
  check('failed legacy import permits independent split-role fallback',await ev(`(async()=>{document.querySelectorAll('link[rel="modulepreload"]').forEach(e=>e.remove());performance.clearResourceTimings();window[Symbol.for('code-codex:appearance-module-hints:v1')]={schema:1,initial:['/app-initial-import-failure.js'],appearance:['/run-app-action-in-primary-window-independent.js']};return (await fixture.readCodexAppearanceTheme())==='light';})()`));
  await page('missing');

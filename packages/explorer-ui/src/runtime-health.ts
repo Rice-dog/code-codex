@@ -1,10 +1,11 @@
 import { runtimeEvent } from './runtime-events';
 import { isHomeWorkspaceView } from './home-view';
 import { isNativeLoginView } from './native-login';
+import {observeNativeStructure,OWNED_ROOT_CONNECTED} from './native-structure-changes';
 
 /** Read-only metadata: never call getContext(), copy DOM text, inspect URLs or restart effects. */
 export function rendererHealth(): Record<string, unknown> {
-  const trees = [...document.querySelectorAll<HTMLElement>('*')].filter(e => /^code-codex-v/.test(e.localName));
+  const trees = [...document.querySelectorAll<HTMLElement>('[data-code-codex-owned]')].filter(e => /^code-codex-v/.test(e.localName));
   const treeState = trees.slice(0, 4).map(tree => {
     const rect = tree.getBoundingClientRect(), style = getComputedStyle(tree);
     return { connected: tree.isConnected, state: tree.dataset.state ?? 'unknown', hidden: tree.hidden,
@@ -23,10 +24,13 @@ export function rendererHealth(): Record<string, unknown> {
 }
 
 export function observeRendererHealth(): void {
-  const key = Symbol.for('code-codex:runtime-health:v1');
+  const key = Symbol.for('code-codex:runtime-health:v2');
   const host = window as unknown as Record<symbol, unknown>;
   if (host[key]) return;
   host[key] = true;
+  // A pre-v2 document already owns resource/network/long-task listeners. Reuse
+  // them during hot takeover; its private legacy timer retires on page unload.
+  const legacy=!!host[Symbol.for('code-codex:runtime-health:v1')];
   const watched = new WeakSet<EventTarget>();
   let windowStart = performance.now(), count = 0, suppressed = 0, previous = '';
   const emit = (action: string, outcome: string, details: Record<string, unknown>) => {
@@ -38,6 +42,7 @@ export function observeRendererHealth(): void {
     runtimeEvent('renderer-health', action, outcome, details);
   };
   const watch = (root: Document | ShadowRoot) => {
+    if(legacy)return;
     if (watched.has(root)) return; watched.add(root);
     root.addEventListener('error', event => {
       const target = event.target;
@@ -53,15 +58,21 @@ export function observeRendererHealth(): void {
   };
   const snapshot = () => {
     watch(document);
-    for (const element of document.querySelectorAll('*')) {
+    for (const element of document.querySelectorAll('[data-code-codex-owned],[data-code-codex-runtime-information]')) {
       if (element.shadowRoot && (/^code-codex-v/.test(element.localName) || element.hasAttribute('data-code-codex-runtime-information'))) watch(element.shadowRoot);
     }
     const details = rendererHealth(), encoded = JSON.stringify(details);
     if (encoded !== previous) { emit('structural state', 'observed', details); previous = encoded; }
   };
   snapshot();
-  const timer = setInterval(() => { if (!document.hidden) snapshot(); }, 15_000);
-  window.addEventListener('pagehide', () => clearInterval(timer), { once: true });
+  let frame:number|undefined;
+  const schedule=()=>{if(!document.hidden&&frame===undefined)frame=requestAnimationFrame(()=>{frame=undefined;snapshot();});};
+  const structure=observeNativeStructure(schedule);
+  window.addEventListener(OWNED_ROOT_CONNECTED,schedule);
+  window.addEventListener('resize',schedule);
+  document.addEventListener('visibilitychange',schedule);
+  window.addEventListener('pagehide',()=>{structure.disconnect();if(frame!==undefined)cancelAnimationFrame(frame);window.removeEventListener(OWNED_ROOT_CONNECTED,schedule);window.removeEventListener('resize',schedule);document.removeEventListener('visibilitychange',schedule);},{once:true});
+  if(legacy)return;
   window.addEventListener('online', () => emit('network hint', 'online', { reliableReachability: false }));
   window.addEventListener('offline', () => emit('network hint', 'offline', { reliableReachability: false }));
   try {

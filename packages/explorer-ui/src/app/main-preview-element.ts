@@ -138,6 +138,7 @@ export class CodeCodexMainPreviewElement extends HTMLElement {
     if (this._clippedLayout) this.dataset.clippedLayout = "true";
     this._render();
     this._syncSuppression();
+    this.dispatchEvent(new CustomEvent('code-codex:owned-root-connected',{bubbles:true,composed:true}));
     queueMicrotask(() => {
       if (this._connected) this._scrollSelectedTabIntoView();
     });

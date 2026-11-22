@@ -2,12 +2,12 @@ import { translate,t,getLocale,parameterLanguage,subscribeLanguage } from '../..
 import { isPluginName, pluginDisplayName } from './plugin-names';
 // Only product-owned, explicitly supplied UI roots are adapted. User content is
 // excluded by data-i18n-skip; never observe the official document or translate code.
-const skip='.git-history-commit-copy strong,.git-history-commit-meta,.git-history-detail > h4,.git-history-detail-meta,.git-history-file-path,[data-i18n-skip],pre,code,textarea,input,[contenteditable="true"],script,style,.node-name:not([data-i18n-owned]),.project-name,.particle-library-name,.particle-image-transform-name,.tree-label,.tree-name,.file-name,.startup-video-card-name,.particle-image-name,.pixel-sculpt-image-name,.tab-label,.file-content,.markdown-body,.git-diff-reader,.notebook-cell,.notebook-output,.office-document,.office-word-document,.office-slide-viewport,.office-sheet-tabs,.csv-title,.diagram-title,.notebook-title,.diagram-canvas,.gallery-name,.detail,table';
+const skip='.account-plan-badge,.git-history-commit-copy strong,.git-history-commit-meta,.git-history-detail > h4,.git-history-detail-meta,.git-history-file-path,[data-i18n-skip],pre,code,textarea,input,[contenteditable="true"],script,style,.node-name:not([data-i18n-owned]),.project-name,.particle-library-name,.particle-image-transform-name,.tree-label,.tree-name,.file-name,.startup-video-card-name,.particle-image-name,.pixel-sculpt-image-name,.tab-label,.file-content,.markdown-body,.git-diff-reader,.notebook-cell,.notebook-output,.office-document,.office-word-document,.office-slide-viewport,.office-sheet-tabs,.csv-title,.diagram-title,.notebook-title,.diagram-canvas,.gallery-name,.detail,table';
 const contentLabels='.markdown-body[aria-label],.git-diff-reader[aria-label],.notebook-cell[aria-label],.csv-table[aria-label],.diagram-canvas[aria-label]';
 export function localizeOwnedUi(root: HTMLElement|ShadowRoot): () => void {
   const originals=new WeakMap<Node,{ source: string; rendered: string }>();
   const attributes=new WeakMap<Element,Map<string,{ source: string; rendered: string }>>();
-  const queue=new Set<Node>(); let scheduled=false,disposed=false;
+  const queue=new Map<Node,boolean>(); let scheduled=false,disposed=false;
   const node=(n: Node) => {
     if(n.nodeType===Node.TEXT_NODE) {
       if(n.parentElement?.closest(skip)||n.parentElement?.closest('[data-plugin-name],[data-i18n-key]')) return;
@@ -51,8 +51,16 @@ export function localizeOwnedUi(root: HTMLElement|ShadowRoot): () => void {
     const walker=document.createTreeWalker(n,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{ acceptNode: item => { if(item instanceof Element&&item.matches(skip)&&!item.matches('input,textarea')) { if(item.matches(contentLabels)) node(item); return NodeFilter.FILTER_REJECT; } return NodeFilter.FILTER_ACCEPT; } });
     while(walker.nextNode()) node(walker.currentNode);
   };
-  const flush=() => { scheduled=false; if(disposed) return; const nodes=[...queue]; queue.clear(); for(const n of nodes) if(n===root||n.isConnected) visit(n); };
-  const observer=new MutationObserver(records => { for(const r of records) { if(r.type==='childList') for(const n of r.addedNodes) queue.add(n); else queue.add(r.target); } if(queue.size&&!scheduled) { scheduled=true; queueMicrotask(flush); } });
+  const flush=() => {
+    scheduled=false;if(disposed)return;const nodes=new Map(queue);queue.clear();
+    for(const [n,deep] of nodes){
+      if(n!==root&&!n.isConnected)continue;
+      let ancestor=n.parentNode;while(ancestor&&nodes.get(ancestor)!==true)ancestor=ancestor.parentNode;
+      if(ancestor)continue;
+      if(deep)visit(n);else node(n);
+    }
+  };
+  const observer=new MutationObserver(records => { for(const r of records) { if(r.type==='childList') for(const n of r.addedNodes) queue.set(n,true); else if(!queue.has(r.target))queue.set(r.target,false); } if(queue.size&&!scheduled) { scheduled=true; queueMicrotask(flush); } });
   visit(root); observer.observe(root,{ subtree: true,childList: true,characterData: true,attributes: true,attributeFilter: ['title','aria-label','placeholder','aria-valuetext'] });
   const unsubscribe=subscribeLanguage(() => visit(root));
   return () => { disposed=true; observer.disconnect(); unsubscribe(); queue.clear(); };

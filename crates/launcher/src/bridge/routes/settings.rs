@@ -99,6 +99,15 @@ impl NativeBridge {
 }
 
 impl NativeBridge {
+    pub(super) fn consume_welcome(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        require_empty_object(&params)?;
+        self.ensure_epoch(epoch)?;
+        let consumed = workspace_service::application_paths::install_root()
+            .and_then(|root| root.as_deref().map_or(Ok(false), workspace_service::first_run::consume))
+            .map_err(|error| operation_error(internal_error(), "welcome_consume", error.to_string()))?;
+        Ok(json!({ "consumed": consumed }))
+    }
+
     pub(super) async fn settings_get(&self, params: Value) -> Result<Value, BridgeError> {
         require_empty_object(&params)?;
         serde_json::to_value(read_unpoisoned(&self.inner.settings).clone()).map_err(|error| {

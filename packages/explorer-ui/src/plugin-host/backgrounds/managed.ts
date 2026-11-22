@@ -48,10 +48,10 @@ export class ManagedBackgroundController<Settings, Renderer extends ManagedRende
   async initialize(): Promise<void> {
     if (this.#disposed) throw new Error(`${this.config.label} is unavailable`);
   }
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
     await this.#failureRecovery;
-    await ensureBackgroundPackage(this.config.packageId);
+    if (!packagePrepared) await ensureBackgroundPackage(this.config.packageId);
     if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;
@@ -65,25 +65,29 @@ export class ManagedBackgroundController<Settings, Renderer extends ManagedRende
     this.#pending = true;
     this.#error = undefined;
     this.#notify();
+    let theme: Promise<void> | undefined;
+    const current = () => !this.#disposed && generation === this.#generation;
     try {
       if (!document.body) throw new Error("The Codex window is not ready");
-      await this.#ensureCodexDarkTheme();
-      if (this.#disposed || generation !== this.#generation) return;
       const layer = document.createElement("div");
       layer.dataset.codeCodexParticleLayer = "v1";
       layer.setAttribute(this.config.layerAttribute,"v1");
       layer.setAttribute("aria-hidden", "true");
       layer.style.backgroundColor = this.config.color(this.#settings);
-      if(this.config.deferPresentationUntilReady){layer.style.cssText+=';position:fixed;inset:0;width:100%;height:100%;pointer-events:none;opacity:0';}
+      layer.style.cssText += ';position:fixed;inset:0;width:100%;height:100%;pointer-events:none;opacity:0';
       const canvas = document.createElement("canvas");
       canvas.className = this.config.canvasClass;
-      if(this.config.deferPresentationUntilReady)canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;display:block';
+      canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;display:block';
       layer.append(canvas);
       document.body.prepend(layer);
       this.#layer = layer;
       this.#canvas = canvas;
-      if(!this.config.deferPresentationUntilReady){document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
-      document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, this.config.color(this.#settings));}
+      theme = this.#ensureCodexDarkTheme().then(() => {
+        if (!current()) return;
+        document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, this.config.color(this.#settings));
+        document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
+        if (!this.config.deferPresentationUntilReady) layer.style.opacity = '1';
+      });
       this.#renderer = this.config.create(layer, canvas, this.#settings, (message) => {
         if (this.#disposed || generation !== this.#generation) return;
         this.#error = message;
@@ -100,14 +104,15 @@ export class ManagedBackgroundController<Settings, Renderer extends ManagedRende
         }
         this.#notify();
       });
-      await this.#renderer.ready;
-      if (this.#disposed || generation !== this.#generation) return;
-      if(this.config.deferPresentationUntilReady){document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE,true);document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY,this.config.color(this.#settings));layer.style.opacity='1';}
+      await Promise.all([theme, this.#renderer.ready]);
+      if (!current()) return;
+      if (this.config.deferPresentationUntilReady) layer.style.opacity = '1';
       registerBackgroundOpening(this.#layer!, this.#renderer);
       this.#enabled = true;
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      await theme?.catch(() => undefined);
       // A user stop/dispose owns cancellation. A stale activation must not
       // restore another background's lease or publish a spurious failure.
       if (this.#disposed || generation !== this.#generation) return;
@@ -149,7 +154,11 @@ export class ManagedBackgroundController<Settings, Renderer extends ManagedRende
   updateSettings(next: Settings): void {
     this.#settings = this.config.normalize(next);
     this.config.persist(this.#settings);
-    if(this.#layer){this.#layer.style.backgroundColor=this.config.color(this.#settings);document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY,this.config.color(this.#settings));}
+    if (this.#layer) {
+      const color = this.config.color(this.#settings);
+      this.#layer.style.backgroundColor = color;
+      if (document.documentElement.hasAttribute(PARTICLE_BACKGROUND_ATTRIBUTE)) document.documentElement.style.setProperty(PARTICLE_BACKGROUND_COLOR_PROPERTY, color);
+    }
     this.#renderer?.setSettings(this.#settings);
     this.#notify();
   }

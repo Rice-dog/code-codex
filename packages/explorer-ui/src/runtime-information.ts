@@ -5,7 +5,7 @@ import { runtimeErrorDetails, flushCaughtRuntimeErrors } from "./runtime-operati
 import { redactRuntimeText, redactRuntimeValue } from "./runtime-redaction";
 import { isHomeWorkspaceView } from "./home-view";
 import { isNativeLoginView } from "./native-login";
-import {nativeStructureChanged} from './native-structure-changes';
+import {observeNativeStructure} from './native-structure-changes';
 
 type Request = <T>(method: string, params?: Record<string, unknown>) => Promise<T>;
 interface Run { id: string; bytes: number; current: boolean; }
@@ -92,7 +92,8 @@ export function observeCodexRuntime(): void {
     const view = isNativeLoginView(document) ? "login" : isHomeWorkspaceView() ? "home" : nativeId.startsWith("builtin:") ? nativeId : "other-native-view";
     if (view !== currentView) { runtimeEvent("codex-observed","page","changed",{from:currentView || "initial",to:view}); currentView = view; }
   };
-  new MutationObserver(records => { if (nativeStructureChanged(records)&&!scheduled) scheduled = setTimeout(check,250); }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:["aria-current","data-app-shell-active-page"]});
+  const structure=observeNativeStructure(()=>{if(!scheduled)scheduled=setTimeout(check,250);});
+  window.addEventListener("pagehide",()=>{structure.disconnect();clearTimeout(scheduled);},{once:true});
   window.addEventListener("code-codex:thread-change",() => runtimeEvent("codex-observed","active task","changed"));
   document.addEventListener("visibilitychange",() => runtimeEvent("codex-observed","document visibility",document.visibilityState));
   window.addEventListener("pagehide",() => { runtimeEvent("renderer","document","leaving"); void flushRuntimeEvents(); });

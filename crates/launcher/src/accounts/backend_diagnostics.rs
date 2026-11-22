@@ -117,6 +117,24 @@ pub(super) fn classify(text:&str)->&'static str {
     }
     "unclassified"
 }
+
+/// The official quota RPC wraps an HTTP rejection and its structured body in
+/// the backend error message. Generic 401s do not establish token revocation.
+pub(super) fn reports_revoked_credential(text: &str) -> bool {
+    if text.len() > MAX_LINE {
+        return false;
+    }
+    let Some((status, body)) = text.split_once("; body=") else {
+        return false;
+    };
+    if !status.contains("failed: 401 Unauthorized") {
+        return false;
+    }
+    let Some(Ok(value)) = serde_json::Deserializer::from_str(body.trim_start()).into_iter::<Value>().next() else {
+        return false;
+    };
+    value["status"] == 401 && value["error"]["code"] == "token_revoked"
+}
 fn os_code(text:&str)->Option<i32> {
     let lower=text.to_ascii_lowercase();
     lower.match_indices("os error ").find_map(|(at,_)| {
@@ -127,6 +145,20 @@ fn os_code(text:&str)->Option<i32> {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test]
+    fn structured_http_revocation_is_distinct_from_unavailable_quota() {
+        let prefix = "failed to fetch codex rate limits: GET https://fixture.invalid failed: 401 Unauthorized; content-type=text/plain; body=";
+        assert!(reports_revoked_credential(&format!(r#"{prefix}{{"error":{{"code":"token_revoked"}},"status":401}}"#)));
+        for body in [
+            r#"{"error":{"message":"token_revoked"},"status":401}"#,
+            r#"{"error":{"code":"token_expired"},"status":401}"#,
+            r#"{"error":{"code":"token_revoked"},"status":403}"#,
+            r#"{"error":{"code":"token_revoked"}"#,
+        ] {
+            assert!(!reports_revoked_credential(&format!("{prefix}{body}")));
+        }
+        assert!(!reports_revoked_credential("401 Unauthorized"));
+    }
     #[test] fn categories_preserve_inner_reason_without_secret_text() {
         for (input,want) in [
             ("error sending request for url (https://secret/?token=private): dns error: failed to lookup address","DNS"),

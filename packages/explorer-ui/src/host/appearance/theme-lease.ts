@@ -1,32 +1,10 @@
-import {loadHostNamespace} from '../../../../../resources/account-host-capabilities.js';
 // controllers responsibility; original state keys, defaults and lifecycle retained.
 import { AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,BLACK_HOLE_BACKGROUND_PLUGIN_ID,BLINKING_SQUARES_BACKGROUND_PLUGIN_ID,CLOUD_TRAIN_BACKGROUND_PLUGIN_ID,GLOW_HORIZON_BACKGROUND_PLUGIN_ID,HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,MILKY_WAY_BACKGROUND_PLUGIN_ID,MOUNTAIN_BACKGROUND_PLUGIN_ID,PARTICLE_BACKGROUND_PLUGIN_ID,PARTICLE_BACKGROUND_THEME_LEASE_KEY,PIXEL_SCULPT_BACKGROUND_PLUGIN_ID } from "../../core/configuration/explorer";
 import { type DarkBackgroundPluginId } from "../../contracts/explorer-model";
-import { findCodexAppInitialModules,findCodexAppearanceActionModules,findCodexNumberedRuntimes,isCodexRpcNamespace } from "./theme-probe";
-import { runtimeEvent } from "../../runtime-events";
 import { recordCaughtRuntimeError } from "../../runtime-operations";
-import {
-  isObjectRecord
-} from "../../startup-background-renderers";
-
-
-
-export type CodexAppearanceTheme="system"|"light"|"dark";
-
-
-
-export type CodexAppearanceAction=
-  |{ readonly type: "app.appearance.get" }
-  |{
-    readonly type: "app.appearance.set_mode";
-    readonly mode: CodexAppearanceTheme;
-  };
-
-
-
-export interface CodexAppearanceAdapter {
-  readonly runAction: (action: CodexAppearanceAction) => Promise<unknown>;
-}
+import type {CodexAppearanceTheme} from './appearance-actions';
+export {codexAppearanceAdapterPromise,discoverCodexAppearanceAdapter,getCodexAppearanceAdapter,isCodexAppearanceTheme,readCodexAppearanceTheme,runCodexAppearanceAction,selectCodexAppearanceAdapter,writeCodexAppearanceTheme} from './appearance-actions';
+export type {CodexAppearanceAction,CodexAppearanceAdapter,CodexAppearanceTheme} from './appearance-actions';
 
 
 
@@ -34,116 +12,6 @@ export interface ParticleThemeLease {
   readonly owner?: DarkBackgroundPluginId;
   readonly previousPreference: Exclude<CodexAppearanceTheme,"dark">;
   readonly forcedPreference: "dark";
-}
-
-
-
-export function isCodexAppearanceTheme(value: unknown): value is CodexAppearanceTheme {
-  return value==="system"||value==="light"||value==="dark";
-}
-
-
-
-export function selectCodexAppearanceAdapter(moduleExports: Record<string,unknown>): CodexAppearanceAdapter|undefined {
-  const values=[...new Set(Object.values(moduleExports))];
-  const adapters=values.filter((value): value is {
-    appActions: { runInPrimaryWindow: (request: { action: CodexAppearanceAction }) => Promise<unknown> };
-    clientCoordination: { invalidateQueryCache: (request: { queryKey: readonly string[] }) => Promise<unknown> };
-  } => {
-    if(!isObjectRecord(value)||!isCodexRpcNamespace(value.appActions)||!isCodexRpcNamespace(value.clientCoordination)) {
-      return false;
-    }
-    return typeof value.appActions.runInPrimaryWindow==="function"
-      &&typeof value.clientCoordination.invalidateQueryCache==="function";
-  });
-  const adapter=adapters[0];
-  if(adapters.length>1) throw new Error("CC-APPEARANCE-ADAPTER-002: Multiple official Appearance namespaces matched; no setting was changed.");
-  if(adapters.length===1&&adapter) {
-    return { runAction: (action) => adapter.appActions.runInPrimaryWindow({ action }) };
-  }
-
-  // Older builds re-export this function from app-initial; newer builds keep
-  // it in the preloaded role module. Never depend on a minified export name.
-  const actions=values.filter((value): value is (action: CodexAppearanceAction) => Promise<unknown> =>
-      typeof value==="function"
-      &&/\.appActions\b/.test(Function.prototype.toString.call(value))
-      &&/\.runInPrimaryWindow\s*\(\s*\{\s*action\s*:/.test(Function.prototype.toString.call(value)));
-  if(actions.length>1) throw new Error("CC-APPEARANCE-ADAPTER-002: Multiple official Appearance dispatchers matched; no setting was changed.");
-  if(actions[0]) return { runAction: actions[0] };
-  return undefined;
-}
-
-export async function discoverCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter> {
-  const numbered=findCodexNumberedRuntimes();
-  const initial=findCodexAppInitialModules();
-  const modules=findCodexAppearanceActionModules();
-  const counts={initialCandidates:initial.length,actionCandidates:modules.length,independentHints:!!(window as unknown as Record<symbol,unknown>)[Symbol.for('code-codex:appearance-module-hints:v1')],accountRuntimeRequired:false};
-  runtimeEvent("appearance","adapter discovery","started",{stage:"module-discovery",...counts});
-  if(initial.length>1||modules.length>1) {
-    runtimeEvent("appearance","adapter discovery","failed",{stage:"module-ambiguity",...counts});
-    throw new Error("CC-APPEARANCE-ADAPTER-002: Multiple official Appearance role modules matched. stage=module-ambiguity; no setting was changed.");
-  }
-  if(numbered.length>1)throw new Error("CC-APPEARANCE-ADAPTER-002: Multiple official runtimes matched; no setting was changed.");
-  for(const path of numbered){const adapter=selectCodexAppearanceAdapter(await loadHostNamespace(path+'#cc-host=appearance'));if(adapter)return adapter;}
-  let importsFailed=0,unmatchedExports=0;
-  for(const [role,paths] of [["initial",initial],["action",modules]] as const) {
-    for(const path of paths) {
-      let namespace:Record<string,unknown>;
-      try{namespace=await import(path) as Record<string,unknown>;}catch{
-        importsFailed++;runtimeEvent("appearance","adapter discovery","unavailable",{stage:"module-import",role,...counts});continue;
-      }
-      const adapter=selectCodexAppearanceAdapter(namespace);
-      if(adapter){runtimeEvent("appearance","adapter discovery","confirmed",{stage:"export-contract",role,...counts});return adapter;}
-      unmatchedExports++;
-    }
-  }
-  const stage=importsFailed?"module-import":unmatchedExports?"export-contract":"module-discovery";
-  runtimeEvent("appearance","adapter discovery","failed",{stage,importsFailed,unmatchedExports,...counts});
-  throw new Error(`CC-APPEARANCE-ADAPTER-001: No supported official Appearance interface was found. stage=${stage}; initialCandidates=${initial.length}; actionCandidates=${modules.length}; importsFailed=${importsFailed}; unmatchedExports=${unmatchedExports}; accountRuntimeRequired=false; background activation was cancelled without changing the theme.`);
-}
-
-
-
-export let codexAppearanceAdapterPromise: Promise<CodexAppearanceAdapter>|undefined;
-
-
-
-export function getCodexAppearanceAdapter(): Promise<CodexAppearanceAdapter> {
-  if(!codexAppearanceAdapterPromise) {
-    codexAppearanceAdapterPromise=discoverCodexAppearanceAdapter().catch((error: unknown) => {
-      codexAppearanceAdapterPromise=undefined;
-      throw error;
-    });
-  }
-  return codexAppearanceAdapterPromise;
-}
-
-
-
-export async function runCodexAppearanceAction(action: CodexAppearanceAction): Promise<Record<string,unknown>> {
-  const adapter=await getCodexAppearanceAdapter();
-  const result=await adapter.runAction(action);
-  if(!isObjectRecord(result)) throw new Error("Codex returned an invalid Appearance response");
-  return result;
-}
-
-
-
-export async function readCodexAppearanceTheme(): Promise<CodexAppearanceTheme> {
-  const result=await runCodexAppearanceAction({ type: "app.appearance.get" });
-  if(!isCodexAppearanceTheme(result.mode)) {
-    throw new Error("Codex returned an unsupported Appearance setting");
-  }
-  return result.mode;
-}
-
-
-
-export async function writeCodexAppearanceTheme(value: CodexAppearanceTheme): Promise<void> {
-  const result=await runCodexAppearanceAction({ type: "app.appearance.set_mode",mode: value });
-  if(result.mode!==value) {
-    throw new Error("Codex did not confirm the Appearance change");
-  }
 }
 
 

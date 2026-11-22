@@ -30,7 +30,7 @@ export class AccountList {
  constructor(private readonly root:ShadowRoot,private readonly list:HTMLElement,private readonly action:(action:string,id:string)=>void|Promise<AccountCheckResult|void>,reorder:(ids:string[])=>Promise<void>=async()=>{}){
   const menu=this.#menu=node('div');menu.className='accounts-actions-menu';menu.setAttribute('popover','manual');menu.setAttribute('role','menu');root.append(menu);
   this.#announcement=node('span');this.#announcement.className='accounts-reorder-announcement';this.#announcement.setAttribute('aria-live','polite');root.append(this.#announcement);list.setAttribute('role','list');
-  this.#sort=new HoldReorder(list,()=>!this.#busy,reorder,saved=>{this.#announcement.textContent=saved?t('accounts.orderSaved'):'ACCOUNT_ORDER_SAVE_FAILED: The original order was restored.';});
+  this.#sort=new HoldReorder(list,()=>!this.#busy,reorder,saved=>{this.#announcement.textContent=saved?t('accounts.orderSaved'):'Could not save the account order.';});
   const options={signal:this.#abort.signal};
   list.addEventListener('click',event=>{const button=(event.target as Element).closest<HTMLButtonElement>('button[data-account-action]');if(!button||button.disabled)return;if(button.dataset.accountAction==='menu')this.#open(button);else if(button.dataset.accountAction==='add')this.#openAdd(button);else action(button.dataset.accountAction!,button.dataset.connection??'');},options);
   menu.addEventListener('click',event=>{const button=(event.target as Element).closest<HTMLButtonElement>('button[data-account-action]');if(!button||button.disabled)return;const name=button.dataset.accountAction!,id=button.dataset.connection!;if(name==='verify'||name==='reconcile')void this.#runCheck(name,id);else{this.close(true);void action(name,id);}},options);
@@ -140,8 +140,10 @@ ${accountQuotaCss}${planBadgeCss}
 .accounts-add-tile:hover{background:var(--cle-subtle);color:var(--cle-icon-blue)}
 .accounts-icon-action:focus-visible,.accounts-add-tile:focus-visible{outline:2px solid var(--cle-icon-blue);outline-offset:2px}
 .accounts-add-tile:disabled,.accounts-icon-action:disabled{opacity:.45;cursor:default}
-.accounts-message:empty{display:none}
-.accounts-message{color:var(--cle-ink);overflow-wrap:anywhere;white-space:pre-line}
+.accounts-feedback{display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:var(--cle-ink)}
+.accounts-feedback[hidden]{display:none}
+.accounts-message{overflow-wrap:anywhere}
+.accounts-elapsed{flex:none;color:var(--cle-muted);font-variant-numeric:tabular-nums}
 .accounts-actions-menu{position:fixed;inset:auto;margin:0;min-width:164px;max-width:calc(100vw - 24px);padding:5px;border:1px solid var(--cle-rule);border-radius:10px;background:var(--cle-paper);color:var(--cle-ink);box-shadow:0 4px 16px #0002}
 .accounts-actions-menu button{display:flex;align-items:center;gap:10px;width:100%;padding:7px 9px;border:0;border-radius:5px;background:transparent;color:inherit;text-align:start;font:inherit;font-size:12px;cursor:pointer}
 .accounts-actions-menu button[data-account-action="primary.start"]{margin-bottom:5px;border-bottom:1px solid var(--cle-rule);border-radius:0;padding-bottom:10px}

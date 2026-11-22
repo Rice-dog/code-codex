@@ -35,7 +35,8 @@ export function attachPluginShortcuts(root:ShadowRoot,open:(id:string)=>void):()
   if(focused)[...root.querySelectorAll<HTMLButtonElement>('[data-plugin-shortcut]')].find(b=>b.dataset.pluginShortcut===focused)?.focus({preventScroll:true});
  };
  const schedule=()=>{if(frame===undefined)frame=requestAnimationFrame(()=>{frame=undefined;render();});};
- const mutation=new MutationObserver(records=>{if(records.some(r=>!host.contains(r.target as Node)&&!menu.contains(r.target as Node)))schedule();});mutation.observe(root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['aria-expanded','hidden']});
+ const mutation=new MutationObserver(schedule);
+ for(const card of cards.values())mutation.observe(card,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['aria-expanded','hidden']});
  const resize=new ResizeObserver(schedule);resize.observe(footer);
  const storage=(event:StorageEvent)=>{if(event.key===null||event.key===PLUGIN_PINS_KEY)schedule();};
  window.addEventListener(PLUGIN_PINS_CHANGED,schedule,{signal:abort.signal});window.addEventListener('storage',storage,{signal:abort.signal});window.addEventListener('resize',close,{signal:abort.signal});

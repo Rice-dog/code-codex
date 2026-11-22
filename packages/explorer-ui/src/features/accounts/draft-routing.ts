@@ -1,4 +1,5 @@
 // Keep the official creation request and callbacks. Only its transport changes.
+import {nativeAccountServices} from '../../../../../resources/account-host-capabilities.js';
 type Native=Record<string,any>;
 export interface DraftRoute {token:string;config:Native;model?:string;}
 export interface DraftPorts {
@@ -41,7 +42,7 @@ export function wrapDraftManager(manager:Native,ports:DraftPorts):Native {
 /** Discover the renderer's existing RPC registry without owning or disposing it. */
 export async function installDraftRouting(initial:Native,shared:Native,paths:string[]|undefined,load:(path:string)=>Promise<Native>,ports:DraftPorts):Promise<()=>void>{
  const getters=[...new Set(Object.values(initial).filter(v=>typeof v==='function'&&/AppServerManager RPC is unavailable for hostId:/.test(Function.prototype.toString.call(v))&&/\.forHost\(/.test(Function.prototype.toString.call(v))))] as Function[];
- const services=[...new Set(Object.values(shared).filter(v=>{if(!v||typeof v!=='object')return false;const d=Object.getOwnPropertyDescriptors(v);return d.appServerManagers?.value&&d.executionHosts?.value&&d.clientCoordination?.value&&d.appActions?.value;}))];
+ const services=nativeAccountServices(shared).filter(value=>typeof value.appActions.runInPrimaryWindow==='function');
  if(getters.length!==1||services.length!==1||!paths?.length||paths.length>4||paths.some(p=>!/^\.\/assets\/(?:register-app-actions-[A-Za-z0-9_-]+\.js|[0-9]+\.[A-Za-z0-9_-]+\.js#cc-host=actions)$/.test(p)))throw Error('ACCOUNT_DRAFT_CAPABILITY_UNAVAILABLE: The native creation registry could not be qualified. Existing conversations remain available.');
  // New official runtimes initialize their action registry lazily. A read-only
  // official action loads it through the host's own lifecycle; no factory is forced.

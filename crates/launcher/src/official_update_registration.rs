@@ -1,6 +1,8 @@
 //! Observe the native deployment, before acknowledging update preparation.
-use windows::{ApplicationModel::{PackageCatalog, PackageUpdatingEventArgs}, Foundation::TypedEventHandler};
+use windows::{ApplicationModel::{PackageCatalog, PackageUpdatingEventArgs}, Foundation::TypedEventHandler, Management::Deployment::PackageManager, core::HSTRING};
 use tokio::sync::watch;
+
+const CODEX_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
 
 #[derive(Clone, Debug, PartialEq)]
 enum State { Idle, Updating, Complete(Result<String, String>) }
@@ -21,7 +23,7 @@ impl Drop for Mta {
 }
 
 fn observation(family: &str, version: &str, from: &str, complete: bool, error: i32) -> Option<State> {
-    if family != "OpenAI.Codex_2p2nqsd0c76g0" || !super::is_newer(version, from) { return None; }
+    if family != CODEX_FAMILY || !super::is_newer(version, from) { return None; }
     Some(if complete {
         State::Complete(if error < 0 { Err(format!("CC-OFFICIAL-UPDATE-005: Package registration failed: HRESULT=0x{:08X}",error as u32)) } else { Ok(version.to_owned()) })
     } else { State::Updating })
@@ -50,14 +52,44 @@ impl Registration {
         Ok(Self { catalog, token, state, _mta: mta })
     }
 
-    pub(super) async fn finish_if_updating(&mut self) -> Result<(), String> {
-        loop {
-            let current = self.state.borrow_and_update().clone();
-            match current {
-                State::Idle => return Ok(()), // No deployment: ordinary close/cancel.
-                State::Complete(result) => return result.map(|_|()),
-                State::Updating => self.state.changed().await.map_err(|_|"CC-OFFICIAL-UPDATE-006: Package registration notifications ended before completion".to_owned())?,
+    pub(super) async fn wait_for_registered(&mut self, from: &str) -> Result<Option<String>, String> {
+        let manager = PackageManager::new().map_err(|e| e.to_string())?;
+        let family = HSTRING::from(CODEX_FAMILY);
+        wait_for_registration(&mut self.state, std::time::Duration::from_secs(120), || {
+            let mut newest = None::<String>;
+            for package in manager.FindPackagesByUserSecurityIdPackageFamilyName(&HSTRING::new(), &family)? {
+                let v = package.Id()?.Version()?;
+                let version = format!("{}.{}.{}.{}",v.Major,v.Minor,v.Build,v.Revision);
+                if super::is_newer(&version, newest.as_deref().unwrap_or(from)) { newest = Some(version); }
             }
+            Ok(newest)
+        }).await
+    }
+}
+
+async fn wait_for_registration(
+    state: &mut watch::Receiver<State>,
+    budget: std::time::Duration,
+    mut registered: impl FnMut() -> windows::core::Result<Option<String>>,
+) -> Result<Option<String>, String> {
+    use std::time::Duration;
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut interval = Duration::from_millis(500);
+    let mut notification_open = true;
+    loop {
+        if let State::Complete(Err(error)) = state.borrow_and_update().clone() { return Err(error); }
+        match registered() {
+            Ok(Some(version)) => return Ok(Some(version)),
+            result if tokio::time::Instant::now() >= deadline => return result.map_err(|error| format!("CC-OFFICIAL-UPDATE-006: Registration could not be verified: {error}")),
+            _ => {}
+        }
+        // Only a user-requested update, after confirmed exit, can reach here.
+        // Native notifications wake immediately; a missed notification falls
+        // back to this current-user package-family query, without PowerShell.
+        let next = (tokio::time::Instant::now() + interval).min(deadline);
+        tokio::select! {
+            result = state.changed(), if notification_open => notification_open = result.is_ok(),
+            () = tokio::time::sleep_until(next) => interval = (interval * 2).min(Duration::from_secs(2)),
         }
     }
 }
@@ -82,24 +114,36 @@ mod tests {
     #[tokio::test]
     async fn native_subscription_and_exit_during_registration() {
         use std::{future::Future, task::{Context, Poll, Waker}};
-        let mut registration=Registration::subscribe("26.1103.7773.0").expect("Native current-user catalog subscription");
-        registration.finish_if_updating().await.expect("Ordinary close has no deployment to wait for");
-        let (sender, receiver)=watch::channel(State::Updating);
-        registration.state=receiver;
-        let mut finish=std::pin::pin!(registration.finish_if_updating());
+        let _registration=Registration::subscribe("26.1103.7773.0").expect("Native current-user catalog subscription");
+        let (sender, mut receiver)=watch::channel(State::Updating);
+        let available=std::cell::Cell::new(false);
+        let mut finish=std::pin::pin!(wait_for_registration(&mut receiver, std::time::Duration::from_secs(2), ||Ok(available.get().then(||"26.1106.6628.0".to_owned()))));
         let mut cx=Context::from_waker(Waker::noop());
         assert!(matches!(finish.as_mut().poll(&mut cx),Poll::Pending),"Old process exit cannot release active registration");
+        available.set(true);
         sender.send_replace(State::Complete(Ok("26.1106.6628.0".into())));
-        finish.await.expect("Completion releases without a delay or rescan loop");
+        assert_eq!(finish.await.unwrap().as_deref(),Some("26.1106.6628.0"));
     }
 
     #[tokio::test]
     async fn completion_before_exit_and_failure_are_retained() {
-        let mut registration=Registration::subscribe("26.1103.7773.0").unwrap();
-        let (sender, receiver)=watch::channel(State::Complete(Ok("26.1106.6628.0".into())));
-        registration.state=receiver;
-        registration.finish_if_updating().await.unwrap();
+        let (sender, mut receiver)=watch::channel(State::Complete(Ok("26.1106.6628.0".into())));
+        let budget=std::time::Duration::ZERO;
+        assert_eq!(wait_for_registration(&mut receiver,budget,||Ok(Some("26.1106.6628.0".into()))).await.unwrap().as_deref(),Some("26.1106.6628.0"));
         sender.send_replace(State::Complete(Err("deployment failed".into())));
-        assert_eq!(registration.finish_if_updating().await.unwrap_err(),"deployment failed");
+        assert_eq!(wait_for_registration(&mut receiver,budget,||panic!("A failed update must not relaunch")).await.unwrap_err(),"deployment failed");
+    }
+
+    #[tokio::test]
+    async fn missing_notification_uses_registration_and_never_relaunches_old_version() {
+        use std::time::Duration;
+        let (_sender, mut receiver)=watch::channel(State::Idle);
+        let mut reads=0;
+        let version=wait_for_registration(&mut receiver,Duration::from_secs(2),||{
+            reads+=1;
+            Ok((reads==2).then(||"26.1106.6628.0".into()))
+        }).await.unwrap();
+        assert_eq!(version.as_deref(),Some("26.1106.6628.0"));
+        assert_eq!(wait_for_registration(&mut receiver,Duration::ZERO,||Ok(None)).await.unwrap(),None);
     }
 }

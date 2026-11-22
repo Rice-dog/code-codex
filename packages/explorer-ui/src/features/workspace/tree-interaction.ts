@@ -40,6 +40,7 @@ export interface TreeInteractionControllerPorts {
   readonly loadDirectory: (path: string,append?: boolean,waitForExisting?: boolean,expectedGeneration?: number) => Promise<void>;
 }
 export class TreeInteractionController {
+ private visibleRows=new Map<string,{signature:string;element:HTMLElement}>();
  clearFileClipboard(expected:{paths:string[];operation:"copy"|"cut"}):void {if(this.fileClipboard===expected)this.fileClipboard=undefined;}
  readonly model=new TreeModel();
 resetFilterPresentation(): void {
@@ -59,13 +60,24 @@ renderVisible(): void {
         const viewport = this.host.treeShell.clientHeight || 420;
         const start = Math.max(0, Math.floor(this.host.treeShell.scrollTop / TREE_ROW_HEIGHT) - OVERSCAN);
         const end = Math.min(this.rows.length, Math.ceil((this.host.treeShell.scrollTop + viewport) / TREE_ROW_HEIGHT) + OVERSCAN);
-        const fragment = document.createDocumentFragment();
+        const next=new Map<string,{signature:string;element:HTMLElement}>();
+        let cursor=this.host.treeWindow.firstChild;
         for (let index = start; index < end; index += 1) {
             const row = this.rows[index];
-            if (row)
-                fragment.append(this.createRow(row, index));
+            if (!row) continue;
+            const node=row.node,key=row.key??`${row.kind}:${row.path}:${index}`;
+            const signature=JSON.stringify([index,row.kind,row.path,row.depth,node?.name,node?.relativePath,node?.kind,node?.change,node?.inaccessible,
+                this.isFilterExpandable(row),node?.kind==='directory'&&(this.fileFilterQuery?this.isFilterExpanded(row):this.model.isExpanded(node.relativePath)),
+                index===this.focusedIndex,this.selectedPaths.has(row.path),row.path===this.host.contextMenuTarget?.path,row.path===this.host.activePreviewPath,
+                row.path===this.host.dragSource?.path,row.path===this.host.dropTargetPath]);
+            const prior=this.visibleRows.get(key);
+            const entry=prior?.signature===signature?prior:{signature,element:this.createRow(row,index)};
+            next.set(key,entry);
+            if(entry.element===cursor)cursor=cursor.nextSibling;
+            else this.host.treeWindow.insertBefore(entry.element,cursor);
         }
-        this.host.treeWindow.replaceChildren(fragment);
+        while(cursor){const old=cursor;cursor=cursor.nextSibling;old.remove();}
+        this.visibleRows=next;
         const active = this.host.shadow.getElementById(`cle-row-${this.focusedIndex}`);
         if (active)
             this.host.treeShell.setAttribute("aria-activedescendant", active.id);
@@ -82,7 +94,7 @@ updateScrollbarPosition(): void {
                 : scrollTop >= maxScrollTop - 1
                     ? "end"
                     : "middle";
-        this.host.treeShell.dataset.scrollPosition = position;
+        if(this.host.treeShell.dataset.scrollPosition!==position)this.host.treeShell.dataset.scrollPosition = position;
     }
 onTreeDoubleClick(event: MouseEvent): void {
         const element = (event.target as Element | null)?.closest<HTMLElement>(".tree-row");
@@ -163,8 +175,15 @@ syncSelectionDom(): void {
         for (const element of this.host.treeWindow.querySelectorAll<HTMLElement>(".tree-row")) {
             const path = element.dataset.path;
             const selected = path !== undefined && this.selectedPaths.has(path);
+            const aria=String(selected || (path !== undefined && path === this.host.activePreviewPath));
+            if(element.dataset.selected===String(selected)&&element.getAttribute('aria-selected')===aria)continue;
             element.dataset.selected = String(selected);
-            element.setAttribute("aria-selected", String(selected || (path !== undefined && path === this.host.activePreviewPath)));
+            element.setAttribute("aria-selected", aria);
+            // Selection also updates rows directly between virtual renders.
+            // Invalidate only that changed row's cached presentation.
+            const index=Number(element.dataset.index),row=this.rows[index];
+            const entry=row&&this.visibleRows.get(row.key??`${row.kind}:${row.path}:${index}`);
+            if(entry)entry.signature='';
         }
     }
 announceSelectionCount(): void {

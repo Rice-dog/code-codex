@@ -22,10 +22,10 @@ export class ConnectionModelSelector {
    if(!model){event.preventDefault();event.stopImmediatePropagation();this.notice('ACCOUNT_NATIVE_MODEL_MENU_UNAVAILABLE: The selected native model could not be matched to the API catalog. stage=row-selection; no model selection was committed.');return;}
    const status=this.adapter.status();if(model===this.#selected&&!status.busy&&!status.preparing&&!isDefault)return;
    event.preventDefault();event.stopImmediatePropagation();
-   if(status.busy||status.preparing){this.notice('ACCOUNT_MODEL_BUSY: Finish the current task before changing its model.');return;}
+   if((status.busy||status.preparing)&&!status.deferredSelection){this.notice('ACCOUNT_MODEL_BUSY: Finish the current task before changing its model.');return;}
    if(isDefault&&model===this.#selected){try{port.select(model,true);}catch(error){this.notice(String(error));}return;}
    const epoch=this.#epoch,id=status.selected;
-   void this.adapter.selectApiModel(id,model).then(()=>{if(epoch!==this.#epoch||this.adapter.status().selected!==id)return;this.#default=model;this.#selected=model;this.#syncRequested=model;port.apply(this.#ids,model);port.select(model,true);}).catch(error=>this.notice(String(error)));
+   void this.adapter.selectApiModel(id,model).then(deferred=>{if(epoch!==this.#epoch||this.adapter.status().selected!==id)return;if(deferred){this.#selected=model;port.preview(model);port.close();return;}this.#default=model;this.#selected=model;this.#syncRequested=model;port.apply(this.#ids,model);port.select(model,true);}).catch(error=>this.notice(String(error)));
   },options);
  }
  #isTrigger(event:Event):boolean{return !!this.#identity&&!!this.#anchor&&event.target instanceof Node&&this.#anchor.contains(event.target);}
@@ -45,17 +45,18 @@ export class ConnectionModelSelector {
    if(connection.api.models){this.#ids=[...connection.api.models];this.#default=connection.api.model;this.#selected=this.adapter.apiChoice(connection.id)?.model??this.#default;this.#syncRequested='';this.#port.apply(this.#ids,this.#default);}else this.#loadCatalog(connection.id);
   }
   if(connection?.api&&this.#port&&((this.adapter.apiChoice(connection.id)?.model??connection.api.model)!==this.#selected||connection.api.model!==this.#default)){this.#default=connection.api.model;this.#selected=this.adapter.apiChoice(connection.id)?.model??this.#default;this.#syncRequested='';this.#port.apply(this.#ids.includes(this.#selected)?this.#ids:[this.#default,this.#selected],this.#default);}
+  this.#port?.preview(status.pendingModel);
   this.#sync();
  }
  #loadCatalog(id:string):void{
   const epoch=this.#epoch;void this.adapter.apiModels(id).then(result=>{if(epoch!==this.#epoch||!this.#port)return;this.#ids=result.models;this.#default=result.selected;this.#selected=this.adapter.apiChoice(id)?.model??this.#default;this.#port.apply(this.#ids,this.#default);if(result.warning)this.notice(result.warning);this.#sync();}).catch(error=>{if(epoch===this.#epoch)this.notice(String(error));});
  }
  #sync():void{
-  const status=this.adapter.status();if(!this.#port||status.busy||status.preparing||this.#syncRequested===this.#selected)return;
+  const status=this.adapter.status();if(!this.#port||status.busy||status.preparing||status.pendingModel||this.#syncRequested===this.#selected)return;
   try{this.#syncRequested=this.#selected;if(this.#port.picker().model!==this.#selected)this.#port.select(this.#selected,false,this.adapter.apiChoice(status.selected)?.effort);}catch(error){this.notice(String(error));}
  }
  #reconcile():void{
-  const port=this.#port,status=this.adapter.status();if(!port||status.busy||status.preparing||!this.#syncRequested)return;
+  const port=this.#port,status=this.adapter.status();if(!port||status.busy||status.preparing||status.pendingModel||!this.#syncRequested)return;
   try{const model=port.picker().model;if(!model||model===this.#selected||!this.#ids.includes(model))return;
    const epoch=this.#epoch;void this.adapter.selectApiModel(status.selected,model).then(()=>{if(epoch!==this.#epoch)return;this.#default=model;this.#selected=model;this.#syncRequested=model;port.apply(this.#ids,model);},error=>{if(epoch!==this.#epoch)return;port.select(this.#selected);this.notice(String(error));});
   }catch(error){this.notice(String(error));}

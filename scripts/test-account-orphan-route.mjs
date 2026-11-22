@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
-const source='(async()=>{'+await readFile('crates/launcher/src/accounts/host_rpc_deadline.js','utf8')+';return await ('+await readFile('crates/launcher/src/accounts/native_route.js','utf8')+');})()';globalThis.window=globalThis;
+const roles=(await readFile('resources/account-host-capabilities.js','utf8')).replaceAll('export ','');
+const source='(async()=>{'+roles+';'+await readFile('crates/launcher/src/accounts/host_rpc_deadline.js','utf8')+';return await ('+await readFile('crates/launcher/src/accounts/native_route.js','utf8')+');})()';globalThis.window=globalThis;
 const pins=new Map();window[Symbol.for('code-codex:native-account-pins:v1')]=pins;
 let active=false,requests=[],released=0,retained=false,loadedReplies=[],resumeFault=false;
 const lease=()=>({dup(){return this},onRpcBroken(){},[Symbol.dispose](){}});
 const manager={...lease(),getThreadExecutionState:async()=>({inProgress:active}),getFollowUpContext:async()=>({needsResume:false,resumeState:'resumed'}),getHostId:async()=> 'local',sendRequest:async(method,p)=>{requests.push({method,p});if(method==='thread/read')return {thread:{id:'task',path:'C:/sessions/task',cwd:'C:/project'}};if(method==='thread/unsubscribe')return {status:'unsubscribed'};if(method==='thread/loaded/list')return loadedReplies.length?loadedReplies.shift():{data:retained?['task']:[],nextCursor:null};if(method==='thread/resume'){if(resumeFault)throw Error('fixture cold resume failed');return {thread:{id:'task',path:'C:/sessions/task',cwd:'C:/project'},modelProvider:'openai'};}throw Error(method)},getCachedConversationMetadata:async()=>({modelProvider:'openai'}),getCurrentPermissions:async()=>({approvalPolicy:'never'}),updateThreadPermissions:async()=>{},resumeConversation:async()=>{},retainActiveConversation:()=>Promise.resolve(lease()),subscribe:()=>Promise.resolve(lease())};
-const service={...lease(),open:()=>Promise.resolve({status:'ready',manager})};globalThis.fixture={appServerManagers:service,executionHosts:{},clientCoordination:{},appActions:{}};
+const service={...lease(),open:()=>Promise.resolve({status:'ready',manager})};globalThis.fixture={appServerManagers:service,executionHosts:{},appActions:{}};
 const profile={shared:'data:text/javascript,export const services=globalThis.fixture'};
 const run=params=>eval(source.replace('__PARAMS__',JSON.stringify({threadId:'task',binding:'new-owner',unloadTimeoutMs:50,...params})).replace('__PROFILE__',JSON.stringify(profile)));
 const oldUrl='http://127.0.0.1:1/old-capability',newUrl='http://127.0.0.1:2/new-capability';

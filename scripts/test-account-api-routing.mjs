@@ -9,7 +9,7 @@ globalThis.window=new EventTarget();
 const preferences=new Map();globalThis.localStorage={getItem:k=>preferences.get(k)??null,setItem:(k,v)=>preferences.set(k,v)};
 const {NativeAccountAdapter,rpcManagerService,wrapDraftManager}=await import(pathToFileURL(resolve(out,'fixture.mjs'))),checks=[];
 const nativeInput={input:[{type:'text',text:'normal official'}]},nativeOptions={};let prepared=0;const pass=wrapDraftManager({startConversation(p,o){assert.equal(p,nativeInput);assert.equal(o,nativeOptions);return 'official';}},{selection(){return undefined;},prepare(){prepared++;},settled(){prepared++;}});assert.equal(await pass.startConversation(nativeInput,nativeOptions),'official');assert.equal(prepared,0);checks.push('Normal official creation passes through with original object identity and no account preparation');
-const quota=(remaining)=>({rateLimits:{limitId:'codex',primary:{usedPercent:100-remaining,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:50,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
+const quota=(remaining)=>({rateLimits:{limitId:'codex',credits:{balance:'0',hasCredits:false,unlimited:false},primary:{usedPercent:100-remaining,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:50,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
 const wait=async p=>{for(let i=0;i<100;i++){if(p())return;await new Promise(r=>setTimeout(r,20));}throw Error('Fixture did not settle');};
 const state={owner:{id:'owner',label:'official@test'},profile:{initial:'./assets/app-initial-fixture.js',shared:'./assets/app-shared-fixture.js',actions:['./assets/register-app-actions-fixture.js']},connections:[{id:'API',email:null,label:'Synthetic API',api:{baseUrl:'https://example.invalid/v1',model:'synthetic-model'}}],selected:{},nativeRoutes:{},nativeRouting:true,sharedConversations:[],activeConversations:[]};
 let admit,notification,active=false,ensureGate,finishEnsure;
@@ -29,7 +29,11 @@ try{
  await adapter.select('API');assert.equal(adapter.status().selected,'API');assert.equal(adapter.status().sendBlocked,false);await admit('task');checks.push('API is selected and admitted only after native prepare/ensure verification');
  assert(!calls.some(p=>p.action==='usage'&&p.connectionId==='API'));checks.push('Generic APIs never request official quota, credit or reset methods');
  await adapter.select('host');assert.equal(adapter.status().selected,'host');await admit('task');checks.push('Official identity can be selected and admitted again without overwriting any global provider configuration');
- active=true;notification({method:'turn/started',params:{threadId:'task',turn:{id:'one'}}});const before=calls.length;await assert.rejects(()=>adapter.select('API'),/ACCOUNT_TURN_ACTIVE/);assert(!calls.slice(before).some(p=>p.action==='native.prepare'));checks.push('Active turn blocks API switching before a native mutation');active=false;notification({method:'turn/completed',params:{threadId:'task',turn:{id:'one',status:'completed'}}});
+ await wait(()=>adapter.usage.sendCreditDecision('host')==='allowed');
+ const warm=calls.length;await adapter.prepareSend();
+ assert.deepEqual(calls.slice(warm).map(p=>p.action),['native.ensure']);
+ checks.push('A known official account takes only the existing native route admission in normal send preparation');
+ active=true;notification({method:'turn/started',params:{threadId:'task',turn:{id:'one'}}});const before=calls.length;await adapter.select('API');assert.equal(adapter.status().selected,'API');assert.equal(adapter.status().executionSelected,'host');assert(!calls.slice(before).some(p=>p.action==='native.prepare'));checks.push('API can be picked during the official turn without a route mutation');active=false;notification({method:'turn/completed',params:{threadId:'task',turn:{id:'one',status:'completed'}}});
 
  notification({method:'account/rateLimits/updated',params:quota(0)});await adapter.select('API');await adapter.prepareSend();await admit('task');assert.equal(adapter.status().selected,'API');checks.push('An exhausted main account does not veto an independently verified API route');
  await adapter.select('API');delete state.nativeRoutes.task;adapter.updateInfo(structuredClone(state));assert.equal(adapter.status().selected,'API');assert.equal(adapter.status().sendBlocked,true);checks.push('Lost runtime route preserves saved API preference and blocks default-account sending');
@@ -49,4 +53,14 @@ try{
  checks.push('Disable fences a pending send, cancels preparation and restores official routes without inference');
  adapter.setEnabled(true);await adapter.select('API');await adapter.prepareSend();assert.equal(adapter.status().selected,'API');checks.push('Enable and manual API selection work again after cancellation');
 }finally{adapter.endSession();}
+state.selected.task='API';state.nativeRoutes={};globalThis.rpcThread='task';
+const reopened=new NativeAccountAdapter(request,structuredClone(state),()=>{},async()=>({services,dispatcher}));
+try{
+ const before=sampling;
+ await reopened.start();
+ await wait(()=>state.nativeRoutes.task==='API'&&!reopened.status().sendBlocked);
+ assert.equal(reopened.status().selected,'API');
+ assert.equal(sampling,before);
+ checks.push('A new adapter rebuilds the saved API route without replaying the previous message');
+}finally{reopened.endSession();}
 await writeFile(resolve(out,'result.json'),JSON.stringify({passed:true,numbered,checks,scope:'Production native adapter with deterministic native RPC and route ports, no real inference'},null,2));console.log(JSON.stringify({passed:true,checks}));

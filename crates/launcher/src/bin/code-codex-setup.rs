@@ -210,12 +210,13 @@ fn main() -> ExitCode {
                 }
             }
 
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let activation_detail = installation_activation_detail(&stdout);
             progress.set_progress_detail(
                 100,
                 "Installation complete",
-                "Code-Codex is ready to use.",
+                activation_detail,
             );
-            let stdout = String::from_utf8_lossy(&output.stdout);
             let shortcut = stdout
                 .lines()
                 .find_map(|line| line.strip_prefix("Code-Codex managed shortcut: "))
@@ -227,6 +228,8 @@ fn main() -> ExitCode {
                 ),
                 None => "Code-Codex was installed successfully. Open the Code-Codex desktop shortcut to start Codex with Code-Codex.".to_owned(),
             };
+            message.push_str("\n\n");
+            message.push_str(activation_detail);
             if stdout.lines().any(|line|line.trim()=="CODECODEX_LANGUAGE_NOT_SAVED") {
                 message.push_str("\n\nLanguage preference was not saved. Open Code-Codex > Language and select it again to repair this preference.");
             }
@@ -1115,9 +1118,24 @@ fn verify_extracted_installer(extraction_root: &Path, installer: &Path) -> Resul
     Ok(installer)
 }
 
+fn installation_activation_detail(stdout: &str) -> &'static str {
+    if stdout.lines().any(|line| line.trim() == "CODECODEX_ACTIVATION_STATE=ready") {
+        "The open Codex interface has been updated."
+    } else {
+        "Files are installed. The open Codex interface has not confirmed the update yet."
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn installation_completion_requires_visible_activation_evidence() {
+        assert_eq!(installation_activation_detail("CODECODEX_ACTIVATION_STATE=ready\r\n"), "The open Codex interface has been updated.");
+        for output in ["", "CODECODEX_ACTIVATION_STATE=readiness-timeout", "CODECODEX_ACTIVATION_STATE=explicitly-skipped", "CODECODEX_ACTIVATION_STATE=no-verified-running-target", "CODECODEX_ACTIVATION_STATE=ready-other"] {
+            assert_eq!(installation_activation_detail(output), "Files are installed. The open Codex interface has not confirmed the update yet.");
+        }
+    }
 
     #[test]
     fn manual_setup_waits_for_selection_but_automatic_update_does_not() {

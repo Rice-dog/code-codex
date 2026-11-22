@@ -692,10 +692,17 @@ pub(crate) fn status() -> Result<Value, BridgeError> {
 }
 fn source_available(root: &Path, p: &Package) -> bool {
     let current = path(root, p);
+    // Preserve legacy availability, without bypassing a malformed current entry.
+    let current = if std::fs::symlink_metadata(&current).is_ok() {
+        current
+    } else {
+        let Some(legacy) = legacy_paths(root, p).into_iter().find(|file| std::fs::symlink_metadata(file).is_ok()) else { return false; };
+        legacy
+    };
     // Market status is an availability projection, not permission to execute.
-    // Avoid rehashing the large native binary on every existing market refresh;
-    // sources()/lan_engine() still verify its actual bytes before load/launch.
-    if p.id == "lan-remote" && p.kind == "native" {
+    // Reuse availability stamps for every asset, not just native binaries.
+    // sources()/lan_engine() still verify actual bytes before load/launch.
+    {
         type Stamp = (String, u64, std::time::SystemTime, bool);
         static VERIFIED: OnceLock<Mutex<HashMap<PathBuf, Stamp>>> = OnceLock::new();
         let Ok(meta)=std::fs::symlink_metadata(&current) else {return false;};
@@ -707,14 +714,6 @@ fn source_available(root: &Path, p: &Package) -> bool {
         let ok=read_verified_file(root,&current,p).is_ok();
         verified.insert(current,(p.sha256.clone(),meta.len(),modified,ok));return ok;
     }
-    // A current malformed entry must not be silently bypassed by legacy data.
-    if std::fs::symlink_metadata(&current).is_ok() {
-        return read_verified_file(root, &current, p).is_ok();
-    }
-    legacy_paths(root, p)
-        .iter()
-        .find(|file| std::fs::symlink_metadata(file).is_ok())
-        .is_some_and(|file| read_verified_file(root, file, p).is_ok())
 }
 /// Explicit support audit, never prepares directories or migrates user files.
 pub(crate) fn diagnostic_status() -> Result<Value, BridgeError> {
@@ -1230,6 +1229,21 @@ pub(crate) fn import_directory(directory: &Path) -> Result<Value, BridgeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn script_status_reuses_stamps_but_load_rechecks_bytes_and_legacy_survives() {
+        use std::fs;
+        let bytes=b"verified-script";let p=fixture_package(bytes);let root=tempfile::tempdir().unwrap();
+        let file=test_path(root.path(),&p);fs::write(&file,bytes).unwrap();assert!(source_available(root.path(),&p));
+        let modified=fs::metadata(&file).unwrap().modified().unwrap();
+        fs::write(&file,b"tampered-script").unwrap();
+        fs::File::options().write(true).open(&file).unwrap().set_times(fs::FileTimes::new().set_modified(modified)).unwrap();
+        assert!(source_available(root.path(),&p));assert!(read_asset(root.path(),&p).is_err());
+        fs::write(&file,b"bad").unwrap();assert!(!source_available(root.path(),&p));
+        fs::remove_file(&file).unwrap();assert!(!source_available(root.path(),&p));
+        let old=old_directory_path(root.path(),&p);fs::create_dir_all(old.parent().unwrap()).unwrap();fs::write(&old,bytes).unwrap();
+        assert!(source_available(root.path(),&p));
+        fs::write(&file,b"bad").unwrap();assert!(!source_available(root.path(),&p));
+    }
     #[test]
     fn lan_native_capability_is_scoped_and_execution_rechecks_cached_bytes() {
         let mut bytes=vec![0u8;MAX_SCRIPT+1024];bytes[..2].copy_from_slice(b"MZ");

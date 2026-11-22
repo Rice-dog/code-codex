@@ -10,6 +10,8 @@ import { ResourceScope } from './core/lifecycle/resource-scope';
 
 interface PackageState { id: string; installed: boolean; phase?: string; downloaded?: number; total?: number; error?: string; errorCode?: string; }
 const cardIds: Record<string, string> = { mountain:'layered-mountain', 'particle-image':'particle-image' };
+const text=(node:HTMLElement,value:string)=>{if(node.textContent!==value)node.textContent=value;};
+const attribute=(node:Element,name:string,value:string)=>{if(node.getAttribute(name)!==value)node.setAttribute(name,value);};
 let nextLoadingOwner=0;
 export class BackgroundPackageMarket {
   #states = new Map<string, PackageState>();
@@ -21,6 +23,7 @@ export class BackgroundPackageMarket {
   #replayed = new WeakSet<Event>();
   #renderQueued = false;
   #statusFailed = false;
+  #refreshJob:Promise<void>|undefined;
   #scope = new ResourceScope(error => runtimeEvent('plugin-market','cleanup','failed',runtimeErrorDetails(error)));
   constructor(private root: ShadowRoot, private bridge: WorkspaceBridge, private notice: (message:string)=>void,private prepare?:(id:string,intent:'enable'|'settings')=>void|Promise<void>) {
     this.#scope.listen(root,'click', this.#click, true);
@@ -90,9 +93,15 @@ export class BackgroundPackageMarket {
       await this.bridge.request('explorer.plugins.install',{id},130_000);
       operation.finish('installed',{enabledAutomatically:false});
     }catch(error){operation.finish('failed',runtimeErrorDetails(error));if(!this.#disposed)this.notice(pluginDownloadMessage(error));}
-    finally{this.#busy.delete(id);if(!this.#disposed)await this.#refresh();}
+    finally{this.#busy.delete(id);if(!this.#disposed)await this.#refresh(true);}
   }
-  async #refresh():Promise<void> {
+  refresh():void {void this.#refresh();}
+  async #refresh(afterChange=false):Promise<void> {
+    if(this.#refreshJob){await this.#refreshJob;if(!afterChange)return;}
+    const job=this.#readStates();this.#refreshJob=job;
+    try{await job;}finally{if(this.#refreshJob===job)this.#refreshJob=undefined;}
+  }
+  async #readStates():Promise<void> {
     if(this.#disposed)return;
     clearTimeout(this.#timer);
     try {
@@ -112,7 +121,9 @@ export class BackgroundPackageMarket {
       for(const info of PLUGIN_PACKAGES)this.#states.set(info.id,{id:info.id,installed:false,error:String(error)});
       this.render();
     }
-    this.#timer=setTimeout(()=>void this.#refresh(),this.#busy.size?600:5000);
+    // Only a live download needs progress observations. Idle state is refreshed
+    // on opening and completion, not by a permanent status/hash loop.
+    if(this.#busy.size)this.#timer=setTimeout(()=>void this.#refresh(),600);
   }
   render():void {
     if(this.#disposed)return;
@@ -122,12 +133,12 @@ export class BackgroundPackageMarket {
       const state=this.#states.get(info.id),busy=this.#busy.has(info.id);
       // An unanswered status poll must not overwrite a verified running runtime.
       const installed=state?state.installed:isPluginPackageLoaded(info.id);
-      card.dataset.packageInstalled=String(installed);
-      card.dataset.packagePending=String(!installed||busy);
+      attribute(card,'data-package-installed',String(installed));
+      attribute(card,'data-package-pending',String(!installed||busy));
       const wasDownload=button.dataset.packageAction==='download';
-      button.dataset.packageAction=!installed||busy?'download':'enable';
+      attribute(button,'data-package-action',!installed||busy?'download':'enable');
       const status=card.querySelector<HTMLElement>('.preview-extension-status');
-      if(status)status.hidden=!installed||busy;
+      if(status&&status.hidden!==(!installed||busy))status.hidden=!installed||busy;
       let download=card.querySelector<HTMLElement>('.preview-extension-download');
       const copy=card.querySelector<HTMLElement>('.preview-extension-copy')!;
       const actions=button.closest<HTMLElement>('.preview-extension-actions')??button;
@@ -148,45 +159,45 @@ export class BackgroundPackageMarket {
         if(actions.parentElement!==copy)copy.append(actions);
         const label=download.querySelector<HTMLElement>('span')!;
         const progress=download.querySelector('progress')!;
-        progress.hidden=!busy;
-        progress.setAttribute('aria-label',t('Download {name}',{name:pluginDisplayName(info.id)}));
+        if(progress.hidden!==!busy)progress.hidden=!busy;
+        attribute(progress,'aria-label',t('Download {name}',{name:pluginDisplayName(info.id)}));
         const packageBytes=info.size+(info.resources??[]).reduce((sum,asset)=>sum+asset.size,0);
         const percent=state?.total?Math.min(100,Math.max(0,Math.floor((state.downloaded??0)/state.total*100))):null;
         if(busy){
           if(percent===null)progress.removeAttribute('value');else progress.value=percent;
           const phase=translate(state?.phase==='verifying'?'Verifying':'Downloading');
-          label.textContent=`${phase}${percent===null?'…':` · ${percent}%`}`;
-        } else label.textContent=`${(packageBytes/1024).toFixed(0)} KB · ${translate(state?.error?'Download failed':state?'Not installed':'Checking…')}`;
-        download.title=state?.error?pluginDownloadMessage(state):'';
+          text(label,`${phase}${percent===null?'…':` · ${percent}%`}`);
+        } else text(label,`${(packageBytes/1024).toFixed(0)} KB · ${translate(state?.error?'Download failed':state?'Not installed':'Checking…')}`);
+        attribute(download,'title',state?.error?pluginDownloadMessage(state):'');
       }
       const active=button.getAttribute('aria-pressed')==='true'||button.dataset.enabled==='true';
-      if(this.#loading.has(info.id)){button.dataset.packageLoadingOwner=this.#loadingOwner;button.textContent=translate('Loading…');button.disabled=true;continue;}
+      if(this.#loading.has(info.id)){attribute(button,'data-package-loading-owner',this.#loadingOwner);text(button,translate('Loading…'));if(!button.disabled)button.disabled=true;continue;}
       const releasedLoading=button.dataset.packageLoadingOwner!==undefined;
       if(releasedLoading){delete button.dataset.packageLoadingOwner;button.disabled=false;}
       if(!installed||busy) {
-        button.textContent=busy?'Cancel':state?'Download':'Checking…';
+        text(button,translate(busy?'Cancel':state?'Download':'Checking…'));
         // Checking is guarded by the capture handler, not a disabled lease:
         // a runtime renderer may replace its label before status resolves.
         // Preserve any legitimate runtime busy state while status is unknown.
-        if(state)button.disabled=false;
-        button.dataset.enabled='false';button.setAttribute('aria-pressed','false');
-        button.setAttribute('aria-label',t(busy?'Cancel download of {name}':'Download {name}',{name:pluginDisplayName(info.id)}));
+        if(state&&button.disabled)button.disabled=false;
+        attribute(button,'data-enabled','false');attribute(button,'aria-pressed','false');
+        attribute(button,'aria-label',t(busy?'Cancel download of {name}':'Download {name}',{name:pluginDisplayName(info.id)}));
       } else if(!isPluginPackageLoaded(info.id)) {
         // A saved enabled preference is not proof of a loaded package. Keep
         // this card actionable while preserving the user's preference bytes.
-        button.textContent='Enable';button.disabled=false;button.dataset.enabled='false';button.setAttribute('aria-pressed','false');
-        button.setAttribute('aria-label',t('Enable {name}',{name:pluginDisplayName(info.id)}));
+        text(button,translate('Enable'));if(button.disabled)button.disabled=false;attribute(button,'data-enabled','false');attribute(button,'aria-pressed','false');
+        attribute(button,'aria-label',t('Enable {name}',{name:pluginDisplayName(info.id)}));
         const status=card.querySelector<HTMLElement>('.preview-extension-status');
-        if(status){status.textContent='Installed';status.dataset.enabled='false';}
+        if(status){text(status,translate('Installed'));attribute(status,'data-enabled','false');}
       } else if(wasDownload||releasedLoading) {
-        button.textContent=translate(active?'Disable':'Enable');button.disabled=false;button.setAttribute('aria-label',t(active?'Disable {name}':'Enable {name}',{name:pluginDisplayName(info.id)}));
-        const status=card.querySelector<HTMLElement>('.preview-extension-status');if(status&&!active)status.textContent='Installed';
+        text(button,translate(active?'Disable':'Enable'));if(button.disabled)button.disabled=false;attribute(button,'aria-label',t(active?'Disable {name}':'Enable {name}',{name:pluginDisplayName(info.id)}));
+        const status=card.querySelector<HTMLElement>('.preview-extension-status');if(status&&!active)text(status,translate('Installed'));
       }
       const settings=card.querySelector<HTMLButtonElement>('.particle-settings-trigger');
-      if(settings){settings.disabled=!installed||busy;settings.title=translate(installed?'Configure plugin':'Download this plugin first');}
+      if(settings){if(settings.disabled!==(!installed||busy))settings.disabled=!installed||busy;attribute(settings,'title',translate(installed?'Configure plugin':'Download this plugin first'));}
     }
     const select=this.root.querySelector<HTMLSelectElement>('#cle-startupTransition-background');
-    if(select)for(const option of select.options){const info=PLUGIN_PACKAGES.find(p=>p.id===option.value);if(info){const available=!!this.#states.get(info.id)?.installed;option.disabled=!available;option.title=available?'':translate('Download this background in Preview Market first');}}
+    if(select)for(const option of select.options){const info=PLUGIN_PACKAGES.find(p=>p.id===option.value);if(info){const available=!!this.#states.get(info.id)?.installed;if(option.disabled!==!available)option.disabled=!available;attribute(option,'title',available?'':translate('Download this background in Preview Market first'));}}
   }
   queueRender():void {
     if(this.#disposed||this.#renderQueued)return;

@@ -59,9 +59,9 @@ export class AuroraIonosphereBackgroundController {
   async initialize(): Promise<void> {
     if (this.#disposed) throw new Error("Aurora Ionosphere Background is unavailable");
   }
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
-    await ensureBackgroundPackage('aurora-ionosphere');
+    if (!packagePrepared) await ensureBackgroundPackage('aurora-ionosphere');
     if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;

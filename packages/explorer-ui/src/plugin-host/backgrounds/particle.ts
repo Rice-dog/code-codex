@@ -120,9 +120,9 @@ export class ParticleBackgroundController {
     this.#notify();
   }
 
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
-    await ensureBackgroundPackage('particle-image');
+    if (!packagePrepared) await ensureBackgroundPackage('particle-image');
     if (generation !== this.#generation) return;
     this.#settings = readParticleBackgroundSettings();
     await this.initialize();

@@ -173,6 +173,7 @@ impl BridgeHandler for NativeBridge {
                 "explorer.watch.start" => self.watch_start(request.params, epoch).await,
                 "explorer.watch.stop" => self.watch_stop(request.params, epoch),
                 "explorer.settings.get" => self.settings_get(request.params).await,
+                "explorer.welcome.consume" => self.consume_welcome(request.params, epoch),
                 "explorer.login.startup.get" => self.login_startup_get(request.params, epoch).await,
                 "explorer.login.startup.set" => self.login_startup_set(request.params, epoch).await,
                 "explorer.language.get" => self.language_get(request.params).await,

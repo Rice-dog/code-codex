@@ -1,4 +1,36 @@
-import {getLocale} from '../../i18n';
+import {getLocale,t} from '../../i18n';
+import {runtimeEvent} from '../../runtime-events';
+import {accountErrorCode} from './stream-recovery';
+
+/** User-facing account actions use short instructions; keep evidence in the diagnostic stream. */
+export function accountActionMessage(error: unknown, action:'account'|'switch'='account'): string {
+ const text = error instanceof Error ? error.message : String(error ?? '');
+ if (!text) return '';
+ switch(accountErrorCode(error)) {
+  case 'ACCOUNT_PRIMARY_CAPABILITY': return t('accounts.error.restart');
+  case 'ACCOUNT_TURN_ACTIVE':
+  case 'ACCOUNT_MODEL_BUSY': return t(action==='switch'?'accounts.busy':'accounts.error.active');
+  case 'ACCOUNT_PRIMARY_PREPARING': return t('accounts.error.preparing');
+  case 'ACCOUNT_PRIMARY_PENDING':
+  case 'ACCOUNT_QUERY_BUSY':
+  case 'ACCOUNT_REQUEST_BUSY': return t('accounts.error.wait');
+  case 'ACCOUNT_AUTH_REQUIRED':
+  case 'ACCOUNT_SIGN_IN': return t('accounts.error.signIn');
+  case 'ACCOUNT_USAGE_TIMEOUT': return t('accounts.error.quotaTimeout');
+  case 'ACCOUNT_NATIVE_QUOTA_UNAVAILABLE': return t('accounts.error.draftKept');
+  case 'ACCOUNT_PRIMARY_OUTCOME_UNKNOWN':
+  case 'ACCOUNT_OWNER_CHANGED':
+  case 'ACCOUNT_STALE_SESSION': return t('accounts.error.checkSignIn');
+  default: return t(action==='switch'?'accounts.error.switch':'accounts.error.action');
+ }
+}
+
+export function logAccountError(stage: string, error: unknown): void {
+ runtimeEvent('accounts', 'account.ui', 'failed', {
+  stage, error: error instanceof Error ? error.message : String(error),
+ });
+}
+
 /** Presentation only: does not classify account health or decide retries. */
 export function accountFailureMessage(error:unknown,scope:'quota'|'send',locale=getLocale()):string {
  const text=error instanceof Error?error.message:String(error??'');

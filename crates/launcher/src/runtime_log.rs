@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 pub(crate) mod redaction;
 use std::{
     collections::VecDeque,
-    fs, io,
+    fs, io::{self,Write},
     path::PathBuf,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -14,7 +14,28 @@ const MAX_BYTES: usize = 5 * 1024 * 1024;
 const KEEP_RUNS: usize = 10;
 static OPERATION_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static LOG: OnceLock<Mutex<RunLog>> = OnceLock::new();
-static WRITER: Mutex<()> = Mutex::new(());
+static WRITER: Mutex<Option<PersistedLog>> = Mutex::new(None);
+struct PersistedLog {id:String,sequence:u64,dropped:u64,bytes:u64,header:String}
+struct LogSnapshot {directory:PathBuf,id:String,sequence:u64,dropped:u64,header:String,tail:String,rewrite:bool,previous_bytes:u64}
+impl LogSnapshot {
+    fn persist(&self)->io::Result<u64>{
+        fs::create_dir_all(&self.directory)?;
+        let target=self.directory.join(format!("{}.jsonl",self.id));
+        if self.rewrite{
+            let temporary=self.directory.join(format!("{}.tmp",self.id));
+            let mut file=fs::File::create(&temporary)?;file.write_all(self.header.as_bytes())?;file.write_all(b"\n")?;file.write_all(self.tail.as_bytes())?;drop(file);
+            replace(&temporary,&target)?;trim_runs(&self.directory,&self.id)?;
+            Ok((self.header.len()+1+self.tail.len()) as u64)
+        }else{
+            let mut file=fs::OpenOptions::new().append(true).open(&target)?;
+            // A previous failed write or external truncation is not an append
+            // acknowledgement. The caller discards its stamp and rewrites.
+            if file.metadata()?.len()!=self.previous_bytes{return Err(io::Error::other("Runtime log size changed before append"));}
+            file.write_all(self.tail.as_bytes())?;
+            Ok(self.previous_bytes+self.tail.len() as u64)
+        }
+    }
+}
 #[cfg(test)]
 thread_local! { static TEST_EVENTS: std::cell::RefCell<Option<Vec<Value>>> = const { std::cell::RefCell::new(None) }; }
 #[cfg(test)]
@@ -80,7 +101,7 @@ struct RunLog {
     started_at: u128,
     sequence: u64,
     dropped: u64,
-    events: VecDeque<String>,
+    events: VecDeque<(u64,String)>,
     bytes: usize,
     dirty: bool,
     storage_error: Option<String>,
@@ -91,13 +112,25 @@ struct RunLog {
 }
 
 impl RunLog {
-    fn document(&self) -> String {
+    fn header(&self) -> String {
         let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES,"redactionPolicy":1,"faultSchema":2,"failureTotal":self.failure_total,"failureCounts":self.failure_counts,"failureOutcomeKinds":self.failure_kinds,"failureCountMeaning":"outcome events, not unique root causes; cancellation and correlated propagation are reported separately","oversizedEvents":self.oversized_events,"failureSummaryScope":"entire run including trimmed events; detailed events are retained only within limits"});
+        header.to_string()
+    }
+    fn document(&self) -> String {
         format!(
             "{}\n{}",
-            header,
-            self.events.iter().cloned().collect::<String>()
+            self.header(),
+            self.events.iter().map(|(_,line)|line.as_str()).collect::<String>()
         )
+    }
+    fn snapshot(&self,previous:Option<&PersistedLog>)->LogSnapshot{
+        let header=self.header();
+        // Normal events leave the header unchanged. Failure-summary changes or
+        // retention compaction keep the original atomic snapshot semantics.
+        let previous=previous.filter(|p|p.id==self.id&&p.dropped==self.dropped&&p.header==header);
+        let sequence=previous.map_or(0,|p|p.sequence);
+        let tail=self.events.iter().rev().take_while(|(seq,_)|*seq>sequence).collect::<Vec<_>>().into_iter().rev().map(|(_,line)|line.as_str()).collect();
+        LogSnapshot{directory:self.directory.clone(),id:self.id.clone(),sequence:self.sequence,dropped:self.dropped,header,tail,rewrite:previous.is_none(),previous_bytes:previous.map_or(0,|p|p.bytes)}
     }
     fn push(&mut self, source: &str, action: &str, outcome: &str, details: Value) {
         self.sequence += 1;
@@ -168,12 +201,12 @@ impl RunLog {
             return;
         }
         self.bytes += line.len();
-        self.events.push_back(line);
+        self.events.push_back((self.sequence,line));
         if self.bytes > MAX_BYTES - 16 * 1024 {
             // Remove an oldest batch, avoiding rewriting the entire file on every new event.
             while self.bytes > MAX_BYTES * 4 / 5 {
                 if let Some(old) = self.events.pop_front() {
-                    self.bytes -= old.len();
+                    self.bytes -= old.1.len();
                     self.dropped += 1;
                 } else {
                     break;
@@ -347,36 +380,24 @@ pub fn record(source: &str, action: &str, outcome: &str, details: Value) {
     }
 }
 pub fn flush() {
-    let Ok(_writer) = WRITER.try_lock() else {
+    let Ok(mut writer) = WRITER.try_lock() else {
         return;
     };
     let Some(log) = LOG.get() else {
         return;
     };
     let snapshot = match log.lock() {
-        Ok(state) if state.dirty => (
-            state.directory.clone(),
-            state.id.clone(),
-            state.sequence,
-            state.dropped,
-            state.document(),
-        ),
+        Ok(state) if state.dirty => state.snapshot(writer.as_ref()),
         _ => return,
     };
     // Disk access never holds the event mutex or blocks recording/application operations.
-    let result = (|| -> io::Result<()> {
-        fs::create_dir_all(&snapshot.0)?;
-        let temporary = snapshot.0.join(format!("{}.tmp", snapshot.1));
-        let target = snapshot.0.join(format!("{}.jsonl", snapshot.1));
-        fs::write(&temporary, &snapshot.4)?;
-        replace(&temporary, &target)?;
-        trim_runs(&snapshot.0, &snapshot.1)
-    })();
+    let result = snapshot.persist();
+    match &result {Ok(bytes)=>*writer=Some(PersistedLog{id:snapshot.id.clone(),sequence:snapshot.sequence,dropped:snapshot.dropped,bytes:*bytes,header:snapshot.header.clone()}),Err(_)=>*writer=None};
     if let Ok(mut state) = log.lock() {
         match result {
-            Ok(()) => {
+            Ok(_) => {
                 state.storage_error = None;
-                if state.sequence == snapshot.2 && state.dropped == snapshot.3 {
+                if state.sequence == snapshot.sequence && state.dropped == snapshot.dropped {
                     state.dirty = false;
                 }
             }
@@ -484,6 +505,29 @@ mod tests {
         }
     }
     #[test]
+    fn incremental_log_preserves_format_metadata_and_recovers_failed_append() {
+        let directory=tempfile::tempdir().unwrap();let mut log=fixture(directory.path().to_owned());
+        log.push("test","first","observed",json!({"operationId":1}));
+        let first=log.snapshot(None);assert!(first.rewrite);let bytes=first.persist().unwrap();
+        let previous=PersistedLog{id:log.id.clone(),sequence:log.sequence,dropped:log.dropped,bytes,header:first.header};
+        log.push("test","second","observed",json!({"operationId":1}));
+        let second=log.snapshot(Some(&previous));assert!(!second.rewrite);assert!(!second.tail.contains("first"));
+        let bytes=second.persist().unwrap();let path=directory.path().join(format!("{}.jsonl",log.id));
+        assert_eq!(fs::read_to_string(&path).unwrap(),log.document());
+        let previous=PersistedLog{id:log.id.clone(),sequence:log.sequence,dropped:log.dropped,bytes,header:second.header};
+        log.push("test","failure","failed",json!({"errorCode":"TEST_ERROR"}));
+        let failure=log.snapshot(Some(&previous));assert!(failure.rewrite);let bytes=failure.persist().unwrap();
+        let previous=PersistedLog{id:log.id.clone(),sequence:log.sequence,dropped:log.dropped,bytes,header:failure.header};
+        log.push("test","third","observed",json!({}));
+        fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(b"partial").unwrap();
+        assert!(log.snapshot(Some(&previous)).persist().is_err());
+        // Production discards the write stamp after error and retries from its
+        // retained authoritative events, rather than duplicating an unknown tail.
+        log.snapshot(None).persist().unwrap();assert_eq!(fs::read_to_string(&path).unwrap(),log.document());
+        let parsed:Vec<Value>=log.document().lines().map(|line|serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(parsed[0]["failureTotal"],1);assert_eq!(parsed[4]["sequence"],4);
+    }
+    #[test]
     fn failure_accounting_separates_cancellation_and_correlated_propagation_after_trimming() {
         let mut log = fixture(PathBuf::new());
         log.push("native-bridge", "read", "failed", json!({"errorCode":"NOT_FOUND"}));
@@ -501,7 +545,11 @@ mod tests {
 
     #[test]
     fn trims_oldest_complete_events_under_five_mb() {
-        let mut log = fixture(PathBuf::new());
+        let directory=tempfile::tempdir().unwrap();
+        let mut log = fixture(directory.path().to_owned());
+        log.push("test","before retention","passed",json!({}));
+        let initial=log.snapshot(None);let bytes=initial.persist().unwrap();
+        let previous=PersistedLog{id:log.id.clone(),sequence:log.sequence,dropped:log.dropped,bytes,header:initial.header};
         for i in 0..3000 {
             log.push(
                 "test",
@@ -512,6 +560,8 @@ mod tests {
         }
         assert!(log.document().len() <= MAX_BYTES);
         assert!(log.dropped > 0);
+        let compacted=log.snapshot(Some(&previous));assert!(compacted.rewrite);compacted.persist().unwrap();
+        assert_eq!(fs::read_to_string(directory.path().join(format!("{}.jsonl",log.id))).unwrap(),log.document());
         let lines: Vec<Value> = log
             .document()
             .lines()
