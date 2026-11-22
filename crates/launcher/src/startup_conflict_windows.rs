@@ -9,7 +9,7 @@ use std::{
     ptr,
 };
 use windows_sys::Win32::{
-    Foundation::{FILETIME, HWND, LPARAM, WAIT_OBJECT_0, WAIT_TIMEOUT},
+    Foundation::{ERROR_FAIL_SHUTDOWN, FILETIME, HWND, LPARAM, WAIT_OBJECT_0, WAIT_TIMEOUT},
     System::{
         RestartManager::{
             RM_PROCESS_INFO, RM_UNIQUE_PROCESS, RmCritical, RmEndSession, RmExplorer, RmGetList,
@@ -24,7 +24,6 @@ use windows_sys::Win32::{
         EnumWindows, GW_OWNER, GetClassNameW, GetWindow, GetWindowThreadProcessId, IsWindowVisible,
     },
 };
-
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn ProcessIdToSessionId(pid: u32, session: *mut u32) -> i32;
@@ -164,6 +163,7 @@ pub(super) fn operate(
     created_ms: u64,
     image: &Path,
     close: bool,
+    after_official_update: bool,
 ) -> Result<Value, String> {
     if pid == 0 || pid == unsafe { GetCurrentProcessId() } {
         return Err("Invalid recovery target".into());
@@ -268,12 +268,19 @@ pub(super) fn operate(
             "Restart Manager could not verify the registered process; no shutdown requested".into(),
         );
     }
-    // Zero explicitly excludes RmForceShutdown. Orderly exit handles hidden/
-    // tray windows too; a veto or hung app fails without termination or restart.
-    rm_ok(
-        unsafe { RmShutdown(session.0, 0, None) },
-        "Codex graceful shutdown",
-    )?;
+    // Restart Manager may reject the newly relaunched official window.
+    // Report that exact outcome to the authorized update controller so it can
+    // use the app's own File menu without sending global keyboard input.
+    let status = unsafe { RmShutdown(session.0, 0, None) };
+    if status == ERROR_FAIL_SHUTDOWN && after_official_update {
+        report["exited"] = json!(exited(&process)?);
+        if report["exited"] != true {
+            report["failureCode"] = json!(status);
+            report["windows"] = json!(windows(pid)?);
+        }
+        return Ok(report);
+    }
+    rm_ok(status, "Codex graceful shutdown")?;
     report["shutdownRequested"] = json!(true);
     report["exited"] = json!(exited(&process)?);
     report["method"] = json!("restart-manager-nonforcing");

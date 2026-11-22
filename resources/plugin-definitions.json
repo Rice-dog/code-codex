@@ -331,8 +331,8 @@
       "name": "Multi-account Tasks",
       "category": "developer-tools",
       "api": 1,
-      "version": "1.0.113",
-      "releaseTag": "plugin-assets-2026-11-18",
+      "version": "1.0.127",
+      "releaseTag": "plugin-assets-2026-11-21",
       "capabilities": [
         "developer-tools"
       ]

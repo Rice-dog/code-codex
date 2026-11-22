@@ -57,9 +57,9 @@ export class BlinkingSquaresBackgroundController {
   async initialize(): Promise<void> {
     if (this.#disposed) throw new Error("Blinking Squares Background is unavailable");
   }
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
-    await ensureBackgroundPackage('blinking-squares');
+    if (!packagePrepared) await ensureBackgroundPackage('blinking-squares');
     if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;

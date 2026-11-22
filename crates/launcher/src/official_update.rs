@@ -37,7 +37,13 @@ pub(crate) async fn follow(port:u16,pid:u32,created_ms:u64,from:String,image:std
     target.wait_for_exit().await.map_err(|e|e.to_string())?;
     crate::runtime_log::record("launcher","official update handoff","original-exited",serde_json::json!({"officialPid":pid,"fromVersion":from}));
     #[cfg(windows)]
-    registration.finish_if_updating().await?;
+    match registration.wait_for_registered(&from).await? {
+        Some(version) => crate::runtime_log::record("launcher","official update handoff","registered",serde_json::json!({"fromVersion":from,"registeredVersion":version})),
+        None => {
+            crate::runtime_log::record("launcher","official update handoff","not-updated",serde_json::json!({"relaunch":false,"fromVersion":from,"reason":"newer-registration-not-observed"}));
+            return Ok(());
+        }
+    }
     let next=crate::discovery::discover_codex(None,None,crate::discovery::ChannelPreference::Stable).map_err(|e|e.to_string())?;
     if !is_newer(&next.version,&from){
         crate::runtime_log::record("launcher","official update handoff","not-updated",serde_json::json!({"relaunch":false,"fromVersion":from,"registeredVersion":next.version}));return Ok(())
@@ -47,7 +53,7 @@ pub(crate) async fn follow(port:u16,pid:u32,created_ms:u64,from:String,image:std
     command.args(["run","--official-update-from",&from]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     #[cfg(windows)]{use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
     let child=command.spawn().map_err(|e|e.to_string())?;
-    crate::runtime_log::record("launcher","official update handoff","relaunched",serde_json::json!({"fromVersion":from,"toVersion":next.version,"workerPid":child.id()}));
+    crate::runtime_log::record("launcher","official update handoff","launcher-dispatched",serde_json::json!({"fromVersion":from,"toVersion":next.version,"workerPid":child.id()}));
     Ok(())
 }
 #[cfg(test)]mod tests{use super::*;#[test]fn update_requires_new_concrete_package_version(){assert!(is_newer("26.1106.6628.0","26.1103.7773.0"));for (a,b) in [("26.1103.7773.0","26.1103.7773.0"),("26.1103.7773.0","26.1106.6628.0"),("unknown","26.1103.7773.0"),("26.1106.6628","26.1103.7773.0")]{assert!(!is_newer(a,b));}}}

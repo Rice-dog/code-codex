@@ -53,7 +53,7 @@ pub(crate) fn parameters(installation:&crate::discovery::CodexInstallation,rende
  if backend_size>512*1024*1024{return Err(error("backend-bound"));}
  let backend_sha256=if native {String::new()}else{use std::io::Read;let mut file=std::fs::File::open(&backend).map_err(|_|error("backend-open"))?;let mut hash=Sha256::new();let mut bytes=vec![0;1024*1024];loop{let n=file.read(&mut bytes).map_err(|_|error("backend-read"))?;if n==0{break;}hash.update(&bytes[..n]);}format!("{:x}",hash.finalize())};
  let blocked=if native {std::collections::BTreeSet::new()}else{blocked_threads()?};
- Ok(json!({"schema":1,"rendererPort":renderer.port(),"port":port,"key":super::nonce(),"control":super::nonce(),"backend":backend,"backendSize":backend_size,"backendSha256":backend_sha256,"blocked":blocked}))
+ Ok(json!({"schema":1,"rendererPort":renderer.port(),"port":port,"key":super::nonce(),"control":super::nonce(),"backend":backend,"backendSize":backend_size,"backendSha256":backend_sha256,"blocked":blocked,"officialImage":installation.executable}))
 }
 pub(super) fn blocked_threads()->Result<std::collections::BTreeSet<String>> {
  let mut blocked=std::collections::BTreeSet::new();
@@ -90,16 +90,32 @@ pub(crate) fn save_descriptor(params:&Value,pid:u32)->Result<()> {
  staged.persist(path).map_err(|_|error("descriptor-commit"))?;Ok(())
 }
 
-async fn descriptor(endpoint:CdpEndpoint)->Result<Option<Value>>{
+async fn descriptor(endpoint: CdpEndpoint, primary: bool) -> Result<Option<Value>> {
  let path=descriptor_path()?;if !path.exists(){return Ok(None);}
  let v=crate::renderer_storage::read_json(&path,8192).map_err(|_|error("descriptor-read"))?;
  // Stale launch metadata is never a route for this official process.
  if v["schema"]!=1||v["rendererPort"]!=endpoint.port(){return Ok(None);}
+ let control_only = v["transport"] == "primary-control";
+ // The native stdio broker never owns ordinary Responses traffic. Only
+ // explicit primary-account promotion needs its local control capability.
+ if control_only && !primary { return Ok(None); }
  let Some(pid)=v["pid"].as_u64().and_then(|v|u32::try_from(v).ok()).filter(|v|*v>0)else{return Err(error("descriptor-pid"))};
  let Some(port)=v["port"].as_u64().and_then(|v|u16::try_from(v).ok()).filter(|v|*v>0)else{return Err(error("descriptor-port"))};
  for key in ["key","control"]{if !v[key].as_str().is_some_and(|s|s.len()==32&&s.bytes().all(|b|b.is_ascii_hexdigit())){return Err(error("descriptor-capability"));}}
  let broker_pid=v["brokerPid"].as_u64().and_then(|v|u32::try_from(v).ok()).unwrap_or(pid);
- tokio::task::spawn_blocking(move||{crate::process_guard::verify_listener_owner_fast(endpoint.port(),pid,std::time::UNIX_EPOCH)?;crate::process_guard::verify_listener_owner_fast(port,broker_pid,std::time::UNIX_EPOCH)}).await.map_err(|_|error("owner-worker"))?.map_err(|_|error("listener-owner"))?;
+ let image = v["officialImage"].as_str().map(std::path::PathBuf::from);
+ tokio::task::spawn_blocking(move || {
+     if control_only {
+         let image = image.ok_or_else(|| error("renderer-image"))?;
+         crate::process_guard::verify_listener_executable(endpoint.port(), &image)
+             .map_err(|_| error("renderer-listener-owner"))?;
+     } else {
+         crate::process_guard::verify_listener_owner_fast(endpoint.port(), pid, std::time::UNIX_EPOCH)
+             .map_err(|_| error("renderer-listener-owner"))?;
+     }
+     crate::process_guard::verify_listener_owner_fast(port, broker_pid, std::time::UNIX_EPOCH)
+         .map_err(|_| error("broker-listener-owner"))
+ }).await.map_err(|_| error("owner-worker"))??;
  Ok(Some(v))
 }
 fn control_client()->Result<reqwest::Client>{reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(3)).build().map_err(|_|error("control-client"))}
@@ -110,16 +126,16 @@ async fn control(client:&reqwest::Client,v:&Value,payload:Value)->Result<Value>{
  serde_json::from_slice(&bytes).map_err(|_|error("control-json"))
 }
 async fn ready_descriptor(endpoint:CdpEndpoint)->Result<Option<(Value,reqwest::Client)>>{
- let Some(v)=descriptor(endpoint).await?else{return Ok(None)};
+ let Some(v)=descriptor(endpoint,false).await?else{return Ok(None)};
  let client=control_client()?;
  let status=control(&client,&v,json!({"action":"status"})).await?;
  if status["schema"]!=1||status["pid"]!=v["pid"]||status["rendererPort"]!=endpoint.port()||status["ready"]!=true||!status["spawns"].as_u64().is_some_and(|v|v>0){return Err(error("backend-startup-unverified"));}
  Ok(Some((v,client)))
 }
 pub(super) async fn primary_capability(endpoint:CdpEndpoint)->Result<Value> {
- let Some(v)=descriptor(endpoint).await?else{return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","Internal primary switching requires a launch-owned native connection. No login or credential was changed."))};
+ let Some(v)=descriptor(endpoint,true).await?else{return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","Internal primary switching requires a launch-owned native connection. No login or credential was changed."))};
  let status=control(&control_client()?,&v,json!({"action":"status"})).await?;
- if status["schema"]!=1||status["pid"]!=v["pid"]||status["rendererPort"]!=endpoint.port()||status["ready"]!=true||status["primarySwitch"]!=1{return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","The running native connection predates internal primary switching. Restart Codex once after active tasks finish. No login or credential was changed."))}Ok(v)
+ if status["schema"]!=1||status["pid"]!=v["pid"]||status["rendererPort"]!=endpoint.port()||status["ready"]!=true||!status["primarySwitch"].as_u64().is_some_and(|revision|revision>=2){return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","The running native connection cannot verify sign-in across restart. Restart Code-Codex once after active tasks finish. No login or credential was changed."))}Ok(v)
 }
 pub(super) async fn primary_switch(v:&Value,source:&std::path::Path,backup:&std::path::Path,email:&str,operation:&str)->Result<Value>{
  let client=reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(45)).build().map_err(|_|error("primary-client"))?;
@@ -130,7 +146,7 @@ pub(super) async fn primary_switch(v:&Value,source:&std::path::Path,backup:&std:
  serde_json::from_slice(&bytes).map_err(|_|error("primary-receipt-json"))
 }
 pub(crate) async fn verify_launch(endpoint:CdpEndpoint)->Result<bool>{
- let Some(v)=descriptor(endpoint).await?else{return Ok(false)};
+ let Some(v)=descriptor(endpoint,false).await?else{return Ok(false)};
  let client=control_client()?;
  let started=std::time::Instant::now();
  let mut status=control(&client,&v,json!({"action":"status"})).await?;
@@ -155,7 +171,7 @@ async fn bind(client:&reqwest::Client,v:&Value,owner:&host::Owner,thread:&str,ta
  if reply["accepted"]!=true{return Err(error("binding-result"));}Ok(())
 }
 pub(super) async fn restore(endpoint:CdpEndpoint,owner:&host::Owner)->Result<()> {
- let Some(v)=descriptor(endpoint).await?else{return Ok(())};
+ let Some(v)=descriptor(endpoint,false).await?else{return Ok(())};
  let reply=control(&control_client()?,&v,json!({"action":"restore","owner":owner.id})).await?;
  if reply["accepted"]!=true{return Err(error("restore-result"));}Ok(())
 }

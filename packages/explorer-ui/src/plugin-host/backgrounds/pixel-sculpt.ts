@@ -96,9 +96,9 @@ export class PixelSculptBackgroundController {
       this.#notify();
     }
   }
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
-    await ensureBackgroundPackage('pixel-sculpt');
+    if (!packagePrepared) await ensureBackgroundPackage('pixel-sculpt');
     if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;

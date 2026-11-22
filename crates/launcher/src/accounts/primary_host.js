@@ -4,10 +4,10 @@
  const deadline=createAccountHostDeadline(18000);const read=run=>deadline.call(run,{code:'ACCOUNT_PRIMARY_OBSERVATION_TIMEOUT'});
  let stage='primary-manager',count=0,authorizationRequested=false,service,opened,manager;
  try{
- const namespace=await read(()=>profile.shared.includes("#cc-host=")?loadHostNamespace(profile.shared):import(profile.shared)),matches=new Set();
- for(const v of Object.values(namespace)){if(!v||typeof v!=='object')continue;const d=Object.getOwnPropertyDescriptors(v);if(d.appServerManagers?.value&&d.executionHosts?.value&&d.clientCoordination?.value&&d.appActions?.value)matches.add(d.appServerManagers.value);}
- if(matches.size!==1)return {failure:{code:'ACCOUNT_PRIMARY_CAPABILITY',stage:'primary-manager'}};
- service=[...matches][0].dup();stage='manager-ready';
+ const namespace=await read(()=>profile.shared.includes("#cc-host=")?loadHostNamespace(profile.shared):import(profile.shared));
+ const registry=rpcManagerService(namespace,['dup','open']);
+ if(!registry)return {failure:{code:'ACCOUNT_PRIMARY_CAPABILITY',stage:'primary-manager'}};
+ service=registry.dup();stage='manager-ready';
   const ready=await read(()=>{opened=service.open('local');return opened;});if(ready.status!=='ready')throw Error('ACCOUNT_RPC_UNAVAILABLE');manager=ready.manager.dup();
   if(p.mode==='cancel'){stage='authorization-cancel';const value=await manager.sendRequest('account/login/cancel',{loginId:p.loginId},{timeoutMs:8000});if(!['canceled','notFound'].includes(value?.status))throw Error('ACCOUNT_PRIMARY_CANCEL_PROTOCOL');const v=window[slot];if(v?.loginId===p.loginId)v.dispose();return value;}
   let cursor;const seen=new Set();

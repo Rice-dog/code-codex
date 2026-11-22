@@ -2,7 +2,10 @@
  * Particle/Glow markers; local media uses Custom. Add a new source marker here,
  * never copy a per-plugin selector list into each shadow-root consumer.
  * Native window transparency keeps its separate, mask-free presentation rules. */
+export const BACKGROUND_HANDOFF_ATTRIBUTE = 'data-code-codex-background-handoff';
+export const BACKGROUND_HANDOFF_COLOR = '--code-codex-background-handoff-color';
 export const BACKGROUND_SURFACE_ATTRIBUTES = [
+  BACKGROUND_HANDOFF_ATTRIBUTE,
   'data-code-codex-particle-image-background',
   'data-code-codex-glow-horizon-background',
   'data-code-codex-custom-background',

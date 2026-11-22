@@ -1,3 +1,4 @@
+import { BACKGROUND_HANDOFF_ATTRIBUTE, BACKGROUND_HANDOFF_COLOR } from '../components/styles/background-surfaces';
 import {LanRemotePlugin,lanRemoteCardMarkup,lanRemotePanelMarkup} from '../lan-remote';
 import {ShallowOceanSettingsController,shallowOceanCardMarkup,shallowOceanPanelMarkup} from '../features/plugin-settings/shallow-ocean';
 import {getShallowOceanBackgroundController} from '../plugin-host/backgrounds/shallow-ocean';
@@ -197,6 +198,18 @@ export class CodeCodexElement extends HTMLElement {
           initializationCurrent:generation=>this.#isCurrentBackgroundInitialization(generation),
           prepare:id=>id===TRANSPARENT_BACKGROUND_PLUGIN_ID?Promise.resolve():ensureBackgroundPackage(entries.find(entry=>entry.id===id)!.packageId),
           ready:operation=>this.#awaitBackgroundInitializations(operation),
+          holdBacking: () => {
+            const root = document.documentElement;
+            const color = root.style.getPropertyValue('--code-codex-particle-background')
+              || root.style.getPropertyValue('--code-codex-glow-horizon-background');
+            if (!color) return;
+            root.style.setProperty(BACKGROUND_HANDOFF_COLOR, color);
+            root.setAttribute(BACKGROUND_HANDOFF_ATTRIBUTE, '');
+            return () => {
+              root.removeAttribute(BACKGROUND_HANDOFF_ATTRIBUTE);
+              root.style.removeProperty(BACKGROUND_HANDOFF_COLOR);
+            };
+          },
           leaveNativeTransparency:async target=>{
             if(target===TRANSPARENT_BACKGROUND_PLUGIN_ID)return;
             if(this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID)||document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE))await this.#nativeWindowBackground.disable();
@@ -340,9 +353,6 @@ export class CodeCodexElement extends HTMLElement {
     #asciiTilesUnsubscribe:(()=>void)|undefined;
     #spectralDrapeUnsubscribe:(()=>void)|undefined;
     #shallowOceanUnsubscribe:(()=>void)|undefined;
-    #asciiTilesInitialization:Promise<void>|undefined;
-    #spectralDrapeInitialization:Promise<void>|undefined;
-    #shallowOceanInitialization:Promise<void>|undefined;
     readonly #surfaceOpacity: SurfaceOpacityPlugin;
     #multiAccount: MultiAccountPlugin;
     #lanRemote: LanRemotePlugin;
@@ -393,20 +403,17 @@ export class CodeCodexElement extends HTMLElement {
     readonly #pixelSculptController = getPixelSculptBackgroundController();
     readonly #blinkingSquaresController = getBlinkingSquaresBackgroundController();
     #blinkingSquaresUnsubscribe: (() => void) | undefined;
-    #blinkingSquaresInitialization: Promise<void> | undefined;
     #startupTransitionNativeSync: Promise<void> = Promise.resolve();
     #pixelSculptUnsubscribe: (() => void) | undefined;
-    #pixelSculptInitialization: Promise<void> | undefined;
     readonly #cloudTrainController = getCloudTrainBackgroundController();
     #cloudTrainUnsubscribe: (() => void) | undefined;
-    #cloudTrainInitialization: Promise<void> | undefined;
     #mountainUnsubscribe: (() => void) | undefined;
-    #mountainInitialization: Promise<void> | undefined;
     readonly #appearanceCoordinator = new AppearanceCoordinator();
     #appearanceSyncQueued = false;
     #appearanceHealthPending = false;
     #appearanceHealthTimer: ReturnType<typeof setTimeout> | undefined;
     #appearanceInitializationGeneration = 0;
+    #backgroundInitialization: Promise<void> | undefined;
     #appearanceRpcTail: Promise<void> = Promise.resolve();
     #previewMarketOpen = false;
     #shortcutIntent = 0;
@@ -445,7 +452,6 @@ export class CodeCodexElement extends HTMLElement {
     readonly #transparentBackgroundStatus: HTMLElement;
     readonly #particleBackgroundController = getParticleBackgroundController();
     #particleBackgroundUnsubscribe: (() => void) | undefined;
-    #particleBackgroundInitialization: Promise<void> | undefined;
     readonly #particleBackgroundButton: HTMLButtonElement;
     readonly #particleSettingsPanel: HTMLElement;
     readonly #particleSettingsTrigger: HTMLButtonElement;
@@ -479,7 +485,6 @@ export class CodeCodexElement extends HTMLElement {
     readonly #particleCursorInteractionInput: HTMLInputElement;
     readonly #blackHoleBackgroundController = getBlackHoleBackgroundController();
     #blackHoleBackgroundUnsubscribe: (() => void) | undefined;
-    #blackHoleBackgroundInitialization: Promise<void> | undefined;
     readonly #blackHoleBackgroundButton: HTMLButtonElement;
     readonly #blackHoleSettingsPanel: HTMLElement;
     readonly #blackHoleSettingsTrigger: HTMLButtonElement;
@@ -498,7 +503,6 @@ export class CodeCodexElement extends HTMLElement {
     readonly #blackHolePresetButtons: readonly HTMLButtonElement[];
     readonly #glowHorizonBackgroundController = getGlowHorizonBackgroundController();
     #glowHorizonBackgroundUnsubscribe: (() => void) | undefined;
-    #glowHorizonBackgroundInitialization: Promise<void> | undefined;
     readonly #glowHorizonBackgroundButton: HTMLButtonElement;
     readonly #glowHorizonSettingsPanel: HTMLElement;
     readonly #glowHorizonSettingsTrigger: HTMLButtonElement;
@@ -514,7 +518,6 @@ export class CodeCodexElement extends HTMLElement {
     readonly #glowHorizonReplayButton: HTMLButtonElement;
     readonly #heavenlyCloudBackgroundController = getHeavenlyCloudBackgroundController();
     #heavenlyCloudBackgroundUnsubscribe: (() => void) | undefined;
-    #heavenlyCloudBackgroundInitialization: Promise<void> | undefined;
     readonly #heavenlyCloudBackgroundButton: HTMLButtonElement;
     readonly #heavenlyCloudSettingsPanel: HTMLElement;
     readonly #heavenlyCloudSettingsTrigger: HTMLButtonElement;
@@ -530,7 +533,6 @@ export class CodeCodexElement extends HTMLElement {
     readonly #heavenlyCloudReplayButton: HTMLButtonElement;
     readonly #auroraIonosphereBackgroundController = getAuroraIonosphereBackgroundController();
     #auroraIonosphereBackgroundUnsubscribe: (() => void) | undefined;
-    #auroraIonosphereBackgroundInitialization: Promise<void> | undefined;
     readonly #auroraIonosphereBackgroundButton: HTMLButtonElement;
     readonly #auroraIonosphereSettingsPanel: HTMLElement;
     readonly #auroraIonosphereSettingsTrigger: HTMLButtonElement;
@@ -546,7 +548,6 @@ export class CodeCodexElement extends HTMLElement {
     readonly #auroraIonosphereReplayButton: HTMLButtonElement;
     readonly #milkyWayBackgroundController = getMilkyWayBackgroundController();
     #milkyWayBackgroundUnsubscribe: (() => void) | undefined;
-    #milkyWayBackgroundInitialization: Promise<void> | undefined;
     readonly #milkyWayBackgroundButton: HTMLButtonElement;
     readonly #milkyWaySettingsPanel: HTMLElement;
     readonly #milkyWaySettingsTrigger: HTMLButtonElement;
@@ -997,7 +998,6 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#particleSettings.renderParticleBackgroundPlugin();
         });
-        this.#particleBackgroundInitialization = this.#particleSettings.initializeParticleBackground(appearanceInitializationGeneration);
         this.#blackHoleBackgroundUnsubscribe?.();
         this.#blackHoleBackgroundUnsubscribe = this.#blackHoleBackgroundController.subscribe(() => {
             if (!this.#connected)
@@ -1008,8 +1008,6 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#blackholeSettings.renderBlackHoleBackgroundPlugin();
         });
-        this.#blackHoleBackgroundInitialization = this.#particleBackgroundInitialization
-            .then(() => this.#blackholeSettings.initializeBlackHoleBackground(appearanceInitializationGeneration));
         this.#glowHorizonBackgroundUnsubscribe?.();
         this.#glowHorizonBackgroundUnsubscribe = this.#glowHorizonBackgroundController.subscribe(() => {
             if (!this.#connected)
@@ -1020,8 +1018,6 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#glowhorizonSettings.renderGlowHorizonBackgroundPlugin();
         });
-        this.#glowHorizonBackgroundInitialization = this.#blackHoleBackgroundInitialization
-            .then(() => this.#glowhorizonSettings.initializeGlowHorizonBackground(appearanceInitializationGeneration));
         this.#heavenlyCloudBackgroundUnsubscribe?.();
         this.#heavenlyCloudBackgroundUnsubscribe = this.#heavenlyCloudBackgroundController.subscribe(() => {
             if (!this.#connected)
@@ -1032,8 +1028,6 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#heavenlycloudSettings.renderHeavenlyCloudBackgroundPlugin();
         });
-        this.#heavenlyCloudBackgroundInitialization = this.#glowHorizonBackgroundInitialization
-            .then(() => this.#heavenlycloudSettings.initializeHeavenlyCloudBackground(appearanceInitializationGeneration));
         this.#auroraIonosphereBackgroundUnsubscribe?.();
         this.#auroraIonosphereBackgroundUnsubscribe = this.#auroraIonosphereBackgroundController.subscribe(() => {
             if (!this.#connected)
@@ -1045,8 +1039,6 @@ export class CodeCodexElement extends HTMLElement {
             this.#auroraionosphereSettings.renderAuroraIonosphereBackgroundPlugin();
             this.#milkywaySettings.renderMilkyWayBackgroundPlugin();
         });
-        this.#auroraIonosphereBackgroundInitialization = this.#heavenlyCloudBackgroundInitialization
-            .then(() => this.#auroraionosphereSettings.initializeAuroraIonosphereBackground(appearanceInitializationGeneration));
         this.#milkyWayBackgroundUnsubscribe?.();
         this.#milkyWayBackgroundUnsubscribe = this.#milkyWayBackgroundController.subscribe(() => {
             if (!this.#connected)
@@ -1057,8 +1049,6 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#milkywaySettings.renderMilkyWayBackgroundPlugin();
         });
-        this.#milkyWayBackgroundInitialization = this.#auroraIonosphereBackgroundInitialization
-            .then(() => this.#milkywaySettings.initializeMilkyWayBackground(appearanceInitializationGeneration));
         this.#mountainUnsubscribe?.();
         this.#mountainUnsubscribe = this.#mountainController.subscribe(() => {
             if (this.#mountainController.stoppedForExternalThemeChange) {
@@ -1068,7 +1058,6 @@ export class CodeCodexElement extends HTMLElement {
             this.#mountainSettings.renderMountain();
             this.#cloudtrainSettings.renderCloudTrain();
         });
-        this.#mountainInitialization = this.#milkyWayBackgroundInitialization!.then(()=>this.#backgroundActions.initialize(MOUNTAIN_BACKGROUND_PLUGIN_ID,appearanceInitializationGeneration));
         this.#mountainSettings.bindMountain();
         this.#cloudTrainUnsubscribe?.();
         this.#cloudTrainUnsubscribe = this.#cloudTrainController.subscribe(() => {
@@ -1078,7 +1067,6 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#cloudtrainSettings.renderCloudTrain();
         });
-        this.#cloudTrainInitialization = this.#mountainInitialization!.then(()=>this.#backgroundActions.initialize(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID,appearanceInitializationGeneration));
         this.#cloudtrainSettings.bindCloudTrain();
         this.#pixelSculptUnsubscribe?.();
         this.#pixelSculptUnsubscribe = this.#pixelSculptController.subscribe(() => {
@@ -1088,7 +1076,6 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#pixelsculptSettings.renderPixelSculpt();
         });
-        this.#pixelSculptInitialization = this.#cloudTrainInitialization!.then(()=>this.#backgroundActions.initialize(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID,appearanceInitializationGeneration));
         this.#pixelsculptSettings.bindPixelSculpt();
         this.#blinkingSquaresUnsubscribe?.();
         this.#blinkingSquaresUnsubscribe = this.#blinkingSquaresController.subscribe(() => {
@@ -1098,7 +1085,6 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#blinkingsquaresSettings.renderBlinkingSquares();
         });
-        this.#blinkingSquaresInitialization = this.#pixelSculptInitialization!.then(()=>this.#backgroundActions.initialize(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID,appearanceInitializationGeneration));
         this.#blinkingsquaresSettings.bindBlinkingSquares();
         this.#startupSettings.bindStartupTransition();
         this.#asciiTilesSettings.start();
@@ -1110,9 +1096,13 @@ export class CodeCodexElement extends HTMLElement {
         this.#asciiTilesUnsubscribe=this.#asciiTilesRuntime.subscribe(()=>{if(!this.#connected)return;if(this.#asciiTilesRuntime.stoppedForExternalThemeChange&&this.#enabledAppearancePlugins.delete(ASCII_TILES_BACKGROUND_PLUGIN_ID))this.#writeEnabledAppearancePlugins();this.#renderPreviewMarket();});
         this.#spectralDrapeUnsubscribe=this.#spectralDrapeRuntime.subscribe(()=>{if(!this.#connected)return;if(this.#spectralDrapeRuntime.stoppedForExternalThemeChange&&this.#enabledAppearancePlugins.delete(SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID))this.#writeEnabledAppearancePlugins();this.#renderPreviewMarket();});
         this.#shallowOceanUnsubscribe=this.#shallowOceanRuntime.subscribe(()=>{if(!this.#connected)return;if(this.#shallowOceanRuntime.stoppedForExternalThemeChange&&this.#enabledAppearancePlugins.delete(SHALLOW_OCEAN_ID))this.#writeEnabledAppearancePlugins();this.#renderPreviewMarket();});
-        this.#asciiTilesInitialization=this.#milkyWayBackgroundInitialization?.then(()=>this.#backgroundActions.initialize(ASCII_TILES_BACKGROUND_PLUGIN_ID,appearanceInitializationGeneration));
-        this.#shallowOceanInitialization=this.#asciiTilesInitialization?.then(()=>this.#backgroundActions.initialize(SHALLOW_OCEAN_ID,appearanceInitializationGeneration));
-        this.#spectralDrapeInitialization=this.#shallowOceanInitialization?.then(()=>this.#backgroundActions.initialize(SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID,appearanceInitializationGeneration));
+        this.#backgroundInitialization = this.#backgroundActions.restore([
+            PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID,
+            HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, MILKY_WAY_BACKGROUND_PLUGIN_ID,
+            MOUNTAIN_BACKGROUND_PLUGIN_ID, CLOUD_TRAIN_BACKGROUND_PLUGIN_ID, PIXEL_SCULPT_BACKGROUND_PLUGIN_ID,
+            BLINKING_SQUARES_BACKGROUND_PLUGIN_ID, ASCII_TILES_BACKGROUND_PLUGIN_ID, SHALLOW_OCEAN_ID,
+            SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID,
+        ], appearanceInitializationGeneration);
         this.#surfaceOpacity.start();
         this.#multiAccount.start();
         this.#lanRemote.start();
@@ -1182,9 +1172,6 @@ export class CodeCodexElement extends HTMLElement {
         this.#asciiTilesUnsubscribe?.();this.#asciiTilesUnsubscribe=undefined;
         this.#spectralDrapeUnsubscribe?.();this.#spectralDrapeUnsubscribe=undefined;
         this.#shallowOceanUnsubscribe?.();this.#shallowOceanUnsubscribe=undefined;
-        this.#asciiTilesInitialization=undefined;
-        this.#spectralDrapeInitialization=undefined;
-        this.#shallowOceanInitialization=undefined;
         this.#surfaceOpacity.stop();
         this.#lanRemote.dispose();
         this.#multiAccount.stop();
@@ -1207,41 +1194,32 @@ export class CodeCodexElement extends HTMLElement {
         this.#connected = false;
         this.#versionFeedback.dispose();
         this.#appearanceInitializationGeneration += 1;
+        this.#backgroundInitialization = undefined;
         this.#particleBackgroundUnsubscribe?.();
         this.#particleBackgroundUnsubscribe = undefined;
-        this.#particleBackgroundInitialization = undefined;
         this.#blackHoleBackgroundUnsubscribe?.();
         this.#blackHoleBackgroundUnsubscribe = undefined;
-        this.#blackHoleBackgroundInitialization = undefined;
         this.#glowHorizonBackgroundUnsubscribe?.();
         this.#glowHorizonBackgroundUnsubscribe = undefined;
-        this.#glowHorizonBackgroundInitialization = undefined;
         this.#heavenlyCloudBackgroundUnsubscribe?.();
         this.#heavenlyCloudBackgroundUnsubscribe = undefined;
-        this.#heavenlyCloudBackgroundInitialization = undefined;
         this.#auroraIonosphereBackgroundUnsubscribe?.();
         this.#auroraIonosphereBackgroundUnsubscribe = undefined;
-        this.#auroraIonosphereBackgroundInitialization = undefined;
         this.#milkyWayBackgroundUnsubscribe?.();
         this.#milkyWayBackgroundUnsubscribe = undefined;
         this.#mountainUnsubscribe?.();
         this.#mountainUnsubscribe = undefined;
-        this.#mountainInitialization = undefined;
         this.#pixelSculptUnsubscribe?.();
         this.#pixelSculptUnsubscribe = undefined;
-        this.#pixelSculptInitialization = undefined;
         this.#pixelsculptSettings.closePixelSculpt();
         this.#blinkingSquaresUnsubscribe?.();
         this.#blinkingSquaresUnsubscribe = undefined;
-        this.#blinkingSquaresInitialization = undefined;
         this.#blinkingsquaresSettings.closeBlinkingSquares();
         this.#cloudTrainUnsubscribe?.();
         this.#cloudTrainUnsubscribe = undefined;
-        this.#cloudTrainInitialization = undefined;
         this.#cloudtrainSettings.closeCloudTrain();
         this.#mountainSettings.closeMountain();
         this.#cloudtrainSettings.closeCloudTrain();
-        this.#milkyWayBackgroundInitialization = undefined;
         this.#appearanceCoordinator.pluginPending = false;
         this.#appearanceCoordinator.transitionPending = false;
         this.#nativeWindowBackground.applied = undefined;
@@ -3002,37 +2980,7 @@ export class CodeCodexElement extends HTMLElement {
     }
     async #awaitBackgroundInitializations(operation: number): Promise<boolean> {
         const generation = this.#appearanceInitializationGeneration;
-        this.#particleBackgroundInitialization ??= this.#particleSettings.initializeParticleBackground(generation);
-        await this.#particleBackgroundInitialization;
-        if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceCoordinator.operation)
-            return false;
-        this.#blackHoleBackgroundInitialization ??= this.#particleBackgroundInitialization
-            .then(() => this.#blackholeSettings.initializeBlackHoleBackground(generation));
-        await this.#blackHoleBackgroundInitialization;
-        if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceCoordinator.operation)
-            return false;
-        this.#glowHorizonBackgroundInitialization ??= this.#blackHoleBackgroundInitialization
-            .then(() => this.#glowhorizonSettings.initializeGlowHorizonBackground(generation));
-        await this.#glowHorizonBackgroundInitialization;
-        if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceCoordinator.operation)
-            return false;
-        this.#heavenlyCloudBackgroundInitialization ??= this.#glowHorizonBackgroundInitialization
-            .then(() => this.#heavenlycloudSettings.initializeHeavenlyCloudBackground(generation));
-        await this.#heavenlyCloudBackgroundInitialization;
-        if (!this.#isCurrentBackgroundInitialization(generation) || operation !== this.#appearanceCoordinator.operation)
-            return false;
-        this.#auroraIonosphereBackgroundInitialization ??= this.#heavenlyCloudBackgroundInitialization
-            .then(() => this.#auroraionosphereSettings.initializeAuroraIonosphereBackground(generation));
-        await this.#auroraIonosphereBackgroundInitialization;
-        this.#milkyWayBackgroundInitialization ??= this.#auroraIonosphereBackgroundInitialization.then(() => this.#milkywaySettings.initializeMilkyWayBackground(generation));
-        await this.#milkyWayBackgroundInitialization;
-        await this.#mountainInitialization;
-        await this.#cloudTrainInitialization;
-        await this.#pixelSculptInitialization;
-        await this.#blinkingSquaresInitialization;
-        await this.#asciiTilesInitialization;
-        await this.#spectralDrapeInitialization;
-        await this.#shallowOceanInitialization;
+        await this.#backgroundInitialization;
         return this.#isCurrentBackgroundInitialization(generation) && operation === this.#appearanceCoordinator.operation;
     }
     #readEnabledAppearancePlugins(): readonly string[] {

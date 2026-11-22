@@ -3,10 +3,16 @@ import {readFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {launchFixture} from './browser-fixture.mjs';
 const source=readFileSync('packages/explorer-ui/src/inject.ts','utf8');
+const adapter=readFileSync('packages/explorer-ui/src/adapters/codex-26.715.ts','utf8');
+const selector=name=>adapter.match(new RegExp(`const ${name} = '([^']+)'`))[1];
 const owned='[data-code-codex-owned="true"]',main='main:is(.main-surface, [data-app-shell-main-surface="default"])';
 const css=source.match(/const SHELL_LAYOUT_CSS = `([\s\S]*?)`;/)[1]
  .replaceAll('${NATIVE_SIDE_PANEL_OPACITY_CSS}','') // Independently exercised by test-native-side-panel-opacity.mjs.
  .replaceAll('${NATIVE_COMPOSER_BACKDROP_CSS}','') // Independently exercised by test-native-composer-backdrop.mjs.
+ .replaceAll('${NATIVE_WORKSPACE_BACKGROUND_CSS}','') // Exercised by test-host-update-probes.mjs.
+ .replaceAll('${SPLIT_MAIN_VIEW_SELECTOR}',selector('SPLIT_MAIN_VIEW_SELECTOR'))
+ .replaceAll('${SPLIT_MAIN_FRAME_SELECTOR}',selector('SPLIT_MAIN_FRAME_SELECTOR'))
+ .replaceAll('${NATIVE_FIXED_TITLEBAR_SELECTOR}',selector('NATIVE_FIXED_TITLEBAR_SELECTOR'))
  .replaceAll('${CURRENT_LAYOUT_EXPLORER_SELECTOR}',owned+'[data-placement="inline"][data-mount-strategy="known:workspace-row"]')
  .replaceAll('${OWNED_EXPLORER_SELECTOR}',owned).replaceAll('${MAIN_SURFACE_SELECTOR}',main).replaceAll('${CURRENT_LAYOUT_HEADER_LEFT_PROPERTY}','--code-codex-current-layout-header-left');
 assert(!css.includes('${'));
@@ -31,5 +37,13 @@ try{
   await b.evaluate(scenario==='single'?`document.querySelector('.viewport').setAttribute('data-app-shell-workspace-layout','single')`:scenario==='full'?`document.querySelector('.viewport').setAttribute('data-app-shell-right-panel-full-width','true')`:scenario==='no-tree'?`document.querySelector('.tree').setAttribute('data-placement','overlay')`:`document.querySelector('#production').remove()`);
   assert.equal(await b.evaluate(`getComputedStyle(document.querySelector('.MainContentFrame-native')).maxWidth`),'none');checks.push(`Native sizing retained/restored: ${scenario}`);
  }
+ await b.evaluate(`document.querySelector('.tree').setAttribute('data-placement','inline');
+  const updatedFrame=document.querySelector('.MainContentFrame-native');
+  updatedFrame.style.cssText+=';min-width:100%;flex:1;align-self:flex-end';
+  updatedFrame.querySelector('.composer').setAttribute('data-app-shell-focus-area','main');
+  updatedFrame.removeAttribute('class');
+  const replacement=document.createElement('style');replacement.textContent=${JSON.stringify(css)};document.head.append(replacement);`);
+ assert(await b.evaluate(`(()=>{const view=document.querySelector('.viewport'),box=view.getBoundingClientRect(),frame=view.firstElementChild.getBoundingClientRect();return frame.left>=box.left-1&&frame.right<=box.right+1;})()`));
+ checks.push('Semantic main focus-area keeps the new class-free native frame inside the split');
  const result={scope:'Production injected CSS in Chromium fixtures; live host verified separately',passed:checks.length,checks};writeFileSync(resolve(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{await b.close();}

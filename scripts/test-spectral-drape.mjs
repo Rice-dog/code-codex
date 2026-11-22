@@ -15,9 +15,9 @@ const catalog=JSON.parse(readFileSync(resolve(ui,'dist/plugins/catalog.json'),'u
 const version=JSON.parse(readFileSync(resolve(ui,'package.json'),'utf8')).version;
 const tag=builtExplorerTag(root);
 const directory=resolve(ui,'dist/plugins');
-for(const p of catalog){for(const asset of [p,...p.resources]){const b=readFileSync(pluginAssetPath(directory,p,asset));assert.equal(b.length,asset.size);assert.equal(createHash('sha256').update(b).digest('hex'),asset.sha256);assert.ok(asset.size<=4*1024*1024);}}
+for(const p of catalog){for(const asset of [p,...p.resources]){const b=readFileSync(pluginAssetPath(directory,p,asset));assert.equal(b.length,asset.size);assert.equal(createHash('sha256').update(b).digest('hex'),asset.sha256);const sizeMiB=p.id==='lan-remote'&&asset.kind==='native'?64:4;assert.ok(asset.size<=sizeMiB*1024*1024,asset.asset);}}
 assertCatalogMatchesDeclarations(catalog,root);assert.ok(readFileSync(resolve(ui,'dist/startup-early.js')).length<40*1024);
-const packageSources=Object.fromEntries(catalog.map(p=>[p.id,verifiedPluginSources(directory,p)]));
+const packageSources=Object.fromEntries(catalog.filter(p=>!p.resources.some(asset=>asset.kind==='native')).map(p=>[p.id,verifiedPluginSources(directory,p)]));
 const setup=`window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));window.calls=[];window.packages=${JSON.stringify(catalog)};window.packageSources=${JSON.stringify(packageSources)};window.packageJobs={};window.installed=new Set(JSON.parse(localStorage.getItem('fixture-packages')||'[]'));window.__CODE_CODEX_BOOTSTRAP__={token:'fixture',codexVersion:'26.930.7945.0',supported:true};window.__codeCodex={request:async({method,params})=>{
 calls.push({method,params});
 if(method==='explorer.window.transparency.set')return {enabled:params.enabled,background:'transparent'};

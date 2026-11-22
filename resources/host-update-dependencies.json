@@ -1,11 +1,13 @@
 {
   "schema": 1,
-  "revision": 35,
+  "revision": 58,
   "rules": [
     {
       "id": "layout",
       "feature": "File tree, workspace mount and composer",
       "sources": [
+        "crates/cdp-client/src/lib.rs",
+        "crates/cdp-client/src/renderer-layout-diagnostic.js",
         "packages/explorer-ui/src/adapters/codex-26.715.ts",
         "packages/explorer-ui/src/inject.ts",
         "packages/explorer-ui/src/active-thread.ts",
@@ -17,7 +19,19 @@
         "packages/explorer-ui/src/background-package-market.ts",
         "packages/explorer-ui/src/components/plugin-shortcuts.ts",
         "packages/explorer-ui/src/host-update-background.ts",
-        "packages/explorer-ui/src/host-update-mount.ts"
+        "packages/explorer-ui/src/host-update-mount.ts",
+        "packages/explorer-ui/src/welcome-surface.ts",
+        "packages/explorer-ui/src/first-run-welcome.ts",
+        "packages/explorer-ui/src/quick-tour.ts",
+        "packages/explorer-ui/src/bridge.ts",
+        "crates/launcher/src/bootstrap.rs",
+        "packages/explorer-ui/src/components/application-dialog.ts",
+        "installer/Install-CodeCodex.ps1",
+        "installer/Package.wxs",
+        "crates/workspace-service/src/first_run.rs",
+        "packages/explorer-ui/src/native-workspace-background.ts",
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "packages/explorer-ui/src/app/explorer-element.ts"
       ],
       "tests": [
         "scripts/test-codex-layout.mjs",
@@ -26,11 +40,19 @@
         "scripts/test-host-update-probes.mjs",
         "scripts/test-native-split-layout.mjs",
         "scripts/test-market-scroll.mjs",
-        "scripts/test-ui-responsiveness.mjs"
+        "scripts/test-ui-responsiveness.mjs",
+        "scripts/test-first-run-welcome.mjs",
+        "scripts/test-application-menu.mjs",
+        "scripts/test-plugin-shortcuts.mjs",
+        "scripts/test-context-menu-language.mjs"
       ],
       "tokens": [
         "data-app-shell-workspace",
         "MainContentClip",
+        "data-codex-history-swipe-page",
+        "data-desktop-login-surface",
+        "data-app-shell-main-content-layout",
+        "data-app-shell-focus-area",
         "data-thread-scroll-footer",
         "data-app-shell-main-surface",
         "data-app-action-sidebar-thread-active",
@@ -38,33 +60,67 @@
         "inert",
         "data-app-shell-workspace-layout",
         "data-app-shell-right-panel-full-width",
-        "MainContentFrame"
+        "MainContentFrame",
+        "builtin:home",
+        "data-app-startup-loading",
+        "data-app-navigation-rail",
+        "data-app-shell-sidebar-trigger",
+        "data-app-shell-titlebar",
+        "data-pip-obstacle",
+        "data-app-shell-titlebar-content"
       ],
       "paths": [],
       "checks": [
+        "Managed renderer qualification and inline placement accept the native history-swipe MAIN with a direct contents wrapper, including a nested workspace. The signed-out desktop column holds a unique semantic login surface, heading and controls without a workspace. Reject a missing marker, wrong wrapper, duplicate rails and wrong order. In split view, the semantic main focus-area identifies the frame without the retired CSS module name.",
         "Existing/new/unknown composer layouts, missing and ambiguous anchors, navigation and disposal.",
         "Collapsed inert/aria-hidden sidebar rows do not compete with the active thread; A/B retain independent saved connections, true multiple active IDs remain ambiguous, and New Chat keeps draft selection.",
         "Native right split with expanded/collapsed file tree and narrow/wide panes keeps the main transcript and composer inside its actual viewport; single-pane/full-width and tree removal restore native sizing.",
+        "Compare the mounted inline tree with its owning workspace's top edge. The former fixed 8 CSS px inset must report an issue; preserve the native conversation inset and use the same check for collapsed and expanded trees. Drawer and unmounted states remain manual.",
         "Plugin Market native vertical scrolling in every category: three tools at short viewport height; wheel, scrollbar drag and keyboard; category reset and closed/unmounted manual state. Read-only host.market-scroll detects hidden/clip overflow without moving the list or adding RPC. Negative: the former developer-tools overflow-y:hidden and fake decorative scrollbar must fail.",
         "Shared native structure observation preserves route/mount delivery and per-subscriber disposal; ordinary response text and owned rows do not invalidate routes. Virtual tree unchanged rows retain DOM, while marks, selection, expansion and scroll overlap update. Market open/download/cancel/completion refreshes remain; idle status polling is absent. These isolated production-module fixtures are not automatic live behavioral certification.",
-        "Autonomous offscreen mount of the actual closed market template and production styles, all three categories with real layout width and scroll-range measurement. No click, wheel, focus, preference or foreground DOM state change. Native split needs a mounted right panel for live acceptance; the isolated production stylesheet must constrain both main frame and composer without pretending to open an official route."
+        "Autonomous offscreen mount of the actual closed market template and production styles, all three categories with real layout width and scroll-range measurement. No click, wheel, focus, preference or foreground DOM state change. Native split needs a mounted right panel for live acceptance; the isolated production stylesheet must constrain both main frame and composer without pretending to open an official route.",
+        "Welcome recognizes visible mounted native Home and waits during sign-in, loading, an active splash, or a hidden document. Verify the welcome-only backdrop is transparent, and its SVG close control is centered and retains keyboard focus. Real install eligibility is separate: clean Setup/MSI installation and purge/reinstall show once; update, repair, and retained-settings reinstall stay quiet. Simultaneous windows share one native claim.",
+        "Quick tour resolves actual Plugin Market, version and top Code-Codex buttons. Missing or ambiguous targets on a mounted host surface are reported without opening UI. The menu opens the shared welcome without claiming first-install eligibility. The tour starts from its Quick tour action. Verify protected target and card brightness against the dimmed surroundings, hidden-target fallback, narrow-window placement, and Skip/Escape/Done cleanup. No implicit update or market action.",
+        "Masthead collision: check both the native titlebar content marker and the fixed app-shell header mark. Compare native header left and tree right in expanded and collapsed states, keep inactive pages and drawer layouts out of the inline reservation.",
+        "Open and close directories, then refresh visible directories and confirm stable selection and preservation of expanded folders. Test missing/deleted directory and a late workspace response.",
+        "Filter loaded files, clear the query, and verify directory navigation and empty-result feedback.",
+        "Verify keyboard and range selection, context actions, open/close preview tabs, drag/selection behavior, and desktop reveal on a disposable workspace.",
+        "Toggle read-only/editing and exercise create, rename, move and trash in a disposable folder. Confirm read-only protection and no cross-workspace writes.",
+        "Collapse, expand, drag the separator and use its keyboard controls. Hide until conversation selection and restore from menu. Verify no extra native header displacement after dismissal.",
+        "Pin and unpin in the market and reorder through supported preferences. Verify open-only shortcut behavior, overflow menu keyboard navigation and focus return when the window narrows.",
+        "Verify workspace follow, retained tab/selection, no-project and deleted-project states, cached-directory updates and watcher recovery."
       ],
       "automatedChecks": [
         "package.inventory",
         "host.layout",
+        "host.tree-top-alignment",
         "host.composer",
+        "host.welcome-surface",
+        "host.quick-tour-targets",
         "regression.layout",
         "host.split-layout",
         "host.market-scroll",
         "background.market-layout",
-        "background.split-layout"
+        "background.split-layout",
+        "host.tree-titlebar-clearance",
+        "host.tree-shortcuts",
+        "host.tree-refresh",
+        "host.tree-collapse",
+        "host.tree-dismiss",
+        "host.tree-filter",
+        "host.tree-edit",
+        "host.tree-resize"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "Open an existing conversation and New Chat. Confirm the file tree follows the correct workspace and the composer remains usable.",
         "Navigate away/back and close the view. Confirm there is one tree and no stale controls.",
-        "Open Side chat, resize the split, expand/collapse the file tree and inspect the first characters and composer. Close the split and confirm native single-pane sizing."
-      ]
+        "Open Side chat, resize the split, expand/collapse the file tree and inspect the first characters and composer. Close the split and confirm native single-pane sizing.",
+        "Use an isolated installation to verify clean install and full purge then reinstall, version-footer upgrades, and retained-settings reinstalls. Check both welcome buttons on the first visible managed Home and when opened via the top menu. Verify the spotlit button and card stay bright across all three steps, and repeat with the explorer collapsed and in a narrow window.",
+        "Use a scratch workspace for actual tree mutations, desktop reveal and opening files; restore the enabled editing and collapse state afterward.",
+        "Use a disposable window to test the footer shortcuts, overflow keyboard navigation and market pinning without changing the active user surface."
+      ],
+      "area": "Workspace / File tree and conversation"
     },
     {
       "id": "accounts",
@@ -72,19 +128,26 @@
       "sources": [
         "resources/account-host-capabilities.js",
         "crates/launcher/src/accounts/host.rs",
+        "packages/explorer-ui/src/features/accounts/rpc-observation.ts",
         "packages/explorer-ui/src/features/accounts/native-adapter.ts",
         "packages/explorer-ui/src/features/accounts/quota.ts",
+        "crates/launcher/src/accounts/backend_diagnostics.rs",
+        "crates/launcher/src/accounts/worker.rs",
         "crates/launcher/src/accounts/worker_health.rs",
         "crates/launcher/src/accounts/credentials.rs",
         "crates/launcher/src/accounts/queries.rs",
         "crates/launcher/src/accounts/usage.rs",
         "crates/launcher/src/accounts/primary.rs",
         "crates/launcher/src/accounts/primary_host.js",
+        "crates/launcher/src/accounts/native_route.js",
+        "packages/explorer-ui/src/features/accounts/draft-routing.ts",
         "packages/explorer-ui/src/multi-account-runtime.ts",
+        "packages/explorer-ui/src/features/accounts/primary-status.ts",
         "packages/explorer-ui/src/features/accounts/error-presentation.ts",
         "packages/explorer-ui/src/features/accounts/quota-view.ts",
         "crates/launcher/src/accounts/mod.rs",
         "crates/launcher/src/accounts/native_route.rs",
+        "crates/launcher/src/accounts/draft.rs",
         "crates/launcher/src/accounts/primary_transport.rs",
         "crates/launcher/src/accounts/startup_backend.rs"
       ],
@@ -100,13 +163,17 @@
         "scripts/test-account-error-presentation.mjs",
         "scripts/test-account-admission.mjs",
         "scripts/test-account-reset-ui.mjs",
+        "crates/launcher/src/accounts/backend_diagnostics.rs",
         "scripts/test-account-primary-internal.py"
       ],
       "tokens": [
         "appServerManagers",
+        "registerReplayAdmission",
+        "startTurnWithOutcome",
         "executionHosts",
         "clientCoordination",
         "account/rateLimits/read",
+        "account/updated",
         "account/read",
         "getAuthStatus",
         "thread/resume",
@@ -120,12 +187,16 @@
       ],
       "paths": [],
       "checks": [
-        "Identity match without forced refresh; expired versus unavailable credentials; active-turn refusal and late replies.",
+        "Identity match without forced refresh; expired versus unavailable credentials; active-turn refusal and late replies. Only a structured native quota response with HTTP 401 and token_revoked is reported as revoked; ambiguous errors remain unavailable without replay or account mutation.",
         "Manual Verify returns verified login status independently of remote quota availability, then schedules the existing background quota queue. Verify and usage reuse observe_managed credentials without duplicate frontend Verify; quota failure does not fail successful login checks. Cached values, one-flight and owner/late-result protections remain. No quota-triggered backend replacement or extra retry counter.",
         "Usable native getAuthStatus credentials avoid forced account/read; near-expiry, missing claims and confirmed reauthorization retain existing refresh behavior. Wrong identity, logout/relogin, removed connection and late replies cannot commit stale results. Local credential selection is not blocked by a hung remote quota read.",
+        "Account metadata refresh is event-driven; reconnect retries failed quota reads through the existing queue once and preserves the last trusted result. Recurring account/info queries and login/token refresh must not be triggered by a quota timeout.",
+        "The initialized numbered runtime qualifies the unique appServerManagers service and dispatcher when the retired legacy prototype and clientCoordination field are absent. Distinct services reject qualification; legacy method requirements still apply without RPC. Do not open a manager, dispatch or move account state while probing.",
+        "Primary settings confirmation recognizes its own modal pointer event. Keep the panel open, show localized stages and elapsed seconds, read operation progress through the existing document/source lease without official account/read, and stop observation when closed or completed. Temporary progress failure is logged and cannot override the confirmed native receipt. Retired, ended and unrelated owners cannot read the local status.",
         "Failed/interrupted primary setup must release ordinary route switching and disable; explicit cancel distinguishes canceled, notFound and missing loginId. Pre-dispatch failures do not claim OAuth started. A real pending login retains existing admission. No OAuth write replay or new polling.",
         "Quota presentation distinguishes explicit connection failure, response deadline, incomplete data and generic unavailable. ACCOUNT_BACKEND/ACCOUNT_STREAM_UNCLASSIFIED alone must not imply offline or expired login. Preserve cached percentages and original diagnostic code. Current-thread terminal connection errors use existing notice, never automatic replay or extra RPC; isolated browser fixture does not certify real provider delivery.",
         "Local native.status/shared.status snapshots reuse an already-held owner lease and current document without official account/read; unknown/ended/retired sessions cannot leak another owner, and snapshot results never replace native.ensure/send/mutation admission. Reselecting a committed connection uses native.ensure, with stale-route repair and original busy/cancellation behavior.",
+        "After an owner or document changes in the same official process, an orphaned per-thread relay is restored using host-generation route evidence even when the current registry and renderer pins are empty. Draft adoption records its already configured endpoint before commit. A prior official process or unrelated thread cannot supply current route evidence; route state contains no credentials.",
         "Internal primary handoff: qualified launch-owned control, native-only chatgptAuthTokens login, exact native getAuthStatus credential match without a duplicate network account/read, request-driven refresh, complete managed persistence, definite rejection restores only credential stores, unknown receipt never replays. Cached idle avoids thread/read; missing frontend state uses one native status read; active/unknown/malformed status blocks. Old connection without primarySwitch capability changes no credential and opens no browser. Fixtures and isolated synthetic official backend do not prove real service/desktop acceptance. New UI uses primary.promote so a retained pre-upgrade account core cannot silently open browser OAuth; legacy primary.start on the new core aliases the internal path."
       ],
       "automatedChecks": [
@@ -139,7 +210,8 @@
         "In an idle test conversation select a previously verified child, then the primary account. Confirm identity and quota update without another login.",
         "Separately test a signed-out/expired connection and an unavailable network; cached quota must not be described as a login failure.",
         "In an idle disposable installation start/cancel a primary-account authorization, including an interrupted receipt. Confirm ordinary account switching and disable remain usable after interruption, and that canceled differs from notFound/unconfirmed. Do not change the active user login automatically."
-      ]
+      ],
+      "area": "Account and execution / Routing and identity"
     },
     {
       "id": "models",
@@ -148,7 +220,8 @@
         "packages/explorer-ui/src/features/accounts/native-model-menu.ts"
       ],
       "tests": [
-        "scripts/test-account-models.mjs"
+        "scripts/test-account-models.mjs",
+        "scripts/test-account-api-routing.mjs"
       ],
       "tokens": [
         "availableAccessPrograms",
@@ -158,7 +231,8 @@
       ],
       "paths": [],
       "checks": [
-        "API saved model subset and default; native model/effort selection; official catalog restore; missing or ambiguous capability."
+        "API saved model subset and default; native model/effort selection; official catalog restore; missing or ambiguous capability.",
+        "Saved API model/default remains on the API route after reopening. Catalog success with provider failure, invalid key, unsupported model and stream interruption are distinct. Switching to official restores native catalog and effort, including late API catalog completion."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -170,14 +244,19 @@
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "Open the native model picker for an API connection: confirm only saved models appear and default/effort selection works.",
-        "Return to an official account and confirm its native catalog and keyboard selection are restored."
-      ]
+        "Return to an official account and confirm its native catalog and keyboard selection are restored.",
+        "Use a controlled Responses endpoint for invalid model, invalid key and stream interruption, then verify the intended real provider and model with one authorized request."
+      ],
+      "area": "Account and execution / Model selection"
     },
     {
       "id": "appearance",
-      "feature": "Backgrounds, surface opacity and theme",
+      "feature": "Conversation, interface opacity and layered panel paint",
       "sources": [
+        "packages/explorer-ui/src/host/appearance/appearance-actions.ts",
         "packages/explorer-ui/src/host/appearance/theme-probe.ts",
+        "packages/explorer-ui/src/host/appearance/theme-lease.ts",
+        "resources/account-host-capabilities.js",
         "packages/explorer-ui/src/native-background-surfaces.ts",
         "packages/explorer-ui/src/plugin-host/backgrounds/spectral-drape.ts",
         "packages/explorer-ui/src/effects/spectral-drape/model.ts",
@@ -192,7 +271,10 @@
         "packages/explorer-ui/src/app/main-preview-element.ts",
         "packages/explorer-ui/src/native-structure-changes.ts",
         "packages/explorer-ui/src/host-update-background.ts",
-        "packages/explorer-ui/src/host-update-mount.ts"
+        "packages/explorer-ui/src/host-update-mount.ts",
+        "packages/explorer-ui/src/native-workspace-background.ts",
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "resources/plugin-definitions.json"
       ],
       "tests": [
         "scripts/test-appearance-adapter.mjs",
@@ -202,7 +284,8 @@
         "scripts/test-host-update-probes.mjs",
         "scripts/test-native-side-panel-opacity.mjs",
         "scripts/test-collapsed-tree-opacity.mjs",
-        "scripts/test-ui-responsiveness.mjs"
+        "scripts/test-ui-responsiveness.mjs",
+        "scripts/test-categorized-plugin-market.mjs"
       ],
       "tokens": [
         "app.appearance.get",
@@ -216,12 +299,20 @@
         "data-summary-panel-variant",
         "data-summary-panel-density",
         "data-app-shell-compact-page-gutter",
+        "data-app-shell-surface-backing",
         "data-new-tab-scroll-root",
-        "data-collapsed"
+        "data-collapsed",
+        "--app-shell-content-fade",
+        "data-app-shell-main-content-layout",
+        "thread-edge-scroll",
+        "data-app-shell-frame",
+        "--app-shell-sidebar-docked-background",
+        "group/turn-diff-file-row"
       ],
       "paths": [],
       "checks": [
-        "Light/dark native theme, background activation/deactivation and unchanged controls/media.",
+        "Read the unique official Appearance action from the mounted workspace. Accept old scoped services and current numbered services without the retired coordinator. Verify confirmed dark/light transitions, background enable/disable restore, unchanged controls/media, and rejected missing or ambiguous services.",
+        "With a supported background enabled, the mounted workspace's direct decorative backing is transparent across the file tree and native conversation. Detect opaque fills and generated layers, including when both foreground surface sliders already read zero. Preserve intentional masks, restore the official backing when the background is disabled, and keep unobserved states manual.",
         "Spectral Drape uses shared ManagedBackgroundController, independent Worker first-frame, native settings surface transparency and theme lease. Test download without activation, parameter/reset persistence, shared ASCII panel, reduced-motion/paused idle, startup copy and cleanup; no account/switch checks or new waits.",
         "Spectral click uses visible folded-surface NDC and CSS offset/DPR-independent pointer coordinates; offset canvas multi-point uniform regression. Saved live defaults and dot SVG icon match panel; startup animation selector includes spectral. Brush path stays unchanged.",
         "With Surface active, inspect visible native footer and its decorative parent backgrounds including generated ::before/::after. Detect opaque color or gradient even when composer and conversation alpha are zero. Inactive/unmounted/cached pages are manual; legitimate conversation masks and native content are excluded.",
@@ -230,23 +321,34 @@
         "Mounted native summary and right-panel gutter/New tab backings follow utility opacity once at 0/mid/100; controls, webviews, terminal and media remain native. Dark/light, remount and deactivate restore use isolated fixtures; unmounted panels remain manual.",
         "Collapsed owned file-tree expand rail follows the tree opacity independently of conversation alpha at 0/mid/100. Detect fixed alpha, opaque fill or gradient; check real fold/reopen and isolated remount/light/dark. Expanded, inactive or unmounted rails remain manual; preserve button geometry, native interactions and out-of-scope paint.",
         "Late owned preview mounts and repeated notifications install one opacity stylesheet. Inactive renders and ordinary response insertions do not scan descendants; stop/start removes subscriptions and restores presentation. Existing fold/reopen and 0/mid/full paint checks still apply.",
-        "One native-style isolated document checks footer backdrop, side panel and collapsed rail paint against supported opacity settings. It must not mark an absent live official surface as passed or leave nodes behind."
+        "One native-style isolated document checks footer backdrop, side panel and collapsed rail paint against supported opacity settings. It must not mark an absent live official surface as passed or leave nodes behind.",
+        "The UI Surface Opacity card has an independent result. In an active conversation the official top edge-scroll decoration must add no fill or gradient over the shared mask at 0, mid, or full opacity. Detect residual paint even when the main backdrop already passes. Preserve unrelated controls and native paint when opacity is inactive.",
+        "Inspect the native page-frame backing and turn-diff file rows independently. The outer docked-sidebar gradient must not dim the whole background when Surface Opacity is active; zero change alpha must also leave the card and non-hovered file rows transparent. Preserve the native state outside the owned surfaces."
       ],
       "automatedChecks": [
         "package.inventory",
         "host.theme",
+        "host.appearance-action",
+        "host.workspace-backing-paint",
         "host.composer-backdrop",
         "host.side-panel-paint",
         "host.tree-rail-paint",
         "background.composer-backdrop",
         "background.side-panel-paint",
-        "background.tree-rail-paint"
+        "background.tree-rail-paint",
+        "host.plugin-surface-opacity",
+        "host.conversation-top-paint",
+        "background.conversation-top-paint",
+        "host.page-frame-paint",
+        "host.turn-change-paint"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "With a background enabled, inspect light and dark themes, then disable it. Confirm native controls and media retain their geometry.",
-        "Collapse then expand the file tree with a background and Surface enabled. Inspect the full width below the native composer at zero and intermediate alpha; a theme token pass alone does not certify transparent paint."
-      ]
+        "Collapse and expand the tree with a background and Surface enabled. Inspect the full widths at the top scroll edge and below the composer at zero and intermediate alpha, then disable Surface and verify native paint restoration.",
+        "Compare the actual background through empty space on each side of the workspace, and inspect the mounted change rows at zero and intermediate alpha. Confirm gradient restoration with Surface Opacity disabled."
+      ],
+      "area": "Native interface background / Conversation and tools"
     },
     {
       "id": "menu",
@@ -254,7 +356,10 @@
       "sources": [
         "packages/explorer-ui/src/application-menu.ts",
         "crates/launcher/src/host_updates/validation.rs",
-        "packages/explorer-ui/src/host-update-probes.ts"
+        "packages/explorer-ui/src/host-update-probes.ts",
+        "packages/explorer-ui/src/contracts/application-menu-items.ts",
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "packages/explorer-ui/src/host/bridge/application-menu.ts"
       ],
       "tests": [
         "scripts/test-application-menu.mjs",
@@ -268,18 +373,57 @@
       ],
       "paths": [],
       "checks": [
-        "Current/stale/legacy/partial report metadata; late status after close; fixed retry admission and keyboard navigation.",
-        "Separate inventory and compatibility identities; immutable validation runs, no hidden update after zero-delta analysis refresh, unknown changes remain involved, partial checks remain manual and stale rules/engine require explicit revalidation."
+        "Compatibility submenu shares Language positioning, focus and disposal. Current/stale/legacy/partial report metadata persists across submenus; late status after close is ignored. Submenu opening does not run either action or reread status.",
+        "Separate inventory and compatibility identities; immutable validation runs, no hidden update after zero-delta analysis refresh, unknown changes remain involved, partial checks remain manual and stale rules/engine require explicit revalidation.",
+        "Inspect every Code-Codex top-menu entry and both submenus without invoking them: tree, market, quick tour, runtime information, installation folder, compatibility report/rescan, two languages, updates, repository, login startup, restart, and uninstall. Closed menus populate labels on open. Verify rows and roles while closed, and labels when open. Check dispatch, destination and keyboard behavior in the isolated production menu fixture.",
+        "file-tree: toggle the explorer, restore the viewport and preserve active workspace identity.",
+        "plugin-market: open, close, switch categories and restore focus, including an already-open settings panel.",
+        "quick-tour: open the existing welcome, start all three steps, then Skip, Escape or Done.",
+        "runtime-information: open the diagnostics and confirm current installation and owner information.",
+        "installation-folder: reveal the active install directory by its resolved local path.",
+        "compatibility: open the submenu with pointer and Arrow keys; Escape returns to the parent.",
+        "compatibility-report: open the current report with the actual report and rules fingerprint.",
+        "compatibility-recheck: run the explicit check once and keep the historical report.",
+        "language: open the shared submenu, keep checked state and restore focus on Escape.",
+        "language-zh-CN: apply Chinese to owned current and lazily loaded content, retain the selected locale.",
+        "language-en: apply English and verify icons, accessible names and labels in the native menu.",
+        "check-updates: use the shared product release check and distinguish no update, update and failure.",
+        "repository: open the fixed project repository URL through the normal native external-link action.",
+        "login-startup: toggle registration in an isolated install without duplicating startup entries.",
+        "restart: deliberate managed relaunch restores Bridge, file tree, workspace and runtime identity.",
+        "uninstall: cancellation preserves files/settings, real teardown tested only in a disposable install.",
+        "Sweep ordinary and submenu rows with the menu open. The native popover branch keeps pointer entry free of placement reads and DOM visibility/ARIA attribute rewrites, links the trigger to the submenu, and exposes browser-managed expanded state. Verify placement on open, resize, scroll and label change and keyboard behavior on the capability fallback.",
+        "Once language indicators exist, the selected and unselected icons must not paint while the submenu is closed, even though it remains measurable. Opening exposes only the selected icon. An overriding visible child is a regression on both popover and fallback paths."
       ],
       "automatedChecks": [
         "package.inventory",
-        "host.menu"
+        "host.menu",
+        "host.menu-actions",
+        "menu.file-tree",
+        "menu.plugin-market",
+        "menu.quick-tour",
+        "menu.runtime-information",
+        "menu.installation-folder",
+        "menu.compatibility",
+        "menu.compatibility-report",
+        "menu.compatibility-recheck",
+        "menu.language",
+        "menu.language-zh-CN",
+        "menu.language-en",
+        "menu.check-updates",
+        "menu.repository",
+        "menu.login-startup",
+        "menu.restart",
+        "menu.uninstall",
+        "host.menu-closed-indicators"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "Open the Code-Codex menu in Chinese and English. Confirm validation counts and keyboard navigation.",
-        "Close the menu during a status read; it must not reopen or change focus when the reply arrives."
-      ]
+        "Close the menu during a status read; it must not reopen or change focus when the reply arrives.",
+        "Use an isolated installation for actual restart, login-startup setting, official/client update and uninstall. A mounted action or a stub receipt only verifies its own contract."
+      ],
+      "area": "Top application menu"
     },
     {
       "id": "transport",
@@ -327,7 +471,8 @@
       "manualSteps": [
         "In a disposable conversation verify one native request and cancellation. Confirm disconnect/unknown outcome is reported without automatic replay.",
         "With two consenting PCs on one private LAN: create/join the same room, reject then approve, verify screen and input, transfer a disposable file, disconnect, disable and close Codex. Confirm access ends and no listener/helper survives. Static official-interface matches do not certify this external native protocol."
-      ]
+      ],
+      "area": "Host and lifecycle / Bridge"
     },
     {
       "id": "backend",
@@ -352,7 +497,8 @@
         "sandbox"
       ],
       "checks": [
-        "Local tool and approval protocol; activity/ownership checks; no request replay after unknown outcomes."
+        "Local tool and approval protocol; activity/ownership checks; no request replay after unknown outcomes.",
+        "On official child and API paths verify one native local tool, approval prompt, deny, stop and resume in separately authorized disposable conversations. Confirm tool result/input pairing, workspace and permissions are unchanged across route switches; a disconnect or uncertain outcome must not replay the turn."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -362,8 +508,10 @@
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
-        "Use a disposable conversation for a tool/approval turn. Confirm cancel and denied approval do not replay a request."
-      ]
+        "Use a disposable conversation for a tool/approval turn. Confirm cancel and denied approval do not replay a request.",
+        "Use a harmless workspace-local file read. Verify the approval decision, same history and tool result after switching provider, and request count after denial/cancel or a simulated disconnect."
+      ],
+      "area": "Host and lifecycle / Backend"
     },
     {
       "id": "desktop",
@@ -379,20 +527,31 @@
         "crates/launcher/src/official_update_registration.rs",
         "crates/launcher/src/host_updates/runtime.rs",
         "crates/launcher/src/host_updates/version_gate.rs",
-        "crates/launcher/src/host_updates/scan.rs"
+        "crates/launcher/src/host_updates/scan.rs",
+        "crates/launcher/src/startup_conflict.rs",
+        "crates/launcher/src/startup_conflict.ps1",
+        "crates/launcher/src/startup_conflict_windows.rs"
       ],
       "tests": [
         "scripts/test-startup-conflict-native.ps1",
         "crates/launcher/src/process_guard.rs",
         "scripts/test-official-update-handoff.mjs",
-        "crates/launcher/src/host_updates/tests.rs"
+        "crates/launcher/src/host_updates/tests.rs",
+        "scripts/test-startup-conflict.ps1",
+        "scripts/test-startup-conflict-windows.ps1",
+        "scripts/test-same-version-install.ps1"
       ],
       "tokens": [
         "appUpdates",
         "installUpdate",
         "installUpdatesIfAvailable",
         "readRegistration",
-        "app.relaunch"
+        "app.relaunch",
+        "Ctrl+Q",
+        "window-all-closed",
+        "codex-update-attempt",
+        "application-menu-trigger-file-menu",
+        "application-menu-content"
       ],
       "paths": [
         "ChatGPT.exe",
@@ -408,24 +567,36 @@
         "Official update installUpdate entry retains native confirmation/deployment; only a verified newer package after retained original process exit triggers handoff. New window must have one working tree and Bridge. Cancel/failed/same-version/ordinary close must not relaunch. Real update acceptance is separate from static matching.",
         "PackageUpdating subscription precedes readiness; matching newer same-family terminal completion gates discovery after original exit; unrelated/progress/error and completion-before-exit cases retain explicit boundaries.",
         "Unchanged desktop plus changed official PrimaryRuntime registration triggers the existing background ledger; unchanged component identities traverse no files. Inventory newest registered Runtime distribution, record all registrations, reuse unchanged desktop entries. Discovery failure preserves baseline; old side-by-side contents and actual backend selection are not certified. Runtime files use official MSIX declared whole-file SHA-256 and path dependency mapping; direct catalog/manifest/runtime metadata reads and missing-hash fallback are separate from full local integrity verification. Native XML positive/missing/invalid/duplicate/DTD and real sampled declared hashes require checks.",
-        "Analysis refresh anchors only an update with matching desktop package and Runtime registration set; other Runtime generations cannot supply behavioral evidence."
+        "Analysis refresh anchors only an update with matching desktop package and Runtime registration set; other Runtime generations cannot supply behavioral evidence.",
+        "After a confirmed official update, retain the exact successor identity and use non-forcing Restart Manager. After Windows error 351, invoke the qualified official File menu Quit item with Windows UI Automation. Verify an eligible exact window, a single enabled Quit item, modal/missing/ambiguous refusal, and process exit before one managed relaunch.",
+        "Official update button completes managed relaunch: prepare/register once, run the native installer, close verified temporary native relaunch if required, start the managed executable and verify the new official version, owner and visible file tree.",
+        "Reject ambiguous or wrong native relaunch targets, preserve active work, and verify interrupted, cancelled and repaired handoff using its existing record. Confirm cleanup of the one-shot startup registration."
       ],
       "automatedChecks": [
         "package.inventory",
-        "package.modules"
+        "package.modules",
+        "host.official-update-hook",
+        "regression.official-update-handoff"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "At a convenient idle time close and launch the official client using Code-Codex. Confirm native identity and tree readiness.",
         "Uninstall/cleanup requires a separate disposable installation; do not uninstall the active user installation.",
         "On an idle test installation click the official update control once. After package deployment, verify the final managed window has one ready tree, the original project and a responding Bridge. Check the native startup backend as well as renderer readiness; a surviving CDP port alone is insufficient. Failed/canceled/same-version exits must not relaunch.",
-        "During a real user-triggered update correlate registration-listening, registration-started, original-exited, registration-completed and relaunched; registration may finish after old PID exits. Never accept same-version snapshot during active deployment as cancellation."
-      ]
+        "During a real user-triggered update correlate registration-listening, registration-started, original-exited, registration-completed and relaunched; registration may finish after old PID exits. Never accept same-version snapshot during active deployment as cancellation.",
+        "After an actual update whose native window opens first, verify the quit transport in the runtime log, confirm old PID exit, and verify the replacement file tree, Bridge, and project are ready.",
+        "During the next deliberate official update, click the native update button in an idle test window; verify process, official version and managed UI from the saved one-shot handoff log."
+      ],
+      "area": "Host and lifecycle / Official update and restart"
     },
     {
       "id": "startup-route",
       "feature": "Launch-owned account transport and native backend startup",
       "sources": [
+        "crates/launcher/src/app/runtime.rs",
+        "crates/launcher/src/bootstrap.rs",
+        "crates/launcher/src/accounts/primary_transport.rs",
+        "crates/launcher/src/accounts/credentials.rs",
         "crates/launcher/src/accounts/startup.rs",
         "crates/launcher/src/accounts/startup_broker.js",
         "crates/launcher/src/platform/windows/compat.rs",
@@ -444,10 +615,14 @@
         "crates/launcher/src/official_update.rs",
         "packages/explorer-ui/src/official-update-handoff.ts",
         "packages/explorer-ui/src/official-update-service.ts",
-        "crates/launcher/src/official_update_registration.rs"
+        "crates/launcher/src/official_update_registration.rs",
+        "crates/launcher/src/accounts/mod.rs",
+        "packages/explorer-ui/src/host-update-feature-inspection.ts"
       ],
       "tests": [
         "crates/launcher/src/accounts/startup.rs",
+        "crates/launcher/src/accounts/startup_backend.rs",
+        "crates/launcher/src/accounts/credentials.rs",
         "scripts/test-account-optional-startup.mjs",
         "crates/launcher/src/accounts/relay.rs",
         "crates/launcher/src/accounts/draft.rs",
@@ -458,12 +633,16 @@
         "scripts/test-account-candidate-cleanup.mjs",
         "crates/launcher/src/process_guard.rs",
         "scripts/test-hot-activation.mjs",
-        "scripts/test-ui-account-ownership.mjs"
+        "scripts/test-ui-account-ownership.mjs",
+        "scripts/test-account-api-routing.mjs",
+        "scripts/test-host-update-probes.mjs"
       ],
       "tokens": [
         "openai_base_url",
         "thread_unload_delay_secs",
         "enable_request_compression",
+        "cli_auth_credentials_store",
+        "chatgptAuthTokens",
         "app-server",
         "thread/started",
         "parentThreadId",
@@ -471,6 +650,7 @@
         "thread-id",
         "session-id",
         "x-codex-turn-state",
+        "x-openai-internal-codex-responses-lite",
         "CODEX_CLI_PATH",
         "CODEX_APP_RUNTIME_CLI_PATH",
         "--print-startup-config",
@@ -480,22 +660,27 @@
         "AppxManifest.xml"
       ],
       "checks": [
+        "An explicitly prepared official install can exit the original process before registration becomes visible, even when PackageUpdating is silent. A matching newer registered package wakes the existing relaunch; deployment failure, unchanged package and unrelated package never relaunch.",
         "Enabled cold launch versus disabled/not-installed launch; shared official backend spawn contract and native proxy/TLS transport.",
         "Root/subagent ownership, mismatched identity, missing lineage, active request and cancelled/failed startup; no alternate-account fallback.",
         "Existing plugin disable/re-enable behavior and session settings remain unchanged.",
-        "Official relay keeps native session-id/thread-id through HTTP and WebSocket and returns upstream x-codex-turn-state when present. Third-party API routes must not receive or return those headers; account switching still cancels the old connection.",
+        "Official relay preserves native session-id/thread-id and forwards x-openai-internal-codex-responses-lite unchanged when supplied on HTTP and WebSocket. Missing Lite is not synthesized; third-party routes omit it. The response x-codex-turn-state contract and account switch cancellation remain in force. Provider cache behavior requires live evidence.",
         "Native packaged cold launch preserves package identity through its registered execution alias and honors CODEX_CLI_PATH before startup config and actor creation; disabled plugin uses unchanged shell activation.",
-        "Native stdio wrapper preserves CLI arguments, startup config, JSONL, tools and permissions; control endpoint and thread lineage preserve owner, active-request and disable/re-enable behavior. Legacy inspector path remains supported.",
+        "Native stdio wrapper preserves the official default base URL, authentication, network and compression. Its authenticated control endpoint serves only primary-account control. The renderer listener is verified independently of the stdio parent. Legacy inspector routing continues to use its original explicit process and thread-ownership contract.",
         "Native cold startup, initial official request, first account switch, backend exit, network reconnect and core hot handoff require separate observation. Static token matching does not certify runtime behavior.",
         "Existing conversations and New Chat drafts share one loopback listener and HTTP client per account service, with distinct capability paths and per-conversation credentials, context, quota and cancellation. Two conversations may use the same account; switching one cannot change the other.",
         "Parallel requests remain isolated; closing or cancelling one route leaves the other usable. Unknown/closed capability paths cannot route to another conversation. The initial loopback probe is reused by later routes without additional identity/quota reads, retries or switching waits.",
         "New Chat refuses inference before the native thread binding and accepts it after binding on the same listener. Cover official/API routes, existing and new chats, disabled/re-enabled plugin and network reconnect separately; real provider success and timing require actual host/service acceptance.",
-        "Same-version retired native bindings cannot cancel current startup, claim document ownership or release the working endpoint again; include legacy slot assignment, failed unreleased candidate, current binding reconnection and new-document reset. This is local lifecycle admission only: no added account switch/auth/quota reads, retry or waiting.",
+        "An old native binding cannot reclaim the same-version UI after a successful replacement, including while its account execution connection remains retained or the same window recreates its document. The newest committed launch epoch is scoped to that window; current reconnect and fresh sessions remain supported.",
+        "Primary promotion confirms the current account and the managed store used on the next Code-Codex cold launch. Cover file-to-keyring and keyring-to-file transfers, a later official sign-in replacing the selected material, malformed or absent storage metadata, and outdated or unsupported broker capability. Verify real cold relaunch separately.",
         "Within one startup transport operation reuse the verified descriptor and HTTP client across status/route/bind. Preserve listener ownership, capability/proof, active-request rejection, legacy/API fallback, failed replies and default restore; no descriptor is cached across operations.",
         "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance.",
         "Official update installUpdate entry retains native confirmation/deployment; only a verified newer package after retained original process exit triggers handoff. New window must have one working tree and Bridge. Cancel/failed/same-version/ordinary close must not relaunch. Real update acceptance is separate from static matching.",
         "PackageUpdating subscription precedes readiness; matching newer same-family terminal completion gates discovery after original exit; unrelated/progress/error and completion-before-exit cases retain explicit boundaries.",
-        "Verified UI/general Bridge publishes while old account work remains active; retain exactly one concrete account connection across consecutive UI upgrades. Existing idle/drain protocol alone retires the executor. Verify rollback, cancellation, same-binding reuse, no repeated UI proof/remount, and no terminated/replayed tasks. Installer completion reflects visible activation receipt instead of successful file commit alone. Real install/active-task UI handoff separate from isolated fixture and real update/uninstall."
+        "Verified UI/general Bridge publishes while old account work remains active; retain exactly one concrete account connection across consecutive UI upgrades. Existing idle/drain protocol alone retires the executor. Verify rollback, cancellation, same-binding reuse, no repeated UI proof/remount, and no terminated/replayed tasks. Installer completion reflects visible activation receipt instead of successful file commit alone. Real install/active-task UI handoff separate from isolated fixture and real update/uninstall.",
+        "Cold restart with routing enabled: retain independent saved official child and API preferences per existing conversation, rebuild both actual routes when visited, and verify the first request goes to the intended provider exactly once. Keep a third official-primary conversation unchanged.",
+        "Missing credentials/provider or unresolved conversation identity must not route a saved child/API message to primary. Preserve the draft, report the reason, and allow an explicit account change. Verify navigation and disabled startup independently.",
+        "After a hot update compare the committed document binding with the account capability. An explicitly retained executor can finish existing work; when idle verify the account endpoint also moved before marking account compatibility complete."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -503,7 +688,11 @@
         "package.modules",
         "host.ownership",
         "regression.interfaces",
-        "regression.account-relay-headers"
+        "regression.account-relay-headers",
+        "regression.native-startup-send",
+        "regression.account-saved-selection",
+        "host.account-execution-owner",
+        "host.account-execution-route"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
@@ -511,8 +700,10 @@
         "In two disposable conversations choose the same account, switch one, then close one. Confirm the other retains its own account/context and still works.",
         "Separately test disable/re-enable and a network reconnect. Confirm no cross-conversation routing, duplicate send or stale owner.",
         "On a deliberate official-account request after a switch or reconnect, compare original and forwarded session/thread fingerprints and observe cached/total input tokens. Keep account, model and context comparable; a cache miss alone does not identify a relay regression.",
-        "During a real user-triggered update correlate registration-listening, registration-started, original-exited, registration-completed and relaunched; registration may finish after old PID exits. Never accept same-version snapshot during active deployment as cancellation."
-      ]
+        "During a real user-triggered update correlate registration-listening, registration-started, original-exited, registration-completed and relaunched; registration may finish after old PID exits. Never accept same-version snapshot during active deployment as cancellation.",
+        "In a disposable signed-in install, save one child route and a separate API route. Cold restart the official process, reopen both chats and confirm no startup inference. Send one authorized first-turn test in each and verify actual provider/model and request count. Use a disposable primary chat as a control."
+      ],
+      "area": "Host and lifecycle / Managed startup"
     },
     {
       "id": "context",
@@ -570,7 +761,8 @@
         "Cancellation, compaction and encrypted-context errors require preserved evidence; do not rewrite the user archive to make the test pass.",
         "In disposable official-account conversations compare same-account continuation, same-account close/reopen and A to B to A. Join item and opaque fingerprints with workspace fingerprint and operation/sampling sequence. A real quota-credit reset requires explicit user action and before/after controls. Missing older provenance remains unknown.",
         "At idle recover an actually failed long conversation using its recorded invalid_encrypted_content evidence. Confirm successful native compaction and a later normal message; separately check disable/default-route behavior and keep the original failure evidence."
-      ]
+      ],
+      "area": "Account and execution / Conversation context"
     },
     {
       "id": "composer-quota",
@@ -604,12 +796,15 @@
       "checks": [
         "Exhausted primary with usable child/API: native send subscription reflects selected identity; permissions/auth remain owned by host.",
         "Usage-card close across native card layouts; per-owner/thread/account/model/reset identity, native close reuse and reset/disposal restoration.",
+        "Distinguish a single exported native quota snapshot family from additional keyword-only helpers. Qualify native getter exports and earlier direct references with the same uniqueness checks. Two structural families are ambiguous, and zero structural families remain unavailable. The read-only probe waits on existing mount readiness, uses the same role discovery as Send, and reports a rejected mounted quota contract as an issue.",
         "Missing/ambiguous native quota roles and unrelated image/media/paywall cards remain protected.",
         "New Chat and existing native composer: optional isResponseInProgress omitted/undefined or boolean false/true must qualify through the same mounted owner/context/subscription contract; invalid values, missing and ambiguous owners remain rejected.",
         "Exhausted host with usable child/API projects only the three native quota snapshots. Existing native permission/auth/busy blocks stay enforced; returning to host, inactive/changed conversation, foreign replacement and disposal restore or stop only owned projection. Controlled child Send forwards the original callback exactly once with unchanged draft; actual remote first-turn success is a separate host/service acceptance.",
         "Same-version selector correction uses its existing revision-based idle replacement and retains the verified execution adapter/routes; active preparation or turns defer view replacement without an added switching wait.",
         "Actual native ComposerScope home identity is kind=new/entrypoint=home without placement or conversationId. Local main identity and legacy new/main stay supported; panels, previews, library, side, wrong thread, distinct matching contexts and missing identity are rejected. Exercise alias context reuse and store/derived-holder dependency forms through all three quota leases and the original Send callback, not just the owner predicate.",
-        "A projected quota-ready operation and its composer caller share one React animation-frame wait; unchanged draft, replaced controls, disabled/error and disposal still prevent duplicate or late sends."
+        "A projected quota-ready operation and its composer caller share one React animation-frame wait; unchanged draft, replaced controls, disabled/error and disposal still prevent duplicate or late sends.",
+        "An owner-scoped zero-credit or included-usage result remains usable during unrelated refresh or timeout; missing, expired or contradicted spending evidence never inherits visible positive percentages. Warm send adds no quota RPC; genuine authorization uncertainty shares one targeted read.",
+        "Verify the mounted native composer subscriptions, including the legacy three boolean roles and current reserve plus string usage status. Reject unknown status and preserve native permission, authorization, draft, credit and route gates."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -621,7 +816,8 @@
       "manualSteps": [
         "With an exhausted primary and a usable child/API, test New Chat and an existing conversation. Confirm the original Send action runs once with the unchanged draft.",
         "Close the native usage card, switch back, navigate and dispose. Confirm quota projection restores only its owned subscriptions; permission/auth/busy blocks remain native."
-      ]
+      ],
+      "area": "Account and execution / Composer quota"
     },
     {
       "id": "composer-lifecycle",
@@ -662,7 +858,8 @@
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "Send in a disposable conversation and watch the account control through preparation, Thinking and composer replacement. Confirm its identity remains readable and no duplicate control appears."
-      ]
+      ],
+      "area": "Workspace / Composer"
     },
     {
       "id": "auto-continuation",
@@ -686,20 +883,24 @@
       "checks": [
         "Official to API and API to next account in saved order; API balance remains unverified and is not read via official quota.",
         "Exact model/effort inheritance or saved default/medium, native settings confirmation before dispatch.",
-        "Duplicate terminal events, cancelled task, transient throttling/network/permission errors and active turn do not trigger duplicate continuation."
+        "Duplicate terminal events, cancelled task, transient throttling/network/permission errors and active turn do not trigger duplicate continuation.",
+        "When a manual send finds confirmed exhaustion, reuse each targeted quota observation for both eligibility and paid-credit admission; a candidate route already prepared in that operation must not prepare the exhausted route first.",
+        "Independently qualify genuine exhaustion, HTTP 429 transient throttling, disconnect, stop and duplicate terminal delivery. A selected API candidate uses its exact saved model catalog, skips official quota and starts at most one continuation."
       ],
       "automatedChecks": [
         "package.inventory",
         "host.interfaces",
         "host.composer",
         "regression.models",
-        "regression.account-behavior"
+        "regression.account-behavior",
+        "regression.account-api-continuation"
       ],
       "manualReason": "Full behavioral acceptance needs a different mounted page, a lifecycle transition, deliberate credentials/provider use or an isolated test installation; read-only contracts do not execute those operations in the active conversation.",
       "manualSteps": [
         "Using a disposable task with an actually exhausted account, confirm continuation follows saved order, including API, and reuses a supported model/effort or saved default/medium.",
         "Cancel or reproduce a transient network error; neither case may trigger duplicate continuation. This test can spend provider credit and must be deliberate."
-      ]
+      ],
+      "area": "Account and execution / Continuation"
     },
     {
       "id": "settings-surfaces",
@@ -742,6 +943,504 @@
       "manualSteps": [
         "Open Settings and representative left-rail secondary pages with the background enabled. Confirm shell/groups are transparent in light and dark themes.",
         "Disable the background. Confirm dialogs, menus, media and native control geometry are restored."
+      ],
+      "area": "Native interface background / Settings"
+    },
+    {
+      "id": "plugin-file-preview",
+      "feature": "File Preview plugin entries and formats",
+      "sources": [
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "resources/plugin-definitions.json",
+        "packages/explorer-ui/src/app/main-preview-element.ts",
+        "packages/explorer-ui/src/background-package-market.ts"
+      ],
+      "tests": [
+        "scripts/test-file-preview-packages.mjs",
+        "scripts/test-categorized-plugin-market.mjs"
+      ],
+      "tokens": [
+        "data-preview-extension",
+        "data-preview-market-section",
+        "app-shell-focus-area",
+        "data-app-shell-main-surface",
+        "explorer.plugins.load",
+        "data-mcp-app-portal-target"
+      ],
+      "paths": [],
+      "checks": [
+        "Check every mounted format card and action independently using the known preview package IDs. Run the existing production viewer fixtures for actual format decoding and errors. A preview card does not exercise decoding.",
+        "Markdown (links/render), CSV (parse/table), diagram (parse/fallback), image (view/zoom), video (play/seek), PDF (pages), audio (play/seek), Office (document/slides), notebook (cells) and 3D model (view/orbit) each use their own representative fixture and error case.",
+        "Open file by tab and reuse the active viewer; distinguish loading failure, unsupported input and stale data after switching projects; release per-format resources on close."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.plugin-markdown-preview",
+        "host.plugin-csv-preview",
+        "host.plugin-diagram-preview",
+        "host.plugin-image-preview",
+        "host.plugin-video-preview",
+        "host.plugin-pdf-preview",
+        "host.plugin-audio-preview",
+        "host.plugin-office-preview",
+        "host.plugin-notebook-preview",
+        "host.plugin-model-preview",
+        "background.market-layout"
+      ],
+      "manualReason": "A live file format requires an applicable workspace file, or a separate local fixture.",
+      "manualSteps": [
+        "Open a representative file in each advertised previewer and check preview tab lifecycle, controls and non-destructive edits."
+      ],
+      "area": "Plugin Market / File preview"
+    },
+    {
+      "id": "plugin-backgrounds",
+      "feature": "Appearance / Rendered backgrounds",
+      "sources": [
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "resources/plugin-definitions.json",
+        "packages/explorer-ui/src/components/styles/background-surfaces.ts",
+        "packages/explorer-ui/src/native-background-surfaces.ts",
+        "packages/explorer-ui/src/native-workspace-background.ts",
+        "packages/explorer-ui/src/core/appearance/background-actions.ts",
+        "packages/explorer-ui/src/plugin-host/backgrounds/managed.ts",
+        "packages/explorer-ui/src/host/appearance/theme-probe.ts"
+      ],
+      "tests": [
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-background-surfaces.mjs",
+        "scripts/test-background-worker.mjs",
+        "scripts/test-shallow-ocean-ui.mjs",
+        "scripts/test-spectral-drape.mjs"
+      ],
+      "tokens": [
+        "app.appearance.set",
+        "data-app-shell-surface-backing",
+        "data-app-shell-main-surface"
+      ],
+      "paths": [],
+      "checks": [
+        "Verify that each background package has a market action, the shared workspace backing lets an active background show through, and the original native paint returns when the background stops.",
+        "For each shipped renderer select its source, enable, confirm actual draw, resize, background pause/resume and clean disable, including unavailable media and fallback.",
+        "Confirm mutually exclusive background ownership, live settings (including pointer/click effects where provided), assets, custom material switch and restoration across theme changes.",
+        "Test normal background enable from light and dark, dark background handoff, first-frame delay, cancellation and rollback. Check the mounted backing before and after first paint and a fold/reopen sequence at zero opacity."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.plugin-backgrounds",
+        "host.workspace-backing-paint",
+        "host.appearance-action",
+        "background.settings-paint",
+        "background.surface-transitions"
+      ],
+      "manualReason": "Actual rendering and resource disposal need a running instance of the corresponding background.",
+      "manualSteps": [
+        "Exercise the production render paths, change theme with an active effect, then stop it and verify native paint and media cleanup."
+      ],
+      "area": "Plugin Market / Appearance"
+    },
+    {
+      "id": "plugin-codex-startup-transition",
+      "feature": "Appearance / Startup animation",
+      "sources": [
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "resources/plugin-definitions.json",
+        "packages/explorer-ui/src/startup-transition-early.ts",
+        "packages/explorer-ui/src/startup-transition-player.ts",
+        "packages/explorer-ui/src/startup-transition-settings.ts",
+        "packages/explorer-ui/src/startup-transition-media.ts",
+        "packages/explorer-ui/src/startup-transition-timeline.ts",
+        "packages/explorer-ui/src/startup-transition-retirement.ts"
+      ],
+      "tests": [
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-startup-image-backgrounds.mjs",
+        "scripts/test-startup-video-library.mjs",
+        "scripts/test-startup-defaults.mjs",
+        "scripts/test-startup-source-settings.mjs",
+        "scripts/test-startup-early-basic.mjs",
+        "scripts/test-startup-early-navigation.mjs",
+        "scripts/test-initial-startup-overlay.mjs",
+        "scripts/test-startup-retirement.ps1"
+      ],
+      "tokens": [
+        "data-app-startup-loading",
+        "data-app-shell-main-surface",
+        "dom-ready",
+        "did-finish-load",
+        "data-desktop-login-surface"
+      ],
+      "paths": [],
+      "checks": [
+        "Verify a unique startup animation entry and exercise production image/media source selection, skip, reduced motion, and overlay teardown on detached fixtures.",
+        "Desktop launch animation: verify enabled/disabled, selected background source, native startup splash handoff and first rendered frame without double-play.",
+        "Desktop startup video: import, validate, select, order and remove videos in an isolated media library; verify fallback on a removed or unreadable file.",
+        "Actual video requests metadata, seeks to the trim start, applies rate/brightness/fit and finishes its clip with the configured fade or returns on media error.",
+        "Video trim drag and preview: confirm handles stay in bounds, short clip defaults, minimum visible time, repeat playback and per-video settings persistence.",
+        "Startup interruption: verify skip, reduced motion, native sign-in, late attachment, navigation during playback, owner replacement and cleanup of the copied media surface."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.plugin-codex-startup-transition",
+        "regression.startup-video-selection",
+        "regression.startup-video-timeline"
+      ],
+      "manualReason": "Live startup animation runs during a deliberate next launch.",
+      "manualSteps": [
+        "Launch an isolated installation with animation enabled and confirm presentation, skip and handoff to a ready file tree.",
+        "Start a disposable managed window with the configured background and then a locally available video. Inspect first frame, fit, end/fade and cleanup; keep the active desktop and media library unchanged."
+      ],
+      "area": "Plugin Market / Appearance"
+    },
+    {
+      "id": "plugin-transparent-background",
+      "feature": "Appearance / Native window transparency",
+      "sources": [
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "resources/plugin-definitions.json",
+        "packages/explorer-ui/src/transparent-background-runtime.ts",
+        "packages/explorer-ui/src/host/native-surfaces/native-window-background.ts",
+        "packages/explorer-ui/src/native-workspace-background.ts"
+      ],
+      "tests": [
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-plugin-action-lifecycle.mjs"
+      ],
+      "tokens": [
+        "setBackgroundColor",
+        "BrowserWindow",
+        "--app-shell-content-fade"
+      ],
+      "paths": [],
+      "checks": [
+        "Verify the window transparency card separately from the Surface Opacity sliders. With native transparency active, the conversation top decoration must also stop painting. Verify a rejected native transition preserves the current appearance.",
+        "Native window opacity: verify supported OS compositor, configured alpha, settings changes and reset/disable restoration. Check interaction with the separate DOM interface-opacity plugin."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.plugin-transparent-background"
+      ],
+      "manualReason": "Actual window compositor transparency and restoration require the native desktop window.",
+      "manualSteps": [
+        "Enable native transparency in an isolated window, verify the window and top decoration, and verify an opaque native window after disable."
+      ],
+      "area": "Plugin Market / Appearance"
+    },
+    {
+      "id": "plugin-git-history",
+      "feature": "Developer Tools / Git history",
+      "sources": [
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "resources/plugin-definitions.json",
+        "packages/explorer-ui/src/git-history-runtime.ts",
+        "packages/explorer-ui/src/features/plugin-settings/git-history.ts",
+        "crates/launcher/src/bridge/routes/git.rs"
+      ],
+      "tests": [
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-plugin-action-lifecycle.mjs"
+      ],
+      "tokens": [
+        "explorer.git.history",
+        "explorer.git.diff",
+        "data-app-shell-main-surface"
+      ],
+      "paths": [],
+      "checks": [
+        "Verify the Git history entry independently. With a Git workspace, open history and an actual commit diff, then verify the panel clears when disabled.",
+        "List commits with pagination, open commit metadata, inspect changed-file status and show textual or unavailable/binary diffs.",
+        "Verify author/date formatting, empty and non-Git workspaces, failed response, and late response after changing workspace."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.plugin-git-history"
+      ],
+      "manualReason": "Actual history and diff require a workspace and commits.",
+      "manualSteps": [
+        "Open a local Git workspace, load the history, and open a representative read-only commit diff."
+      ],
+      "area": "Plugin Market / Tools"
+    },
+    {
+      "id": "plugin-multi-account",
+      "feature": "Developer Tools / Multi-account tasks",
+      "sources": [
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "resources/plugin-definitions.json",
+        "packages/explorer-ui/src/multi-account.ts",
+        "packages/explorer-ui/src/features/accounts/composer-selector.ts",
+        "crates/launcher/src/accounts/native_route.rs",
+        "packages/explorer-ui/src/multi-account-runtime.ts",
+        "packages/explorer-ui/src/features/accounts/account-list.ts",
+        "packages/explorer-ui/src/features/accounts/host-assets.ts",
+        "packages/explorer-ui/src/features/accounts/quota-view.ts",
+        "packages/explorer-ui/src/features/accounts/asset-controls.ts",
+        "packages/explorer-ui/src/core/localization/owned-ui.ts",
+        "packages/explorer-ui/src/core/localization/runtime.ts",
+        "packages/explorer-ui/src/features/accounts/error-presentation.ts"
+      ],
+      "tests": [
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-account-selector.mjs",
+        "scripts/test-native-composer-quota.mjs",
+        "scripts/test-account-quota.mjs",
+        "scripts/test-account-primary-host.mjs",
+        "scripts/test-account-auto-adapter.mjs",
+        "scripts/test-account-asset-recovery.mjs",
+        "scripts/test-global-language.mjs",
+        "scripts/test-account-error-presentation.mjs"
+      ],
+      "tokens": [
+        "appServerManagers",
+        "thread/read",
+        "account/usage/read"
+      ],
+      "paths": [],
+      "checks": [
+        "Verify the account plugin entry independently, native account/selector boundaries and controlled quota behavior. Actual routing, repeated account switching and sign-in persistence need deliberate service acceptance.",
+        "Routing disabled: opening settings shows real two-window quota and assets for the signed-in primary and connected official children while leaving account routing and inference off; closing stops queued panel reads.",
+        "Login verification, provider quota read and card rendering each have their own evidence. Preserve cached real numbers on transport failure; keep incomplete snapshots, true zero, auth expiry and disconnected owner distinct.",
+        "Connect, cancel sign-in, reauthorize and remove a disposable child; verify login state and manual quota refresh independently, and retain account order and follow-primary-logout policy.",
+        "Check both reset windows, reset times, credits and reset-card count for each accessible official account. Real reset consumption requires explicit confirmation and a real eligible card.",
+        "Promote a disposable account using native same-window switching, test progress and cancel, preserved former primary and reopening after restart.",
+        "A cached current-conversation busy indication cannot veto primary promotion. A pending renderer preparation refuses before dispatch; a real or unknown native task state refuses before any credential or sign-in change.",
+        "Use separate chats and New Chat to confirm account selection, routing disable/restore, official model recovery, third-party model catalog and connection error display.",
+        "In a disposable task, separately exercise quota exhaustion, rotation, cancellation and active-task ownership without retrying an uncertain or billable mutation.",
+        "Verify official plan badges preserve their product labels, including Plus across both global languages while numeric elapsed units translate.",
+        "Check the primary, child, and API paths separately: chosen identity and model, confirmed route, one provider request, rendered reply and live Send recovery. A valid menu, catalog, sign-in or quota observation alone never verifies Send.",
+        "Disable and restart preserve the intended primary/default route. Check login expiry versus unavailable quota, API configuration failures, non-replayed unknown send outcomes, and restored official model choices after leaving API mode.",
+        "While a native turn is active, selecting another account preserves its route and shows short feedback in the UI language. Verify active, reauthorization and generic failure in Chinese and English; raw codes and diagnostic details stay in logs."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.plugin-multi-account",
+        "host.interfaces",
+        "host.composer",
+        "host.quota",
+        "regression.account-behavior",
+        "host.account-panel-actions",
+        "host.account-panel-identity",
+        "host.account-panel-quota",
+        "regression.account-quota-card",
+        "host.account-execution-owner",
+        "host.account-execution-route",
+        "regression.account-api-continuation"
+      ],
+      "manualReason": "Actual account authorization and provider traffic need appropriate accounts and a disposable conversation.",
+      "manualSteps": [
+        "Confirm a freshly routed and an existing disposable conversation with authorized accounts, then compare the intended request counts and restored native connection.",
+        "Read each official account in the existing panel if permission and connection permit. Use disposable accounts for actual sign-in, promotion, removal, credits and reset consumption.",
+        "Use disposable conversations and authorized credentials to verify one provider response for each identity path. Record only route kind and request outcome."
+      ],
+      "area": "Plugin Market / Tools"
+    },
+    {
+      "id": "plugin-lan-remote",
+      "feature": "Developer Tools / LAN Remote",
+      "sources": [
+        "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "resources/plugin-definitions.json",
+        "packages/explorer-ui/src/lan-remote.ts",
+        "packages/explorer-ui/src/lan-remote-runtime.ts"
+      ],
+      "tests": [
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-lan-remote-ui.mjs",
+        "scripts/test-lan-remote-native.py"
+      ],
+      "tokens": [
+        "explorer.plugins.load",
+        "data-app-shell-main-surface",
+        "data-preview-market-section"
+      ],
+      "paths": [],
+      "checks": [
+        "Verify the LAN Remote card independently, and exercise room code/address form and approval behavior with the existing local controlled ports.",
+        "Create or join by room code; join by explicit IPv4 address and test invalid addresses, no host and room mismatch.",
+        "Host approval, denial and cancel each clear pending state and preserve approval on supported devices.",
+        "Test encrypted session and authorized screen, input and file transfer; stop/revoke and confirm the second device disconnects."
+      ],
+      "automatedChecks": [
+        "package.inventory",
+        "host.plugin-lan-remote"
+      ],
+      "manualReason": "Physical connection requires a second consenting device.",
+      "manualSteps": [
+        "Join a room from a second consenting device, verify approval before remote control, confirm file transfer and disconnect."
+      ],
+      "area": "Plugin Market / Tools"
+    },
+    {
+      "id": "app-release-update",
+      "feature": "Code-Codex footer version, release check and installation",
+      "sources": [
+        "packages/explorer-ui/src/app/explorer-element.ts",
+        "packages/explorer-ui/src/features/workspace/updates.ts",
+        "packages/explorer-ui/src/features/updates/responses.ts",
+        "packages/explorer-ui/src/version-feedback.ts",
+        "installer/src/install/execute.ps1"
+      ],
+      "tests": [
+        "scripts/test-version-feedback.mjs",
+        "scripts/test-update-handoff.mjs",
+        "scripts/test-same-version-install.ps1"
+      ],
+      "tokens": [
+        "data-app-shell-main-surface",
+        "data-app-shell-sidebar-trigger"
+      ],
+      "paths": [],
+      "checks": [
+        "Startup version number, checking indicator, latest and update-available feedback, failure, reduced motion and collapsed-tree feedback deferral.",
+        "Footer manual recheck, no-change/ahead/available/error feedback, Later and focus restoration.",
+        "Select an available release, validate actual download and hash, finish install, then verify current core, Bridge and visible footer owner agree before signing off hot activation."
+      ],
+      "automatedChecks": [
+        "host.tree-version-control",
+        "regression.tree-version-startup",
+        "regression.tree-version-manual",
+        "regression.tree-version-install"
+      ],
+      "manualReason": "The running application may be current. To verify installation and relaunch, a real published update and a disposable idle installation are required.",
+      "manualSteps": [
+        "Use the footer of an older disposable install to select a real newer release. Check downloaded bytes, setup result, native owner and immediately visible version."
+      ],
+      "area": "Workspace / Product update"
+    },
+    {
+      "id": "navigation-rail",
+      "area": "Native left navigation",
+      "feature": "Sidebar destinations and secondary page surfaces",
+      "sources": [
+        "packages/explorer-ui/src/native-workspace-background.ts",
+        "packages/explorer-ui/src/native-background-surfaces.ts",
+        "packages/explorer-ui/src/inject.ts",
+        "packages/explorer-ui/src/host-navigation-inspection.ts",
+        "packages/explorer-ui/src/host-paint-inspection.ts",
+        "packages/explorer-ui/src/host-update-background.ts"
+      ],
+      "tests": [
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-background-surfaces.mjs"
+      ],
+      "tokens": [
+        "data-app-navigation-rail",
+        "data-sidebar-destination",
+        "data-app-shell-inline-page-header",
+        "data-expand-search",
+        "data-sticky",
+        "--app-shell-content-fade",
+        "data-app-shell-main-content-layout",
+        "full-bleed"
+      ],
+      "paths": [],
+      "automatedChecks": [
+        "host.nav-home",
+        "host.nav-space",
+        "host.nav-scheduled",
+        "host.nav-plugins",
+        "host.nav-explore",
+        "host.nav-code-review",
+        "host.nav-sites",
+        "host.nav-page-header",
+        "host.nav-page-edge",
+        "host.nav-page-content",
+        "background.nav-page-paint",
+        "host.nav-region-paint",
+        "background.surface-transitions"
+      ],
+      "checks": [
+        "Home and workspace navigation restore the same opened conversation, focused surface and file tree.",
+        "Space and Customize Plugins/Skills keep search, tabs and actions usable and layer the sticky header once. Check both new search headers and legacy collapsible headers.",
+        "Scheduled and other default/full-bleed pages with no sticky heading keep the top edge clear, including the empty Scheduled state.",
+        "Code Review and Sites maintain foreground content while the decorative backing releases in background mode. A redirect or an account-dependent page requires separate acceptance.",
+        "Explore and profile menus retain their native modality, foreground controls and focus. Real destinations vary by host, account and feature availability.",
+        "Repeat with each supported shared background marker and with backgrounds off. Dialogs, menus, cards and embedded content preserve their own paint.",
+        "Inspect broad top, content and bottom bands independently of style-fix selectors. Exercise mounted known structures, an unrecognized painted edge and background off/on in isolation."
+      ],
+      "manualReason": "Some destinations are pinned or account-dependent. The mounted and isolated probes do not navigate the active user session.",
+      "manualSteps": [
+        "In a disposable workspace open each available left navigation destination, including subpages. Inspect its header, its top border and background; return to the original conversation."
+      ]
+    },
+    {
+      "id": "native-conversation-toolbar",
+      "area": "Native conversation toolbar",
+      "feature": "Share, pinned summary and tabs",
+      "sources": [
+        "packages/explorer-ui/src/host-navigation-inspection.ts",
+        "packages/explorer-ui/src/native-side-panel-opacity.ts",
+        "packages/explorer-ui/src/host-update-background.ts",
+        "packages/explorer-ui/src/inject.ts"
+      ],
+      "tests": [
+        "scripts/test-host-update-probes.mjs",
+        "scripts/test-native-side-panel-opacity.mjs",
+        "scripts/test-native-split-layout.mjs"
+      ],
+      "tokens": [
+        "data-app-shell-titlebar",
+        "data-app-shell-workspace-layout-toggle",
+        "data-summary-panel-variant",
+        "data-summary-panel-density",
+        "data-app-shell-focus-area",
+        "data-new-tab-scroll-root"
+      ],
+      "paths": [],
+      "automatedChecks": [
+        "host.toolbar-share",
+        "host.toolbar-summary",
+        "host.toolbar-tabs",
+        "host.toolbar-share-paint",
+        "host.toolbar-summary-paint",
+        "host.toolbar-tabs-paint",
+        "host.split-layout",
+        "background.split-layout",
+        "background.side-panel-paint",
+        "background.surface-transitions"
+      ],
+      "checks": [
+        "Share has a distinct horizontal hit area and an unstacked toolbar backing. Open the native dialog with an eligible disposable conversation and verify geometry, cancellation and focus without creating a public link.",
+        "Pinned summary opens and closes, follows utility opacity 0/50/100, and keeps content, toolbar and focus usable at narrow widths.",
+        "Show tabs and Hide tabs keep the native toolbar and pane controls fitting. Check split and full-width transitions, wide and narrow viewports, and file tree collapsed/expanded.",
+        "Tabs and summary panels each follow the utility surface independently with a single backing. Web content, terminal, media and interactive buttons keep native rendering.",
+        "Exercise split and summary open/close, panel opacity 100%, 50% and 0%, and measured conversation bounds in an isolated mounted layout."
+      ],
+      "manualReason": "Share may expose or publish conversation content. Panels may not be mounted in the current conversation; read-only validation checks visible controls and paint only.",
+      "manualSteps": [
+        "Use a disposable conversation to open and close summary and tabs, resize both panes and check 0%, 50% and 100% opacity. Use an eligible disposable conversation for the separate Share dialog scenario."
+      ]
+    },
+    {
+      "id": "plugin-surface-opacity",
+      "area": "Plugin Market / Appearance",
+      "feature": "Interface transparency controls",
+      "sources": [
+        "packages/explorer-ui/src/surface-opacity.ts",
+        "packages/explorer-ui/src/native-side-panel-opacity.ts",
+        "packages/explorer-ui/src/host-update-background.ts"
+      ],
+      "tests": [
+        "scripts/test-surface-opacity.mjs"
+      ],
+      "tokens": [
+        "data-app-shell-page-surface",
+        "data-summary-panel-variant",
+        "data-app-shell-inline-page-header"
+      ],
+      "paths": [],
+      "automatedChecks": [
+        "host.plugin-surface-opacity",
+        "host.workspace-backing-paint",
+        "background.nav-page-paint",
+        "background.side-panel-paint"
+      ],
+      "checks": [
+        "Enable, adjust and reset each independent region; verify 0%, intermediate and 100%, remount after navigation, and native restoration after disable."
+      ],
+      "manualReason": "Actual adjustment changes preferences, so the automatic report uses current observations and detached production styles.",
+      "manualSteps": [
+        "Adjust each region in an isolated local instance and restore the saved settings."
       ]
     }
   ]

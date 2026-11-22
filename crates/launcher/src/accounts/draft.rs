@@ -76,6 +76,9 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
     let metadata=host::thread_metadata(endpoint,&thread).await?;
     let api=draft.route.api_settings();
     verify_created_thread(&metadata,&thread,&draft.cwd)?;
+    // thread/start already pointed this actor at the draft listener. Record it
+    // before adoption so a close/cancel can still be recovered on the next send.
+    super::native_route::note_draft_route(&root,endpoint,&thread).await?;
     // Native thread/start reserves the archive path; it is flushed on turn/start.
     // Resolve and verify it at the first relay admission, before any API request.
     let new_archive=if api.is_some(){Some(PathBuf::from(metadata["path"].as_str().filter(|v|!v.is_empty()).ok_or_else(||failure("archive-path"))?))}else{None};

@@ -57,9 +57,9 @@ export class MilkyWayBackgroundController {
   async initialize(): Promise<void> {
     if (this.#disposed) throw new Error("Milky Way Background is unavailable");
   }
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
-    await ensureBackgroundPackage('milky-way');
+    if (!packagePrepared) await ensureBackgroundPackage('milky-way');
     if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;

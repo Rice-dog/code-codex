@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
-const source='(async()=>{'+await readFile('crates/launcher/src/accounts/host_rpc_deadline.js','utf8')+';return await ('+await readFile('crates/launcher/src/accounts/native_route.js','utf8')+');})()';
+const roles=(await readFile('resources/account-host-capabilities.js','utf8')).replaceAll('export ','');
+const source='(async()=>{'+roles+';'+await readFile('crates/launcher/src/accounts/host_rpc_deadline.js','utf8')+';return await ('+await readFile('crates/launcher/src/accounts/native_route.js','utf8')+');})()';
 const originalPerformance=globalThis.performance,originalTimeout=globalThis.setTimeout;
 let clock=0,active=false,ack='unsubscribed',retainedUntil=0,brokenList=false,brokenResume=false,viewReady=true,historyProvider='openai',closingCount=0,resumeTimeout=false,requests=[];
 Object.defineProperty(globalThis,'performance',{configurable:true,value:{now:()=>clock}});
@@ -16,7 +17,7 @@ const manager={...lease(),getThreadExecutionState:async()=>({inProgress:active})
  if(method==='thread/resume'){if(closingCount>0){closingCount--;throw Object.assign(Error('thread task is closing; retry thread/resume after the thread is closed'),{code:-32600});}if(resumeTimeout)throw Error('Request timed out');if(brokenResume)throw Error('fixture recovery unavailable');return {thread:{id:'task',path:'C:/sessions/task',cwd:'C:/project'},modelProvider:p.modelProvider??'openai',model:p.model};}
  throw Error('Unexpected fixture method '+method);
 }};
-globalThis.routeSubscriptionFixture={appServerManagers:{...lease(),open:()=>Promise.resolve({status:'ready',manager})},executionHosts:{},clientCoordination:{},appActions:{}};
+globalThis.routeSubscriptionFixture={appServerManagers:{...lease(),open:()=>Promise.resolve({status:'ready',manager})},executionHosts:{},appActions:{}};
 const profile={shared:'data:text/javascript,export const services=globalThis.routeSubscriptionFixture'};
 const run=params=>eval(source.replace('__PARAMS__',JSON.stringify({mode:'switch',threadId:'task',binding:'current',...params})).replace('__PROFILE__',JSON.stringify(profile)));
 const reset=()=>{clock=0;active=false;ack='unsubscribed';retainedUntil=0;brokenList=false;brokenResume=false;viewReady=true;historyProvider='openai';closingCount=0;resumeTimeout=false;requests=[];pins.clear();};

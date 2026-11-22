@@ -44,6 +44,9 @@ $InstallRoot = Assert-CodeCodexRoot $InstallRoot
 if ($installedBefore -and -not $InstallRoot.Equals([IO.Path]::GetFullPath($RegisteredRoot).TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)) {
     throw 'CC-INSTALL-LOCATION-001: An existing installation must be updated in its registered folder. To relocate, uninstall with KeepSettings first, then select the new folder.'
 }
+$existingWelcomeRegistration = Get-ItemProperty 'HKCU:\Software\CodeCodex' -ErrorAction SilentlyContinue
+$armWelcome = -not ($installedBefore -or $existingWelcomeRegistration.InstallPath -or $existingWelcomeRegistration.RetainedRoot -or
+    (Test-Path -LiteralPath (Join-Path $InstallRoot 'current-version') -PathType Leaf))
 $VersionsRoot = Join-Path $InstallRoot 'versions'
 $VersionRoot = Join-Path $VersionsRoot $Version
 if (Test-Path -LiteralPath $InstallRoot) {
@@ -296,7 +299,9 @@ elseif ($UiLanguage -or [int]$script:LanguageBefore.revision -eq 0) {
 }
 if ($script:LanguageBefore.issue -or $script:LanguageCommitted.issue) { Write-Host 'CODECODEX_LANGUAGE_NOT_SAVED' }
 $script:InstallOperation = "Committing shortcut installation"
-& $installedShortcutTool commit-install --install-root $InstallRoot | Out-Null
+$commitInstallArgs = @('commit-install','--install-root',$InstallRoot)
+if ($armWelcome) { $commitInstallArgs += '--arm-welcome' }
+& $installedShortcutTool @commitInstallArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "The shortcut installation could not be committed." }
 $script:InstallRollbackPrepared = $false
 $script:InstallCommitted = $true

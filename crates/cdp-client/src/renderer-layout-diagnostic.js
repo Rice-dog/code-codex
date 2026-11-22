@@ -5,9 +5,12 @@
   const active = root => [...root.querySelectorAll(selector)].filter(e => !e.closest('[data-app-shell-active-page="false"]'));
   const allMains = [...document.querySelectorAll(selector)];
   const mains = active(document);
-  const loginPanels = [...document.querySelectorAll('div.flex.h-full.w-full.items-center.justify-center.overflow-hidden.bg-surface')].filter(e =>
-    !e.closest('[data-app-shell-active-page="false"]') && (e.classList.contains('pb-6') || e.classList.contains('pb-12')) &&
-    [...e.children].some(c => c.classList.contains('w-[340px]') && c.classList.contains('flex-col') && c.querySelector('button') && c.querySelector('svg')));
+  const loginPanels = [...document.querySelectorAll('div.flex.h-full.w-full.items-center.justify-center.overflow-hidden.bg-surface,div[data-desktop-login-surface].flex.h-full.w-full.flex-col.overflow-y-auto.bg-surface')].filter(e =>
+    !e.closest('[data-app-shell-active-page="false"],[hidden],[inert],[aria-hidden="true"]') &&
+    (e.hasAttribute('data-desktop-login-surface')
+      ? e.querySelector('h1') && e.querySelector('button') && e.querySelector('svg')
+      : (e.classList.contains('pb-6') || e.classList.contains('pb-12')) &&
+        [...e.children].some(c => c.classList.contains('w-[340px]') && c.classList.contains('flex-col') && c.querySelector('button') && c.querySelector('svg'))));
   const nativeLoginPage = mains.length === 0 && loginPanels.length === 1 &&
     !document.querySelector('nav[data-app-navigation-rail],aside.app-shell-left-panel,[data-app-shell-sidebar-trigger]');
   const main = mains.length === 1 ? mains[0] : null;
@@ -38,6 +41,8 @@
   const owner = owners.length === 1 ? owners[0] : null;
   const railBeforeOwner = rails.length === 1 && !!owner && children.indexOf(rails[0]) < children.indexOf(owner);
   const clip = !!parent?.className.includes('MainContentClip');
+  const historySurface = !!main?.matches('[data-app-shell-main-surface="default"][data-codex-history-swipe-page="true"]')
+    && !!parent?.matches('div.contents');
   const rowMainCount = row ? active(row).length : 0;
   const ownerMainCount = owner ? active(owner).length : 0;
   const tag = element => ['DIV', 'ASIDE', 'MAIN', 'SECTION', 'ARTICLE', 'HEADER', 'NAV'].includes(element.tagName) ? element.tagName : 'OTHER';
@@ -79,7 +84,7 @@
   if (row && !legacy) checks.push(
     { name: 'row_unique_main', expected: 1, actual: rowMainCount },
     { name: 'row_unique_rail', expected: 1, actual: row.querySelectorAll('aside.app-shell-left-panel').length },
-    { name: 'main_content_clip', expected: true, actual: clip },
+    { name: 'main_content_wrapper', expected: true, actual: clip || historySurface },
     { name: 'one_direct_rail', expected: 1, actual: rails.length },
     { name: 'one_main_owner_child', expected: 1, actual: owners.length },
     { name: 'rail_before_main_owner', expected: true, actual: railBeforeOwner },
@@ -88,7 +93,7 @@
   const explorer = document.querySelector('[data-code-codex-owned="true"]');
   const explorerStyle = explorer ? getComputedStyle(explorer) : null;
   return {
-    diagnosticVersion: 5,
+    diagnosticVersion: 6,
     topFrame: window === window.top,
     appOrigin: location.protocol === 'app:' && location.host === '-',
     readyState: document.readyState,
@@ -105,6 +110,7 @@
     outerDirectRailCount: outerRails.length,
     rowMainCount,
     mainContentClip: clip,
+    historyMainSurface: historySurface,
     directRailCount: rails.length,
     workspaceCount: owners.length,
     unifiedTabStripCount: children.filter(child => child.hasAttribute('data-app-shell-unified-tab-strip')).length,

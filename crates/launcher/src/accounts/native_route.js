@@ -19,14 +19,12 @@
  const resumeParams=(id,baseUrl,api)=>({threadId:id,excludeTurns:true,cwd:before.cwd,modelProvider:provider(api),...(api?{model:api.model}:{}),config:configuration(baseUrl,api)});
  const deadline=createAccountHostDeadline(params.mode==='switch'?95000:45000);let mutationUnknown=false;
  const read=run=>deadline.call(run),mutate=run=>deadline.call(run,{timeoutMs:12000,code:'ACCOUNT_NATIVE_RECOVERY_PENDING',onUnknown:()=>{mutationUnknown=true;}});
- const namespace=await read(()=>profile.shared.includes("#cc-host=")?loadHostNamespace(profile.shared):import(profile.shared)),matches=new Set();
- for(const value of Object.values(namespace)){
-  if(!value||typeof value!=='object')continue;
-  const d=Object.getOwnPropertyDescriptors(value);
-  if(d.appServerManagers?.value&&d.executionHosts?.value&&d.clientCoordination?.value&&d.appActions?.value)matches.add(d.appServerManagers.value);
- }
- if(matches.size!==1)return {failure:{code:'ACCOUNT_RPC_SERVICE',stage:'native-route-service'}};
- const service=[...matches][0].dup();let manager,opened;
+ const namespace=await read(()=>profile.shared.includes("#cc-host=")?loadHostNamespace(profile.shared):import(profile.shared));
+ let registry;
+ try{registry=rpcManagerService(namespace,['dup','open']);}
+ catch{return {failure:{code:'ACCOUNT_RPC_SERVICE',stage:'native-route-service'}};}
+ if(!registry)return {failure:{code:'ACCOUNT_RPC_SERVICE',stage:'native-route-service'}};
+ const service=registry.dup();let manager,opened;
  const slot=Symbol.for('code-codex:native-account-pins:v1');
  const pins=window[slot]??(window[slot]=new Map());
  const release=pin=>{if(!pin)return;pin.valid=false;for(const value of pin.owned)try{value[Symbol.dispose]?.()}catch{}};

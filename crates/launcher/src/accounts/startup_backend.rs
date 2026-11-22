@@ -2,12 +2,7 @@
 //! This process is the official CLI's stdio parent, not another executor.
 use super::{AccountError, Result, relay, startup};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use std::{
-    collections::{HashMap, HashSet},
-    process::Stdio,
-    sync::{Arc, Mutex},
-};
+use std::{process::Stdio, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
@@ -20,85 +15,6 @@ fn failure(stage: &str) -> AccountError {
         format!("Startup transport unavailable. stage={stage}; no request was replayed."),
     )
 }
-fn token(v: &str) -> bool {
-    !v.is_empty()
-        && v.len() <= 128
-        && v.bytes()
-            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
-}
-#[derive(Clone)]
-struct Binding {
-    owner: String,
-    target: Option<String>,
-    proof: Option<String>,
-}
-#[derive(Default)]
-struct State {
-    routes: HashMap<String, Binding>,
-    blocked: HashSet<String>,
-    direct: HashSet<String>,
-    threads: HashMap<String, Option<Option<String>>>,
-    active: HashMap<String, usize>,
-    enabled: bool,
-}
-impl State {
-    fn remember(&mut self, thread: &Value) {
-        let Some(id) = thread["id"].as_str().filter(|s| token(s)) else {
-            return;
-        };
-        if self.threads.len() >= 8192 && !self.threads.contains_key(id) {
-            return;
-        }
-        if thread.get("parentThreadId").is_none() && thread.get("source").is_none() {
-            return;
-        }
-        let parent = thread
-            .get("parentThreadId")
-            .filter(|v| !v.is_null())
-            .or_else(|| thread.pointer("/source/subAgent/thread_spawn/parent_thread_id"));
-        let record = match parent {
-            Some(v) => v.as_str().filter(|s| token(s)).map(|s| Some(s.to_owned())),
-            None if thread["source"].get("subAgent").is_some() => None,
-            None => Some(None),
-        };
-        let record = if self.threads.get(id).is_some_and(|old| old != &record) {
-            None
-        } else {
-            record
-        };
-        self.threads.insert(id.into(), record);
-    }
-    fn root(&self, id: &str) -> Option<String> {
-        let mut id = id;
-        let mut seen = HashSet::new();
-        for _ in 0..32 {
-            if !seen.insert(id) {
-                return None;
-            }
-            match self.threads.get(id)?.as_ref()? {
-                Some(parent) => id = parent,
-                None => return Some(id.into()),
-            }
-        }
-        None
-    }
-}
-struct Active {
-    state: Arc<Mutex<State>>,
-    root: String,
-}
-impl Drop for Active {
-    fn drop(&mut self) {
-        let mut s = self.state.lock().unwrap();
-        if let Some(n) = s.active.get_mut(&self.root) {
-            *n -= 1;
-            if *n == 0 {
-                s.active.remove(&self.root);
-            }
-        }
-    }
-}
-
 fn parent_pid() -> u32 {
     #[cfg(windows)]
     {
@@ -145,21 +61,12 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
             .ok_or_else(|| failure("backend-path"))?,
     );
     if server {
-        command.args([
-            "-c",
-            &format!(
-                "openai_base_url={}",
-                json!(format!(
-                    "http://localhost:{}/{}",
-                    p["port"],
-                    p["key"].as_str().unwrap()
-                ))
-            ),
-            "-c",
-            "features.enable_request_compression=false",
-            "-c",
-            "thread_unload_delay_secs=0",
-        ]);
+        if let Some(store) = super::credentials::official_home().ok()
+            .as_deref().and_then(super::credentials::primary_launch_store)
+        {
+            command.args(["-c", &format!("cli_auth_credentials_store={}", json!(store))]);
+        }
+        command.args(native_server_overrides());
     }
     command
         .args(args)
@@ -172,19 +79,6 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
         .kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
-    if serving {
-        p["blocked"] = json!(startup::blocked_threads()?);
-    }
-    let state = Arc::new(Mutex::new(State {
-        blocked: p["blocked"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect(),
-        enabled: true,
-        ..State::default()
-    }));
     let listener = if serving {
         Some(
             TcpListener::bind((
@@ -205,29 +99,19 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
         if official == 0 {
             return Err(failure("launch-parent"));
         }
+        p["transport"] = json!("primary-control");
         startup::save_descriptor(&p, official)?;
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| failure("client"))?;
-        let direct = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| failure("local-client"))?;
-        let state = state.clone();
-        let p = p.clone();
-        let transport=transport.clone();
+        let p = Arc::new(p);
+        let transport = transport.clone();
         tokio::spawn(async move {
             while let Ok((stream, address)) = listener.accept().await {
                 if !address.ip().is_loopback() {
                     continue;
                 }
-                let (state, p, client, direct) =
-                    (state.clone(), p.clone(), client.clone(), direct.clone());
-                let transport=transport.clone();
+                let p = p.clone();
+                let transport = transport.clone();
                 tokio::spawn(async move {
-                    let _ = serve(stream, state, p, official, client, direct,transport).await;
+                    let _ = serve(stream, &p, official, transport).await;
                 });
             }
         });
@@ -251,7 +135,7 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
                 if segment.last()==Some(&b'\n') {
                     if !passthrough {
                         let consumed=if let Ok(v)=serde_json::from_slice::<Value>(&line){
-                            let thread=if v["method"]=="thread/started"{&v["params"]["thread"]}else{&v["result"]["thread"]};state.lock().unwrap().remember(thread);transport.consume(&v)
+                            transport.consume(&v)
                         }else{false};
                         if !consumed{target.write_all(&line).await.map_err(|_|failure("backend-forward"))?;}
                     }
@@ -269,288 +153,58 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
     Ok(exit.code().unwrap_or(1).clamp(0, 255) as u8)
 }
 
-fn control(s: &mut State, v: &Value, p: &Value, official: u32) -> Result<Value> {
-    let thread = v["thread"].as_str().filter(|s| token(s));
-    match v["action"].as_str() {
-        Some("status") => {
-            return Ok(
-                json!({"schema":1,"pid":official,"rendererPort":p["rendererPort"],"ready":true,"spawns":1,"enabled":s.enabled,"routeCount":s.routes.len(),"blockedCount":s.blocked.len(),"primarySwitch":1}),
-            );
-        }
-        Some("route") if thread.is_some() => {
-            let id = thread.unwrap();
-            return Ok(
-                json!({"direct":s.direct.contains(id),"blocked":s.blocked.contains(id),"target":s.routes.get(id).and_then(|b|b.target.as_ref())}),
-            );
-        }
-        Some("native") if thread.is_some() && v["direct"].is_boolean() => {
-            let id = thread.unwrap();
-            if v["direct"] == true {
-                if s.direct.len() >= 4096 && !s.direct.contains(id) {
-                    return Err(failure("bound"));
-                }
-                s.direct.insert(id.into());
-            } else {
-                s.direct.remove(id);
-                s.routes.remove(id);
-                s.blocked.remove(id);
-            }
-            return Ok(json!({"accepted":true}));
-        }
-        _ => {}
-    }
-    let owner = v["owner"]
-        .as_str()
-        .filter(|v| v.len() == 64 && v.bytes().all(|c| c.is_ascii_hexdigit()))
-        .ok_or_else(|| failure("binding-owner"))?;
-    match v["action"].as_str() {
-        Some("restore") => {
-            if s.routes
-                .iter()
-                .any(|(id, b)| b.owner == owner && s.active.get(id).copied().unwrap_or(0) > 0)
-            {
-                return Err(failure("active"));
-            }
-            s.routes.retain(|_, b| b.owner != owner);
-            s.blocked.clear();
-            s.enabled = false;
-        }
-        Some("bind") if thread.is_some() => {
-            let id = thread.unwrap();
-            if s.active.get(id).copied().unwrap_or(0) > 0 {
-                return Err(failure("active"));
-            }
-            let target = if v["target"].is_null() {
-                None
-            } else {
-                let t = v["target"].as_str().ok_or_else(|| failure("target"))?;
-                let u = url::Url::parse(t).map_err(|_| failure("target"))?;
-                if u.scheme() != "http"
-                    || u.host_str() != Some("localhost")
-                    || u.port().is_none()
-                    || !u.username().is_empty()
-                    || u.password().is_some()
-                    || u.query().is_some()
-                    || u.fragment().is_some()
-                    || u.path().len() != 33
-                    || !u.path()[1..].bytes().all(|b| b.is_ascii_hexdigit())
-                    || !v["proof"]
-                        .as_str()
-                        .is_some_and(|v| v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit()))
-                {
-                    return Err(failure("target"));
-                }
-                Some(t.to_owned())
-            };
-            if s.routes.len() >= 4096 && !s.routes.contains_key(id)
-                || s.routes.get(id).is_some_and(|b| b.owner != owner)
-            {
-                return Err(failure("binding-owner"));
-            }
-            s.routes.insert(
-                id.into(),
-                Binding {
-                    owner: owner.into(),
-                    target,
-                    proof: v["proof"].as_str().map(String::from),
-                },
-            );
-            s.blocked.remove(id);
-            s.enabled = true;
-        }
-        _ => return Err(failure("binding-action")),
-    }
-    Ok(json!({"accepted":true}))
+// Keep the official provider, base URLs, proxy and compression defaults.
+pub(crate) fn native_server_overrides() -> [&'static str; 2] {
+    ["-c", "thread_unload_delay_secs=0"]
 }
-fn headers(mut h: reqwest::header::HeaderMap) -> reqwest::header::HeaderMap {
-    for k in [
-        "host",
-        "connection",
-        "proxy-authorization",
-        "proxy-connection",
-        "keep-alive",
-        "te",
-        "trailer",
-        "transfer-encoding",
-        "upgrade",
-        "origin",
-        "cookie",
-        "content-length",
-    ] {
-        h.remove(k);
-    }
-    h
-}
+
 async fn serve(
     stream: TcpStream,
-    state: Arc<Mutex<State>>,
-    p: Value,
+    p: &Value,
     official: u32,
-    client: reqwest::Client,
-    direct: reqwest::Client,
-    transport:Arc<super::primary_transport::Transport>,
+    transport: Arc<super::primary_transport::Transport>,
 ) -> Result<()> {
     let mut io = BufReader::new(stream);
     let raw = relay::read_header(&mut io).await?;
-    let r = relay::parse_header_paths(
+    let request = relay::parse_header_paths(
         &raw,
         &format!("localhost:{}", p["port"]),
         p["key"].as_str().unwrap(),
-        &["/responses", "/responses/compact", "/control"],
+        &["/control"],
     )?;
-    if r.websocket {
+    if request.websocket
+        || request.headers.get("x-code-codex-control").and_then(|v| v.to_str().ok())
+            != p["control"].as_str()
+        || request.length > 16384
+    {
         return relay::reject(
             &mut io,
-            426,
-            "ACCOUNT_STARTUP_HTTP: Use native HTTP transport.",
-        )
-        .await;
+            403,
+            "ACCOUNT_STARTUP_CONTROL: Control authentication failed.",
+        ).await;
     }
-    if r.path == "/control" {
-        if r.headers
-            .get("x-code-codex-control")
-            .and_then(|v| v.to_str().ok())
-            != p["control"].as_str()
-            || r.length > 16384
-        {
-            return relay::reject(
-                &mut io,
-                403,
-                "ACCOUNT_STARTUP_CONTROL: Control authentication failed.",
-            )
-            .await;
+    let mut body = vec![0; request.length];
+    io.read_exact(&mut body).await.map_err(|_| failure("control-read"))?;
+    let reply = match serde_json::from_slice::<Value>(&body) {
+        Ok(value) if value["action"] == "primary-switch" => transport.switch(&value).await,
+        Ok(value) if value["action"] == "status" => Ok(json!({
+            "schema": 1,
+            "pid": official,
+            "rendererPort": p["rendererPort"],
+            "ready": true,
+            "spawns": 1,
+            "primarySwitch": 2
+        })),
+        _ => Err(failure("control-action")),
+    };
+    match reply {
+        Ok(value) => {
+            let body = value.to_string();
+            io.write_all(format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ).as_bytes()).await.map_err(|_| failure("control-reply"))
         }
-        let mut body = vec![0; r.length];
-        io.read_exact(&mut body)
-            .await
-            .map_err(|_| failure("control-read"))?;
-        let reply=match serde_json::from_slice::<Value>(&body) {
-            Ok(v) if v["action"]=="primary-switch"=>transport.switch(&v).await,
-            Ok(v)=>control(&mut state.lock().unwrap(),&v,&p,official),
-            Err(_)=>Err(failure("control-json")),
-        };
-        return match reply {
-            Ok(v) => {
-                let body = v.to_string();
-                io.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).await.map_err(|_|failure("control-reply"))
-            }
-            Err(e) => relay::reject(&mut io, 409, &e.message).await,
-        };
+        Err(error) => relay::reject(&mut io, 409, &error.message).await,
     }
-    let id = r
-        .headers
-        .get("thread-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|v| token(v))
-        .ok_or_else(|| failure("thread"))?;
-    let (root, binding) = {
-        let mut s = state.lock().unwrap();
-        let root = s.root(id).ok_or_else(|| failure("lineage"))?;
-        if r.headers.get("session-id").is_some_and(|v| {
-            v.to_str()
-                .map_or(true, |s| !token(s) || s != id && s != root)
-        }) || s.blocked.contains(id)
-            || s.blocked.contains(&root)
-        {
-            return Err(failure("pending"));
-        }
-        let binding = s.routes.get(&root).cloned();
-        *s.active.entry(root.clone()).or_default() += 1;
-        (root, binding)
-    };
-    let _active = Active { state, root };
-    if let Some(b) = &binding {
-        if b.target.is_some()
-            && b.proof.as_deref()
-                != Some(
-                    format!(
-                        "{:x}",
-                        Sha256::digest(
-                            r.headers
-                                .get("authorization")
-                                .map(|v| v.as_bytes())
-                                .unwrap_or_default()
-                        )
-                    )
-                    .as_str(),
-                )
-        {
-            return Err(failure("owner"));
-        }
-    }
-    let target = format!(
-        "{}{}",
-        binding
-            .as_ref()
-            .and_then(|b| b.target.as_deref())
-            .unwrap_or("https://chatgpt.com/backend-api/codex"),
-        r.path
-    );
-    let mut body = vec![0; r.length];
-    io.read_exact(&mut body)
-        .await
-        .map_err(|_| failure("body"))?;
-    let transport = if binding.as_ref().is_some_and(|b| b.target.is_some()) {
-        &direct
-    } else {
-        &client
-    };
-    let request = transport
-        .post(target)
-        .headers(headers(r.headers))
-        .body(body);
-    let (mut reader, mut writer) = io.into_inner().into_split();
-    let transfer = async {
-        let mut response = match request.send().await {
-            Ok(response) => response,
-            Err(_) => {
-                let body=json!({"error":{"type":"account_route_unavailable","message":"ACCOUNT_STARTUP_UPSTREAM: Upstream request failed; no request was replayed."}}).to_string();
-                writer.write_all(format!("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).await.map_err(|_|failure("response-write"))?;
-                return Ok(());
-            }
-        };
-        let mut head = format!(
-            "HTTP/1.1 {} Relayed\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",
-            response.status().as_u16()
-        );
-        for (k, v) in headers(response.headers().clone()).iter() {
-            head.push_str(k.as_str());
-            head.push_str(": ");
-            head.push_str(v.to_str().map_err(|_| failure("response-header"))?);
-            head.push_str("\r\n");
-        }
-        head.push_str("\r\n");
-        writer
-            .write_all(head.as_bytes())
-            .await
-            .map_err(|_| failure("response-write"))?;
-        while let Some(bytes) = response
-            .chunk()
-            .await
-            .map_err(|_| failure("upstream-stream"))?
-        {
-            if bytes.is_empty() {
-                continue;
-            }
-            writer
-                .write_all(format!("{:x}\r\n", bytes.len()).as_bytes())
-                .await
-                .map_err(|_| failure("response-write"))?;
-            writer
-                .write_all(&bytes)
-                .await
-                .map_err(|_| failure("response-write"))?;
-            writer
-                .write_all(b"\r\n")
-                .await
-                .map_err(|_| failure("response-write"))?;
-        }
-        writer
-            .write_all(b"0\r\n\r\n")
-            .await
-            .map_err(|_| failure("response-write"))?;
-        Ok(())
-    };
-    let mut disconnected = [0];
-    tokio::select! {r=transfer=>r,_=reader.read(&mut disconnected)=>Ok(())}
 }

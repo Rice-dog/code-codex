@@ -1,13 +1,23 @@
-import {inspectCollapsedTreePaint,inspectSettingsPaint,inspectSplitLayout,mountedExplorer,runBackgroundChecks,waitForUpdateMount} from './host-update-background';
-import {quotaRemaining} from './features/accounts/quota';
-import {AccountContinuationCycle,continueAfterQuota,isQuotaExhausted} from './features/accounts/auto-continue';
+import {inspectCollapsedTreePaint,inspectConversationTopPaint,inspectNativeSurfaceLayers,inspectSettingsPaint,inspectSplitLayout,inspectTreeTopAlignment,inspectWorkspaceBackingPaint,mountedExplorer,runBackgroundChecks,waitForUpdateMount} from './host-update-background';
+import {AccountUsageStore,quotaRemaining} from './features/accounts/quota';
+import {quotaElement,updateQuota} from './features/accounts/quota-view';
+import {AccountContinuationCycle,apiContinuationSettings,continueAfterQuota,isQuotaExhausted} from './features/accounts/auto-continue';
 // Separate, on-demand read-only entry. Never imported by the switch/send path.
-import {qualifyHostModules,managerRole,dispatcherRole} from '../../../resources/account-host-capabilities.js';
+import {qualifyHostModules,managerRole,dispatcherRole,rpcManagerService} from '../../../resources/account-host-capabilities.js';
 import {codex26715Adapter,activePageElements,MAIN_SURFACE_SELECTOR} from './adapters/codex-26.715';
 import {nativeFiberChain,pickerOf} from './features/accounts/native-model-menu';
-import {capabilities as nativeQuotaCapabilities} from './features/accounts/native-composer-quota';
+import {capabilities as nativeQuotaCapabilities,composerQuotaSubscriptions} from './features/accounts/native-composer-quota';
 import {inspectComposerBackdrop} from './native-composer-backdrop';
 import {inspectSidePanelOpacity} from './native-side-panel-opacity';
+import {welcomeSurfaceState} from './welcome-surface';
+import {missingQuickTourTargets} from './quick-tour';
+import {discoverCodexAppearanceAdapter,readCodexAppearanceTheme} from './host/appearance/appearance-actions';
+import {BACKGROUND_PLUGIN_IDS,inspectAccountExecution,inspectAccountPanel,inspectClosedMenuIndicators,inspectMarketCards,inspectMenuActions,inspectTreeControl,inspectTreeShortcuts,inspectTreeTitlebarClearance,inspectTreeVersionControl} from './host-update-feature-inspection';
+import {wrapOfficialUpdateService} from './official-update-service';
+import {UpdatesController,type UpdatesControllerPorts} from './features/workspace/updates';
+import {DEFAULT_STARTUP_TRANSITION_SETTINGS,settingsForStartupVideo,startupDefaultClip,startupPlaybackVideoId} from './startup-transition-settings';
+import {clipFadeOpacity,moveTimelineBoundary,startupTimelineGeometry} from './startup-transition-timeline';
+import {inspectConversationToolbar,inspectNavigationDestination,inspectSecondaryPaint,inspectSecondaryPaintCoverage,inspectToolbarPanelPaint} from './host-navigation-inspection';
 
 export {inspectCollapsedTreePaint} from './host-update-background';
 
@@ -33,6 +43,10 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
   assert(managerRole({a:Manager,alias:Manager}).value===Manager);assert(dispatcherRole({a:bus,alias:bus}).value===bus);
   class Other extends Manager{}assert(refuses(()=>managerRole({a:Manager,b:Other})));assert(refuses(()=>managerRole({a:class Missing{}})));
   let reads=0;assert(refuses(()=>dispatcherRole({a:{get subscribe(){reads++;return ()=>{};},dispatchMessage(){}}})));assert(reads===0);
+  const service={dup(){throw Error('never acquire');},open(){throw Error('never open');},subscribe(){throw Error('never subscribe');}};
+  const services={appServerManagers:service,executionHosts:{},clientCoordination:{},appActions:{}};
+  assert(rpcManagerService({services,alias:services})===service);
+  assert(refuses(()=>rpcManagerService({services,other:{...services,appServerManagers:{...service}}})));
   for(const version of ['unknown','1.0.0.0','99.9999.9999.0']){const p=await qualifyHostModules({version,initial:['./assets/app-initial-fixture.js'],shared:['./assets/app-shared-fixture.js']},async path=>path.includes('initial')?{a:Manager}:{a:bus});assert(p.compatibility==='capabilities');}
   add('regression.interfaces','passed','Executed production role alias, ambiguity, missing-method, getter exclusion and old/new/unknown-version fixtures without RPC.','controlled-production-regression');
  }catch{add('regression.interfaces','issue','A controlled production capability regression failed.','controlled-production-regression');}
@@ -40,6 +54,9 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
   const root=document.createElement('div');root.innerHTML='<button data-app-shell-sidebar-trigger></button><div><aside class="app-shell-left-panel"></aside><main class="main-surface"></main></div>';
   assert(codex26715Adapter.qualifiesRenderer(root));assert(codex26715Adapter.supportsVersion('unknown'));
   root.querySelector('main')!.parentElement!.append(root.querySelector('main')!.cloneNode());assert(!codex26715Adapter.qualifiesRenderer(root));root.querySelectorAll('main').forEach(n=>n.remove());assert(!codex26715Adapter.qualifiesRenderer(root));
+  root.innerHTML='<button data-app-shell-sidebar-trigger></button><div data-app-shell-workspace-row="true"><div data-app-shell-workspace="true"><aside class="app-shell-left-panel"></aside><div data-app-shell-active-page="true"><div class="contents"><main data-app-shell-main-surface="default" data-codex-history-swipe-page="true"></main></div></div></div></div>';
+  assert(codex26715Adapter.qualifiesRenderer(root));
+  root.querySelector('main')!.removeAttribute('data-codex-history-swipe-page');assert(!codex26715Adapter.qualifiesRenderer(root));
   const marker=(id:string)=>`<div data-app-action-sidebar-thread-active="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-kind="local" data-app-action-sidebar-thread-id="local:${id}"></div>`;
   for(const hidden of ['inert','aria-hidden="true"','inert aria-hidden="true"']){
    root.innerHTML=marker('thread_active')+`<div ${hidden}>`+marker('thread_hidden')+'</div>';
@@ -71,26 +88,228 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
   assert(await continueAfterQuota(cancelled,{...ports,prepare:async()=>{cancelled.cancel();}})==='cancelled');assert(sent===1);
   add('regression.account-behavior','passed','Production quota unknown/zero/window mapping, terminal classification, independent cycles, one continuation and cancellation exercised with local ports only. Live routing/provider acceptance remain separate.','controlled-production-regression');
  }catch{add('regression.account-behavior','issue','A controlled quota/continuation behavior regression failed.','controlled-production-regression');}
+ const controlled='controlled-production-regression';
+ async function regression(id:string,detail:string,run:()=>unknown){
+  try{await run();add(id,'passed',detail,controlled);}
+  catch{add(id,'issue',detail+' The controlled scenario failed.',controlled);}
+ }
+ await regression('regression.account-api-continuation','The production continuation preserves an allowed API model, uses its safe fallback, skips official quota on API, and does not rotate on throttling, disconnect or user cancellation.',async()=>{
+  const api={model:'fallback',models:['fallback','allowed']};
+  const matched=apiContinuationSettings({model:'allowed',effort:'high'},api);
+  const fallback=apiContinuationSettings({model:'official',effort:'high'},api);
+  assert(matched.model==='allowed'&&matched.effort==='high'&&fallback.model==='fallback'&&fallback.effort==='medium');
+  assert(!isQuotaExhausted({status:'failed',error:{codexErrorInfo:{httpConnectionFailed:{httpStatusCode:429}}}}));
+  assert(!isQuotaExhausted({status:'failed',error:{codexErrorInfo:'responseStreamDisconnected'}}));
+  assert(!isQuotaExhausted({status:'interrupted',error:{codexErrorInfo:'usageLimitExceeded'}}));
+  const cycle=new AccountContinuationCycle(['official','api'],'official');
+  const steps:string[]=[];
+  const ports={current:()=>true,available:()=>true,isApi:(id:string)=>id==='api',quota:async()=>{throw Error('never read official quota for API');},
+   prepare:async(id:string)=>{steps.push('prepare:'+id);},resume:async(id:string)=>{steps.push('send:'+id);},phase:()=>{},event:()=>{}};
+  assert(await continueAfterQuota(cycle,ports)==='continued');
+  assert(await continueAfterQuota(cycle,ports)==='unavailable'&&steps.join(',')==='prepare:api,send:api');
+ });
+ await regression('regression.account-quota-card','Production read-only usage store and card: unobserved values, complete windows, decimal and zero quota, reset labels and disabled asset actions.',async()=>{
+  const now=Date.now(),reset=Math.floor(now/1000)+3600;
+  const raw={rateLimits:{primary:{usedPercent:100,windowDurationMins:300,resetsAt:reset},secondary:{usedPercent:2.5,windowDurationMins:10080,resetsAt:reset}}};
+  const store=new AccountUsageStore(async()=>raw,()=>{},()=>now);
+  const view=quotaElement('host',true);
+  updateQuota(view,store);
+  assert(view.dataset.quotaPhase==='unobserved'&&view.querySelector('.account-quota-value')?.textContent==='—');
+  await store.observeRead('host',async()=>raw);
+  updateQuota(view,store);
+  assert(view.dataset.quotaPhase==='ready'&&[...view.querySelectorAll('.account-quota-value')].map(number=>number.textContent).join(',')==='0%,97.5%');
+  assert(view.querySelectorAll('.account-quota-reset').length===2&&[...view.querySelectorAll('[data-account-asset]')].every(button=>button.getAttribute('aria-disabled')==='true'));
+  store.dispose();
+ });
+ await regression('regression.official-update-handoff','Production official update wrapper: prepare precedes install, receiver and arguments survive, and failed preparation blocks native dispatch.',async()=>{
+  const steps:string[]=[];
+  const original={installUpdate(...args:unknown[]){assert(this===original&&args[0]==='fixture');steps.push('install');return 'handed-off';}};
+  const service={appUpdates:original};
+  const stop=wrapOfficialUpdateService(service,async()=>{steps.push('prepare');});
+  assert(await service.appUpdates.installUpdate('fixture')==='handed-off'&&steps.join(',')==='prepare,install');
+  stop();assert(service.appUpdates===original);
+  const retire=wrapOfficialUpdateService(service,async()=>{throw Error('denied fixture');});
+  await Promise.resolve(service.appUpdates.installUpdate('fixture')).then(()=>assert(false),(error:unknown)=>assert(String(error).includes('denied fixture')));
+  retire();assert(steps.length===2);
+ });
+ const calls:string[]=[],feedback:string[]=[];
+ const version=__CODE_CODEX_VERSION__,next=version.replace(/\d+$/,n=>String(Number(n)+1));
+ const bridge={available:true,request:async(method:string,params:{latestVersion?:string})=>{
+  calls.push(method);
+  if(method==='explorer.update.install'){assert(params.latestVersion===next);return {latestVersion:next,launched:true,windowReady:false};}
+  const startup=method==='explorer.update.startup',latestVersion=startup?version:next;
+  return {currentVersion:version,latestVersion,status:startup?'upToDate':'updateAvailable',tagName:`v${latestVersion}`,releaseUrl:`https://github.com/Rice-dog/code-codex/releases/tag/v${latestVersion}`};
+ }};
+ const noop=()=>{},updatePopover=document.createElement('div');
+ const host={bridge,connected:true,state:'ready',versionFeedback:{cancel:noop,show:(kind:string)=>feedback.push(kind)},
+  actionNotice:document.createElement('div'),hideActionNotice:noop,renderStatus:noop,showActionNotice:noop,showActionProgress:noop,closePreviewMarket:noop,
+  updateMessage:document.createElement('p'),updatePopover,statusCode:document.createElement('button'),
+  updateInstallButton:document.createElement('button'),updateLaterButton:document.createElement('button')} as unknown as UpdatesControllerPorts;
+ const controller=new UpdatesController(host,noop);
+ await regression('regression.tree-version-startup','Production startup version check: one lookup and delivery to the version feedback renderer.',async()=>{
+  await controller.checkStartupVersion();
+  await controller.checkStartupVersion();
+  assert(calls.join()==='explorer.update.startup'&&feedback.join()==='latest');
+ });
+ await regression('regression.tree-version-manual','Production manual version check: release lookup, confirmation and dismissal.',async()=>{
+  await controller.checkForUpdates();
+  assert(calls.at(-1)==='explorer.update.check'&&!updatePopover.hidden&&controller.updateCandidate?.latestVersion===next);
+  controller.closeUpdateDialog(false);assert(updatePopover.hidden);
+ });
+ await regression('regression.tree-version-install','Production installer entry: selected version delivery and separate process-launch and visible-window outcomes.',async()=>{
+  await controller.checkForUpdates();
+  await controller.installUpdate();
+  assert(calls.at(-1)==='explorer.update.install'&&updatePopover.hidden&&controller.updateCheckSummary.includes('has not been confirmed'));
+ });
+ const start={...DEFAULT_STARTUP_TRANSITION_SETTINGS,clipStart:2,clipEnd:10,playbackRate:2,fadePercent:25,selectedVideoId:'chosen'};
+ await regression('regression.startup-video-selection','Production startup media profile: chosen source and short-clip defaults.',()=>{
+  assert(startupPlaybackVideoId(start)==='chosen'&&settingsForStartupVideo(start,'short',3).clipEnd===3&&startupDefaultClip(3).clipStart===0);
+ });
+ await regression('regression.startup-video-timeline','Production startup timeline: trim bounds, playback rate and fade at start, midpoint and end.',()=>{
+  const geometry=startupTimelineGeometry(start,12);
+  assert(geometry.clipPlaybackSeconds===4&&geometry.fadeMs===1000&&moveTimelineBoundary('start',99,start,12).clipStart===9.9);
+  assert(clipFadeOpacity(2,2,10,geometry.fadeMs,2)===1&&clipFadeOpacity(9,2,10,geometry.fadeMs,2)===0.5&&clipFadeOpacity(10,2,10,geometry.fadeMs,2)===0);
+ });
  // Qualify exactly the same interfaces used by production, without publishing
  // a profile, constructing managers, subscribing, reading accounts or sending RPC.
  let profile:any;
  const existing=(window as any)[Symbol.for('code-codex:account-host-profile:v1')];
- const observed=[existing?.initial?.split('#')[0],existing?.shared?.split('#')[0],...Array.from(document.querySelectorAll<HTMLScriptElement>('script[type="module"][src]'),s=>s.src),...performance.getEntriesByType('resource').map(e=>e.name)];
- const loaded=new Set(observed.filter(Boolean).map(p=>{try{const u=new URL(p,location.href);return u.protocol===location.protocol&&u.host===location.host?'.'+u.pathname:'';}catch{return '';}}));
- const load=async(path:string)=>{if(!loaded.has(path))throw Error('HOST_UPDATE_MODULE_NOT_LOADED');return import(/* @vite-ignore */path);};
- try{profile=await qualifyHostModules(manifest,load);add('host.interfaces','passed','Production module qualification accepted the loaded conversation-manager and dispatcher contracts. No RPC was sent.');}
- catch(error:any){const stage=error?.stage;add('host.interfaces',stage==='role-selection'?'issue':'manual',stage==='role-selection'?'The initialized official modules do not satisfy production role uniqueness/required methods.':'Official module qualification could not complete in this document. Recheck after the native page is ready.');}
- if(profile?.contractRevision===2){try{const c=await nativeQuotaCapabilities(profile.initial);add('host.quota','passed',`Production quota capability discovery accepted ${c.gates.length} gate references and the native refresh effect. No subscriptions were changed.`);}catch(error){const stage=String(error).match(/stage=([a-z-]+)/)?.[1];const unavailable=['semantic-roles','source-budget','module-budget'].includes(stage??'');add('host.quota',unavailable?'manual':'issue',unavailable?'Quota role initialization was not established in this page. Recheck in a mounted native composer.':'Production quota capability discovery rejected the initialized native runtime. No subscriptions were changed.');}}
- else add('host.quota','manual','The numbered native quota runtime is not initialized in this document. Check a mounted composer before judging compatibility.');
+ const observed=[existing?.initial?.split('#')[0],existing?.shared?.split('#')[0],...Array.from(document.querySelectorAll<HTMLScriptElement>('script[type="module"][src],link[rel="modulepreload"][href]'),e=>e.getAttribute('src')??e.getAttribute('href')),...performance.getEntriesByType('resource').map(e=>e.name)];
+ const loaded=new Set(observed.filter(Boolean).map(p=>{try{const u=new URL(p,location.href);return u.protocol===location.protocol&&u.host===location.host&&!u.search&&!u.hash?u.href:'';}catch{return '';}}));
+ const load=async(path:string)=>{if(!loaded.has(new URL(path,location.href).href))throw Error('HOST_UPDATE_MODULE_NOT_LOADED');return import(/* @vite-ignore */path);};
+ try{profile=await qualifyHostModules(manifest,load);add('host.interfaces','passed',profile.managerExport?'The loaded conversation-manager and dispatcher contracts qualified.':'The loaded native RPC manager service and dispatcher contracts qualified.');}
+ catch(error:any){
+  const issue=error?.stage==='role-selection';
+  const role=['conversation-manager','dispatcher','rpc-manager-service'].includes(error?.capability)?error.capability:'unknown';
+  add('host.interfaces',issue?'issue':'manual',issue?`The initialized role ${role} did not qualify (matches: ${Number.isInteger(error?.matches)?error.matches:'unknown'}).`:'Official module qualification could not complete in this document. Recheck after the native page is ready.');
+ }
  await readiness;
  const mains=activePageElements(document,MAIN_SURFACE_SELECTOR);
  add('host.layout',mains.length===0?'manual':codex26715Adapter.qualifiesRenderer(document)?'passed':'issue',mains.length===0?'No native workspace is mounted; check an existing conversation and New Chat.':'Production workspace qualification checked active-page ownership, native rail and main surface.');
+ const explorer = mountedExplorer();
+ const marketCards = inspectMarketCards(explorer);
+ add('host.plugin-backgrounds',...marketCards(...BACKGROUND_PLUGIN_IDS));
+ add('host.plugin-codex-startup-transition',...marketCards('codex-startup-transition'));
+ add('host.plugin-surface-opacity',...marketCards('surface-opacity'));
+ add('host.plugin-transparent-background',...marketCards('transparent-background'));
+ add('host.plugin-markdown-preview',...marketCards('markdown-preview'));
+ add('host.plugin-csv-preview',...marketCards('csv-preview'));
+ add('host.plugin-diagram-preview',...marketCards('diagram-preview'));
+ add('host.plugin-image-preview',...marketCards('image-preview'));
+ add('host.plugin-video-preview',...marketCards('video-preview'));
+ add('host.plugin-pdf-preview',...marketCards('pdf-preview'));
+ add('host.plugin-audio-preview',...marketCards('audio-preview'));
+ add('host.plugin-office-preview',...marketCards('office-preview'));
+ add('host.plugin-notebook-preview',...marketCards('notebook-preview'));
+ add('host.plugin-model-preview',...marketCards('model-preview'));
+ add('host.plugin-git-history',...marketCards('git-history'));
+ add('host.plugin-multi-account',...marketCards('multi-account'));
+ add('host.plugin-lan-remote',...marketCards('lan-remote'));
+ const conversationTop = inspectConversationTopPaint(document);
+ add('host.conversation-top-paint',conversationTop.status,conversationTop.detail);
+ const [pageFrame,changeCard] = inspectNativeSurfaceLayers(document,mains.length===1?mains[0]:undefined);
+ add('host.page-frame-paint',pageFrame.status,pageFrame.detail);
+ add('host.turn-change-paint',changeCard.status,changeCard.detail);
+ const topAlignment = inspectTreeTopAlignment(explorer);
+ add('host.tree-top-alignment',topAlignment.status,topAlignment.detail);
+ const fields=({status,detail}:Pick<Check,'status'|'detail'>)=>[status,detail] as const;
+ add('host.nav-home',...fields(inspectNavigationDestination(document,'home')));
+ add('host.nav-space',...fields(inspectNavigationDestination(document,'space')));
+ add('host.nav-scheduled',...fields(inspectNavigationDestination(document,'automations')));
+ add('host.nav-plugins',...fields(inspectNavigationDestination(document,'customize')));
+ add('host.nav-explore',...fields(inspectNavigationDestination(document,'explore')));
+ add('host.nav-code-review',...fields(inspectNavigationDestination(document,'pull-requests')));
+ add('host.nav-sites',...fields(inspectNavigationDestination(document,'sites')));
+ add('host.nav-page-header',...fields(inspectSecondaryPaint(document,'header')));
+ add('host.nav-page-edge',...fields(inspectSecondaryPaint(document,'edge')));
+ add('host.nav-page-content',...fields(inspectSecondaryPaint(document,'content')));
+ add('host.nav-region-paint',...fields(inspectSecondaryPaintCoverage(document)));
+ const toolbar=inspectConversationToolbar(document);
+ add('host.toolbar-share',...fields(toolbar('share')));
+ add('host.toolbar-summary',...fields(toolbar('summary')));
+ add('host.toolbar-tabs',...fields(toolbar('tabs')));
+ add('host.toolbar-share-paint',...fields(toolbar('share',true)));
+ add('host.toolbar-summary-paint',...fields(inspectToolbarPanelPaint(document,'summary')));
+ add('host.toolbar-tabs-paint',...fields(inspectToolbarPanelPaint(document,'tabs')));
+ add('host.tree-titlebar-clearance',...fields(inspectTreeTitlebarClearance(document,explorer)));
+ add('host.tree-version-control',...fields(inspectTreeVersionControl(explorer,options?.version)));
+ add('host.tree-shortcuts',...fields(inspectTreeShortcuts(explorer)));
+ add('host.tree-refresh',...fields(inspectTreeControl(explorer,'.masthead button.refresh','directory refresh')));
+ add('host.tree-collapse',...fields(inspectTreeControl(explorer,'.masthead button.collapse','tree collapse')));
+ add('host.tree-dismiss',...fields(inspectTreeControl(explorer,'.masthead button.disable','tree dismissal')));
+ add('host.tree-filter',...fields(inspectTreeControl(explorer,'input.file-filter[aria-controls="cle-tree"]','loaded-file filter')));
+ add('host.tree-edit',...fields(inspectTreeControl(explorer,'button.edit-mode-toggle[aria-pressed]','editing mode')));
+ add('host.tree-resize',...fields(inspectTreeControl(explorer,'.resize-handle[role="separator"][aria-valuenow]','tree resize handle')));
+ add('host.account-panel-actions',...fields(inspectAccountPanel(explorer,'actions')));
+ add('host.account-panel-identity',...fields(inspectAccountPanel(explorer,'identity')));
+ add('host.account-panel-quota',...fields(inspectAccountPanel(explorer,'quota')));
+ const accountExecution=inspectAccountExecution(window as unknown as Record<symbol,unknown>);
+ add('host.account-execution-owner',...fields(accountExecution.owner));
+ add('host.account-execution-route',...fields(accountExecution.route));
+ const updateHandoff=(window as unknown as Record<symbol,unknown>)[Symbol.for('code-codex:official-update-handoff:v1')];
+ add('host.official-update-hook',typeof updateHandoff==='function'?'passed':explorer&&mains.length?'issue':'manual',
+   typeof updateHandoff==='function'?'The production official update service wrapper owns this document.':'The official update service wrapper was not observed in this document.');
+ const workspaceBacking = inspectWorkspaceBackingPaint(document,mains.length===1?mains[0]:undefined,explorer);
+ add('host.workspace-backing-paint',workspaceBacking.status,workspaceBacking.detail);
  const split = inspectSplitLayout(document);
  add('host.split-layout',split.status,split.detail);
  const menubar=document.querySelector('[role="menubar"]');
  const triggers=menubar?.querySelectorAll('button[id^="application-menu-trigger-"][id$="-menu"]');
  add('host.menu',!menubar?'manual':triggers?.length?'passed':'issue',!menubar?'The native menu bar is not mounted.':'Native menu triggers and their owning menubar were inspected without opening menus.');
- const anchors=activePageElements<HTMLElement>(document,'[data-codex-composer-root] button[data-composer-navigation-target="reasoning"]');
+ const menuActions = inspectMenuActions(document,!!explorer&&(triggers?.length??0)>=2);
+ add('host.menu-actions',menuActions.status,menuActions.detail);
+ add('host.menu-closed-indicators',...fields(inspectClosedMenuIndicators(document)));
+ const menuItem=(id:string)=>fields(menuActions.items[id]??menuActions);
+ add('menu.file-tree',...menuItem('file-tree'));
+ add('menu.plugin-market',...menuItem('plugin-market'));
+ add('menu.quick-tour',...menuItem('quick-tour'));
+ add('menu.runtime-information',...menuItem('runtime-information'));
+ add('menu.installation-folder',...menuItem('installation-folder'));
+ add('menu.compatibility',...menuItem('compatibility'));
+ add('menu.compatibility-report',...menuItem('compatibility-report'));
+ add('menu.compatibility-recheck',...menuItem('compatibility-recheck'));
+ add('menu.language',...menuItem('language'));
+ add('menu.language-zh-CN',...menuItem('language-zh-CN'));
+ add('menu.language-en',...menuItem('language-en'));
+ add('menu.check-updates',...menuItem('check-updates'));
+ add('menu.repository',...menuItem('repository'));
+ add('menu.login-startup',...menuItem('login-startup'));
+ add('menu.restart',...menuItem('restart'));
+ add('menu.uninstall',...menuItem('uninstall'));
+ const anchors=activePageElements<HTMLButtonElement>(document,'[data-codex-composer-root] button[data-composer-navigation-target="reasoning"]')
+   .filter(anchor=>!anchor.closest('[inert],[aria-hidden="true"]')&&anchor.checkVisibility());
+ if(profile?.contractRevision===2){
+  try{
+   const capability=await nativeQuotaCapabilities(profile.initial);
+   if(anchors.length!==1)add('host.quota','manual','Quota modules qualified. A unique visible composer is required to verify mounted subscriptions.');
+   else {
+    const {found}=composerQuotaSubscriptions(anchors[0]!,capability);
+    add('host.quota','passed',`The native composer has ${found.length} qualified quota subscriptions (${found.map(item=>item.gate).join(', ')}). No subscriptions were changed.`);
+   }
+  }catch(error){
+   const stage=String(error).match(/stage=([a-z-]+)/)?.[1]??'module-import';
+   const unavailable=anchors.length!==1&&['module-import','semantic-roles','quota-family'].includes(stage);
+   add('host.quota',unavailable?'manual':'issue',unavailable
+    ?'Quota role initialization was not established in this page. Recheck in a mounted native composer.'
+    :`Production quota capability discovery rejected the native runtime at ${stage}. No subscriptions were changed.`);
+  }
+ }else add('host.quota','manual','The numbered native quota runtime is not initialized in this document. Check a mounted composer before judging compatibility.');
+ const welcome = welcomeSurfaceState();
+ const welcomeStatus = welcome === 'ready' ? 'passed' : welcome === 'unready' && anchors.length === 1 ? 'issue' : 'manual';
+ add('host.welcome-surface', welcomeStatus, welcomeStatus === 'passed'
+   ? 'The production welcome gate recognizes this mounted Codex workspace. No dialog or install state was changed.'
+   : welcomeStatus === 'issue'
+     ? 'A native home composer is mounted, but the production welcome gate did not recognize ready content.'
+     : 'A visible, ready Codex home view is unavailable for the welcome gate check. First-install behavior remains separate.');
+ const tourExplorer = explorer?.shadowRoot;
+ if (tourExplorer && menubar && triggers?.length) {
+  const missing = missingQuickTourTargets(tourExplorer);
+  add('host.quick-tour-targets', missing.length ? 'issue' : 'passed', missing.length
+   ? `Quick tour targets missing or ambiguous: ${missing.join(', ')}.`
+   : 'Quick tour resolves both owned file-tree footer controls and the Code-Codex application menu; no actions were triggered.');
+ } else {
+  add('host.quick-tour-targets', 'manual', 'A mounted file tree and native menu bar are needed to verify quick tour target resolution.');
+ }
  const roots=[...new Set(anchors.map(x=>x.closest('[data-codex-composer-root]')).filter(Boolean))];
  if(roots.length!==1){add('host.composer','manual','A unique mounted composer anchor was not available; check New Chat and an existing conversation separately.');add('host.models','manual','The native model picker is not mounted. Open its native menu, then recheck.');}
  else try{
@@ -103,6 +322,15 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
  // manual scenarios when those pages/modes are not mounted.
  const style=getComputedStyle(document.documentElement);
  add('host.theme',style.getPropertyValue('--color-text').trim()||style.getPropertyValue('--color-token-text-primary').trim()?'passed':'manual','Current native theme tokens were inspected; light/dark transitions and Settings pages still require their own scenarios.');
+ if(!mains.length||!explorer){
+  add('host.appearance-action','manual','A mounted official workspace and Code-Codex connection are required to read the Appearance preference.');
+ }else try{
+  await readCodexAppearanceTheme(await discoverCodexAppearanceAdapter(load));
+  add('host.appearance-action','passed','The background controller’s production adapter read a recognized official Appearance preference. No setting was changed.');
+ }catch(error){
+  const unloaded=String(error).includes('HOST_UPDATE_MODULE_NOT_LOADED')||String(error).includes('stage=module-import');
+  add('host.appearance-action',unloaded?'manual':'issue',unloaded?'An official Appearance module has not been observed in this document.':'The production background adapter could not read the official Appearance preference on the mounted workspace.');
+ }
  const settings=inspectSettingsPaint(document);
  add('host.settings-paint',settings.status,settings.detail);
  const backdrop=inspectComposerBackdrop(document);
@@ -116,6 +344,6 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
  add('host.ownership',!owner||owner.pending?'manual':retired?.has?.(owner.nativeBinding)?'issue':'passed',!owner||owner.pending?'Document ownership has not completed in this page. Recheck when the file tree is ready.':'The current document owner is committed and its binding is not retired. No handoff was requested.');
  const marketScroll=inspectMarketScroll(document);
  add('host.market-scroll',marketScroll.status,marketScroll.detail);
- if(options)checks.push(...runBackgroundChecks(new Set(options.background),mountedExplorer()));
+ if(options)checks.push(...runBackgroundChecks(new Set(options.background),explorer));
  return {checks,documentVersion:manifest.version??null};
 }

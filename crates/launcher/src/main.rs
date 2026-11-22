@@ -145,6 +145,8 @@ enum Commands {
         image: PathBuf,
         #[arg(long)]
         close: bool,
+        #[arg(long, requires = "close")]
+        after_official_update: bool,
     },
     /// Inspect cached first-party backgrounds, or import verified offline release assets.
     Plugins {
@@ -342,8 +344,8 @@ async fn application_main() -> ExitCode {
         };
     }
     // Small JSON/text protocol: no GUI diagnostics or CDP discovery in this worker.
-    if let Some(Commands::StartupRecoveryWindow { pid, created_ms, image, close }) = &cli.command {
-        return startup_conflict::window_operation(*pid, *created_ms, image, *close);
+    if let Some(Commands::StartupRecoveryWindow { pid, created_ms, image, close, after_official_update }) = &cli.command {
+        return startup_conflict::window_operation(*pid, *created_ms, image, *close, *after_official_update);
     }
     if let Some(Commands::HostUpdates { force, register, unregister, validate, port }) = &cli.command {
         let result = if *validate {host_updates::validation::run(port.map(cdp_client::CdpEndpoint::loopback), true, None).await} else if *register || *unregister { if *register {Err(std::io::Error::other("HOST_UPDATE_STARTUP_ONLY: Periodic registration was retired. Use startup observation or --force."))}else{host_updates::scheduler::configure(false)} } else { host_updates::run(*force) };
@@ -384,8 +386,7 @@ async fn application_main() -> ExitCode {
         Commands::ResetStartupRecovery => startup_conflict::reset()
             .map(|()| println!("{}", gui_support::localization::text("Automatic restart permission cleared. Code-Codex will ask next time.")))
             .map_err(AppError::StartupConflict),
-        Commands::StartupRecoveryWindow { pid, created_ms, image, close } =>
-            return startup_conflict::window_operation(pid, created_ms, &image, close),
+        Commands::StartupRecoveryWindow { .. } => unreachable!("handled before initialization"),
         Commands::Plugins { import_dir } => {
             let result = if let Some(directory) = import_dir {
                 plugin_store::import_directory(&directory)

@@ -1,6 +1,7 @@
 import {subscribeLanguage,t} from '../../i18n';
 import {icons} from '../../icons';
 import type {AccountConnection} from './contracts';
+import {accountActionMessage,logAccountError} from './error-presentation';
 
 export interface ApiConnectionInput {label:string;baseUrl:string;model:string;models:string[];apiKey:string;}
 export interface ApiEditorPorts {
@@ -21,6 +22,7 @@ export class ApiConnectionEditor {
   this.root.append(dialog);const form=dialog.querySelector('form')!;
   const field=(name:string)=>form.elements.namedItem(name) as HTMLInputElement;
   const fetchButton=dialog.querySelector<HTMLButtonElement>('[data-fetch]')!,saveButton=dialog.querySelector<HTMLButtonElement>('[data-save]')!,grid=dialog.querySelector<HTMLElement>('.model-grid')!,status=dialog.querySelector<HTMLElement>('[role=status]')!;
+  const report=(stage:string,error:unknown)=>{logAccountError(stage,error);status.textContent=accountActionMessage(error);};
   let models=[...(connection?.api?.models??(connection?.api?[connection.api.model]:[]))],selected=connection?.api?.model??'',busy=false,fetching=false,closed=false,keyEdited=false,requestEpoch=0;
   field('label').value=connection?.label??'';field('baseUrl').value=connection?.api?.baseUrl??'';
   const sync=()=>{fetchButton.disabled=busy||fetching||!field('baseUrl').value.trim()||!field('apiKey').value;fetchButton.setAttribute('aria-busy',String(fetching));dialog.querySelector<HTMLElement>('.model-spinner')!.hidden=!fetching;dialog.querySelector('[data-fetch-label]')!.textContent=t(fetching?'accounts.apiFetchingModels':'accounts.apiFetchModels');saveButton.disabled=busy||fetching||!models.length||!field('apiKey').value;field('model').disabled=busy||fetching;for(const b of grid.querySelectorAll<HTMLButtonElement>('button'))b.disabled=busy||fetching;};
@@ -46,13 +48,13 @@ export class ApiConnectionEditor {
    void this.ports.fetchModels(value).then(result=>{if(closed||epoch!==requestEpoch)return;
     if(!Array.isArray(result.models)||!result.models.length||result.models.length>256||result.models.some(m=>typeof m!=='string'||!/^[a-zA-Z0-9_.:/-]{1,160}$/.test(m))||new Set(result.models).size!==result.models.length)throw Error('ACCOUNT_API_MODELS: Invalid model directory. stage=editor-response; the previous model list was retained.');
     models=[...result.models];if(!models.includes(selected))selected=models[0]!;field('model').value='';renderModels();
-   }).catch(error=>{if(!closed&&epoch===requestEpoch)status.textContent=error instanceof Error?error.message:String(error);}).finally(()=>{value.apiKey='';if(!closed&&epoch===requestEpoch){fetching=false;sync();}});
+   }).catch(error=>{if(!closed&&epoch===requestEpoch)report('api-model-list',error);}).finally(()=>{value.apiKey='';if(!closed&&epoch===requestEpoch){fetching=false;sync();}});
   });
   form.addEventListener('submit',event=>{event.preventDefault();if(busy||fetching||!add()||!models.length||!form.reportValidity())return;busy=true;sync();for(const input of form.querySelectorAll<HTMLInputElement>('input'))input.disabled=true;
    const value={label:field('label').value.trim(),baseUrl:field('baseUrl').value.trim(),model:selected,models:[...models],apiKey:field('apiKey').value};
-   void save(value).then(close,error=>{if(closed)return;status.textContent=error instanceof Error?error.message:String(error);busy=false;for(const input of form.querySelectorAll<HTMLInputElement>('input'))input.disabled=false;sync();}).finally(()=>{value.apiKey='';});
+   void save(value).then(close,error=>{if(closed)return;report('api-save',error);busy=false;for(const input of form.querySelectorAll<HTMLInputElement>('input'))input.disabled=false;sync();}).finally(()=>{value.apiKey='';});
   });
-  if(connection){void this.ports.loadKey(connection.id).then(result=>{const key=result.apiKey;result.apiKey='';if(closed||keyEdited)return;field('apiKey').value=key;sync();}).catch(error=>{if(!closed&&!keyEdited)status.textContent=error instanceof Error?error.message:String(error);});}
+  if(connection){void this.ports.loadKey(connection.id).then(result=>{const key=result.apiKey;result.apiKey='';if(closed||keyEdited)return;field('apiKey').value=key;sync();}).catch(error=>{if(!closed&&!keyEdited)report('api-key-read',error);});}
   dialog.showModal();field('label').focus();
  }
  dispose():void{this.#close?.();}

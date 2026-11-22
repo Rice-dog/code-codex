@@ -114,6 +114,8 @@ enum Commands {
     CommitInstall {
         #[arg(long, value_name = "DIRECTORY")]
         install_root: PathBuf,
+        #[arg(long)]
+        arm_welcome: bool,
     },
     /// Back up the official AppX shortcut and replace it with the Code-Codex launcher.
     Install {
@@ -398,7 +400,7 @@ fn execute() -> Result<OperationReport, IntegrationError> {
         | Commands::Preflight { install_root, .. }
         | Commands::PrepareInstall { install_root }
         | Commands::RollbackInstall { install_root }
-        | Commands::CommitInstall { install_root }
+        | Commands::CommitInstall { install_root, .. }
         | Commands::Install { install_root, .. }
         | Commands::Restore { install_root }
         | Commands::Status { install_root } => (install_root, &cli.command),
@@ -456,7 +458,13 @@ fn execute() -> Result<OperationReport, IntegrationError> {
         Commands::Preflight { version, .. } => preflight(&shell, &paths, version),
         Commands::PrepareInstall { .. } => prepare_install(&shell, &paths),
         Commands::RollbackInstall { .. } => rollback_install(&shell, &paths),
-        Commands::CommitInstall { .. } => commit_install(&shell, &paths),
+        Commands::CommitInstall { arm_welcome, .. } => {
+            let report = commit_install(&shell, &paths)?;
+            if let Err(error) = workspace_service::first_run::configure(&paths.install_root, *arm_welcome) {
+                eprintln!("CC-WELCOME-STATE-001: Could not persist first-run welcome state: {error}");
+            }
+            Ok(report)
+        },
         Commands::Install {
             version,
             preserve_legacy,

@@ -9,7 +9,7 @@ export function assetControl(id:string,kind:'credit'|'reset',store:AccountUsageS
  if(existing&&controls.get(existing)!==store)existing=undefined;
  const e=existing??node('button');controls.set(e,store);e.type='button';e.className='account-asset-button';e.dataset.accountAsset=kind;e.dataset.assetOwner=id;
  const a=store?.assets?.(id),value=kind==='credit'?(a?.unlimited?'∞':a?.balance??'—'):String(a?.availableCount??'—');
- const active=kind==='credit'&&!!store?.creditAllowed?.(id),available=!!a&&(kind==='credit'?usableCredits(a):(a.availableCount??0)>0);
+ const active=kind==='credit'&&!!store?.creditAllowed?.(id),available=!!store?.assetActions&&!!a&&(kind==='credit'?usableCredits(a):(a.availableCount??0)>0);
  e.setAttribute('aria-disabled',String(!available));if(kind==='credit')e.setAttribute('aria-pressed',String(active&&available));else{e.setAttribute('aria-haspopup','dialog');e.setAttribute('aria-expanded',String(currentAnchor===e));}
  const label=text(kind==='credit'?'积分':'重置卡',kind==='credit'?'Credits':'Resets');e.replaceChildren(node('span',label),node('span',value));e.children[0]!.className='account-asset-label';e.children[1]!.className='account-asset-number';
  e.setAttribute('aria-label',label+' '+value);

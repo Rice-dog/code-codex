@@ -105,6 +105,16 @@ try {
         while(-not [IO.File]::Exists($readyPath) -and [DateTime]::UtcNow -lt $deadline -and -not $script:windowFixture.HasExited){Start-Sleep -Milliseconds 100}
         Verify ([IO.File]::Exists($readyPath)) 'Disposable window becomes ready'
         $script:records=@([pscustomobject]@{ExecutablePath=$image;CommandLine='fixture';ProcessId=$script:windowFixture.Id;CreationDate=$script:windowFixture.StartTime})
+        $script:records[0].CommandLine='fixture --remote-debugging-port=12345'
+        $managedCandidate=Get-RestartCandidate $image
+        Verify ($managedCandidate.Managed -and $null -eq $managedCandidate.Process) 'Ordinary startup preserves a debug-managed browser'
+        $env:CLE_UPDATE_RESTART_ALLOWED='1'
+        try {
+            $updated=Get-RestartCandidate $image
+            try { Verify ($updated.Managed -and $null -ne $updated.Process -and $updated.Created -gt 0) 'Official update retains the real process identity even with inherited debug options' }
+            finally { $updated.Process.Dispose() }
+        } finally { Remove-Item Env:CLE_UPDATE_RESTART_ALLOWED }
+        $script:records[0].CommandLine='fixture'
         $captured=Get-RestartCandidate $image
         try { Reject { Wait-RestartProcessExit $captured $image ([TimeSpan]::Zero) } 'Production timeout stops before closing any window' }
         finally { $captured.Process.Dispose() }
@@ -230,6 +240,16 @@ try {
     $script:queue.Enqueue((New-FakeCandidate 41 100 $true))
     Verify ((Invoke-RestartRecovery $image $preference) -eq 'managed') 'Existing managed session is left alone'
     Verify ($script:promptCount -eq 0 -and $script:closeCount -eq 0) 'Managed session never prompts or closes'
+    Prepare-Scenario $false $false $false
+    $script:first.Managed=$true
+    $script:queue.Clear()
+    $script:queue.Enqueue($script:first)
+    $script:queue.Enqueue((New-FakeCandidate 41 100 $true))
+    $script:queue.Enqueue($null)
+    $env:CLE_UPDATE_RESTART_ALLOWED='1'
+    try { Verify ((Invoke-RestartRecovery $image $preference) -eq 'ready') 'Verified update accepts its single authorized replacement' }
+    finally { Remove-Item Env:CLE_UPDATE_RESTART_ALLOWED }
+    Verify ($script:promptCount -eq 0 -and $script:closeCount -eq 1 -and -not (Read-RestartPreference $preference)) 'Update consent reaches one close without becoming permanent'
     Prepare-Scenario $false $true $true
     $script:queue.Clear()
     $script:queue.Enqueue($script:first)

@@ -79,9 +79,9 @@ export class BlackHoleBackgroundController {
     if (this.#disposed) throw new Error("Black Hole Background is unavailable");
   }
 
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
-    await ensureBackgroundPackage('black-hole');
+    if (!packagePrepared) await ensureBackgroundPackage('black-hole');
     if (generation !== this.#generation) return;
     await this.initialize();
     if (

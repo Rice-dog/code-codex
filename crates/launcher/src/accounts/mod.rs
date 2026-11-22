@@ -198,12 +198,17 @@ impl AccountService {
             .await?;
         // These are snapshots owned by an existing local lease, not admission
         // evidence. Reading progress must not perform another account/read.
-        if matches!(action.as_str(), "native.status" | "shared.status") {
+        if matches!(action.as_str(), "native.status" | "shared.status" | "primary.progress") {
             let owner = text(&params, "owner")?;
             let all = self.state.lock().await;
             if all.contains_key(owner) {
-                if !current() || owner_root(owner)?.join("ended-session.json").exists() {
+                let root = owner_root(owner)?;
+                if !current() || root.join("ended-session.json").exists() {
                     return Err(AccountError::new("ACCOUNT_STALE_SESSION", "The owning account session ended before its local status could be read."));
+                }
+                if action == "primary.progress" {
+                    drop(all);
+                    return primary::local_progress(&root, owner);
                 }
                 let thread = identifier(&params, "conversationId")?;
                 return Ok(if action == "native.status" {
@@ -211,6 +216,9 @@ impl AccountService {
                 } else {
                     self.preparations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&format!("{owner}:{thread}")).map(|p|p.snapshot()).unwrap_or(json!({"status":"none"}))
                 });
+            }
+            if action == "primary.progress" {
+                return Err(AccountError::new("ACCOUNT_STALE_SESSION", "The local account session is unavailable."));
             }
         }
         let observe_started=std::time::Instant::now();
@@ -816,6 +824,46 @@ fn save(root: &Path, registry: &Registry) -> Result<()> {
     crate::renderer_storage::atomic(&root.join("connections.json"), &json!(registry))
         .map_err(|_| AccountError::new("ACCOUNT_STORAGE", "Saving the account registry failed."))
 }
+
+pub(crate) fn check_saved_selection_contract() -> bool {
+    fn exercise() -> Result<bool> {
+        const CHILD: &str = "11111111111111111111111111111111";
+        const API: &str = "22222222222222222222222222222222";
+        let folder = tempfile::tempdir().map_err(|_| AccountError::protocol("Account fixture directory is unavailable."))?;
+        let primary = folder.path().join("primary");
+        let other = folder.path().join("other");
+        directory(&primary)?;
+        directory(&other)?;
+        let mut registry = Registry {
+            schema: 1,
+            selected: HashMap::from([
+                ("thread-official".into(), CHILD.into()),
+                ("thread-api".into(), API.into()),
+                ("thread-primary".into(), "host".into()),
+            ]),
+            ..Default::default()
+        };
+        registry.connections.push(Connection {
+            api: Some(api::Settings::parse("https://provider.example.invalid/v1", "fixture-model")?
+                .with_models(Some(&json!(["fixture-model", "fixture-alternative"])))?),
+            id: API.into(), label: "Fixture API".into(), email: None, plan: None,
+        });
+        registry.connections.push(Connection {
+            api: None, id: CHILD.into(), label: "Fixture child".into(),
+            email: Some("child@example.invalid".into()), plan: None,
+        });
+        save(&primary, &registry)?;
+        let restored = load(&primary)?;
+        let isolated = load(&other)?;
+        Ok(restored.selected == registry.selected
+            && restored.connections.iter().any(|connection| connection.id == API
+                && connection.api.as_ref().is_some_and(|settings| settings.model == "fixture-model"
+                    && settings.models.as_ref().is_some_and(|models| models == &["fixture-model", "fixture-alternative"])))
+            && restored.active.is_empty() && restored.shared.is_empty()
+            && isolated.selected.is_empty() && isolated.connections.is_empty())
+    }
+    exercise().unwrap_or(false)
+}
 fn nonce() -> String {
     use sha2::{Digest, Sha256};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -859,7 +907,7 @@ fn identifier<'a>(p: &'a Value, key: &str) -> Result<&'a str> {
 }
 fn validate_fields(params: &Value, action: &str) -> Result<()> {
     let extra: &[&str] = match action {
-        "info" | "release" | "session.end" | "primary.cancel" | "primary.status" => &[],
+        "info" | "release" | "session.end" | "primary.cancel" | "primary.status" | "primary.progress" => &[],
         "session.policy" => &["followLogout"],
         "connections.reorder" => &["connectionIds"],
         "primary.start" | "primary.promote" => &["connectionId"],

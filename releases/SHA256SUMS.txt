@@ -1,7 +1,7 @@
-00acdda325f2fea0cba01774b7cf6485263b3c9ccb5e3dfabfe5bfa1378ba936  CodeCodex-0.6.37-x64-setup.exe
-f3ab361a09b10bd57008bd5a701bbc3e435fc6fa1f75435eeb9de4a47f0d5f7e  CodeCodex-0.6.37-x64.msi
-e299abc0261fe07d57e5b981ca47b380f9a1faa3d28a1645f7889696640a6fba  CodeCodex-0.6.37-x64.zip
-a3c28d6e8020d8d64f8140457a5d74923d5fe676179b1939969ca819469cbeb0  Uninstall-CodeCodex.exe
+327376a0fdca772592f7d642a4eb20c8dc7a448e678d29ef9fa46a77700ea6eb  CodeCodex-0.6.56-x64-setup.exe
+e7160f1a0c4f51337ef95b797fac7243cfba937fb2448de9d74b51a04ce0ffe6  CodeCodex-0.6.56-x64.msi
+a04bcfd69b3f51cb0464eeeaea3339753b821850b238550d6b6f571b00a6fa87  CodeCodex-0.6.56-x64.zip
+5912958ab938de49099d8c88107fa09d9cc5286ccd3619824871f362691fe589  Uninstall-CodeCodex.exe
 4bf3ebba5ac222851e7ba0f4318bd693fdb28109fd06bd4a12da591098b95106  plugins/appearance/glow-horizon/CodeCodex-background-glow-horizon-1.0.1.js
 ac2f4a1b14f21b2c944c1ffbcef01f63e7597cb08bc8721282ba1840f2d282e7  plugins/appearance/black-hole/CodeCodex-background-black-hole-1.0.6.js
 857fea5dd51f9bd4cb78a99e976858500d518855f1a7a3af28daeb00ae9ec864  plugins/appearance/heavenly-cloud/CodeCodex-background-heavenly-cloud-1.0.1.js
@@ -46,10 +46,10 @@ b6264078fae002f7a7210775296118dbf3ce618979b64892e9bdea4454a05599  plugins/file-p
 c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2  plugins/file-preview/model-preview/CodeCodex-plugin-model-preview-1.0.0.js
 180b2ceaed686d660e118e406680b07c0c6c259051d9573ae079dfbc8307e202  plugins/appearance/ascii-tiles/CodeCodex-background-ascii-tiles-1.0.8.js
 1da590e0c8640ca9c60e1223303eab051c0822c12b631084ad41b0bcb97b7278  plugins/appearance/shallow-ocean/CodeCodex-background-shallow-ocean-1.0.17.js
-c71f313890d75b283fe74228f917dfbfeeb6dc6894587d602a5fc8b968342ec5  plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.113.js
+d0a51d9c373c32f9b91d1467da468fcacfb3be64c236d899d4437126043e8eba  plugins/developer-tools/multi-account/CodeCodex-plugin-multi-account-1.0.127.js
 5236aaaa21b71ab2a32df2831c6919c0e9ff1c5476db92b7e00a39ff6b658136  plugins/appearance/spectral-drape/CodeCodex-background-spectral-drape-1.0.2.js
 9c676ab980cb19170e086ede943fe56afdfaab21b969c0ef0bece5d99ab7c9e5  plugins/developer-tools/lan-remote/resources/CodeCodex-plugin-lan-remote-1.0.3-x64.exe
 66a95d6f3afe64c58a9ec99373550d7a4ff2ef38804333687977e4f5662a5302  plugins/developer-tools/lan-remote/resources/CodeCodex-plugin-lan-remote-1.0.3-viewer-x64.exe
 5735febb4249f2fea35481266e47668eb890404f83714ec3d12f68e80c95d72f  plugins/developer-tools/lan-remote/resources/CodeCodex-plugin-lan-remote-1.0.3-COPYING.txt
 244cee07744f0058fd1249bd2eb017ad09f61092a6c6742c14600e4a5cdabdfc  plugins/developer-tools/lan-remote/CodeCodex-plugin-lan-remote-1.0.3.js
-ff8fec98711f0a2913a8407a1146026ae11cb5c8c42d36d6032f9d1d34218603  plugins/catalog.json
+d006eaae9a50518ca82ee9dc87725c33374ef5237ba129df909589a615c97336  plugins/catalog.json

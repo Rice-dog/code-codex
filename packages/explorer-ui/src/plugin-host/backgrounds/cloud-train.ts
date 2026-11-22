@@ -50,9 +50,9 @@ export class CloudTrainBackgroundController {
   async initialize(): Promise<void> {
     if (this.#disposed) throw new Error("Cloud Train Background is unavailable");
   }
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
-    await ensureBackgroundPackage('cloud-train');
+    if (!packagePrepared) await ensureBackgroundPackage('cloud-train');
     if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;

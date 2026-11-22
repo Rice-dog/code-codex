@@ -258,13 +258,34 @@ pub(super) fn replace_managed(source:&Path,destination:&Path)->Result<()> {
     }
     for (output,file) in staged {if let Some(file)=file {file.persist(output).map_err(|_|AccountError::protocol("Managed credential commit failed."))?;}else if output.exists(){std::fs::remove_file(output).map_err(|_|AccountError::protocol("Old managed credential removal failed."))?;}}
     let marker=destination.join("managed-auth-source.json");
-    if source.join("auth.json").exists(){crate::renderer_storage::atomic(&marker,&json!({"schema":1,"store":"file"})).map_err(|_|AccountError::protocol("Credential storage mode could not be saved."))?;}else if marker.exists(){std::fs::remove_file(marker).map_err(|_|AccountError::protocol("Credential storage mode could not be cleared."))?;}
+    let store = if source.join("auth.json").is_file() { "file" } else { "keyring" };
+    crate::renderer_storage::atomic(&marker,&json!({"schema":1,"store":store}))
+        .map_err(|_|AccountError::protocol("Credential storage mode could not be saved."))?;
     Ok(())
 }
 pub(super) fn storage_mode(home:&Path)->Result<&'static str>{
  let marker=home.join("managed-auth-source.json");if !marker.exists(){return Ok("keyring")}
  let value=crate::renderer_storage::read_json(&marker,1024).map_err(|_|AccountError::protocol("Managed credential storage marker could not be read."))?;
- if value["schema"]==1&&value["store"]=="file"{Ok("file")}else{Err(AccountError::protocol("Managed credential storage marker is invalid."))}
+ match (value["schema"].as_u64(),value["store"].as_str()){
+  (Some(1),Some("file"))=>Ok("file"),
+  (Some(1),Some("keyring"))=>Ok("keyring"),
+  _=>Err(AccountError::protocol("Managed credential storage marker is invalid.")),
+ }
+}
+
+/// Only a committed managed transfer chooses the native store at next launch.
+/// An ordinary login that replaced the material takes precedence over a stale marker.
+pub(super) fn primary_launch_store(home: &Path) -> Option<&'static str> {
+    if !home.join("managed-auth-source.json").is_file() {
+        return None;
+    }
+    let file = home.join("auth.json").is_file();
+    let encrypted = home.join("secrets/codex_auth.age").is_file();
+    match (storage_mode(home).ok()?, file, encrypted) {
+        ("file", true, _) => Some("file"),
+        ("keyring", false, true) => Some("keyring"),
+        _ => None,
+    }
 }
 pub fn delete(home: &Path) -> Result<()> {
     workspace_service::application_paths::validate_directory_path(home)
@@ -315,6 +336,30 @@ mod tests {
         replace_managed(&new,&live).unwrap();assert_eq!(std::fs::read(live.join("auth.json")).unwrap(),b"synthetic-new");assert_eq!(storage_mode(&live).unwrap(),"file");
         replace_managed(&old,&live).unwrap();assert_eq!(std::fs::read(live.join("auth.json")).unwrap(),b"synthetic-old");
         assert_eq!(std::fs::read(live.join("config.toml")).unwrap(),b"keep-config");assert_eq!(std::fs::read(live.join("history.jsonl")).unwrap(),b"keep-history");
+    }
+    #[test]
+    fn primary_launch_reuses_committed_store_but_not_a_stale_selection() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("official");
+        let keyring_home = temp.path().join("keyring");
+        let secrets = keyring_home.join("secrets");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&secrets).unwrap();
+        std::fs::write(secrets.join("codex_auth.age"), b"synthetic").unwrap();
+        std::fs::write(home.join("auth.json"), b"former-primary").unwrap();
+        assert_eq!(primary_launch_store(&home), None);
+        replace_managed(&keyring_home, &home).unwrap();
+        assert_eq!(primary_launch_store(&home), Some("keyring"));
+        assert!(!home.join("auth.json").exists());
+        std::fs::write(home.join("auth.json"), b"desktop-login").unwrap();
+        assert_eq!(primary_launch_store(&home), None);
+        let file_home = temp.path().join("file");
+        std::fs::create_dir_all(&file_home).unwrap();
+        std::fs::write(file_home.join("auth.json"), b"promoted-file").unwrap();
+        replace_managed(&file_home, &home).unwrap();
+        assert_eq!(primary_launch_store(&home), Some("file"));
+        std::fs::remove_file(home.join("auth.json")).unwrap();
+        assert_eq!(primary_launch_store(&home), None);
     }
     #[test]
     fn unavailable_or_oversized_transfer_does_not_touch_existing_authorization(){

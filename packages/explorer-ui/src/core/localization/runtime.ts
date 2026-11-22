@@ -15,7 +15,7 @@ for(const [locale,catalog] of [['en',en],['zh-CN',zh]] as const) {
   for(const [key,value] of Object.entries(catalog)) {
     const matches=[...value.matchAll(/\{([A-Za-z][A-Za-z0-9]*)\}/g)]; if(!matches.length) continue;
     let pattern='^',offset=0; const names: string[]=[];
-    for(const match of matches) { pattern+=escapePattern(value.slice(offset,match.index))+(/Label$/.test(match[1]!)? '([^\\s·]+)':['detail','execution','animations'].includes(match[1]!)? '(.*?)':'(.+?)'); names.push(match[1]!); offset=match.index!+match[0].length; }
+    for(const match of matches) { pattern+=escapePattern(value.slice(offset,match.index))+(match[1]==='seconds'? '(\\d+(?:[.,]\\d+)?)': /Label$/.test(match[1]!)? '([^\\s·]+)':['detail','execution','animations'].includes(match[1]!)? '(.*?)':'(.+?)'); names.push(match[1]!); offset=match.index!+match[0].length; }
     pattern+=escapePattern(value.slice(offset))+'$'; templates.push({ locale,pattern: new RegExp(pattern),names,key,specificity: value.replace(/\{[^}]+\}/g,'').length });
   }
 }

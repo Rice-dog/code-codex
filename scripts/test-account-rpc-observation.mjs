@@ -7,7 +7,7 @@ const root=resolve(import.meta.dirname,'..'),out=resolve(root,'artifacts/account
 await build({stdin:{contents:"export {NativeAccountAdapter} from './features/accounts/native-adapter';export {rpcManagerService} from './features/accounts/rpc-observation';",resolveDir:resolve(root,'packages/explorer-ui/src'),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:resolve(out,'fixture.mjs'),plugins:[{name:'thread',setup(b){b.onResolve({filter:/active-thread$/},()=>({path:'thread',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:"export const resolveActiveThread=()=>globalThis.rpcThread??'task';"}));}}]});
 globalThis.window=new EventTarget();
 const {NativeAccountAdapter,rpcManagerService}=await import(pathToFileURL(resolve(out,'fixture.mjs'))),checks=[];
-const quota=(remaining)=>({rateLimits:{limitId:'codex',primary:{usedPercent:100-remaining,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:50,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
+const quota=(remaining)=>({rateLimits:{limitId:'codex',credits:{balance:'0',hasCredits:false,unlimited:false},primary:{usedPercent:100-remaining,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:50,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
 const wait=async p=>{for(let i=0;i<100;i++){if(p())return;await new Promise(r=>setTimeout(r,20));}throw Error('Fixture did not settle');};
 const state={owner:{id:'owner',label:'fixture'},profile:{initial:'./assets/app-initial-fixture.js',shared:'./assets/app-shared-fixture.js'},connections:[{id:'B',email:'B@test'}],selected:{task:'B'},sharedConversations:[],activeConversations:[]};
 let callback,admit,notification,disposed=0,active=false,hostQuota=89,childReads=0,hostReads=0;
@@ -15,7 +15,8 @@ const lease=()=>({[Symbol.dispose](){disposed++;}}),manager={dup(){return this},
 const registry={dup(){return this},[Symbol.dispose](){disposed++;},subscribe(_host,f){callback=f;queueMicrotask(()=>f({status:'ready',manager}));return Promise.resolve(lease());}};
 const services={appServerManagers:registry,executionHosts:{},clientCoordination:{},appActions:{}};
 assert.equal(rpcManagerService({one:services,alias:services}),registry);checks.push('One concrete trusted service is deduplicated across re-export aliases');
-assert.throws(()=>rpcManagerService({one:services,two:{...services,appServerManagers:{}}}),/AMBIGUOUS/);checks.push('Distinct service candidates are rejected rather than chosen arbitrarily');
+assert.equal(rpcManagerService({one:services,two:{...services,appServerManagers:{}}}),registry);
+assert.throws(()=>rpcManagerService({one:services,two:{...services,appServerManagers:{...registry}}}),/capability=rpc-manager-service; matches=2/);checks.push('Distinct service candidates are rejected rather than chosen arbitrarily');
 let getter=0;assert.equal(rpcManagerService({trap:{get appServerManagers(){getter++;return registry;}}}),undefined);assert.equal(getter,0);checks.push('Service discovery never invokes namespace object getters');
 const subscribers=new Set(),dispatcher={subscribe(_type,f){subscribers.add(f);return()=>subscribers.delete(f)},dispatchMessage(_type,m){hostReads++;queueMicrotask(()=>{for(const f of subscribers)f({message:{id:m.request.id,result:quota(hostQuota)}})})}};
 const calls=[],request=async p=>{calls.push(p);if(p.action==='info')return structuredClone(state);if(p.action==='usage'){childReads++;return quota(0)}if(p.action==='select'){state.selected[p.conversationId]=p.connectionId;return {}}if(p.action==='release')return {};throw Error('Unexpected action '+p.action);};

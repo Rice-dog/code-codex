@@ -82,7 +82,8 @@ pub(super) fn routing_metadata(input: &reqwest::header::HeaderMap, output: &reqw
         "nativeSession": status("session-id"),
         "nativeThread": status("thread-id"),
         "legacySession": status("session_id"),
-        "stickyTurn": status("x-codex-turn-state")
+        "stickyTurn": status("x-codex-turn-state"),
+        "responsesLite": status(super::relay::RESPONSES_LITE_HEADER)
     })
 }
 
@@ -159,8 +160,13 @@ impl ErrorBody {
         let mut output=reqwest::header::HeaderMap::new();
         output.insert("session_id",input["session_id"].clone());
         output.insert("thread-id","PRIVATE_CHANGED_THREAD".parse().unwrap());
+        let lite = super::super::relay::RESPONSES_LITE_HEADER;
+        assert_eq!(routing_metadata(&input, &output)["responsesLite"], "absent");
+        input.insert(lite, "PRIVATE_LITE_FLAG".parse().unwrap());
+        assert_eq!(routing_metadata(&input, &output)["responsesLite"], "omitted");
+        output.insert(lite, input[lite].clone());
         let metadata=routing_metadata(&input,&output);
-        assert_eq!(metadata, json!({"nativeSession":"omitted","nativeThread":"changed","legacySession":"preserved","stickyTurn":"absent"}));
+        assert_eq!(metadata, json!({"nativeSession":"omitted","nativeThread":"changed","legacySession":"preserved","stickyTurn":"absent","responsesLite":"preserved"}));
         let event=json!({"type":"response.completed","response":{"id":"PRIVATE_RESPONSE","output":[{"text":"PRIVATE_OUTPUT"}],"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":90},"output_tokens":12,"output_tokens_details":{"reasoning_tokens":8},"total_tokens":112}}});
         let original=event.clone();let usage=response_usage(&event).unwrap();assert_eq!(event,original);
         assert_eq!(usage["cachedInputUnits"],90);assert_eq!(usage["reasoningOutputUnits"],8);

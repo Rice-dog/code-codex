@@ -284,9 +284,21 @@ impl Worker {
                 } else if let Some(id) = message["id"].as_u64() {
                     if let Some(reply) = worker.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id) {
                         let value = if message.get("error").is_some() {
+                            let failure = &message["error"]["message"];
+                            let detail = failure.as_str().unwrap_or("");
+                            let route_reason = super::routing::reason(detail);
+                            let revoked = super::backend_diagnostics::reports_revoked_credential(detail);
+                            let (code, reason, safe_detail) = if revoked {
+                                ("ACCOUNT_AUTH_REQUIRED", "token_revoked",
+                                 "The official authorization for this connection was revoked. Sign in again to check this account.".to_owned())
+                            } else if let Some(reason) = route_reason {
+                                ("ACCOUNT_WORKSPACE_ROUTING", reason, sanitize_error(failure))
+                            } else {
+                                ("ACCOUNT_BACKEND", "backend-rejected", sanitize_error(failure))
+                            };
                             Err(AccountError::new(
-                                if message["error"]["message"].as_str().and_then(super::routing::reason).is_some(){"ACCOUNT_WORKSPACE_ROUTING"}else{"ACCOUNT_BACKEND"},
-                                format!("{} Backend evidence: rpcCode={}; reason={}; responseDataWithheld=true; requestReplayed=false; networkObservation={}.",sanitize_error(&message["error"]["message"]),message["error"]["code"].as_i64().map(|v|v.to_string()).unwrap_or_else(||"unavailable".into()),message["error"]["message"].as_str().and_then(super::routing::reason).unwrap_or("backend-rejected"),super::backend_diagnostics::classify(message["error"]["message"].as_str().unwrap_or(""))),
+                                code,
+                                format!("{safe_detail} Backend evidence: rpcCode={}; reason={reason}; responseDataWithheld=true; requestReplayed=false; networkObservation={}.",message["error"]["code"].as_i64().map(|v|v.to_string()).unwrap_or_else(||"unavailable".into()),super::backend_diagnostics::classify(detail)),
                             ))
                         } else {
                             Ok(message["result"].clone())

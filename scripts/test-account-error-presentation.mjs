@@ -6,9 +6,15 @@ import {createServer} from 'node:http';
 import {launchFixture} from './browser-fixture.mjs';
 const out=resolve('artifacts/account-error-presentation');await mkdir(out,{recursive:true});
 await build({stdin:{resolveDir:resolve('packages/explorer-ui/src'),loader:'ts',contents:`
-import {accountFailureMessage} from './features/accounts/error-presentation';
+import {accountActionMessage,accountFailureMessage} from './features/accounts/error-presentation';
 import {updateQuota,quotaElement} from './features/accounts/quota-view';
+import en from '../../../resources/localization/plugins/en.json';
+import zh from '../../../resources/localization/plugins/zh-CN.json';
 window.message=accountFailureMessage;
+window.action=(error,locale)=>{
+ window[Symbol.for('code-codex:language-service:v1')]={getLocale:()=>locale,t:key=>(locale==='zh-CN'?zh:en)[key]};
+ return accountActionMessage(Error(error),'switch');
+};
 window.show=(error,locale,cached)=>{
  window[Symbol.for('code-codex:language-service:v1')]={getLocale:()=>locale,t:(k,p)=>k==='accounts.quotaCached'?'cached '+p.time:k};
  const e=quotaElement('child',true);document.body.replaceChildren(e);
@@ -20,10 +26,21 @@ const server=createServer((q,s)=>{s.setHeader('Content-Type',q.url==='/fixture.j
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await launchFixture(`http://127.0.0.1:${server.address().port}/`),checks=[];
 try{
  for(const [input,expected] of [['ACCOUNT_BACKEND: error sending request','服务连接失败'],['ACCOUNT_STREAM_UNCLASSIFIED: unknown','暂时无法查询'],['ACCOUNT_BACKEND: failed to fetch codex rate limits: HTTP 503','暂时无法查询'],['ACCOUNT_USAGE_TIMEOUT','暂时未响应'],['ACCOUNT_USAGE_INCOMPLETE','暂不完整'],['ACCOUNT_AUTH_REQUIRED','重新登录']]){
-  const v=await browser.evaluate(`show(${JSON.stringify(input)},'zh-CN',true)`);assert(v.text.includes(expected));assert(v.text.includes('cached'));assert(v.text.includes('84%'));assert(!v.text.includes('ACCOUNT_'));assert(v.title.includes('ACCOUNT_'));checks.push(input);
+  const v=await browser.evaluate(`show(${JSON.stringify(input)},'zh-CN',true)`);assert(v.text.includes(expected));assert(v.text.includes('cached'));assert(v.text.includes('84%'));assert(!v.text.includes('ACCOUNT_'));assert(!v.title.includes('ACCOUNT_'));checks.push(input);
  }
  const fresh=await browser.evaluate(`show('ACCOUNT_BACKEND: error sending request','en',false)`);assert(fresh.text.includes('Service connection failed'));assert(!fresh.text.includes('cached'));checks.push('English without fake cache timestamp');
  const net=await browser.evaluate(`message('stream disconnected before completion: error sending request','send','zh-CN')`);assert(net.includes('服务连接中断'));checks.push('Terminal send network notice');
  const unknown='ACCOUNT_PROTOCOL: unknown contract';assert.equal(await browser.evaluate(`message(${JSON.stringify(unknown)},'send','en')`),unknown);checks.push('Unrelated send failure is unchanged');
+ for(const [code,cn,en] of [
+  ['ACCOUNT_TURN_ACTIVE','回复结束','current response'],
+  ['ACCOUNT_AUTH_REQUIRED','重新登录','Sign in again'],
+  ['ACCOUNT_PROTOCOL','稍后重试','Try again shortly'],
+ ]){
+  for(const [locale,expected] of [['zh-CN',cn],['en',en]]){
+   const value=await browser.evaluate(`action('${code}: diagnostic fixture','${locale}')`);
+   assert(value.includes(expected));assert(!value.includes(code));assert(!value.includes('diagnostic fixture'));
+  }
+ }
+ checks.push('Switch feedback follows the UI language and omits raw diagnostic details');
  await writeFile(resolve(out,'result.json'),JSON.stringify({passed:true,checks,scope:'Production formatter and quota DOM in Chromium; no network reads, authentication or inference'},null,2));console.log(JSON.stringify({passed:true,checks}));
 }finally{await browser.close();server.close();}

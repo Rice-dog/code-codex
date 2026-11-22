@@ -62,7 +62,9 @@ impl Transport {
   let mut dispatched=false;let mut login_rejected=false;
   let result=async{
    credentials::replace_managed(&source,&official)?;
-   stage="credential-source";let worker=Worker::spawn(&official).await?;
+   stage="credential-source";
+   let store=credentials::primary_launch_store(&official).ok_or_else(||error("credential-store"))?;
+   let worker=Worker::spawn(&official).await?;
    let auth=match credentials::managed(&worker,&email).await {Ok(value)=>value,Err(e)=>{worker.stop().await;return Err(e)}};
    let expected=auth["accessToken"].as_str().ok_or_else(||error("credential-contract"))?.to_owned();
    // Install the refresh source before login can emit a request/notification.
@@ -71,7 +73,7 @@ impl Transport {
    if login["type"]!="chatgptAuthTokens"{return Err(error("login-contract"))}
    stage="identity-confirm";let observed=self.request("getAuthStatus",json!({"includeToken":true,"refreshToken":false})).await?;
    if observed["authToken"].as_str()!=Some(expected.as_str()){return Err(error("identity-confirm"))}
-   Ok(json!({"completed":true,"authorizationRequired":false,"browserOpened":false,"persistent":true}))
+   Ok(json!({"completed":true,"authorizationRequired":false,"browserOpened":false,"persistent":true,"startupStore":store}))
   }.await;
   // Before dispatch, restoring the verified managed backup leaves live auth
   // unchanged. After dispatch, an unknown outcome is never replayed or guessed.

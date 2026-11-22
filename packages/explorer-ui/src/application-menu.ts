@@ -3,11 +3,13 @@ import { icons } from './icons';
 import {nativeMenuCheckSvg} from './components/menu-check';
 import type { LoginStartupActions } from './contracts/login-startup';
 import { LoginStartupController } from './features/startup/login-startup';
+import { APPLICATION_MENU_ITEMS } from './contracts/application-menu-items';
 
 interface ApplicationMenuActions extends LoginStartupActions {
   isExplorerVisible(): boolean;
   toggleExplorer(): void;
   openPreviewMarket(): void;
+  openQuickTour(): void;
   checkForUpdates(): void;
   openRuntimeInformation(): void;
   openInstallationFolder(): void;
@@ -71,8 +73,16 @@ ${MENU_POPUP_SELECTOR} {
   overflow-y: auto;
   user-select: none;
   outline: none;
+  -webkit-app-region: no-drag;
 }
 ${MENU_POPUP_SELECTOR}[hidden] { display: none !important; }
+/* Submenus retain their measured boxes without taking input or focus. */
+${MENU_POPUP_SELECTOR}:is([popover]:not(:popover-open), [hidden]:not([data-code-codex-application-menu-popup="true"])) {
+  display: block !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+${MENU_POPUP_SELECTOR}[popover] { inset: auto; margin: 0; }
 ${MENU_POPUP_SELECTOR} > :is(button, a) {
   display: block;
   box-sizing: border-box;
@@ -87,6 +97,7 @@ ${MENU_POPUP_SELECTOR} > :is(button, a) {
   text-align: start;
   text-decoration: none;
   cursor: pointer;
+  transition: none;
 }
 ${MENU_POPUP_SELECTOR} > :is(button, a):hover,
 ${MENU_POPUP_SELECTOR} > :is(button, a):focus-visible {
@@ -98,7 +109,7 @@ ${MENU_POPUP_SELECTOR} > [role="separator"] {
   margin: 8px 0;
   background: var(--color-border-strong, rgba(26, 28, 31, .117));
 }
-${MENU_POPUP_SELECTOR} > [data-code-codex-language-trigger] {
+${MENU_POPUP_SELECTOR} > [aria-haspopup="menu"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -113,6 +124,7 @@ ${MENU_POPUP_SELECTOR} > [data-code-codex-login-startup] {
 [data-code-codex-menu-check] { display:inline-flex; align-items:center; flex:none; width:17px; height:17px; margin-inline-start:auto; }
 [data-code-codex-application-menu-popup] > button[role="menuitemradio"] { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 [data-code-codex-menu-check][hidden] { display: none; }
+[role="menuitemradio"][aria-checked="false"] > [data-code-codex-menu-check] { visibility: hidden; }
 ${MENU_POPUP_SELECTOR} > button:disabled { opacity: .6; cursor: default; }
 /* A fresh read blocks writes without flashing the normal menu foreground. */
 ${MENU_POPUP_SELECTOR} > button:disabled[data-code-codex-startup-read="true"] { opacity: 1; }
@@ -226,21 +238,49 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   loginStartupItem.type = 'button';
   loginStartupItem.tabIndex = -1;
   const loginStartup = new LoginStartupController(loginStartupItem, actions);
-  const languageItem = document.createElement('button');
-  languageItem.type = 'button';languageItem.setAttribute('role','menuitem');languageItem.tabIndex=-1;
-  languageItem.setAttribute('aria-haspopup','menu');languageItem.setAttribute('aria-expanded','false');
-  languageItem.dataset.codeCodexLanguageTrigger='true';
-  const languageLabel=document.createElement('span');
-  const languageChevron=document.createElement('span');
-  languageChevron.dataset.codeCodexSubmenuChevron='true';
-  languageChevron.setAttribute('aria-hidden','true');
-  languageChevron.innerHTML=icons.chevron;
-  languageItem.append(languageLabel,languageChevron);
-  const languagePopup=document.createElement('div');
-  languagePopup.dataset.codeCodexApplicationMenuPopup='language';
-  languagePopup.id='code-codex-language-popup';languagePopup.setAttribute('role','menu');
-  languagePopup.setAttribute('aria-label','Language');languagePopup.hidden=true;languagePopup.style.width='160px';
-  languageItem.setAttribute('aria-controls',languagePopup.id);
+  const createSubmenu = (name: string) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.tabIndex = -1;
+    item.setAttribute('role', 'menuitem');
+    item.setAttribute('aria-haspopup', 'menu');
+    const label = document.createElement('span');
+    const chevron = document.createElement('span');
+    chevron.dataset.codeCodexSubmenuChevron = 'true';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.innerHTML = icons.chevron;
+    item.append(label, chevron);
+
+    const panel = document.createElement('div');
+    panel.dataset.codeCodexApplicationMenuPopup = name;
+    panel.id = `code-codex-${name}-popup`;
+    panel.setAttribute('role', 'menu');
+    const nativePopover = typeof panel.showPopover === 'function' && 'popoverTargetElement' in item;
+    if (nativePopover) {
+      panel.popover = 'manual';
+      item.popoverTargetElement = panel;
+    } else {
+      panel.hidden = true;
+      item.setAttribute('aria-expanded', 'false');
+    }
+    item.setAttribute('aria-controls', panel.id);
+    return { item, label, panel, setOpen(open: boolean) {
+      if (nativePopover) {
+        if (open) (panel.showPopover as (options: { source: HTMLButtonElement }) => void)({ source: item });
+        else panel.hidePopover();
+      } else {
+        panel.hidden = !open;
+        item.setAttribute('aria-expanded', String(open));
+      }
+    } };
+  };
+  const language = createSubmenu('language');
+  language.item.dataset.codeCodexLanguageTrigger = 'true';
+  const languagePopup = language.panel;
+  languagePopup.style.width = '160px';
+  const compatibility = createSubmenu('compatibility');
+  compatibility.item.dataset.codeCodexCompatibilityTrigger = 'true';
+  compatibility.panel.append(hostUpdatesItem, retryUpdatesItem);
   const languageOptions=([['zh-CN','中文（简体）'],['en','English']] as const).map(([locale,label])=>{
     const button=document.createElement('button');button.type='button';button.tabIndex=-1;
     button.setAttribute('role','menuitemradio');button.dataset.locale=locale;
@@ -268,40 +308,98 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   uninstallItem.type = 'button'; uninstallItem.tabIndex = -1;
   uninstallItem.setAttribute('role', 'menuitem');
   uninstallItem.dataset.codeCodexUninstall = 'true';
-  popup.append(treeItem, marketItem, runtimeItem, installationItem, hostUpdatesItem, retryUpdatesItem, languageItem, separator, updateItem, repositoryItem, uninstallSeparator, loginStartupItem, restartItem, uninstallItem);
+  const quickTourItem = document.createElement('button');
+  quickTourItem.type = 'button';
+  quickTourItem.tabIndex = -1;
+  quickTourItem.setAttribute('role', 'menuitem');
+  quickTourItem.dataset.codeCodexQuickTourAction = 'true';
+  popup.append(treeItem, marketItem, quickTourItem, runtimeItem, installationItem, compatibility.item, language.item, separator, updateItem, repositoryItem, uninstallSeparator, loginStartupItem, restartItem, uninstallItem);
 
   // Keep this sibling separate from Codex's React-owned Radix menubar. It
   // shares the visual row without joining Radix's private keyboard collection.
   mount.topBar.insertBefore(host, mount.menubar.nextSibling);
-  document.body.append(popup);
-  document.body.append(languagePopup);
+  document.body.append(popup, languagePopup, compatibility.panel);
 
-  const items: HTMLElement[] = [treeItem, marketItem, runtimeItem, installationItem, hostUpdatesItem, retryUpdatesItem, languageItem, updateItem, repositoryItem, loginStartupItem, restartItem, uninstallItem];
+  const items: HTMLElement[] = [treeItem, marketItem, quickTourItem, runtimeItem, installationItem, compatibility.item, language.item, updateItem, repositoryItem, loginStartupItem, restartItem, uninstallItem];
+  for (const [name, group] of [
+    ['main', items],
+    ['compatibility', [hostUpdatesItem, retryUpdatesItem]],
+    ['language', languageOptions],
+  ] as const) {
+    group.forEach((item, index) => { item.dataset.codeCodexMenuItem = APPLICATION_MENU_ITEMS[name][index]!; });
+  }
+  const submenus = [
+    { ...language, options: languageOptions, key: 'menu.language' },
+    { ...compatibility, options: [hostUpdatesItem, retryUpdatesItem], key: 'menu.hostCompatibility' },
+  ] as const;
+  type Submenu = typeof submenus[number];
+  let activeSubmenu: Submenu | undefined;
+  let hostStatus: Awaited<ReturnType<NonNullable<ApplicationMenuActions['hostUpdateStatus']>>> | undefined;
+  const renderHostReport = () => {
+    const counts = hostStatus?.latest?.counts;
+    const priority = (counts?.pluginDependency ?? 0) + (counts?.needsReview ?? 0);
+    const hasChanges = ['update', 'analysis_refresh'].includes(hostStatus?.latest?.type ?? '') && priority > 0;
+    const validation = hostStatus?.validation;
+    let suffix = hasChanges ? String(priority) : '';
+    if (validation && ['passed', 'manual_required', 'issues_found'].includes(validation.status ?? '')) {
+      const issues = Math.max(validation.counts?.issues ?? 0, validation.checkCounts?.issues ?? 0);
+      const manual = validation.counts?.manualGroups ?? 0;
+      suffix = issues || manual ? t('menu.hostValidationSummary', { issues, manual }) : t('menu.hostValidationPassed');
+    }
+    hostUpdatesItem.textContent = t('menu.hostUpdates') + (suffix ? ` (${suffix})` : '');
+  };
   const updateText=()=>{
     loginStartup.render();
     treeItem.textContent=t(actions.isExplorerVisible()?'menu.hideTree':'menu.showTree');
-    for(const [item,key] of [[marketItem,'menu.market'],[runtimeItem,'menu.runtime'],[hostUpdatesItem,'menu.hostUpdates'],[retryUpdatesItem,'menu.hostUpdatesRetry'],[installationItem,'menu.installation'],[restartItem,'menu.restart'],[updateItem,'menu.updates'],[repositoryItem,'menu.repository'],[uninstallItem,'menu.uninstall']] as const)item.textContent=t(key);
-    languageLabel.textContent=t('menu.language');
-    languagePopup.setAttribute('aria-label',t('menu.language'));
-    for(const button of languageOptions){const checked=button.dataset.locale===getLocale();button.setAttribute('aria-checked',String(checked));const label=document.createElement('span');label.textContent=button.dataset.languageLabel!;const check=document.createElement('span');check.dataset.codeCodexMenuCheck='true';check.setAttribute('aria-hidden','true');check.innerHTML=nativeMenuCheckSvg;check.style.visibility=checked?'visible':'hidden';button.replaceChildren(label,check);}
+    quickTourItem.textContent = t('welcome.quickTour');
+    for(const [item,key] of [[marketItem,'menu.market'],[runtimeItem,'menu.runtime'],[retryUpdatesItem,'menu.hostUpdatesRetry'],[installationItem,'menu.installation'],[restartItem,'menu.restart'],[updateItem,'menu.updates'],[repositoryItem,'menu.repository'],[uninstallItem,'menu.uninstall']] as const)item.textContent=t(key);
+    for (const { label, panel, key } of submenus) {
+      label.textContent = t(key);
+      panel.setAttribute('aria-label', t(key));
+    }
+    renderHostReport();
+    for(const button of languageOptions){const checked=button.dataset.locale===getLocale();button.setAttribute('aria-checked',String(checked));const label=document.createElement('span');label.textContent=button.dataset.languageLabel!;const check=document.createElement('span');check.dataset.codeCodexMenuCheck='true';check.setAttribute('aria-hidden','true');check.innerHTML=nativeMenuCheckSvg;button.replaceChildren(label,check);}
   };
   const unsubscribe=subscribeLanguage(()=>{updateText();position();});
-  const closeSub=()=>{languagePopup.hidden=true;languageItem.setAttribute('aria-expanded','false');};
-  const positionSub=()=>{
-    if(languagePopup.hidden)return;
-    const rect=languageItem.getBoundingClientRect();
-    const right=popup.getBoundingClientRect().right;
-    languagePopup.style.left=`${Math.max(8,right+languagePopup.offsetWidth<=window.innerWidth-8?right:popup.getBoundingClientRect().left-languagePopup.offsetWidth)}px`;
-    languagePopup.style.top=`${Math.max(8,Math.min(rect.top,window.innerHeight-languagePopup.offsetHeight-8))}px`;
+  const closeSub = (returnFocus = false) => {
+    if (!activeSubmenu) return;
+    const { item, setOpen } = activeSubmenu;
+    activeSubmenu = undefined;
+    setOpen(false);
+    if (returnFocus) item.focus({ preventScroll: true });
   };
-  const openSub=(focus=false)=>{updateText();languagePopup.hidden=false;languageItem.setAttribute('aria-expanded','true');positionSub();if(focus)(languageOptions.find(option=>option.dataset.locale===getLocale())??languageOptions[0])?.focus();};
+  const positionSub = ({ item, panel }: Submenu, rootRect: DOMRect) => {
+    const rect = item.getBoundingClientRect();
+    const {width,height}=panel.getBoundingClientRect();
+    return {panel,left:Math.max(8,rootRect.right+width<=window.innerWidth-8?rootRect.right:rootRect.left-width),
+      top:Math.max(8,Math.min(rect.top,window.innerHeight-height-8))};
+  };
+  const positionSubmenus = () => {
+    const rootRect = popup.getBoundingClientRect();
+    const positions = submenus.map(submenu => positionSub(submenu, rootRect));
+    for (const {panel,left,top} of positions) {
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+    }
+  };
+  const openSub = (submenu: Submenu, focus = false) => {
+    if (activeSubmenu !== submenu) {
+      closeSub();
+      activeSubmenu = submenu;
+      submenu.setOpen(true);
+    }
+    if (focus) {
+      const enabled = submenu.options.filter(option => !option.disabled);
+      (enabled.find(option => option.dataset.locale === getLocale()) ?? enabled[0])?.focus({ preventScroll: true });
+    }
+  };
   const position = () => {
     if (popup.hidden) return;
     const rect = trigger.getBoundingClientRect();
     const left = Math.max(8, Math.min(Math.round(rect.left), window.innerWidth - popup.offsetWidth - 8));
     popup.style.left = `${left}px`;
     popup.style.top = `${Math.max(8, Math.min(Math.round(rect.bottom), window.innerHeight - popup.offsetHeight - 8))}px`;
-    positionSub();
+    positionSubmenus();
   };
   let hostStatusEpoch=0;
   const close = (returnFocus = false) => {
@@ -317,18 +415,24 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     const statusEpoch=++hostStatusEpoch;
     dismissNativeMenu();
     void loginStartup.refresh();
+    hostStatus = undefined;
+    hostUpdatesItem.title = '';
+    delete hostUpdatesItem.dataset.reportStatus;
+    delete hostUpdatesItem.dataset.analysisStatus;
+    delete hostUpdatesItem.dataset.validationStatus;
     updateText();
     popup.hidden = false;
     void actions.hostUpdateStatus?.().then(value=>{
       if(signal.aborted||popup.hidden||statusEpoch!==hostStatusEpoch)return;
-      const counts=value.latest?.counts,priority=(counts?.pluginDependency??0)+(counts?.needsReview??0),validation=value.validation;
+      hostStatus = value;
+      renderHostReport();
+      positionSubmenus();
+      const validation = value.validation;
       hostUpdatesItem.dataset.reportStatus=value.scan?.status??'pending';
-      if((value.latest?.type==='update'||value.latest?.type==='analysis_refresh')&&priority>0)hostUpdatesItem.textContent=t('menu.hostUpdates')+` (${priority})`;
       hostUpdatesItem.dataset.analysisStatus=value.analysis?.status??'unknown';
       hostUpdatesItem.dataset.validationStatus=validation?.status??'pending';
       if(validation&&['passed','manual_required','issues_found'].includes(validation.status??'')){
-        const issues=Math.max(validation.counts?.issues??0,validation.checkCounts?.issues??0),manual=validation.counts?.manualGroups??0;
-        hostUpdatesItem.textContent=issues||manual?t('menu.hostValidationSummary',{issues,manual}):t('menu.hostValidationPassed');
+        const manual = validation.counts?.manualGroups ?? 0;
         hostUpdatesItem.title=`Automatic checks: ${validation.checkCounts?.passed??0} passed; ${validation.checkCounts?.issues??0} issues; ${validation.checkCounts?.manual??0} unavailable. ${manual} grouped acceptance actions remain. See VALIDATION.md; partial checks do not certify full behavior.`;
       }else hostUpdatesItem.title=validation?.status==='refresh_required'?'HOST_UPDATE_VALIDATION_STALE: Recheck official Codex updates to validate with the current engine/rules.':'';
       if(value.analysis?.manualRetryRequired)hostUpdatesItem.title=value.analysis.message??'HOST_UPDATE_RULES_CHANGED: Recheck official Codex updates.';
@@ -392,8 +496,17 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
     }
   }, { signal });
   popup.addEventListener("keydown", (event) => {
-    if(document.activeElement===languageItem&&['ArrowRight','Enter',' '].includes(event.key)){event.preventDefault();openSub(true);return;}
-    if(event.key==='Escape'&&!languagePopup.hidden){event.preventDefault();closeSub();languageItem.focus();return;}
+    const submenu = submenus.find(({ item }) => item === document.activeElement);
+    if (submenu && ['ArrowRight', 'Enter', ' '].includes(event.key)) {
+      event.preventDefault();
+      openSub(submenu, true);
+      return;
+    }
+    if (event.key === 'Escape' && activeSubmenu) {
+      event.preventDefault();
+      closeSub(true);
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       close(true);
@@ -410,22 +523,37 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
       const index = navigable.indexOf(document.activeElement as HTMLElement);
       const next = event.key === "Home" ? 0 : event.key === "End" ? navigable.length - 1 :
         (index + (event.key === "ArrowDown" ? 1 : -1) + navigable.length) % navigable.length;
+      closeSub();
       navigable[next]?.focus();
     }
   }, { signal });
-  languageItem.addEventListener('pointerenter',()=>openSub(),{signal});
-  languageItem.addEventListener('click',()=>languagePopup.hidden?openSub():closeSub(),{signal});
-  for(const item of items)if(item!==languageItem)item.addEventListener('pointerenter',closeSub,{signal});
-  languagePopup.addEventListener('keydown',event=>{
-    if(['Escape','ArrowLeft'].includes(event.key)){event.preventDefault();closeSub();languageItem.focus();}
-    else if(event.key==='Tab'){close();}
-    else if(['ArrowUp','ArrowDown','Home','End'].includes(event.key)){
-      event.preventDefault();const index=languageOptions.indexOf(document.activeElement as HTMLButtonElement);
-      languageOptions[event.key==='Home'?0:event.key==='End'?1:(index+(event.key==='ArrowDown'?1:-1)+2)%2]?.focus();
-    }
-  },{signal});
+  for (const submenu of submenus) {
+    submenu.item.addEventListener('pointerenter', event => {
+      if (event.pointerType !== 'touch') openSub(submenu);
+    }, { signal });
+    submenu.item.addEventListener('click', event => { event.preventDefault(); openSub(submenu, true); }, { signal });
+    submenu.panel.addEventListener('keydown', event => {
+      if (['Escape', 'ArrowLeft'].includes(event.key)) {
+        event.preventDefault();
+        closeSub(true);
+      } else if (event.key === 'Tab') {
+        close();
+      } else if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault();
+        const enabled = submenu.options.filter(option => !option.disabled);
+        const index = enabled.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? enabled.length - 1 :
+          (index + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length;
+        enabled[next]?.focus();
+      }
+    }, { signal });
+  }
+  for (const item of items) {
+    if (!submenus.some(submenu => submenu.item === item)) item.addEventListener('pointerenter', () => closeSub(), { signal });
+  }
   treeItem.addEventListener("click", () => { close(); actions.toggleExplorer(); }, { signal });
   marketItem.addEventListener("click", () => { close(); actions.openPreviewMarket(); }, { signal });
+  quickTourItem.addEventListener('click', () => { close(true); actions.openQuickTour(); }, { signal });
   runtimeItem.addEventListener("click", () => { close(); actions.openRuntimeInformation(); }, { signal });
   installationItem.addEventListener("click", () => { close(); actions.openInstallationFolder(); }, { signal });
   retryUpdatesItem.addEventListener('click',()=>{if(retryUpdatesItem.disabled)return;close();retryUpdatesItem.disabled=true;void actions.retryHostUpdates?.().catch(error=>window.alert(`Starting the official update scan failed.\n${String(error)}`)).finally(()=>{retryUpdatesItem.disabled=false;});},{signal});
@@ -449,7 +577,7 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
   }, { signal });
   document.addEventListener("pointerdown", (event) => {
     const target = event.target;
-    if (target instanceof Node && !host.contains(target) && !popup.contains(target) && !languagePopup.contains(target)) close();
+    if (target instanceof Node && !host.contains(target) && !popup.contains(target) && !activeSubmenu?.panel.contains(target)) close();
   }, { capture: true, signal });
   window.addEventListener("resize", position, { signal });
   window.addEventListener("scroll", position, { capture: true, signal });
@@ -461,7 +589,8 @@ function createMenu(mount: MenuMount, actions: ApplicationMenuActions): MenuStat
       controller.abort();
       nativeStateObserver.disconnect();
       loginStartup.dispose();
-      unsubscribe();languagePopup.remove();
+      unsubscribe();
+      for (const { panel } of submenus) panel.remove();
       host.remove();
       popup.remove();
     },

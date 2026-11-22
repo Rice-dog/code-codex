@@ -42,6 +42,17 @@ fn unknown_resource_and_unknown_code_are_not_harmless() {
  let r=summarize_with_registry(&json!({"complete":true,"changes":[{"path":"image.png","category":"no_known_plugin_dependency","dependencyIds":[]},{"path":"new.js","dependencyIds":[]}]}),&checks(),registry_fixture());
  assert_eq!(r["counts"]["manual"],2);assert_eq!(r["counts"]["noImpact"],0);assert_eq!(r["features"].as_array().unwrap().len(),3);
 }
+#[test]
+fn complete_feature_coverage_does_not_depend_on_reported_file_matches() {
+ let r=summarize_with_registry(&json!({"complete":true,"changes":[{"path":"ok.js","dependencyIds":["ok"]}]}),&checks(),registry_fixture());
+ assert_eq!(r["changes"][0]["status"],"passed");
+ let features=r["features"].as_array().unwrap();
+ assert_eq!(features.len(),3);
+ assert_eq!(features[0]["affected"],true);
+ assert_eq!(features[1]["affected"],false);
+ assert_eq!(features[1]["status"],"issue");
+ assert_eq!(features[2]["checks"][1]["status"],"manual");
+}
 fn report_dir(dir:&Path,id:&str,kind:&str,time:u64)->PathBuf {
  let p=dir.join("reports").join(id);fs::create_dir_all(&p).unwrap();
  atomic(&p.join("report.json"),&json!({"version":"new","package":"official","type":kind,"observedMs":time,"complete":true})).unwrap();
@@ -77,6 +88,7 @@ fn registry_check_references_resolve_and_manual_steps_are_concrete() {
             let id = id.as_str().unwrap();
             let browser_call = format!("add('{id}',");
             assert!(native.contains(&format!("check(\"{id}\",")) || browser.contains(&browser_call)
+                || browser.contains(&format!("regression('{id}',"))
                 || background.contains(&browser_call), "Missing check: {id}");
         }
         assert!(!rule["manualReason"].as_str().unwrap().is_empty());

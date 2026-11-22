@@ -61,9 +61,9 @@ export class HeavenlyCloudBackgroundController {
     if (this.#disposed) throw new Error("Heavenly Cloud Background is unavailable");
   }
 
-  async enable(): Promise<void> {
+  async enable(packagePrepared = false): Promise<void> {
     const generation = this.#generation;
-    await ensureBackgroundPackage('heavenly-cloud');
+    if (!packagePrepared) await ensureBackgroundPackage('heavenly-cloud');
     if (generation !== this.#generation) return;
     await this.initialize();
     if (this.#disposed || this.#enabled || this.#pending || this.#enableOperation || generation !== this.#generation) return;

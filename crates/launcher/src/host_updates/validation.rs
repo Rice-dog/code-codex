@@ -93,8 +93,9 @@ fn affected_rules<'a>(report: &Value, registry: &'a Value) -> (bool, Vec<&'a Val
 fn summarize_with_registry(report: &Value, executed: &[Value], registry: Value) -> Value {
     let mut checks = executed.to_vec();
     let (unknown, rules) = affected_rules(report, &registry);
+    let affected: BTreeSet<_> = rules.iter().filter_map(|rule| rule["id"].as_str()).collect();
     let mut features = Vec::new();
-    for rule in rules {
+    for rule in registry["rules"].as_array().into_iter().flatten() {
         let id = rule["id"].as_str().unwrap_or("");
         let auto: Vec<_> = rule["automatedChecks"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
         let mut feature_checks = Vec::new();
@@ -110,7 +111,7 @@ fn summarize_with_registry(report: &Value, executed: &[Value], registry: Value) 
             feature_checks.push(json!({"id":format!("{id}.scenario.{n}"),"status":"manual","scope":"behavioral-acceptance","detail":required,"reason":rule["manualReason"],"steps":rule["manualSteps"]}));
         }
         let state = if feature_checks.iter().any(|c| c["status"] == "issue") { "issue" } else if feature_checks.is_empty() || feature_checks.iter().any(|c| c["status"] != "passed") { "manual" } else { "passed" };
-        features.push(json!({"id":id,"feature":rule["feature"],"status":state,"checks":feature_checks,"sourceFiles":rule["sources"],"developmentTests":rule["tests"]}));
+        features.push(json!({"id":id,"area":rule["area"].as_str().unwrap_or("Other"),"feature":rule["feature"],"affected":affected.contains(id),"status":state,"checks":feature_checks,"sourceFiles":rule["sources"],"developmentTests":rule["tests"]}));
     }
     let changes: Vec<_> = report["changes"].as_array().into_iter().flatten().map(|c| {
         let unchanged = report["complete"] == true && c["change"] == "dependency_mapping_changed" && c["before"]["sha256"].is_string() && c["before"]["sha256"] == c["after"]["sha256"] && c["before"]["kind"] == c["after"]["kind"];
@@ -128,11 +129,19 @@ fn markdown(result: &Value) -> String {
     let mut s = format!("# Official Codex compatibility validation\n\nReport: {}. Official version: {}.\n\n{} recorded changes: {} no impact, {} passed, {} found issues, {} require manual acceptance.\n\nAutomatic checks: {} passed, {} found issues, {} unavailable. Partial checks do not mean a full functional pass.\n\nRules: {}; engine: {}.\n\n{}\n\n## Executed automatic checks\n\n",result["identity"]["reportId"],result["version"],result["counts"]["all"],result["counts"]["noImpact"],result["counts"]["passed"],result["counts"]["issues"],result["counts"]["manual"],result["checkCounts"]["passed"],result["checkCounts"]["issues"],result["checkCounts"]["manual"],result["identity"]["registryHash"],result["identity"]["engineHash"],result["coverage"].as_str().unwrap_or(""));
     for c in result["automatedChecks"].as_array().into_iter().flatten() { s += &format!("- **{}** `{}` ({}): {}\n",c["status"].as_str().unwrap_or("manual"),c["id"].as_str().unwrap_or(""),c["scope"].as_str().unwrap_or(""),c["detail"].as_str().unwrap_or("")); }
     s += "\n## Grouped behavioral acceptance and required user actions\n\n";
-    for feature in result["features"].as_array().into_iter().flatten() {
-        s += &format!("### {}: {}\n\n", feature["feature"].as_str().unwrap_or(""), feature["status"].as_str().unwrap_or("manual"));
+    let mut features:Vec<_> = result["features"].as_array().into_iter().flatten().collect();
+    features.sort_by_key(|feature|feature["area"].as_str().unwrap_or("Other"));
+    let mut last_area = ("", "");
+    for feature in features {
+        let area = feature["area"].as_str().unwrap_or("Other");
+        let area = area.split_once(" / ").unwrap_or((area,""));
+        if area.0 != last_area.0 {s += &format!("### {}\n\n",area.0);}
+        if area!=last_area&&!area.1.is_empty() {s += &format!("#### {}\n\n",area.1);}
+        last_area=area;
+        s += &format!("{} {}: {}\n\n",if area.1.is_empty(){"####"}else{"#####"},feature["feature"].as_str().unwrap_or(""),feature["status"].as_str().unwrap_or("manual"));
         let mut reasons = BTreeSet::new();
-        for c in feature["checks"].as_array().into_iter().flatten().filter(|c|c["status"]!="passed") {
-            s += &format!("- {}: {}\n",c["status"].as_str().unwrap_or("manual"),c["detail"].as_str().unwrap_or(""));
+        for c in feature["checks"].as_array().into_iter().flatten() {
+            s += &format!("- {} `{}`: {}\n",c["status"].as_str().unwrap_or("manual"),c["id"].as_str().unwrap_or(""),c["detail"].as_str().unwrap_or(""));
             if let Some(reason) = c["reason"].as_str() { reasons.insert(reason); }
         }
         for reason in reasons { s += &format!("\nWhy manual: {reason}\n"); }
@@ -164,14 +173,25 @@ pub(crate) async fn run(endpoint: Option<CdpEndpoint>, force: bool, cancel: Opti
     } else {
         "The production header policy failed the official-routing or API-isolation fixture. Review the relay before switching accounts."
     }));
+    let native_overrides = crate::accounts::startup_backend::native_server_overrides();
+    let saved_selection = crate::accounts::check_saved_selection_contract();
+    checks.push(check("regression.account-saved-selection", if saved_selection {"passed"} else {"issue"}, "local-synthetic-contract",
+        if saved_selection {"Production registry save/load preserved independent primary, child and API selections and the API model catalog in an isolated fixture. No live route, vault or provider was used."}
+        else {"The production registry lost or mixed a fixture account selection or API model catalog."}));
+    let native_send = native_overrides == ["-c", "thread_unload_delay_secs=0"];
+    checks.push(check("regression.native-startup-send", if native_send {"passed"} else {"issue"}, "local-synthetic-contract", if native_send {
+        "The production native startup arguments retain the official provider and default network endpoint. Explicit selection uses the per-conversation route. No real request or login was performed."
+    } else {
+        "The native startup fixture found an unexpected process-wide configuration override. Verify the official send path before enabling account routing."
+    }));
     let manifest = tokio::task::spawn_blocking(crate::accounts::host::discover_modules).await;
     match manifest {
         Ok(Ok(manifest)) if manifest["version"]==report["version"] => {
             checks.push(check("package.modules","passed","actual-installed-package","Production ASAR/module discovery accepted the current official package and entrypoint inventory."));
             if let Some(endpoint) = endpoint {
                 let dependency_registry = registry();
-                let background: BTreeSet<_> = affected_rules(&report, &dependency_registry).1
-                    .into_iter().flat_map(|rule| rule["automatedChecks"].as_array().into_iter().flatten())
+                let background: BTreeSet<_> = dependency_registry["rules"].as_array().into_iter().flatten()
+                    .flat_map(|rule| rule["automatedChecks"].as_array().into_iter().flatten())
                     .filter_map(Value::as_str).filter(|id| id.starts_with("background.")).collect();
                 let options = json!({"version": env!("CARGO_PKG_VERSION"), "background": background});
                 let expression = format!("(async()=>{{{};return await codeCodexHostUpdateProbe.probeHostUpdate({},{});}})()",include_str!("../../../../packages/explorer-ui/dist/host-update-probes.js"),manifest,options);

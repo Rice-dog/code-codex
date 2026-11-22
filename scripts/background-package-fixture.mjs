@@ -10,7 +10,7 @@ export function installedBackgroundFixture(root,ids) {
   const directory=resolve(root,'packages/explorer-ui/dist/plugins');
   const all=JSON.parse(readFileSync(resolve(directory,'catalog.json'),'utf8'));
   if(ids&&ids.some(id=>!all.some(p=>p.id===id)))throw Error('Unknown installed fixture package');
-  const catalog=ids?all.filter(p=>ids.includes(p.id)):all;
+  const catalog=ids?all.filter(p=>ids.includes(p.id)):all.filter(p=>!p.resources.some(asset=>asset.kind==='native'));
   const scripts=catalog.map(p=>{
     const bytes=readFileSync(pluginAssetPath(directory,p));
     if(bytes.length!==p.size||createHash('sha256').update(bytes).digest('hex')!==p.sha256)throw Error(`Fixture package ${p.id} failed its production catalog`);

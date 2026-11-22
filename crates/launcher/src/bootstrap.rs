@@ -52,6 +52,9 @@ struct BootstrapMetadata<'a> {
     manual_workspace: bool,
     startup_splash_active: bool,
     centralized_storage: bool,
+    activation_epoch: u64,
+    welcome_banner: &'a str,
+    welcome_pending: bool,
     language: workspace_service::ui_language::Preference,
     appearance_modules: &'a serde_json::Value,
 }
@@ -227,6 +230,19 @@ pub fn build_bootstrap(
             ),
         ));
     }
+    let install_root = workspace_service::application_paths::install_root().ok().flatten();
+    let welcome_pending = install_root.as_deref().is_some_and(workspace_service::first_run::pending);
+    static WELCOME_BANNER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let welcome_banner = WELCOME_BANNER.get_or_init(|| {
+        use base64::Engine as _;
+        let asset = include_bytes!("../../../packages/explorer-ui/src/assets/welcome-banner.webp");
+        format!("data:image/webp;base64,{}", base64::engine::general_purpose::STANDARD.encode(asset))
+    });
+    static ACTIVATION_EPOCH: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let activation_epoch = *ACTIVATION_EPOCH.get_or_init(|| {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default().as_micros() as u64
+    });
     let metadata = BootstrapMetadata {
         token: token.expose(),
         binding,
@@ -238,10 +254,10 @@ pub fn build_bootstrap(
         startup_splash_active,
         appearance_modules,
         language: crate::gui_support::localization::preference(),
-        centralized_storage: workspace_service::application_paths::install_root()
-            .ok()
-            .flatten()
-            .is_some(),
+        centralized_storage: install_root.is_some(),
+        activation_epoch,
+        welcome_banner,
+        welcome_pending,
     };
     let metadata = serde_json::to_string(&metadata).map_err(|error| {
         BootstrapError::InvalidBundle.context("serializing bootstrap metadata", error)

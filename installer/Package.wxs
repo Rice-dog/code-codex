@@ -148,7 +148,7 @@
     <CustomAction
       Id="CommitCodexShortcutInstall"
       FileRef="ShortcutIntegrationExecutable"
-      ExeCommand="commit-install --install-root &quot;[INSTALLFOLDER].&quot;"
+      ExeCommand="commit-install --install-root &quot;[INSTALLFOLDER].&quot; [FIRSTWELCOMESWITCH]"
       Execute="commit"
       Impersonate="yes"
       Return="ignore" />
@@ -217,6 +217,9 @@
     </InstallExecuteSequence>
 
     <Property Id="REGISTEREDINSTALLFOLDER"><RegistrySearch Id="CurrentStorageRoot" Root="HKCU" Key="Software\CodeCodex" Name="InstallPath" Type="raw" /></Property>
+    <Property Id="RETAINEDINSTALLFOLDER"><RegistrySearch Id="RetainedStorageRoot" Root="HKCU" Key="Software\CodeCodex" Name="RetainedRoot" Type="raw" /></Property>
+    <SetProperty Id="FIRSTWELCOMESWITCH" Value="--arm-welcome" Before="InstallInitialize" Sequence="execute"
+      Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED AND NOT REGISTEREDINSTALLFOLDER AND NOT RETAINEDINSTALLFOLDER AND NOT (REMOVE = &quot;ALL&quot;)" />
     <SetProperty Id="INSTALLFOLDER" Value="[REGISTEREDINSTALLFOLDER]" Before="CostInitialize" Condition="REGISTEREDINSTALLFOLDER AND NOT INSTALLFOLDER" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />

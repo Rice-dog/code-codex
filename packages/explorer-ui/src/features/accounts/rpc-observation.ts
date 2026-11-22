@@ -1,17 +1,8 @@
 import {AccountReadLane,waitForAccount} from './read-lane';
+export {rpcManagerService} from '../../../../../resources/account-host-capabilities.js';
 // The trusted host namespace can expose an out-of-renderer manager service.
 // Its RPC client is not a mutable legacy manager and must not be treated as one.
 type Native=Record<string,any>;
-export function rpcManagerService(namespace:Native):Native|undefined {
- const matches=new Set<Native>();
- for(const value of Object.values(namespace)){
-  if(!value||typeof value!=='object')continue;
-  const fields=Object.getOwnPropertyDescriptors(value);
-  if(fields.appServerManagers?.value&&fields.executionHosts?.value&&fields.clientCoordination?.value&&fields.appActions?.value)matches.add(fields.appServerManagers.value);
- }
- if(matches.size>1)throw Error('ACCOUNT_RPC_SERVICE_AMBIGUOUS: Multiple native manager services were exposed. No account execution was enabled.');
- return [...matches][0];
-}
 export interface RpcObservation {
  readonly ready:boolean;
  dispose():void;

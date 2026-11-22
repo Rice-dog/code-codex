@@ -1,13 +1,13 @@
 import {AccountReadLane,waitForAccount} from './read-lane';
 import {accountFailureMessage} from './error-presentation';
-import {hostAssetRequest} from './host-assets';
+import {hostProfileAssetRequest} from './host-assets';
 import {dispatcherRole,managerRole,loadHostNamespace,validHostModulePath} from '../../../../../resources/account-host-capabilities.js';
 import type {AccountRequest,AccountsInfo,EventsResult,NativeAccountStatus} from './contracts';
 import {ACCOUNT_UI_CHANGED,ACCOUNT_AUTO_CONTINUE_KEY} from './contracts';
 import {normalizeSelection,turnIsActive,conversationTurns,type NativeConversation} from './context';
 import {resolveActiveThread} from '../../active-thread';
 import {AccountUsageStore} from './quota';
-import {projectAssets,requireResetCard,usableCredits} from './assets-model';
+import {requireResetCard,usableCredits} from './assets-model';
 import {installSessionGuard} from './session-guard';
 import {permissionSettings} from './permissions';
 import {runtimeEvent} from '../../runtime-events';
@@ -94,6 +94,7 @@ export class NativeAccountAdapter {
  #disabling=false;
  #rpcStartupAttempts=new Set<string>();
  #usageReads=new AccountReadLane();
+ #hostIdentityRevision=0;
  #pendingPreparations=new Map<string,{conversationId:string|null;controller:AbortController}>();
  #beginPreparation(conversationId:string|null):{id:string;controller:AbortController}{const id=crypto.randomUUID().replaceAll('-',''),controller=new AbortController();this.#pendingPreparations.set(id,{conversationId,controller});return{id,controller};}
  #finishPreparation(id:string):void{this.#pendingPreparations.delete(id);}
@@ -104,7 +105,7 @@ export class NativeAccountAdapter {
  #cancelAuto(b:Binding):void{b.cycle?.cancel();b.cycle=undefined;}
  async #readUsage(id:string,signal?:AbortSignal):Promise<unknown>{
   if(this.#info.connections.some(c=>c.id===id&&c.api))return {};
-  const owner=this.#info.owner.id;
+  const owner=this.#info.owner.id,revision=this.#hostIdentityRevision;
   const job=this.#usageReads.read(id,async()=>{
    if(this.#disposed)throw Error('ACCOUNT_ASSET_RETIRED: The account session ended.');
    // Child usage is owner-checked by the native action before and after its read.
@@ -113,27 +114,26 @@ export class NativeAccountAdapter {
    if(this.#disposed||before&&before.owner.id!==owner)throw Error('ACCOUNT_USAGE_OWNER: The host login changed before quota could be read.');
    const result=id==='host'?await this.#hostAssetRpc('account/rateLimits/read',{}):await this.#call({action:'usage',connectionId:id});
    const after=id==='host'?await this.request<AccountsInfo>({action:'info'}):undefined;
-   if(this.#disposed||this.#info.owner.id!==owner||after&&after.owner.id!==owner)throw Error('ACCOUNT_USAGE_OWNER: The account session changed while quota was being read.');
+   if(this.#disposed||this.#info.owner.id!==owner||after&&(after.owner.id!==owner||revision!==this.#hostIdentityRevision))throw Error('ACCOUNT_USAGE_OWNER: The account session changed while quota was being read.');
    return {...result as Native,pluginCreditAllowed:this.#creditsAllowed(id)};
   },55000,'ACCOUNT_USAGE_TIMEOUT');
   return signal?waitForAccount(job,55000,'ACCOUNT_USAGE_TIMEOUT',signal):job;
  }
- async #assertCreditPermission(id:string,signal?:AbortSignal):Promise<void>{
+ async #assertCreditPermission(id:string,signal?:AbortSignal,alreadyRead=false):Promise<void>{
   if(this.#info.connections.some(c=>c.id===id&&c.api))return;
   if(!this.#enabled||this.#creditsAllowed(id))return;
-  const cache=this.usage.diagnostics(id),assets=this.usage.assets(id);
-  const remaining=this.usage.remaining(id);
-  if(cache?.phase==='ready'&&Date.now()-(cache.lastSuccessAt??0)<30000&&((cache.raw as Native)?.ordinaryUsageAllowed!==false&&remaining.fiveHour!==null&&remaining.weekly!==null&&remaining.fiveHour>0&&remaining.weekly>0||assets.balance!==null&&Number(assets.balance)===0))return;
-  const raw=await this.#readUsage(id,signal) as Native;this.usage.observe(id,raw);
-  if(!usableCredits({...this.usage.assets(id),...projectAssets(raw)}))return;
-  if(raw.ordinaryUsageAllowed===false)throw Error('ACCOUNT_CREDITS_DISABLED: Included usage is exhausted and this account has not permitted credits for plugin-managed requests. No turn was sent.');
-  if(raw.ordinaryUsageAllowed!==true)throw Error('ACCOUNT_CREDIT_STATUS_UNKNOWN: Included usage could not be verified before a credit-capable request. No turn was sent.');
+  if(this.usage.sendCreditDecision(id)==='allowed')return;
+  const started=performance.now();
+  if(!alreadyRead)await this.usage.observeRead(id,()=>this.#readUsage(id,signal));
+  const decision=this.usage.sendCreditDecision(id);
+  runtimeEvent('accounts','account.send','quota-checked',{stage:'send-credit',decision,durationMs:Math.round(performance.now()-started),taskSent:false});
+  if(decision==='exhausted')throw Error('ACCOUNT_CREDITS_DISABLED: Included usage is exhausted and this account has not permitted credits for plugin-managed requests. No turn was sent.');
+  if(decision!=='allowed')throw Error('ACCOUNT_CREDIT_STATUS_UNKNOWN: Included usage could not be verified before a credit-capable request. No turn was sent.');
  }
  #creditKey(id:string):string{return 'code-codex:credit-permission:v1:'+this.#info.owner.id+':'+id;}
  #creditsAllowed(id:string):boolean{try{return localStorage.getItem(this.#creditKey(id))==='true';}catch{return false;}}
  async #hostAssetRpc(method:'account/rateLimits/read'|'account/rateLimitResetCredit/consume',params:Native):Promise<unknown>{
-  if(!validHostModulePath(this.#info.profile.shared))throw Error('ACCOUNT_HOST_UNSUPPORTED: Invalid quota host profile.');
-  return hostAssetRequest(await loadHostNamespace(this.#info.profile.shared,this.loadProfile),method,params);
+  return hostProfileAssetRequest(this.#info.profile.shared,method,params,this.loadProfile);
  }
  async #consumeReset(id:string,cardId:string,key:string):Promise<string>{
   if(!cardId||cardId.length>256||!/^[-a-f0-9]{36}$/i.test(key))throw Error('ACCOUNT_RESET_PROTOCOL: Invalid reset confirmation identity.');
@@ -144,6 +144,7 @@ export class NativeAccountAdapter {
   const result:Native=id==='host'?await this.#hostAssetRpc('account/rateLimitResetCredit/consume',{creditId:cardId,idempotencyKey:key}) as Native:await this.#call({action:'reset.consume',connectionId:id,cardId,idempotencyKey:key});
   const after=await this.request<AccountsInfo>({action:'info'});if(this.#disposed||after.owner.id!==before.owner.id)throw Error('ACCOUNT_RESET_OUTCOME_UNKNOWN: The owner changed after redemption. Verify before any retry.');
   if(!['reset','alreadyRedeemed','nothingToReset','noCredit'].includes(result?.outcome))throw Error('ACCOUNT_RESET_OUTCOME_UNKNOWN: The official reset result could not be verified. Do not create another attempt.');
+  if(result.outcome==='reset'||result.outcome==='alreadyRedeemed')this.usage.forgetCreditEvidence(id);
   runtimeEvent('accounts','account.assets','confirmed',{stage:'reset-consume',outcome:result.outcome,accountOrdinal:id==='host'?1:this.#info.connections.findIndex(c=>c.id===id)+2,taskSent:false});return result.outcome;
  }
  apiChoice(connectionId:string):{model:string;effort:string}|undefined{const thread=this.status().conversationId,choice=thread?this.#apiChoices.get(thread):undefined;return choice?.connectionId===connectionId?choice:undefined;}
@@ -183,6 +184,8 @@ export class NativeAccountAdapter {
  async start():Promise<void>{
   const storage=(event:StorageEvent)=>{if(event.key===null||event.key?.startsWith('code-codex:credit-permission:v1:'+this.#info.owner.id+':'))this.usage.assetChanged();if(event.key===ACCOUNT_AUTO_CONTINUE_KEY||event.key===null){try{this.setAutoContinue(localStorage.getItem(ACCOUNT_AUTO_CONTINUE_KEY)==='true');}catch{this.setAutoContinue(false);this.#apiChoices.clear();}}};
   window.addEventListener('storage',storage);this.#disposers.push(()=>window.removeEventListener('storage',storage));
+  const online=()=>this.usage.retryUnavailable(['host',...this.#info.connections.filter(c=>c.email).map(c=>c.id)]);
+  window.addEventListener('online',online);this.#disposers.push(()=>window.removeEventListener('online',online));
   const profile=this.#info.profile;
   if(!validHostModulePath(profile.initial))throw Error('ACCOUNT_HOST_UNSUPPORTED: Invalid native adapter profile.');
   const native=await loadHostNamespace(profile.initial,this.loadProfile);
@@ -340,6 +343,10 @@ export class NativeAccountAdapter {
 
  #ownsNativeWork(id:string):boolean{return !!this.#info.nativeRoutes?.[id]||this.#info.nativeRouting===true&&this.#autoEnabled;}
  #operationPending():boolean{return this.#selecting||this.#draftPreparing||this.#rpcSendPreparing||!!this.#rpcAutomatic.size||[...this.#bindings.values()].some(b=>b.active||b.preparing||b.stopping||b.autoPending);}
+ primaryPreparationPending():boolean{
+  return this.#disabling||this.#selecting||this.#draftPreparing||this.#rpcSendPreparing||this.#rpcAutomatic.size>0||
+   [...this.#bindings.values()].some(binding=>binding.preparing||binding.stopping||binding.autoPending);
+ }
  canDisable():boolean{return !this.#disabling&&!this.#operationPending()&&![...this.#rpcActive].some(id=>!!this.#info.nativeRoutes?.[id]);}
  handoffStatus():{busy:boolean;reason:string;activeTasks:number;autoPending:number}{
   const bindings=[...this.#bindings.values()];
@@ -415,7 +422,7 @@ export class NativeAccountAdapter {
   manager.executeTurnStart=function(id:string,operation:Operation,...rest:any[]){return adapter.#execute(managed,id,operation,rest);};
   manager.getStreamRole=function(id:string){const b=managed.bindings.get(id);return b?.shared?adapter.#ownerRole(b):managed.role.call(manager,id);};
   manager.requestClient.sendRequest=function(method:string,params:Native,...rest:any[]){return adapter.#send(managed,method,params,rest);};
-  manager.onNotification=function(method:string,params:Native,...rest:any[]){if(method==='account/rateLimits/updated')adapter.usage.observe('host',params);const b=managed.bindings.get(params?.threadId??params?.thread?.id);if(b?.shared)return;const result=managed.notification.call(manager,method,params,...rest);if(b)adapter.#turnNotification(b,method,params);return result;};
+  manager.onNotification=function(method:string,params:Native,...rest:any[]){if(method==='account/rateLimits/updated')adapter.usage.observe('host',params);if(method==='account/updated')adapter.#identityChanged();const b=managed.bindings.get(params?.threadId??params?.thread?.id);if(b?.shared)return;const result=managed.notification.call(manager,method,params,...rest);if(b)adapter.#turnNotification(b,method,params);return result;};
   manager.sendAppServerResponse=function(method:string,response:Native,id:string,...rest:any[]){const b=managed.bindings.get(id);if(b?.shared&&b.pending.has(String(response.id))){b.pending.delete(String(response.id));void adapter.#call({action:'shared.reply',conversationId:id,id:response.id,result:response.result}).catch(e=>adapter.#fail(b,e));return;}return managed.reply.call(manager,method,response,id,...rest);};
   this.#disposers.push(()=>{manager.executeTurnStart=managed.execute;manager.getStreamRole=managed.role;manager.onNotification=managed.notification;manager.sendAppServerResponse=managed.reply;manager.requestClient.sendRequest=managed.send;});
  }
@@ -686,22 +693,28 @@ export class NativeAccountAdapter {
   }
   const id=resolveActiveThread()!,selected=normalizeSelection(this.#info.selected[id],this.#info.connections);
   this.#rpcSendPreparing=true;this.#selectionTarget={id:selected,conversationId:id};this.#preparation={phase:'native-history',elapsedMs:0};this.changed();
-   await this.#assertCreditPermission(selected,preparation.controller.signal);
-   if(this.#disposed||!this.#enabled||this.#disabling)throw Error('ACCOUNT_SEND_PREPARATION_CHANGED: Account preparation was cancelled. No turn was sent.');
-   const result=await this.#call<Native>({action:'native.ensure',conversationId:id,connectionId:selected,preparationId:preparation.id});
-   if(this.#disposed||!this.#enabled||this.#disabling||this.#profileError||result.ready!==true||result.threadId!==id||result.selected!==selected||resolveActiveThread()!==id)throw Error('ACCOUNT_SEND_PREPARATION_CHANGED: The execution connection could not be verified for this conversation. No turn was sent.');
-   this.#info.nativeRoutes??={};if(selected==='host'&&result.routed!==true)delete this.#info.nativeRoutes[id];else this.#info.nativeRoutes[id]=selected;
+   const signal=preparation.controller.signal;
+   const current=()=>!this.#disposed&&this.#enabled&&!this.#disabling&&!this.#profileError&&!signal.aborted&&resolveActiveThread()===id;
+   const selectedNow=()=>normalizeSelection(this.#info.selected[id],this.#info.connections);
+   let checkedQuota=false;
    if(this.#autoEnabled&&selected!=='host'&&(this.usage.remaining(selected).fiveHour===0||this.usage.remaining(selected).weekly===0)&&(await this.#rpcObserver?.state(id))?.inProgress===false){
-    const raw=await this.#readUsage(selected);this.usage.observe(selected,raw);
+    const raw=await this.usage.observeRead(selected,()=>this.#readUsage(selected,signal));checkedQuota=true;
+    if(!current()||selectedNow()!==selected)throw Error('ACCOUNT_SEND_PREPARATION_CHANGED: The account changed during quota verification. No turn was sent.');
     if(quotaEligibility(raw)==='exhausted'){
      const cycle=new AccountContinuationCycle(this.#accountOrder(),selected);
      const nativeSettings=await this.#rpcObserver!.settings(id);let settings:Native={model:nativeSettings.latestModel,effort:nativeSettings.latestReasoningEffort};
-     const current=()=>!this.#disposed&&this.#autoEnabled&&!this.#profileError&&resolveActiveThread()===id;
-     const result=await continueAfterQuota(cycle,{current:()=>!this.#disposed&&this.#autoEnabled&&!this.#profileError&&resolveActiveThread()===id,available:c=>c==='host'||this.#info.connections.some(v=>v.id===c&&(v.email||v.api)),isApi:c=>this.#info.connections.some(v=>v.id===c&&!!v.api),quota:async c=>{const raw=await this.#readUsage(c);this.usage.observe(c,raw);return raw;},prepare:async c=>{settings=await this.#prepareContinuation(id,c,settings,current);},resume:async()=>{},phase:()=>{},event:(stage,details)=>runtimeEvent('accounts','account.auto',stage,{...details,origin:'pre-send',taskSent:false})});
+     const continuing=()=>current()&&this.#autoEnabled;
+     const result=await continueAfterQuota(cycle,{current:continuing,model:settings.model,available:c=>c==='host'||this.#info.connections.some(v=>v.id===c&&(v.email||v.api)),isApi:c=>this.#info.connections.some(v=>v.id===c&&!!v.api),quota:async c=>{const raw=await this.usage.observeRead(c,()=>this.#readUsage(c,signal));await this.#assertCreditPermission(c,signal,true);return raw;},prepare:async c=>{settings=await this.#prepareContinuation(id,c,settings,continuing);},resume:async()=>{},phase:()=>{},event:(stage,details)=>runtimeEvent('accounts','account.auto',stage,{...details,origin:'pre-send',taskSent:false})});
      if(result!=='continued')throw Error('ACCOUNT_AUTO_NO_QUOTA: No account in this traversal has verified available quota. The message was not sent.');
      this.#rpcCycles.set(id,{cycle,settings,prepared:true});
+     return;
     }
    }
+   await this.#assertCreditPermission(selected,signal,checkedQuota);
+   if(!current()||selectedNow()!==selected)throw Error('ACCOUNT_SEND_PREPARATION_CHANGED: Account preparation was cancelled. No turn was sent.');
+   const result=await this.#call<Native>({action:'native.ensure',conversationId:id,connectionId:selected,preparationId:preparation.id});
+   if(!current()||selectedNow()!==selected||result.ready!==true||result.threadId!==id||result.selected!==selected)throw Error('ACCOUNT_SEND_PREPARATION_CHANGED: The execution connection could not be verified for this conversation. No turn was sent.');
+   this.#info.nativeRoutes??={};if(selected==='host'&&result.routed!==true)delete this.#info.nativeRoutes[id];else this.#info.nativeRoutes[id]=selected;
    this.#rpcRouteFaults.delete(id);
   }
   finally{this.#finishPreparation(preparation.id);this.#rpcSendPreparing=false;if(!this.#selecting)this.#selectionTarget=undefined;finish();this.changed();}
@@ -765,7 +778,7 @@ export class NativeAccountAdapter {
     current,available:c=>c==='host'||this.#info.connections.some(v=>v.id===c&&(v.email||v.api)),
     isApi:c=>this.#info.connections.some(v=>v.id===c&&!!v.api),
     model:entry.settings.model,
-    quota:async c=>{this.#selectionTarget={id:c,conversationId:id};this.#preparation={phase:'check-quota',elapsedMs:0};this.changed();const raw=await this.#readUsage(c);if(current())this.usage.observe(c,raw);return raw;},
+    quota:async c=>{this.#selectionTarget={id:c,conversationId:id};this.#preparation={phase:'check-quota',elapsedMs:0};this.changed();const raw=await this.usage.observeRead(c,()=>this.#readUsage(c));if(current())await this.#assertCreditPermission(c,undefined,true);return raw;},
     prepare:async c=>{if(current())entry.settings=await this.#prepareContinuation(id,c,entry.settings,current);},
     resume:async()=>{if(current()){const state=await this.#rpcObserver?.state(id);if(state?.inProgress!==false)throw Error('ACCOUNT_AUTO_TURN_ACTIVE: Another native turn is active. No continuation was sent.');if(current())await this.#rpcObserver!.start(id,continuationOperation(id,entry.settings,crypto.randomUUID()));}},
     phase:phase=>{this.#preparation={phase:phase==='checking'?'check-quota':phase==='preparing'?'native-transport':'continue-task',elapsedMs:0};this.changed();},
@@ -775,9 +788,14 @@ export class NativeAccountAdapter {
   }catch(error){entry.cycle.cancel();this.#showNotice(String(error));runtimeEvent('accounts','account.auto','failed',{errorCode:accountErrorCode(error),executionMode:'native-relay',taskRetry:false});}
   finally{this.#rpcAutomatic.delete(id);if(!this.#selecting)this.#selectionTarget=undefined;this.changed();if(this.#rpcPendingTerminal.delete(id)&&current())void this.#rpcContinue(id);}
  }
+ #identityChanged():void{
+   this.#hostIdentityRevision++;
+   this.usage.forgetCreditEvidence('host');
+   window.dispatchEvent(new Event('code-codex:account-identity-changed'));
+ }
  #rpcNotification(method:string,p:Native):void{
   if(this.#disposed)return;
-  if(method==='account/updated'){if(Object.hasOwn(p,'planType')){this.#info.owner.plan=typeof p.planType==='string'&&/^[a-z][a-z0-9_-]{0,39}$/i.test(p.planType)?p.planType:null;this.changed();}return;}
+  if(method==='account/updated'){this.#identityChanged();return;}
   if(method==='account/rateLimits/updated'){this.usage.observe('host',p);const remaining=this.usage.remaining('host'),signature=JSON.stringify(remaining);if(signature!==this.#rpcQuotaSignature){this.#rpcQuotaSignature=signature;runtimeEvent('accounts','account.quota','observed',{stage:'native-rpc-notification',accountOrdinal:1,...remaining,taskSent:false});}return;}
   if(typeof p?.threadId!=='string')return;
   if(method==='thread/compacted'||(method==='item/started'||method==='item/completed')&&p.item?.type==='contextCompaction'){

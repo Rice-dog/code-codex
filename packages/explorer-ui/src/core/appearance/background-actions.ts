@@ -8,7 +8,7 @@ export interface BackgroundRuntime {
   readonly error: string | undefined;
   readonly stoppedForExternalThemeChange?: boolean;
   initialize(): Promise<unknown>;
-  enable(): Promise<unknown>;
+  enable(packagePrepared?: boolean): Promise<unknown>;
   disable(preserveTheme?: boolean): Promise<unknown>;
 }
 export interface BackgroundEntry {
@@ -29,6 +29,7 @@ export interface BackgroundActionPorts {
   /** Native transparency must succeed before any current media is stopped. */
   readonly leaveNativeTransparency: (target: string) => Promise<void>;
   readonly reconcileNative: () => Promise<void>;
+  readonly holdBacking?: () => (() => void) | undefined;
   readonly transferTheme: (target: string) => void;
   readonly committed: () => void;
   readonly changed: () => void;
@@ -51,6 +52,12 @@ export class BackgroundActions implements BackgroundCommands {
     const entry = this.#required(id);
     if (this.ports.enabled.has(id) || entry.runtime.enabled) await entry.runtime.disable(true);
     if (this.ports.enabled.delete(id)) this.ports.committed();
+  }
+  async restore(ids: readonly string[], generation: number): Promise<void> {
+    for (const id of ids) {
+      if (!this.ports.initializationCurrent(generation)) return;
+      if (this.ports.enabled.has(id) || this.#required(id).runtime.enabled) await this.initialize(id, generation);
+    }
   }
   async initialize(id: string, generation: number): Promise<void> {
     const entry = this.#required(id);
@@ -85,11 +92,13 @@ export class BackgroundActions implements BackgroundCommands {
     const previous: BackgroundEntry[] = [];
     let before = new Set<string>();
     let captured = false;
+    let releaseBacking: (() => void) | undefined;
     let started = false, committed = false;
     const owner = {};
     const current = () => p.connected() && p.coordinator.current(operation);
     try {
-      if (!p.enabled.has(id)) await p.prepare(id);
+      const packagePrepared = !p.enabled.has(id);
+      if (packagePrepared) await p.prepare(id);
       if (!current() || !await p.ready(operation) || !current()) return;
       before = new Set(p.enabled);
       captured = true;
@@ -102,11 +111,12 @@ export class BackgroundActions implements BackgroundCommands {
         if (!current()) { await p.reconcileNative(); return; }
         if (entry.activationOrder === 'before-exclusion') {
           this.#runtimeOwners.set(id, owner);
-          await entry.runtime.enable();
+          await entry.runtime.enable(packagePrepared);
           started = entry.runtime.enabled;
           if (!current()) return;
           if (!started) throw new Error(entry.runtime.error || `BACKGROUND_ENABLE_FAILED: ${entry.label} could not be enabled.`);
         }
+        if (entry.activationOrder !== 'before-exclusion') releaseBacking = p.holdBacking?.();
         for (const other of p.entries) {
           if (other.id === id || !other.runtime.enabled) continue;
           previous.push(other);
@@ -116,7 +126,7 @@ export class BackgroundActions implements BackgroundCommands {
         if (entry.activationOrder !== 'before-exclusion') {
           p.transferTheme(id);
           this.#runtimeOwners.set(id, owner);
-          await entry.runtime.enable();
+          await entry.runtime.enable(packagePrepared);
           started = entry.runtime.enabled;
         }
         if (!current()) return;
@@ -147,6 +157,7 @@ export class BackgroundActions implements BackgroundCommands {
           await p.reconcileNative().catch(error => p.failed('rollback native transparency', error));
         }
       }
+      releaseBacking?.();
       if (p.coordinator.current(operation)) {
         p.coordinator.transitionPending = false;
         p.changed(); p.resumeHealth();

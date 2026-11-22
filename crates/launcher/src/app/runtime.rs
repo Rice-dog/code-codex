@@ -304,7 +304,9 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
     tracing::info!(event = "codex_launched", channel = %installation.channel);
 
     let result = async {
-        let mut startup_route_applied=native_startup_route;
+        // Native Chromium uses the wrapper for primary-account control only.
+        // The renderer continues to send through the native default provider.
+        let mut startup_route_applied=false;
         if let Some(main_inspector_endpoint) = main_inspector_endpoint {
             record_startup_event("main inspector", if startup_route.is_some(){"preparing startup account transport"}else{"waiting for Windows 10 surface patch"});
             let patched = crate::platform_windows_compat::initialize_native_main_process(main_inspector_endpoint, endpoint, launched_pid, launched_after,startup_route.as_ref(),windows_10).await?;

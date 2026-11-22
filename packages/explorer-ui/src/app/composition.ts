@@ -11,10 +11,24 @@ import {MULTI_ACCOUNT_AVAILABLE} from '../core/configuration/optional-features';
 import {discoverSharedDispatcher} from '../../../../resources/account-host-capabilities.js';
 import {runtimeEvent} from '../runtime-events';
 
+const activationKey = 'code-codex:committed-activation-epoch:v1';
+function newerActivationCommitted(epoch: number | undefined): boolean {
+  if (epoch === undefined) return false;
+  try { return Number(window.sessionStorage.getItem(activationKey)) > epoch; }
+  catch { return false; }
+}
+
+function rememberActivation(epoch: number | undefined): void {
+  if (epoch === undefined) return;
+  try { window.sessionStorage.setItem(activationKey, String(epoch)); }
+  catch { /* The existing document ownership fence remains active. */ }
+}
+
 /** Composition owns startup ordering. Preference failures must not hide recovery UI. */
 export function startApplication(): void {
   // Stop a released supervisor before it cancels the current startup or probes.
-  if(documentBindingRetired(getBootstrapConfig().binding))return;
+  const { binding, activationEpoch } = getBootstrapConfig();
+  if(documentBindingRetired(binding)||newerActivationCommitted(activationEpoch))return;
   const key=Symbol.for('code-codex:application-startup:v1'),globals=window as unknown as Record<symbol,{version:string;binding?:string|undefined;cancel():void}>;
   const prior=globals[key],version=__CODE_CODEX_VERSION__;
   if(prior?.version===version&&prior.binding===getBootstrapConfig().binding)return;
@@ -22,7 +36,7 @@ export function startApplication(): void {
   let cancelled=false,timer:ReturnType<typeof setTimeout>|undefined,finishAccounts:(()=>Promise<void>)|undefined;
   globals[key]={version,binding:getBootstrapConfig().binding,cancel(){cancelled=true;clearTimeout(timer);}};
   const attempt=async(count:number):Promise<void>=>{
-    if(cancelled||documentBindingRetired(getBootstrapConfig().binding))return;
+    if(cancelled||documentBindingRetired(binding)||newerActivationCommitted(activationEpoch))return;
     try{
       // Publish the UI once. Existing retries apply only to account execution
       // ownership; they must not recreate its bridge or wait to show the tree.
@@ -47,7 +61,7 @@ async function startOwnedApplication(current:()=>boolean): Promise<(()=>Promise<
     // A surviving JS binding/DOM version is not a live native service. Probe the
     // candidate transport before retiring the previous connection or its tasks.
     await storageBridge.request('explorer.language.get',{},5000);
-    if(!current()){storageBridge.dispose();return;}
+    if(!current()||newerActivationCommitted(bootstrap.activationEpoch)){storageBridge.dispose();return;}
     if(!await replaceDocumentConnection(()=>({dispose:()=>storageBridge.dispose()}),async()=>{
       if(!current())throw Error('CC-START-HANDOFF-RETIRED: A newer activation owns startup.');
     },bootstrap.token,true,bootstrap.binding,true)){storageBridge.dispose();return;}
@@ -56,6 +70,7 @@ async function startOwnedApplication(current:()=>boolean): Promise<(()=>Promise<
   }
   storageBridge.connectServices();
   connectApplicationMenu(storageBridge.request.bind(storageBridge));
+  rememberActivation(bootstrap.activationEpoch);
   const mount=()=>{if(current())installInjector();};
   if(bootstrap.centralizedStorage)void initializeRendererStorage().then(mount,error=>{
     console.warn('CC-START-STORAGE-001: Native preference restoration failed; mounting recovery interface.',error);mount();

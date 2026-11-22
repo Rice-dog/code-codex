@@ -7,7 +7,7 @@ const root=resolve(import.meta.dirname,'..'),out=resolve(root,'artifacts/account
 await build({stdin:{contents:"export {NativeAccountAdapter} from './features/accounts/native-adapter';export {bindAccountTransport} from './features/accounts/transport';export {retireLegacyAccountAdapter} from './features/accounts/legacy-handoff';",resolveDir:resolve(root,'packages/explorer-ui/src'),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:resolve(out,'adapter.mjs'),plugins:[{name:'active-thread-fixture',setup(b){b.onResolve({filter:/active-thread$/},()=>({path:'active-thread',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const resolveActiveThread=()=>globalThis.__autoTask;'}));}}]});
 globalThis.window=new EventTarget();globalThis.__autoTask='task-one';
 const {NativeAccountAdapter,bindAccountTransport,retireLegacyAccountAdapter}=await import(pathToFileURL(resolve(out,'adapter.mjs'))),checks=[];
-const quota=(five=50,week=50)=>({rateLimits:{limitId:'codex',primary:{usedPercent:100-five,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:100-week,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
+const quota=(five=50,week=50)=>({rateLimits:{limitId:'codex',credits:{balance:'0',hasCredits:false,unlimited:false},primary:{usedPercent:100-five,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+3600},secondary:{usedPercent:100-week,windowDurationMins:10080,resetsAt:Math.floor(Date.now()/1000)+86400}}});
 const wait=async predicate=>{for(let i=0;i<100;i++){if(predicate())return;await new Promise(r=>setTimeout(r,30));}throw Error('Fixture wait expired');};
 async function fixture(cold=false){
  globalThis.__autoTask='task-one';
@@ -59,6 +59,16 @@ const test=async(name,run)=>{const f=await fixture();try{await run(f);checks.pus
  const f=await fixture(true);try{f.manager.onNotification('account/rateLimits/updated',quota(84,34));assert.equal(f.adapter.usage.remaining('host').fiveHour,84);checks.push('The first native notification attaches the cold manager and consumes its quota update');}finally{await f.cleanup();}
 }
 await test('Default off never retries a quota failure',async f=>{await f.adapter.select('B');await f.manager.startTurn('task-one',f.input);f.complete('failed','usageLimitExceeded');await wait(()=>!f.adapter.status().busy);assert.equal(f.sends.length,1);});
+await test('A send with trusted no-credit evidence never waits for a hung quota refresh',async f=>{
+ await f.adapter.select('B');await wait(()=>f.adapter.usage.diagnostics('B')?.phase==='ready');
+ let release;f.setQuotaGate(new Promise(resolve=>{release=resolve;}));
+ const countReads=()=>f.calls.filter(c=>c.action==='usage'&&c.connectionId==='B').length;
+ const beforeRefresh=countReads();
+ f.adapter.usage.invalidate('B');f.adapter.usage.refresh(['B']);
+ try{await wait(()=>countReads()>beforeRefresh);const before=countReads();await f.manager.startTurn('task-one',f.input);assert.equal(f.sends.length,1);assert.equal(countReads(),before);}
+ finally{release();}
+ f.complete();await wait(()=>!f.adapter.status().busy);
+});
 await test('Starting at B skips empty C then prepares host before one same-thread continuation',async f=>{f.adapter.setAutoContinue(true);await f.adapter.select('B');f.quotas.set('C',quota(0,50));await f.manager.startTurn('task-one',f.input);const at=f.calls.length;f.complete('failed','usageLimitExceeded');await wait(()=>f.sends.length===2);assert.deepEqual(f.sends.map(s=>s.account),['B','host']);const op=f.sends[1];assert.equal(op.id,'task-one');assert.equal(op.params.model,'fixture-model');assert.equal(op.params.effort,'high');assert(!JSON.stringify(op.params).includes('ORIGINAL_TASK_PRIVATE'));assert.notEqual(op.params.clientUserMessageId,'manual-id');const actions=f.calls.slice(at);assert(actions.some(c=>c.action==='usage'&&c.connectionId==='C'));assert(!actions.some(c=>c.action==='shared.prepare'&&c.connectionId==='C'));assert.equal(actions.find(c=>c.action==='shared.prepare').settings.permissions,':danger-full-access');f.complete();await wait(()=>f.adapter.canDisable());assert.equal(f.sends.length,2);});
 await test('C to host to B traverses once and stops on the next quota failure',async f=>{f.adapter.setAutoContinue(true);await f.adapter.select('C');await f.manager.startTurn('task-one',f.input);f.complete('failed','usageLimitExceeded');await wait(()=>f.sends.length===2);f.complete('failed','usageLimitExceeded');await wait(()=>f.sends.length===3);f.complete('failed','usageLimitExceeded');await wait(()=>f.notices.some(m=>m.startsWith('ACCOUNT_AUTO_NO_QUOTA')));assert.deepEqual(f.sends.map(s=>s.account),['C','host','B']);assert.equal(f.notices.filter(m=>m.startsWith('ACCOUNT_AUTO_NO_QUOTA')).length,1);});
 await test('An unshared host task can promote to the same shared conversation after quota failure',async f=>{f.adapter.setAutoContinue(true);await f.manager.startTurn('task-one',f.input);f.complete('failed','usageLimitExceeded');await wait(()=>f.sends.length===2);assert.deepEqual(f.sends.map(s=>s.account),['host','B']);assert(f.state.sharedConversations.includes('task-one'));});

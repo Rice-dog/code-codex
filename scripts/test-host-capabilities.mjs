@@ -51,6 +51,16 @@ checks.push('Numbered runtime addresses reject external, traversal, query and un
 assert.equal(Object.keys(await loadHostNamespace(profile.actions[0],loader)).length,0);fixture.addActions();assert((await loadHostNamespace(profile.actions[0],loader)).appActionRegistry instanceof Map);checks.push('Lazy official action registry is discovered after actual cache growth without invoking uninitialized factories');
 fixture=runtimeFixture({extraDispatcher:true});await assert.rejects(qualifyHostModules(numbered,loader),/capability=dispatcher; matches=2/);assert.equal(fixture.calls(),0);checks.push('Distinct cached dispatchers fail closed without choosing the first or executing modules');
 fixture=runtimeFixture({missingManager:true});await assert.rejects(qualifyHostModules(numbered,loader),/conversation-manager; matches=0/);checks.push('Numbered packaging does not bypass missing manager capability checks');
+const nativeService={dup(){throw Error('never acquire');},open(){throw Error('never open');},subscribe(){throw Error('never subscribe');}};
+fixture.q.c.services.exports.services.appServerManagers=nativeService;
+delete fixture.q.c.services.exports.services.clientCoordination;
+profile=await qualifyHostModules(numbered,loader);
+assert.equal(profile.managerExport,'');
+assert.equal(profile.dispatcherExport,'dispatch.bus');
+assert.equal(fixture.calls(),0);
+fixture.q.c.services.exports.distinct={...fixture.q.c.services.exports.services,appServerManagers:{...nativeService}};
+await assert.rejects(qualifyHostModules(numbered,loader),/capability=rpc-manager-service; matches=2/);
+checks.push('Native RPC service and dispatcher qualify without the removed legacy manager; distinct services fail without RPC');
 fixture=runtimeFixture();await assert.rejects(qualifyHostModules(numbered,async()=>({one:fixture.q,two:runtimeFixture().q})),/runtime-selection/);checks.push('Ambiguous distinct runtimes are rejected before account state');
 await assert.rejects(qualifyHostModules({...numbered,runtimes:Array(5).fill(path)},loader),/module-discovery/);checks.push('Numbered main-entry discovery is bounded');
 const malicious={};Object.defineProperty(malicious,'execute',{enumerable:true,get(){throw Error('Unrelated getters must not run')}});fixture.q.c.unrelated={exports:malicious};fixture.q.m.unrelated=function unrelatedFactory(){return 'plain unrelated code'};await qualifyHostModules(numbered,loader);checks.push('Unrelated cached export getters and factory bodies remain untouched');

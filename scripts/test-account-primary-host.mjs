@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';import {readFile,mkdir,writeFile} from 'node:fs/promises';
-const source='(async()=>{'+await readFile('crates/launcher/src/accounts/host_rpc_deadline.js','utf8')+';return await ('+await readFile('crates/launcher/src/accounts/primary_host.js','utf8')+');})()';globalThis.window=globalThis;
+const roles=(await readFile('resources/account-host-capabilities.js','utf8')).replaceAll('export ','');
+const source='(async()=>{'+roles+';'+await readFile('crates/launcher/src/accounts/host_rpc_deadline.js','utf8')+';return await ('+await readFile('crates/launcher/src/accounts/primary_host.js','utf8')+');})()';globalThis.window=globalThis;
 let active=false,known=true,status='idle',requests=[],disposed=0,connected=true,malformed=false;
 const lease={dup(){return this},[Symbol.dispose](){disposed++}};
 const manager={...lease,sendRequest:async(method,p)=>{requests.push({method,p});if(method==='thread/loaded/list')return malformed?{data:null}:{data:['thread-a','thread-b'],nextCursor:null};if(method==='thread/read')return {thread:{status:{type:status}}};if(method==='account/login/cancel')return {status:'canceled'};throw Error('Unexpected method '+method)},getThreadExecutionState:async()=>known?{inProgress:active}:null};
-globalThis.primaryFixture={appServerManagers:{...lease,open:()=>Promise.resolve({status:connected?'ready':'disconnected',manager})},executionHosts:{},clientCoordination:{},appActions:{}};
+globalThis.primaryFixture={appServerManagers:{...lease,open:()=>Promise.resolve({status:connected?'ready':'disconnected',manager})},executionHosts:{},appActions:{}};
 const profile={shared:'data:text/javascript,export const service=globalThis.primaryFixture'};
 const run=p=>eval(source.replace('__PROFILE__',JSON.stringify(profile)).replace('__PARAMS__',JSON.stringify(p)));
 const reset=()=>{active=false;known=true;status='idle';requests=[];connected=true;malformed=false;};const checks=[];
