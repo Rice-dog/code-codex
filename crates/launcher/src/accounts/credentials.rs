@@ -79,6 +79,29 @@ pub fn read(home: &Path, email: &str, host: bool) -> Result<Value> {
     Ok(json!({"type":"chatgptAuthTokens","accessToken":token,"chatgptAccountId":account}))
 }
 
+/// Preserve the file path for ordinary sign-in. A keyring-only primary is
+/// read by the official app-server, via the same bounded credential contract.
+pub(super) async fn read_primary(home: &Path, email: &str) -> Result<Value> {
+    if primary_launch_store(home) != Some("keyring") {
+        return read(home,email,true);
+    }
+    let worker = super::Worker::spawn(home).await?;
+    let result = async {
+        let exported = worker.cached_credential().await?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| AccountError::protocol("The credential observation clock is unavailable."))?.as_secs();
+        if let Some(auth) = managed_token(&exported,email,now,false)? {
+            return Ok(auth);
+        }
+        let observed = worker.request("account/read",json!({"refreshToken":false})).await?;
+        super::identity::check(&observed,Some(email))?;
+        managed_token(&exported,email,now,true)?.ok_or_else(|| AccountError::new(
+            "ACCOUNT_CREDENTIAL_STALE","The verified official keyring does not contain a usable primary credential. No task was sent."))
+    }.await;
+    worker.stop_checked().await?;
+    result
+}
+
 /// Fixed native-only token export supported by the qualified official app-server.
 /// Native token claims are checked against the saved identity before use.
 /// Neither the backend response nor the token is queued to renderer.
@@ -379,6 +402,21 @@ mod tests {
         assert!(cleanup.is_ok(),"Temporary credential cleanup failed");
         assert!(result.as_ref().ok().is_some_and(|v|v["account"]["type"]=="chatgpt"),"The preserved authorization could not be read by the official backend");
         for (name,hash) in before{assert_eq!(std::fs::read(source.join(name)).ok().map(|b|Sha256::digest(b).to_vec()),hash,"Original credential storage changed during read-only snapshot validation");}
+    }
+    #[tokio::test]
+    #[ignore="Explicit local keyring route verification with an isolated snapshot; no live login or inference."]
+    async fn keyring_primary_route_reads_the_official_store() {
+        let expected = std::env::var("CODE_CODEX_TEST_PRIMARY_IDENTITY").expect("Expected identity unavailable");
+        let original = official_home().unwrap();
+        assert_eq!(primary_launch_store(&original), Some("keyring"));
+        let temporary = tempfile::tempdir().unwrap();
+        let home = temporary.path().join("keyring");
+        snapshot_managed(&original,&home).unwrap();
+        crate::renderer_storage::atomic(&home.join("managed-auth-source.json"),&json!({"schema":1,"store":"keyring"})).unwrap();
+        let result = read_primary(&home,&expected).await;
+        let cleaned = delete(&home);
+        assert!(cleaned.is_ok(),"Isolated keyring fixture cleanup failed");
+        assert!(result.is_ok(),"The official keyring route could not verify its isolated primary credential");
     }
     #[tokio::test]
     #[ignore = "Explicit local Windows credential check; emits no credentials or account response."]

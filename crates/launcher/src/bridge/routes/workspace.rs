@@ -38,10 +38,10 @@ impl NativeBridge {
             .map(|thread| thread.strip_prefix("local:").unwrap_or(thread))
             .map(str::to_owned);
 
+        let reuse_workspace = params.reuse_workspace;
         if let Some(thread_id) = requested_thread {
-            if let Some(workspace) = self.inner.manual_workspace.clone() {
-                self.replace_context(Some(thread_id), workspace, epoch, request_generation)
-                    .await?;
+            let workspace = if let Some(workspace) = self.inner.manual_workspace.clone() {
+                workspace
             } else {
                 let resolver = self.inner.resolver.as_ref().ok_or_else(no_context_error)?;
                 let resolved = resolver.resolve_thread(&thread_id).await;
@@ -49,27 +49,29 @@ impl NativeBridge {
                 let resolved = resolved.map_err(map_resolver_error)?;
                 let workspace = Workspace::open(resolved.cwd).map(Arc::new);
                 self.ensure_context_request(epoch, request_generation)?;
-                let workspace = workspace.map_err(map_workspace_error)?;
-                self.replace_context(Some(thread_id), workspace, epoch, request_generation)
-                    .await?;
-            }
+                workspace.map_err(map_workspace_error)?
+            };
+            self.replace_context(Some(thread_id), workspace, epoch, request_generation, reuse_workspace)
+                .await?;
         } else if lock_unpoisoned(&self.inner.state)
             .current
             .as_ref()
             .is_none_or(|context| context.lifecycle_epoch != epoch)
         {
             if let Some(workspace) = self.inner.manual_workspace.clone() {
-                self.replace_context(None, workspace, epoch, request_generation)
+                self.replace_context(None, workspace, epoch, request_generation, reuse_workspace)
                     .await?;
             }
         }
 
-        let context = self.active_context_for_request(epoch, request_generation)?;
+        let (context, watching) = self.active_context_for_request(epoch, request_generation)?;
         let result = ContextResult {
             thread_id: context.thread_id,
             project_name: context.workspace.display_name().to_owned(),
             root_name: context.workspace.display_name().to_owned(),
             root_path: context.workspace.root_path().to_string_lossy().into_owned(),
+            workspace_revision: context.workspace_revision,
+            watching,
             compatible: true,
             reason: None,
         };

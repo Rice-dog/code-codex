@@ -32,7 +32,7 @@ import {
 import { isHomeWorkspaceView } from "./home-view";
 import { LOGIN_BACKGROUND_CSS, reconcileLoginBackground, isNativeLoginView } from "./native-login";
 import {observeNativeStructure} from './native-structure-changes';
-import {UPDATE_MOUNT_READY} from './host-update-mount';
+import {canRetainWorkspaceMount, UPDATE_MOUNT_READY} from './host-update-mount';
 import {
   clearExplorerDismissalForSession,
   dismissExplorerForSession,
@@ -627,6 +627,11 @@ export function injectExplorer(): CodeCodexElement | null {
   if (mount.strategy === "known:main.main-surface" || mount.strategy === "known:workspace-row") installShellLayoutStyle();
 
   if (existing) {
+    if (mount.strategy === "safe-drawer" && !mount.mainSurface &&
+        canRetainWorkspaceMount(existing, window.innerWidth, getBootstrapConfig().forceDrawer === true)) {
+      existing.reconcileMainPreview(null);
+      return existing;
+    }
     const responsiveDrawer =
       mount.placement === "drawer" &&
       existing.dataset.placement === "drawer" &&

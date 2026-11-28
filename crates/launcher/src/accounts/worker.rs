@@ -20,6 +20,55 @@ use tokio::{
 };
 
 const MAX_MESSAGE: usize = 8 * 1024 * 1024;
+pub(super) type LoginNotification = (tokio::sync::broadcast::Sender<cdp_client::BridgeNotification>, u64);
+
+struct LoginWatch {
+    id: String,
+    notification: LoginNotification,
+}
+
+fn consume_login(watch: &mut Option<LoginWatch>, params: &Value) -> Option<bool> {
+    let success = params["success"].as_bool()?;
+    if watch.as_ref().is_none_or(|watch| params["loginId"].as_str() != Some(watch.id.as_str())) {
+        return None;
+    }
+    let (sender, lifecycle_epoch) = watch.take().expect("matched login watch").notification;
+    if success {
+        let _ = sender.send(cdp_client::BridgeNotification {
+            payload: json!({"method":"explorer.accounts.login.completed","params":{}}),
+            lifecycle_epoch,
+        });
+    }
+    Some(success)
+}
+
+#[cfg(test)]
+#[test]
+fn login_completion_notifies_only_the_matching_success_once() {
+    let (sender, mut receiver) = tokio::sync::broadcast::channel(4);
+    let mut watch = Some(LoginWatch { id: "active".into(), notification: (sender.clone(), 7) });
+    for params in [
+        json!({"loginId":"previous","success":true}),
+        json!({"loginId":"active"}),
+        json!({"loginId":null,"success":true}),
+    ] {
+        assert_eq!(consume_login(&mut watch, &params), None);
+        assert!(receiver.try_recv().is_err());
+    }
+    let completed = json!({"loginId":"active","success":true,"extra":"private"});
+    assert_eq!(consume_login(&mut watch, &completed), Some(true));
+    let wake = receiver.try_recv().unwrap();
+    assert_eq!(wake.lifecycle_epoch, 7);
+    assert_eq!(wake.payload, json!({"method":"explorer.accounts.login.completed","params":{}}));
+    assert_eq!(consume_login(&mut watch, &completed), None);
+    assert!(receiver.try_recv().is_err());
+
+    watch = Some(LoginWatch { id: "active".into(), notification: (sender, 7) });
+    assert_eq!(consume_login(&mut watch, &json!({"loginId":"active","success":false})), Some(false));
+    assert!(watch.is_none());
+    assert!(receiver.try_recv().is_err());
+}
+
 type Reply = oneshot::Sender<Result<Value>>;
 struct PendingSlot<'a>{slots:&'a std::sync::Mutex<HashMap<u64,Reply>>,id:u64}
 impl Drop for PendingSlot<'_>{fn drop(&mut self){self.slots.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&self.id);}}
@@ -32,6 +81,7 @@ pub struct Worker {
     pub(super) sqlite:std::path::PathBuf,
     retiring:std::sync::atomic::AtomicBool,
     auth_transition:std::sync::atomic::AtomicBool,
+    login_watch: std::sync::Mutex<Option<LoginWatch>>,
     credential_refresh:std::sync::Mutex<(u64,u64)>,
     retained_home_lease: std::sync::RwLock<Option<Arc<std::fs::File>>>,
     selection:std::sync::RwLock<Option<String>>,
@@ -48,7 +98,15 @@ pub struct Worker {
     #[cfg(test)] fixture:Option<std::path::PathBuf>,
 }
 impl Worker {
+    pub(super) fn watch_login(&self, id: String, notification: Option<LoginNotification>) {
+        *self.login_watch.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            notification.map(|notification| LoginWatch { id, notification });
+    }
+
     pub(super) fn retain_home_lease(&self,lease:Option<Arc<std::fs::File>>){*self.retained_home_lease.write().unwrap_or_else(std::sync::PoisonError::into_inner)=lease;}
+    pub(super) fn launch(&self) -> Option<crate::discovery::AppServerLaunch> {
+        self._launch.clone()
+    }
     pub async fn spawn(home: &Path) -> Result<Arc<Self>> {
         Self::spawn_sqlite(home, &home.join("sqlite")).await
     }
@@ -78,6 +136,18 @@ impl Worker {
                 "Preparing the official app-server failed. stage=launch-extraction.",
             )
         })?;
+        Self::spawn_using_launch(home, sqlite, events, launch).await
+        })
+    }
+
+    pub(super) async fn spawn_prepared(home: &Path, launch: crate::discovery::AppServerLaunch) -> Result<Arc<Self>> {
+        Self::spawn_using_launch(home, &home.join("sqlite"), None, launch).await
+    }
+
+    async fn spawn_using_launch(
+        home: &Path, sqlite: &Path, events: Option<Arc<Mutex<super::stream::Stream>>>,
+        launch: crate::discovery::AppServerLaunch,
+    ) -> Result<Arc<Self>> {
         let mut command = tokio::process::Command::new(launch.executable());
         command.env_clear();
         for key in [
@@ -153,7 +223,6 @@ impl Worker {
             )
         })?;
         Self::connect(child,Some(launch),home,sqlite,events,#[cfg(test)] None).await
-        })
     }
     async fn connect(mut child:Box<dyn TokioChildWrapper>,launch:Option<crate::discovery::AppServerLaunch>,home:&Path,sqlite:&Path,events:Option<Arc<Mutex<super::stream::Stream>>>,#[cfg(test)] fixture:Option<std::path::PathBuf>)->Result<Arc<Self>> {
         let writer = child
@@ -192,7 +261,7 @@ impl Worker {
             });
         }
         let worker = Arc::new(Self {
-            health:super::worker_health::Health::default(),lifecycle:tokio::sync::RwLock::new(()),health_gate:Mutex::new(()),replacement:std::sync::RwLock::new(None),home:home.to_owned(),sqlite:sqlite.to_owned(),retiring:std::sync::atomic::AtomicBool::new(false),auth_transition:std::sync::atomic::AtomicBool::new(false),credential_refresh:std::sync::Mutex::new((0,0)),
+            health:super::worker_health::Health::default(),lifecycle:tokio::sync::RwLock::new(()),health_gate:Mutex::new(()),replacement:std::sync::RwLock::new(None),home:home.to_owned(),sqlite:sqlite.to_owned(),retiring:std::sync::atomic::AtomicBool::new(false),auth_transition:std::sync::atomic::AtomicBool::new(false),login_watch:Default::default(),credential_refresh:std::sync::Mutex::new((0,0)),
             retained_home_lease:std::sync::RwLock::new(None),
             selection:std::sync::RwLock::new(None),
             auth_source: std::sync::RwLock::new(None),
@@ -228,7 +297,14 @@ impl Worker {
                     break;
                 };
                 worker.evidence.stdout();
-                if message["method"]=="account/login/completed"{worker.auth_transition.store(false,Ordering::Release);}
+                if message["method"] == "account/login/completed" {
+                    worker.auth_transition.store(false, Ordering::Release);
+                    let mut watch = worker.login_watch.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(success) = consume_login(&mut watch, &message["params"]) {
+                        crate::runtime_log::record("accounts", "account.oauth", if success { "completed" } else { "rejected" },
+                            json!({"backendInstance":worker.evidence.id,"taskSent":false}));
+                    }
+                }
                 if message.get("method").is_some() {
                     if message["method"] == "account/chatgptAuthTokens/refresh" {
                         let source = worker
@@ -241,7 +317,8 @@ impl Worker {
                                 managed.invalidate_credential();
                                 super::credentials::managed(&managed, &email).await
                             } else {
-                                super::credentials::read(&home, &email, host)
+                                if host { super::credentials::read_primary(&home, &email).await }
+                                else { super::credentials::read(&home, &email, false) }
                             }
                         } else {
                             Err(AccountError::protocol(
@@ -404,7 +481,10 @@ impl Worker {
                 Err(_)=>{self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);Err(AccountError::new("ACCOUNT_OUTCOME_UNKNOWN",format!("The backend response deadline expired. timeoutMs={}. Do not automatically repeat the operation.",budget.as_millis())))},
             }
         }.await;
-        if result.is_ok()&&matches!(method,"account/login/cancel"|"account/logout"){self.auth_transition.store(false,Ordering::Release);}
+        if result.is_ok()&&matches!(method,"account/login/cancel"|"account/logout"){
+            self.auth_transition.store(false,Ordering::Release);
+            self.login_watch.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        }
         self.health.observe(method,&result);
         self.health.explicit_auth_changed(method,&result);
         let evidence=if result.is_err(){self.evidence.snapshot()}else{json!({"backendInstance":self.evidence.id})};

@@ -8,7 +8,7 @@ try{
  const trace=globalThis.trace=[];globalThis.nativeUp=false;globalThis.active=false;
  const file=join(folder,'composition.mjs');
  const mocks={
-  'bridge.ts':`export function getBootstrapConfig(){return {token:'fixture',binding:'fixture',receiver:'fixture',centralizedStorage:true};}export class ExplorerBridge{constructor(_t,_b,_r,_ms,services){trace.push(['created',services]);}async request(method,p){trace.push(['request',method,p?.action]);if(method==='explorer.language.get'){if(!nativeUp)throw Object.assign(Error('Dead transport'),{code:'TIMEOUT'});return {};}if(p.action==='info')return {owner:{id:'A'},activeConversations:[],selected:{},connections:[]};throw Error('Unexpected native request');}connectServices(){trace.push(['services']);}dispose(){trace.push(['candidate disposed']);}}`,
+  'bridge.ts':`export function getBootstrapConfig(){return {token:'fixture',binding:'fixture',receiver:'fixture',centralizedStorage:true};}export class ExplorerBridge extends EventTarget{constructor(_t,_b,_r,_ms,services){super();globalThis.fixtureBridge=this;trace.push(['created',services]);}async request(method,p){trace.push(['request',method,p?.action]);if(method==='explorer.language.get'){if(!nativeUp)throw Object.assign(Error('Dead transport'),{code:'TIMEOUT'});return {};}if(p.action==='info')return {owner:{id:'A'},activeConversations:[],selected:{},connections:[]};throw Error('Unexpected native request');}connectServices(){trace.push(['services']);}dispose(){trace.push(['candidate disposed']);}}`,
   'inject.ts':`export function installInjector(){trace.push(['inject']);}`,
   'renderer-storage.ts':`export async function initializeRendererStorage(){trace.push(['storage']);}`,
   'runtime-events.ts':`export function runtimeEvent(...args){trace.push(['event',...args]);}`,
@@ -33,6 +33,13 @@ try{
  assert.equal(window[owner].retainedAccounts,undefined);assert.equal(trace.filter(x=>x[0]==='inject').length,1);
  assert(trace.findIndex(x=>x[0]==='services')>trace.findIndex(x=>x[0]==='request'&&x[1]==='explorer.language.get'));
  assert(trace.findIndex(x=>x[0]==='storage')>trace.findIndex(x=>x[0]==='services'));checks.push('Existing idle retry migrates accounts and releases the retained bridge without remounting or reproving the UI transport');
+ let accountChanges=0;
+ window.addEventListener('code-codex:account-identity-changed',()=>accountChanges++);
+ const beforeNotification=trace.length;
+ fixtureBridge.dispatchEvent(new Event('explorer.accounts.login.completed'));
+ assert.equal(accountChanges,1);
+ assert.equal(trace.length,beforeNotification);
+ checks.push('Official child login completion wakes the existing account identity refresh without a new Bridge request at composition');
  const count=trace.length;startApplication();await new Promise(r=>setTimeout(r,100));assert.equal(trace.length,count);window[Symbol.for('code-codex:application-startup:v1')].cancel();checks.push('Repeated same-native bootstrap reuses startup without any request or duplicate tree');
  console.log(JSON.stringify({passed:true,scope:'Production composition/ownership/handoff with controlled native ports; no official process or inference',checks}));
 }finally{await rm(folder,{recursive:true,force:true});}

@@ -8,7 +8,7 @@ const ui=resolve('packages/explorer-ui'),{build}=createRequire(resolve(ui,'packa
 const out=resolve('artifacts/host-update-probes-test');mkdirSync(out,{recursive:true});
 await build({entryPoints:[resolve(ui,'src/host-update-probes.ts')],bundle:true,format:'iife',globalName:'probe',outfile:resolve(out,'probe.js'),define:{__CODE_CODEX_VERSION__:JSON.stringify('0.0.1'),'location.href':JSON.stringify('app://-/index.html'),'location.protocol':JSON.stringify('app:'),'location.host':JSON.stringify('-')}});
 const manager=`class Manager{getConversation(){} startTurn(){} getStreamRole(){} onNotification(){} onRequest(){} executeTurnStart(){} sendAppServerResponse(){}}`;
-const server=createServer((req,res)=>{res.setHeader('Content-Type',req.url.endsWith('.js')?'text/javascript':'text/html');
+const server=createServer((req,res)=>{res.setHeader('Content-Type',req.url.endsWith('.js')?'text/javascript; charset=utf-8':'text/html; charset=utf-8');
  if(req.url==='/probe.js')res.end(readFileSync(resolve(out,'probe.js')));
  else if(req.url==='/assets/app-initial-good.js')res.end(manager+';export {Manager};');
  else if(req.url==='/assets/app-initial-bad.js')res.end('export class Missing{}');
@@ -18,10 +18,10 @@ const server=createServer((req,res)=>{res.setHeader('Content-Type',req.url.endsW
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const browser=await launchFixture(`http://127.0.0.1:${server.address().port}`),checks=[];
 try{
- const run=()=>browser.evaluate(`probe.probeHostUpdate({version:'unknown-compatible',initial:[window[Symbol.for('code-codex:account-host-profile:v1')].initial],shared:['./assets/app-shared-good.js']})`);
+ const run=(version)=>browser.evaluate(`probe.probeHostUpdate({version:'unknown-compatible',initial:[window[Symbol.for('code-codex:account-host-profile:v1')].initial],shared:['./assets/app-shared-good.js']},${version?JSON.stringify({version,background:[]}):'undefined'})`);
  const before=await browser.evaluate('document.documentElement.outerHTML');
  let r=await run();
- for(const id of ['regression.interfaces','regression.layout','regression.models','regression.account-quota-card','regression.account-api-continuation','regression.official-update-handoff','regression.tree-version-startup','regression.tree-version-manual','regression.tree-version-install','regression.startup-video-selection','regression.startup-video-timeline'])assert.equal(r.checks.find(c=>c.id===id)?.status,'passed',id);
+ for(const id of ['regression.interfaces','regression.layout','regression.tree-route-mount','regression.models','regression.account-quota-card','regression.account-api-continuation','regression.official-update-handoff','regression.tree-version-startup','regression.tree-version-manual','regression.tree-version-install','regression.startup-video-selection','regression.startup-video-timeline'])assert.equal(r.checks.find(c=>c.id===id)?.status,'passed',id);
  const state=(id,result=r)=>result.checks.find(c=>c.id===id)?.status;
  assert.equal(state('host.interfaces'),'passed');checks.push('Production qualifier accepts real imported fixture modules independently of a version floor');
  assert.equal(state('host.layout'),'passed');checks.push('Production layout adapter executes on mounted fixture DOM');
@@ -57,6 +57,18 @@ try{
  assert.equal(state('host.quick-tour-targets',await run()),'passed');
  await browser.evaluate(`treeRoot.append(treeRoot.querySelector('.status-code').cloneNode());`);
  assert.equal(state('host.quick-tour-targets',await run()),'issue');
+ await browser.evaluate(`treeRoot.innerHTML='<div class="preview-market-popover"></div><footer><button class="status-code" aria-label="Check for updates" aria-controls="update-dialog">LOADING</button></footer><div id="update-dialog" role="dialog"><button class="update-install"></button><button class="update-later"></button></div>';window.versionButton=treeRoot.querySelector('.status-code');window[Symbol.for('code-codex:document-connection-owner:v2')]={version:'0.6.65'};`);
+ for(const [workspace,label,disabled,feedback,expected] of [
+  ['loading','LOADING',true,'','manual'],['ready','LOADING',true,'','issue'],
+  ['ready','v0.6.65',false,'','passed'],['ready','v0.6.64',false,'','issue'],
+  ['ready','↑ v0.7.0',false,'update','passed'],['ready','v0.6.65',false,'error','passed']]){
+  await browser.evaluate(`Object.assign(versionButton,{textContent:${JSON.stringify(label)},disabled:${disabled}});versionButton.dataset.feedback=${JSON.stringify(feedback)};tree.dataset.state=${JSON.stringify(workspace)};`);
+  assert.equal(state('host.tree-version-control',await run('0.6.65')),expected,`${workspace}: ${label}`);
+ }
+ await browser.evaluate(`treeRoot.querySelector('.update-later').remove();tree.dataset.state='loading';`);
+ assert.equal(state('host.tree-version-control',await run('0.6.65')),'issue');
+ await browser.evaluate(`delete window[Symbol.for('code-codex:document-connection-owner:v2')]`);
+ checks.push('Tree version control distinguishes workspace loading, valid feedback, stale caption, and missing dialog controls');
  await browser.evaluate(`tree.remove();document.querySelector('[data-code-codex-application-menu]').remove()`);
  checks.push('Quick tour target probe distinguishes qualified, ambiguous and unmounted targets without starting the tour');
  await browser.evaluate(`window[Symbol.for('code-codex:account-host-profile:v1')]={initial:'./assets/app-initial-bad.js',shared:'./assets/app-shared-good.js'};`);
@@ -91,7 +103,7 @@ try{
  await browser.evaluate(`document.documentElement.removeAttribute('data-code-codex-particle-image-background')`);r=await run();assert.equal(state('host.settings-paint'),'manual');
  await browser.evaluate(`document.querySelector('main').remove();document.querySelector('[role=menubar]').remove();document.documentElement.style.setProperty('--color-text','');document.querySelector('style').remove();`);
  r=await browser.evaluate(`probe.probeHostUpdate({initial:[],shared:[]})`);assert.equal(state('host.layout'),'manual');assert.equal(state('host.menu'),'manual');assert.equal(state('host.theme'),'manual');checks.push('Unmounted views and unavailable theme tokens stay manual');
- const backgroundIds=['background.market-layout','background.split-layout','background.composer-backdrop','background.side-panel-paint','background.tree-rail-paint','background.settings-paint','background.nav-page-paint','background.surface-transitions'];
+ const backgroundIds=['background.market-layout','background.split-layout','background.composer-backdrop','background.conversation-top-paint','background.side-panel-paint','background.tree-rail-paint','background.settings-paint','background.nav-page-paint','background.surface-transitions'];
  const shellCSS=readFileSync(resolve(ui,'src/inject.ts'),'utf8');
  const productionMarket=readFileSync(resolve(ui,'src/components/styles/status-and-market.ts'),'utf8').split('`')[1];
  const productionSide=readFileSync(resolve(ui,'src/native-side-panel-opacity.ts'),'utf8');
@@ -109,9 +121,40 @@ try{
  r=await runBackground();
  for(const id of backgroundIds)assert.equal(state(id),'passed',JSON.stringify(r.checks.find(c=>c.id===id)));
  assert.equal(state('host.market-scroll'),'manual');assert.equal(state('host.split-layout'),'manual');
+ const sceneEvidence=r.checks.filter(check=>check.scope==='isolated-mounted-regression'&&check.evidenceFor?.startsWith('host.'));
+ assert.equal(sceneEvidence.length,19);
+ assert.equal(new Set(sceneEvidence.map(item=>item.evidenceFor)).size,19);
+ for(const item of sceneEvidence){
+  assert.equal(item.status,item.evidenceFor==='host.menu-closed-indicators'?'manual':'passed',JSON.stringify(item));
+ }
  assert.deepEqual(await browser.evaluate(`({dom:document.documentElement.outerHTML,market:probeTree.shadowRoot.innerHTML,scroll:window.scrollY})`),beforeBackground);
  assert.equal(await browser.evaluate(`document.querySelectorAll('[data-code-codex-update-sandbox]').length`),0);
  checks.push('Isolated mounts cover background, opacity, tree fold/reopen, split and summary states without changing user UI');
+ await browser.evaluate(`document.body.insertAdjacentHTML('beforeend','<div id="code-codex-language-popup" popover="manual" hidden><button role="menuitemradio">English</button></div><style data-code-codex-application-menu-style>[data-code-codex-menu-check]{display:inline-flex}</style>')`);
+ r=await runBackground(['background.surface-transitions']);
+ assert.equal(state('host.menu-closed-indicators'),'manual');
+ assert.equal(state('isolated.host.menu-closed-indicators'),'passed');
+ await browser.evaluate(`document.querySelector('#code-codex-language-popup').remove();document.querySelector('style[data-code-codex-application-menu-style]').remove();`);
+ checks.push('All 19 isolated interface scenarios have individual evidence, including the closed language indicator');
+ await browser.evaluate(`(()=>{
+  const doc=window[Symbol.for('code-codex:document-connection-owner:v2')];
+  doc.nativeBinding='new';doc.retainedAccounts={nativeBinding:'old'};
+  window[Symbol.for('code-codex:accounts-capability:v1')]={request:{runtimeIdentity:'old'}};
+  window[Symbol.for('code-codex:multi-account-runtime:v1')]={enabled:true,adapter:{
+   request:{runtimeIdentity:'new'},info:{owner:{id:'owner',label:'isolated@example.test'},connections:[],activeConversations:[],nativeRouting:true,selected:{fixture:'host'}},
+   status:()=>({supported:true,active:true,conversationId:'fixture'}),
+   usage:{remaining:()=>({fiveHour:0,weekly:99.2}),resetTimes:()=>({fiveHour:null,weekly:null}),diagnostics:()=>{window.accountCacheObserved=true;return {phase:'ready'};}}
+  }};
+  window.accountHandoffProbe=probe.probeHostUpdate({initial:[],shared:[]},{version:'test',background:[]}).then(value=>{window.accountProbeDone=true;return value;});
+ })()`);
+ assert.equal(await browser.evaluate(`(async()=>{for(let i=0;i<60&&!window.accountCacheObserved;i++)await new Promise(requestAnimationFrame);return !!window.accountCacheObserved&&!window.accountProbeDone;})()`),true);
+ await browser.evaluate(`delete window[Symbol.for('code-codex:document-connection-owner:v2')].retainedAccounts;window[Symbol.for('code-codex:accounts-capability:v1')].request.runtimeIdentity='new';window.dispatchEvent(new Event('code-codex:account-handoff-committed'));`);
+ const finishedAccount=await browser.evaluate('window.accountHandoffProbe');
+ for(const id of ['host.account-execution-owner','host.account-execution-route','isolated.host.account-panel-identity','isolated.host.account-panel-quota']){
+  assert.equal(state(id,finishedAccount),'passed',JSON.stringify(finishedAccount.checks.find(c=>c.id===id)));
+ }
+ await browser.evaluate(`delete window[Symbol.for('code-codex:accounts-capability:v1')];delete window[Symbol.for('code-codex:multi-account-runtime:v1')];`);
+ checks.push('Cached account identity and quota render without opening the panel, and the handoff event triggers the route read');
  await browser.evaluate(`(()=>{
   const stage=document.createElement('div');stage.id='pixel-stage';stage.style.cssText='position:fixed;left:12px;top:12px;width:320px;height:120px;background:rgb(247,230,24);z-index:9999';
   stage.innerHTML='<main class="main-surface" style="position:relative;height:120px"><div data-app-shell-main-content-layout="default"><div data-app-shell-focus-area="main"><div data-app-shell-inline-page-header><div data-sticky data-expand-search id="pixel-header" style="height:24px"></div></div></div></div></main><style>#pixel-header::before{content:"";position:absolute;inset:0 0 auto;height:24px;background:black}</style>';

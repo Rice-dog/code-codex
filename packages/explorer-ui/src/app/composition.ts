@@ -69,6 +69,8 @@ async function startOwnedApplication(current:()=>boolean): Promise<(()=>Promise<
     storageBridge.dispose();runtimeEvent('startup','document handoff','failed',{reason:String(error),previousConnectionRetained:true});throw error;
   }
   storageBridge.connectServices();
+  storageBridge.addEventListener('explorer.accounts.login.completed', () =>
+    window.dispatchEvent(new Event('code-codex:account-identity-changed')));
   connectApplicationMenu(storageBridge.request.bind(storageBridge));
   rememberActivation(bootstrap.activationEpoch);
   const mount=()=>{if(current())installInjector();};
@@ -93,6 +95,7 @@ async function startOwnedApplication(current:()=>boolean): Promise<(()=>Promise<
         suspendSessionGuard();suspendAccounts();
       }
       releaseRetainedAccountConnection();
+      window.dispatchEvent(new Event('code-codex:account-handoff-committed'));
     }catch(error){
       // The UI already owns this bridge. Keep it on a deferred account handoff;
       // only a cancelled, unpublished account candidate releases its own lease.

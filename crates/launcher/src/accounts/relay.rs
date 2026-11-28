@@ -228,8 +228,8 @@ impl Route {
             cancel: CancellationToken::new(),
         }))
     }
-    pub fn prepare_official(email: String) -> Result<Arc<Credential>> {
-        let auth = super::credentials::read(&super::credentials::official_home()?, &email, true)?;
+    pub async fn prepare_official(email: String) -> Result<Arc<Credential>> {
+        let auth = super::credentials::read_primary(&super::credentials::official_home()?, &email).await?;
         Ok(Arc::new(Credential {
             connection: "host".into(),
             source: Source::Official,
@@ -449,11 +449,10 @@ impl Route {
                     super::credentials::managed(source, &selection.email).await?
                 }
                 Source::Api(_) => return Ok(auth.0.clone()),
-                Source::Official => super::credentials::read(
+                Source::Official => super::credentials::read_primary(
                     &super::credentials::official_home()?,
                     &selection.email,
-                    true,
-                )?,
+                ).await?,
                 #[cfg(test)]
                 Source::Fixture => return Err(fault("fixture-expired")),
             };
@@ -464,6 +463,17 @@ impl Route {
     fn context_diagnostic(&self, operation: &crate::runtime_log::Operation, selection: &Credential,
         identity: &Value, value: &Value, stage: &str, sampling_sequence: u64) {
         let started = std::time::Instant::now();
+        let prefix = if (matches!(stage, "input-after-projection" |
+             "http-input-before-projection" | "http-input-after-projection" | "http-native-input")
+                || stage=="input-before-projection" && self.has_handoff())
+            && matches!(selection.source, Source::Managed(_) | Source::Official)
+        {
+            super::relay_diagnostics::cache_prefix(value)
+        } else { None };
+        let mut request_state=super::relay_diagnostics::request_state(value);
+        if let (Some(state), Some(prefix))=(&mut request_state,prefix) {
+            state["cachePrefix"]=prefix;
+        }
         let items: &[Value] = if value["type"] == "response.output_item.done" {
             std::slice::from_ref(&value["item"])
         } else {
@@ -474,10 +484,12 @@ impl Route {
             operation.event("account.context.trace", "observed", json!({"stage":stage,
                 "routeId":self.route_id,"conversationId":self.thread(),"samplingSequence":sampling_sequence,
                 "connectionFingerprint":super::relay_diagnostics::fingerprint(&selection.connection),
-                "identity":identity,"observation":summary,"requestState":super::relay_diagnostics::request_state(value),"originInference":"unproven",
+                "identity":identity,"observation":summary,"requestState":request_state,"originInference":"unproven",
                 "samplingMicros":started.elapsed().as_micros()}));
-        } else if let Some(state)=super::relay_diagnostics::request_state(value) {
-            operation.event("account.relay.request-state","observed",json!({"stage":stage,"samplingSequence":sampling_sequence,"requestState":state}));
+        } else if let Some(state)=request_state {
+            operation.event("account.relay.request-state","observed",json!({"stage":stage,"routeId":self.route_id,
+                "conversationId":self.thread(),"samplingSequence":sampling_sequence,"identity":identity,
+                "requestState":state,"samplingMicros":started.elapsed().as_micros()}));
         }
     }
     fn usage_diagnostic(&self,operation:&crate::runtime_log::Operation,value:&Value,sampling:u64) {

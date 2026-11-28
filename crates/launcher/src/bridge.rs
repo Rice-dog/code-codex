@@ -186,6 +186,7 @@ struct ActiveContext {
     workspace: Arc<Workspace>,
     lifecycle_epoch: u64,
     revision: u64,
+    workspace_revision: u64,
 }
 
 impl NativeBridge {
@@ -227,7 +228,12 @@ impl NativeBridge {
             Some(root.root_path().to_owned())
         }else{None};
         self.ensure_epoch(epoch)?;
-        self.inner.accounts.request(params,workspace,||self.ensure_epoch(epoch).is_ok()).await.map_err(Into::into)
+        let login_notification = if params["action"] == "login" {
+            self.inner.notification_sender.read().await.clone().map(|sender| (sender, epoch))
+        } else {
+            None
+        };
+        self.inner.accounts.request(params,workspace,login_notification,||self.ensure_epoch(epoch).is_ok()).await.map_err(Into::into)
     }
     pub fn new(
         resolver: Option<AppServerClient>,
@@ -276,7 +282,7 @@ impl NativeBridge {
             let epoch = self.inner.lifecycle_epoch.load(Ordering::Acquire);
             if let Ok(request_generation) = self.begin_context_request(epoch) {
                 let _ = self
-                    .replace_context(None, workspace, epoch, request_generation)
+                    .replace_context(None, workspace, epoch, request_generation, false)
                     .await;
             }
         }
@@ -292,7 +298,37 @@ impl NativeBridge {
         workspace: Arc<Workspace>,
         epoch: u64,
         request_generation: u64,
+        reuse_workspace: bool,
     ) -> Result<(), BridgeError> {
+        if reuse_workspace {
+            let mut state = lock_unpoisoned(&self.inner.state);
+            self.ensure_context_request(epoch, request_generation)?;
+            if let Some(current) = state.current.as_ref().filter(|current| {
+                current.lifecycle_epoch == epoch && current.workspace.same_root(&workspace)
+            }) {
+                let rebound = ActiveContext {
+                    thread_id,
+                    revision: self.inner.context_revision.fetch_add(1, Ordering::AcqRel) + 1,
+                    ..current.clone()
+                };
+                abort_import_locked(&mut state);
+                state.current = Some(rebound);
+                return Ok(());
+            }
+            // Publish the new root before starting its watcher. The old
+            // watcher generation is invalidated with the context replacement.
+            self.stop_watcher_locked(&mut state);
+            abort_import_locked(&mut state);
+            let revision = self.inner.context_revision.fetch_add(1, Ordering::AcqRel) + 1;
+            state.current = Some(ActiveContext {
+                thread_id,
+                workspace,
+                lifecycle_epoch: epoch,
+                revision,
+                workspace_revision: revision,
+            });
+            return Ok(());
+        }
         let mut subscription = None;
         loop {
             self.ensure_context_request(epoch, request_generation)?;
@@ -337,6 +373,7 @@ impl NativeBridge {
                 workspace,
                 lifecycle_epoch: epoch,
                 revision,
+                workspace_revision: revision,
             });
             if state.watch_enabled {
                 let replacement = subscription.take().ok_or_else(internal_error)?;
@@ -530,10 +567,11 @@ impl NativeBridge {
         &self,
         epoch: u64,
         request_generation: u64,
-    ) -> Result<ActiveContext, BridgeError> {
+    ) -> Result<(ActiveContext, bool), BridgeError> {
         let state = lock_unpoisoned(&self.inner.state);
         self.ensure_context_request(epoch, request_generation)?;
-        state.current.clone().ok_or_else(no_context_error)
+        let context = state.current.clone().ok_or_else(no_context_error)?;
+        Ok((context, state.watch_enabled))
     }
 
     fn ensure_active_context(
@@ -3350,6 +3388,39 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn workspace_switch_reuses_only_the_same_root_and_invalidates_old_operations() {
+        let (directory, bridge) = manual_bridge().await;
+        let request_context = |thread_id: &str| {
+            request(
+                "explorer.context",
+                json!({"threadId":thread_id,"reuseWorkspace":true}),
+            )
+        };
+        let first = bridge.handle(request_context("first")).await.expect("first context");
+        bridge.handle(request("explorer.watch.start", json!({}))).await.expect("watcher");
+        let watcher_generation = bridge.inner.watch_generation.load(Ordering::Acquire);
+        let previous = { lock_unpoisoned(&bridge.inner.state).current.clone().expect("context") };
+
+        let second = bridge.handle(request_context("second")).await.expect("second context");
+        assert_eq!(second["threadId"], "second");
+        assert_eq!(second["workspaceRevision"], first["workspaceRevision"]);
+        assert_eq!(second["watching"], true);
+        assert_eq!(bridge.inner.watch_generation.load(Ordering::Acquire), watcher_generation);
+        assert_eq!(bridge.ensure_active_context(&previous, 0).expect_err("old context").code, "CANCELLED");
+
+        let next_path = directory.path().join("another");
+        fs::create_dir(&next_path).expect("other directory");
+        let project = Arc::new(Workspace::open(next_path).expect("other workspace"));
+        let next = bridge.begin_context_request(0).expect("context request");
+        bridge.replace_context(Some("third".into()),project,0,next,true).await.expect("other context");
+        let (context, watching) = bridge.active_context_for_request(0,next).expect("new context");
+        assert_ne!(context.workspace_revision, previous.workspace_revision);
+        assert_eq!(context.thread_id.as_deref(), Some("third"));
+        assert!(!watching);
+        assert_ne!(bridge.inner.watch_generation.load(Ordering::Acquire), watcher_generation);
     }
 
     #[tokio::test]

@@ -2599,20 +2599,39 @@ mod tests {
 
     #[tokio::test]
     async fn qualified_renderer_is_rechecked_for_its_full_lifetime() {
+        retained_renderer_layout_case(false).await;
+    }
+
+    #[tokio::test]
+    async fn retained_renderer_dispatches_primary_promotion_once_after_layout_recovers() {
+        retained_renderer_layout_case(true).await;
+    }
+
+    async fn retained_renderer_layout_case(recovers: bool) {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
         let port = listener.local_addr().expect("address").port();
+        let token = CapabilityToken::generate();
+        let server_token = token.clone();
+        let ids = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = ids.clone();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.expect("accept");
             let mut socket = tokio_tungstenite::accept_async(stream)
                 .await
                 .expect("websocket accept");
             let mut probe_count = 0_u8;
+            let binding = |id: &str, method: &str, params: Value| {
+                Message::Text(json!({
+                    "method":"Runtime.bindingCalled",
+                    "params":{
+                        "name":PRIMARY_BINDING_NAME,
+                        "executionContextId":1,
+                        "payload":json!({"id":id,"method":method,"token":server_token.expose(),"params":params}).to_string()
+                    }
+                }).to_string().into())
+            };
             loop {
-                let message = socket
-                    .next()
-                    .await
-                    .expect("client message")
-                    .expect("valid websocket message");
+                let Some(Ok(message)) = socket.next().await else { return probe_count; };
                 let Message::Text(text) = message else {
                     continue;
                 };
@@ -2620,15 +2639,21 @@ mod tests {
                 let id = command["id"].as_u64().expect("command ID");
                 let method = command["method"].as_str().expect("command method");
                 let expression = command["params"]["expression"].as_str().unwrap_or_default();
-                let result = if method == "Runtime.evaluate" && expression == RENDERER_LAYOUT_PROBE
-                {
+                let layout_probe = method == "Runtime.evaluate" && expression == RENDERER_LAYOUT_PROBE;
+                let global_probe = layout_probe && command["params"]["contextId"].is_null();
+                let result = if global_probe {
                     probe_count += 1;
+                    if recovers && probe_count == 4 {
+                        assert_eq!(*observed.lock().unwrap(), ["retained-read"]);
+                    }
                     json!({
                         "result": {
                             "type": "boolean",
-                            "value": probe_count < 3
+                            "value": probe_count < 3 || (recovers && probe_count >= 4)
                         }
                     })
+                } else if layout_probe {
+                    json!({"result":{"type":"boolean","value":true}})
                 } else if method == "Page.addScriptToEvaluateOnNewDocument" {
                     json!({ "identifier": "script-1" })
                 } else {
@@ -2640,7 +2665,20 @@ mod tests {
                     ))
                     .await
                     .expect("CDP response");
-                if probe_count == 3 {
+                if expression == "window.__mockExplorerLoaded=true;" {
+                    assert!(probe_count < 3, "retained document must not bootstrap again");
+                    socket.send(binding("retained-read", "explorer.context", json!({}))).await.unwrap();
+                }
+                if global_probe && probe_count == 3 {
+                    assert_eq!(*observed.lock().unwrap(), ["retained-read"]);
+                    socket.send(binding(
+                        "retained-primary-promotion",
+                        "explorer.accounts.request",
+                        json!({"action":"primary.promote","connectionId":"fixture"})
+                    )).await.unwrap();
+                }
+                if expression.contains("retained-primary-promotion") {
+                    assert!(recovers, "unsupported renderer must not dispatch promotion");
                     return probe_count;
                 }
             }
@@ -2653,7 +2691,6 @@ mod tests {
             url: "app://-/index.html".to_owned(),
             web_socket_debugger_url: format!("ws://127.0.0.1:{port}/devtools/page/mock-lifetime"),
         };
-        let token = CapabilityToken::generate();
         let injection = InjectionConfig::new("window.__mockExplorerLoaded=true;", token);
         let (notification_sender, notifications) = broadcast::channel(4);
         let _notification_sender = notification_sender;
@@ -2663,10 +2700,10 @@ mod tests {
             CdpEndpoint::loopback(port),
             target,
             injection,
-            Arc::new(EchoHandler),
+            Arc::new(RecordingHandler { ids: ids.clone() }),
             Arc::new(AllowEndpointVerifier),
             notifications,
-            cancellation,
+            cancellation.clone(),
             Duration::ZERO,
             None,
             false,
@@ -2683,12 +2720,20 @@ mod tests {
             "mock-lifetime"
         );
 
-        let result = tokio::time::timeout(Duration::from_secs(7), session)
+        if recovers {
+            assert_eq!(tokio::time::timeout(Duration::from_secs(6), server).await.unwrap().unwrap(), 4);
+            assert_eq!(*ids.lock().unwrap(), ["retained-read", "retained-primary-promotion"]);
+            cancellation.cancel();
+            let _ = session.await.expect("session task");
+            return;
+        }
+        let result = tokio::time::timeout(Duration::from_secs(10), session)
             .await
             .expect("session timeout")
             .expect("session task");
         assert!(matches!(result, Err(CdpError::IncompatibleRenderer)));
-        assert_eq!(server.await.expect("mock renderer task"), 3);
+        assert!(server.await.expect("mock renderer task") > 3);
+        assert_eq!(*ids.lock().unwrap(), ["retained-read"]);
     }
 }
 

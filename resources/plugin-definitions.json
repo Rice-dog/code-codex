@@ -184,8 +184,8 @@
       "name": "Codex Startup Transition",
       "category": "appearance",
       "api": 1,
-      "version": "1.1.33",
-      "releaseTag": "plugin-assets-2026-11-11",
+      "version": "1.1.34",
+      "releaseTag": "plugin-assets-2026-11-22",
       "capabilities": [
         "startup",
         "preview",
@@ -359,6 +359,18 @@
       "capabilities": [
         "developer-tools",
         "lan-remote"
+      ]
+    },
+    {
+      "id": "liquid-ascii",
+      "name": "Liquid ASCII Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.2",
+      "releaseTag": "plugin-assets-2026-11-22",
+      "capabilities": [
+        "background",
+        "preview"
       ]
     }
   ]

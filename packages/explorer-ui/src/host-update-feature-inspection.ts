@@ -28,10 +28,18 @@ export function inspectTreeVersionControl(tree:HTMLElement|undefined,version:str
   const dialog=root.getElementById(button?.getAttribute('aria-controls')??'');
   const feedback=button?.dataset.feedback;
   const label=button?.textContent?.trim()??'';
-  const validLabel=/^v\d+\.\d+\.\d+$/.test(label)&&(!version||label===`v${version}`||feedback==='update');
-  return result(!!button&&!!dialog?.matches('[role="dialog"]')&&!!dialog.querySelector('.update-install')&&
-    !!dialog.querySelector('.update-later')&&(validLabel||!!feedback)&&!!button.getAttribute('aria-label'),
-    'Footer version caption, accessible manual trigger, and owned update dialog with install and defer controls.');
+  if(!button?.getAttribute('aria-label')||!dialog?.matches('[role="dialog"]')||
+    !dialog.querySelector('.update-install')||!dialog.querySelector('.update-later'))
+    return result(false,'The file tree footer is missing its accessible update trigger or one of the owned dialog controls.');
+  const versionLabel=/^v\d+\.\d+\.\d+$/.test(label);
+  if(feedback==='update'||feedback==='latest'||feedback==='error')
+    return result(feedback==='update'?/^↑ v\d+\.\d+\.\d+$/.test(label):versionLabel&&(!version||label===`v${version}`),
+      'The owned update controls and their temporary version feedback were inspected.');
+  const state=tree?.dataset.state;
+  if(state!==undefined&&!['ready','empty','no-project'].includes(state)&&button.disabled&&!versionLabel)
+    return unavailable('The file tree is still showing a workspace status. The update controls are mounted and the version caption is pending.');
+  return result(versionLabel&&(!version||label===`v${version}`),
+    'The ready file tree footer version caption was compared with the current Code-Codex version.');
 }
 
 export function inspectTreeShortcuts(tree:HTMLElement|undefined):ProbeResult {
@@ -60,7 +68,7 @@ export function inspectTreeControl(tree:HTMLElement|undefined,selector:string,la
   return result(nodes.length===1&&!!name,`Checked the unique, named ${label} control in the owned file tree.`);
 }
 
-export function inspectAccountPanel(tree:HTMLElement|undefined,kind:'identity'|'quota'|'actions'):ProbeResult {
+export function inspectAccountPanel(tree:HTMLElement|undefined,kind:'identity'|'quota'|'actions',isolated=false):ProbeResult {
   const panel=tree?.shadowRoot?.querySelector('.accounts-panel');
   if(!panel)return unavailable('The optional account settings panel is not mounted.');
   if(kind==='actions')return result([
@@ -68,7 +76,7 @@ export function inspectAccountPanel(tree:HTMLElement|undefined,kind:'identity'|'
     '.accounts-close','.accounts-auto-continue[role="switch"]','.accounts-follow-logout[role="switch"]','.accounts-primary-cancel',
   ].every(selector=>tree?.shadowRoot?.querySelectorAll(selector).length===1),'Checked settings, routing switch, close, auto-continue, follow-logout and primary-cancel controls.');
   const rows=[...panel.querySelectorAll<HTMLElement>('.accounts-connection')];
-  if(!panel.matches(':popover-open')||!rows.length)return unavailable('There are no materialized account cards to inspect in this document.');
+  if((!isolated&&!panel.matches(':popover-open'))||!rows.length)return unavailable('There are no materialized account cards to inspect in this document.');
   if(kind==='identity')return result(rows.filter(row=>row.dataset.host==='true').length===1&&rows.every(row=>
     ['true','false'].includes(row.dataset.signed??'')&&!!row.querySelector('.accounts-login-dot[aria-label]')),
     `Checked separate, accessible login states for ${rows.length} account card(s).`);
@@ -83,7 +91,7 @@ export function inspectAccountPanel(tree:HTMLElement|undefined,kind:'identity'|'
   const valid=quotas.every((quota,i)=>!!quota&&quota.querySelectorAll('.account-quota-value').length===2&&
     quota.querySelectorAll('.account-quota-reset').length===2&&quota.querySelectorAll('[data-account-asset]').length===2&&
     (phases[i]!=='ready'||[...quota.querySelectorAll('.account-quota-value')].every(value=>/^\d+(?:\.\d)?%$/.test(value.textContent??''))));
-  const status=!valid||missing?'issue':ready===signed.length?'passed':'manual';
+  const status=!valid||(!isolated&&missing)?'issue':ready===signed.length?'passed':'manual';
   return {status,detail:`Official account quota cards: ${ready} complete, ${loading} reading, ${unavailableCount} provider results unavailable, ${missing} without a read state. Checked both windows, reset fields and asset controls without sending a request.`};
 }
 

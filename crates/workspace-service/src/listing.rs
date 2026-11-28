@@ -128,6 +128,15 @@ impl Workspace {
         &self.root
     }
 
+    /// Compare two independently opened roots without reopening either path.
+    #[must_use]
+    pub fn same_root(&self, other: &Self) -> bool {
+        self.root == other.root
+            && (Arc::ptr_eq(&self.root_handle, &other.root_handle)
+                || crate::path_guard::same_file_identity(&self.root_handle, &other.root_handle)
+                    .unwrap_or(false))
+    }
+
     /// Cheap native validity probe for long-lived watcher subscriptions.
     /// Returns false after the canonical root name is removed, replaced, or
     /// redirected to a different filesystem object.

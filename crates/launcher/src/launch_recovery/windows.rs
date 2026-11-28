@@ -113,16 +113,21 @@ impl Backend for NativeBackend {
         .map_err(activation_failure)?;
         self.original_pid = guard.pid();
         crate::record_launch_context(self.port, self.inspector, guard.pid());
-        self.start_animation(guard.pid());
         Ok(guard)
     }
     async fn verify(&mut self, guard: &Self::Guard) -> Result<(), ProcessGuardError> {
         let (pid, after, image) = (guard.pid(), self.launched_after, self.image.clone());
+        let early_presentation = self.animation;
         tokio::task::spawn_blocking(move || {
+            if early_presentation && process_guard::verify_process_identity_native(pid, after, &image).is_ok() {
+                return Ok(());
+            }
             process_guard::verify_process_identity(pid, after, &image)
         })
         .await
-        .map_err(|e| ProcessGuardError::OwnershipUnknown.context("activation identity worker", e))?
+        .map_err(|e| ProcessGuardError::OwnershipUnknown.context("activation identity worker", e))??;
+        self.start_animation(pid);
+        Ok(())
     }
     fn exit_code(&mut self, guard: &mut Self::Guard) -> Result<Option<u32>, String> {
         guard

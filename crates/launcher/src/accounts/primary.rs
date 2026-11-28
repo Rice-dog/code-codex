@@ -6,6 +6,8 @@ use serde_json::{Value,json};
 use std::{path::{Path,PathBuf},time::{Duration,SystemTime,UNIX_EPOCH},sync::Mutex};
 
 static STATE_IO:Mutex<()>=Mutex::new(());
+static ACTIVE_PROMOTION:tokio::sync::Mutex<()>=tokio::sync::Mutex::const_new(());
+pub(super) fn promotion_in_progress()->bool { ACTIVE_PROMOTION.try_lock().is_err() }
 fn now()->u64{SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64}
 
 #[derive(Serialize,Deserialize)]
@@ -40,7 +42,7 @@ fn update(root:&Path,p:&mut Pending,stage:Option<&str>)->Result<()>{
 fn recovery(p:&Pending)->&'static str{if p.authorization_requested{"Verify the current official login before retrying. Authorization may have started; it was not replayed."}else{"Authorization was not requested. Reopen the panel after the connection recovers and retry when all tasks are idle."}}
 pub(super) fn status(root:&Path,owner:&host::Owner)->Result<Value>{
  let Some(mut p)=read(root)?else{return Ok(Value::Null)};
- if matches!(p.state.as_str(),"pending"|"interrupted")&&p.source_owner!=owner.id {
+ if !promotion_in_progress()&&matches!(p.state.as_str(),"pending"|"interrupted")&&p.source_owner!=owner.id {
   p.state=if p.target_email.eq_ignore_ascii_case(&owner.label){"completed"}else{"mismatch"}.into();p.updated_at_ms=now();p.stage="identity-confirm".into();p.error_code=if p.state=="mismatch"{Some("ACCOUNT_PRIMARY_IDENTITY_MISMATCH".into())}else{None};
   let _lock=STATE_IO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);if read(root)?.is_some_and(|v|v.operation_id==p.operation_id){write(root,&p)?;event(&p,&p.state);}
  }
@@ -121,6 +123,7 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
   }
   return Ok(json!({"cancelled":true}));
  }
+ let _promotion=ACTIVE_PROMOTION.try_lock().map_err(|_|AccountError::new("ACCOUNT_PRIMARY_PENDING","A primary-account operation is already running."))?;
  guard(&root,owner,"primary.start")?;
  let id=super::text(p,"connectionId")?.to_owned();
  let target={let all=tokio::time::timeout(Duration::from_secs(15),service.state.lock()).await.map_err(|_|AccountError::new("ACCOUNT_REQUEST_BUSY","Primary switch could not read the account registry. stage=target-selection; authorizationRequested=false."))?;all.get(&owner.id).and_then(|s|s.registry.connections.iter().find(|c|c.id==id&&c.api.is_none())).and_then(|c|c.email.clone()).ok_or_else(||AccountError::new("ACCOUNT_CONNECTION","The selected authorized account is unavailable. stage=target-selection; authorizationRequested=false."))?};
@@ -146,7 +149,13 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
  let backup_id=super::nonce();let backup_home=root.join(&backup_id);
  update(&root,&mut saved,Some("primary-backup"))?;
  credentials::snapshot_managed(&credentials::official_home()?,&backup_home)?;
- let backup=match Worker::spawn(&backup_home).await {Ok(w)=>w,Err(e)=>{let _=credentials::delete(&backup_home);return Err(e)}};
+ let stage=transport["backendSource"].as_str().map(Path::new).and_then(crate::discovery::reuse_app_server_stage);
+ let backup_result=match stage {
+  Some(launch)=>Worker::spawn_prepared(&backup_home,launch).await,
+  None=>Worker::spawn(&backup_home).await,
+ };
+ let backup=match backup_result {Ok(w)=>w,Err(e)=>{let _=credentials::delete(&backup_home);return Err(e)}};
+ let runtime_lease=backup.launch();
  update(&root,&mut saved,Some("backup-verify"))?;
  let verified=credentials::managed(&backup,&owner.label).await;backup.stop_checked().await?;
  if verified.is_err(){let _=credentials::delete(&backup_home);return Err(AccountError::new("ACCOUNT_PRIMARY_BACKUP","The former primary authorization could not be verified. The current login was not changed."))}
@@ -165,9 +174,19 @@ pub(super) async fn request(service:&AccountService,endpoint:CdpEndpoint,owner:&
  let worker={let mut all=service.state.lock().await;all.get_mut(&owner.id).and_then(|state|state.workers.remove(&id))};
  if let Some(worker)=worker{worker.stop_checked().await?;}
  saved.authorization_requested=true;update(&root,&mut saved,Some("internal-switch"))?;
- let receipt=super::startup::primary_switch(&transport,&source,&backup_home,&saved.target_email,&saved.operation_id).await?;
+ let receipt=super::startup::primary_switch(&transport,&source,&backup_home,&saved.target_email,&saved.operation_id,runtime_lease.as_ref()).await?;
  if receipt["restored"]==true {saved.authorization_requested=receipt["loginDispatched"]==true;saved.state="failed".into();return Err(AccountError::new("ACCOUNT_PRIMARY_RESTORED","Internal switching failed before a confirmed identity change. The original managed authorization was restored; no login was replayed."))}
  if receipt["completed"]!=true||receipt["persistent"]!=true||receipt["browserOpened"]!=false||!matches!(receipt["startupStore"].as_str(),Some("file"|"keyring")){return Err(AccountError::new("ACCOUNT_PRIMARY_PROTOCOL","The native primary switch did not confirm its complete contract."))}
+ if let Some(timing)=receipt["timings"].as_object() {
+  crate::runtime_log::record("accounts","account.primary.native-timing","observed",json!({
+   "operationId":saved.operation_id,"runtimeStageReused":timing.get("runtimeStageReused").and_then(Value::as_bool),
+   "runtimeStageVerifyMs":timing.get("runtimeStageVerifyMs").and_then(Value::as_u64),
+   "workerStartMs":timing.get("workerStartMs").and_then(Value::as_u64),
+   "credentialReadMs":timing.get("credentialReadMs").and_then(Value::as_u64),
+   "officialLoginMs":timing.get("officialLoginMs").and_then(Value::as_u64),
+   "identityConfirmMs":timing.get("identityConfirmMs").and_then(Value::as_u64)
+  }));
+ }
  saved.state="completed".into();update(&root,&mut saved,Some("identity-confirm"))?;
  Ok(json!({"completed":true,"pending":false,"targetEmail":selected.email,"authorizationRequired":false}))
  }.await;

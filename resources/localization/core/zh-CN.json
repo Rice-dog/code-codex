@@ -199,5 +199,6 @@
   "lan.phase.error": "连接已结束，可输入房间码重新连接。",
   "lan.phase.starting": "已同意，正在建立远控连接…",
   "lan.phase.controlled": "已连接，加入者可以控制本机。",
-  "lan.settings": "局域网远控设置"
+  "lan.settings": "局域网远控设置",
+  "plugin.name.liquid-ascii": "流体字符"
 }

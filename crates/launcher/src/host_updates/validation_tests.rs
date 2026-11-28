@@ -33,6 +33,21 @@ fn unexecuted_automatic_check_is_manual_and_is_not_claimed_passed() {
  assert_eq!(r["counts"]["passed"],0);assert_eq!(r["counts"]["issues"],0);assert_eq!(r["checkCounts"]["manual"],2);
 }
 #[test]
+fn isolated_evidence_is_linked_without_overwriting_live_status() {
+ let input = [
+    check("ok-check","manual","actual-host-read-only","Panel closed"),
+    json!({"id":"isolated.ok-check","evidenceFor":"ok-check","status":"passed","scope":"isolated-mounted-regression","detail":"Surface passed in the test document"}),
+    check("bad-check","passed","actual-host-read-only","Visible control"),
+    json!({"id":"isolated.bad-check","evidenceFor":"bad-check","status":"issue","scope":"isolated-mounted-regression","detail":"Isolated opacity failed"}),
+ ];
+ let result=summarize_with_registry(&fixture(),&input,registry_fixture());
+ assert_eq!(result["checkCounts"],json!({"passed":1,"issues":0,"manual":1}));
+ assert_eq!(result["evidenceCounts"],json!({"passed":1,"issues":1,"manual":0}));
+ assert_eq!(result["features"][0]["status"],"manual");
+ assert_eq!(result["features"][1]["status"],"issue");
+ assert!(markdown(&result).contains("## Isolated evidence"));
+}
+#[test]
 fn incomplete_inventory_cannot_prove_a_mapping_only_no_impact() {
  let mut input=fixture();input["complete"]=json!(false);
  let r=summarize_with_registry(&input,&checks(),registry_fixture());assert_eq!(r["counts"]["noImpact"],0);

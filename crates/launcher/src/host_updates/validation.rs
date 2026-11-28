@@ -91,7 +91,8 @@ fn affected_rules<'a>(report: &Value, registry: &'a Value) -> (bool, Vec<&'a Val
     (unknown, rules)
 }
 fn summarize_with_registry(report: &Value, executed: &[Value], registry: Value) -> Value {
-    let mut checks = executed.to_vec();
+    let evidence: Vec<_> = executed.iter().filter(|c|c["evidenceFor"].is_string()).cloned().collect();
+    let mut checks: Vec<_> = executed.iter().filter(|c|!c["evidenceFor"].is_string()).cloned().collect();
     let (unknown, rules) = affected_rules(report, &registry);
     let affected: BTreeSet<_> = rules.iter().filter_map(|rule| rule["id"].as_str()).collect();
     let mut features = Vec::new();
@@ -100,7 +101,10 @@ fn summarize_with_registry(report: &Value, executed: &[Value], registry: Value) 
         let auto: Vec<_> = rule["automatedChecks"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
         let mut feature_checks = Vec::new();
         for requested in auto {
-            if let Some(executed) = checks.iter().find(|c| c["id"] == requested) { feature_checks.push(executed.clone()); }
+            if let Some(executed) = checks.iter().find(|c| c["id"] == requested) {
+                feature_checks.push(executed.clone());
+                feature_checks.extend(evidence.iter().filter(|c|c["evidenceFor"] == requested).cloned());
+            }
             else {
                 let missing = check(requested, "manual", "unavailable", "This automatic check did not execute. Recheck with the qualified official document available.");
                 feature_checks.push(missing.clone());
@@ -123,11 +127,20 @@ fn summarize_with_registry(report: &Value, executed: &[Value], registry: Value) 
     let count = |state: &str| changes.iter().filter(|c| c["status"] == state).count();
     let counts = json!({"all":changes.len(),"noImpact":count("no_impact"),"passed":count("passed"),"issues":count("issue"),"manual":count("manual"),"manualGroups":features.iter().filter(|f|f["checks"].as_array().is_some_and(|c|c.iter().any(|c|c["status"]=="manual"))).count()+usize::from(unknown)});
     let check_counts = json!({"passed":checks.iter().filter(|c|c["status"]=="passed").count(),"issues":checks.iter().filter(|c|c["status"]=="issue").count(),"manual":checks.iter().filter(|c|c["status"]=="manual").count()});
-    json!({"changes":changes,"features":features,"automatedChecks":checks,"counts":counts,"checkCounts":check_counts,"unknownChangesRequireReview":unknown,"coverage":"Live host reads, isolated mounted regressions and full behavioral acceptance are reported independently. Isolated probes use production styles or markup without opening or scrolling user surfaces. No login, account mutation, inference, navigation or provider billing was performed."})
+    let evidence_counts=json!({"passed":evidence.iter().filter(|c|c["status"]=="passed").count(),"issues":evidence.iter().filter(|c|c["status"]=="issue").count(),"manual":evidence.iter().filter(|c|c["status"]=="manual").count()});
+    json!({"changes":changes,"features":features,"automatedChecks":checks,"isolatedEvidence":evidence,"evidenceCounts":evidence_counts,"counts":counts,"checkCounts":check_counts,"unknownChangesRequireReview":unknown,"coverage":"Live host reads, isolated mounted regressions and full behavioral acceptance are reported independently. Isolated probes exercise production styles or markup without opening or scrolling user surfaces. Account cards can reuse already cached state. No login, account mutation, inference, navigation or provider billing was performed."})
 }
 fn markdown(result: &Value) -> String {
     let mut s = format!("# Official Codex compatibility validation\n\nReport: {}. Official version: {}.\n\n{} recorded changes: {} no impact, {} passed, {} found issues, {} require manual acceptance.\n\nAutomatic checks: {} passed, {} found issues, {} unavailable. Partial checks do not mean a full functional pass.\n\nRules: {}; engine: {}.\n\n{}\n\n## Executed automatic checks\n\n",result["identity"]["reportId"],result["version"],result["counts"]["all"],result["counts"]["noImpact"],result["counts"]["passed"],result["counts"]["issues"],result["counts"]["manual"],result["checkCounts"]["passed"],result["checkCounts"]["issues"],result["checkCounts"]["manual"],result["identity"]["registryHash"],result["identity"]["engineHash"],result["coverage"].as_str().unwrap_or(""));
     for c in result["automatedChecks"].as_array().into_iter().flatten() { s += &format!("- **{}** `{}` ({}): {}\n",c["status"].as_str().unwrap_or("manual"),c["id"].as_str().unwrap_or(""),c["scope"].as_str().unwrap_or(""),c["detail"].as_str().unwrap_or("")); }
+    if let Some(evidence)=result["isolatedEvidence"].as_array().filter(|values| !values.is_empty()){
+        s += &format!("\n## Isolated evidence\n\n{} passed, {} found issues, {} unavailable. Related live checks keep their own results.\n\n",
+            result["evidenceCounts"]["passed"],result["evidenceCounts"]["issues"],result["evidenceCounts"]["manual"]);
+        for c in evidence {
+            s += &format!("- **{}** `{}` ({}): {}\n",c["status"].as_str().unwrap_or("manual"),
+                c["evidenceFor"].as_str().unwrap_or(""),c["scope"].as_str().unwrap_or(""),c["detail"].as_str().unwrap_or(""));
+        }
+    }
     s += "\n## Grouped behavioral acceptance and required user actions\n\n";
     let mut features:Vec<_> = result["features"].as_array().into_iter().flatten().collect();
     features.sort_by_key(|feature|feature["area"].as_str().unwrap_or("Other"));
@@ -167,6 +180,11 @@ pub(crate) async fn run(endpoint: Option<CdpEndpoint>, force: bool, cancel: Opti
     if !force && index_path.is_file() && read_json(&index_path)?["identity"] == identity { return status(&dir); }
     if cancel.as_ref().is_some_and(|c|c.is_cancelled()) { return Ok(json!({"status":"cancelled"})); }
     let mut checks = vec![check("package.inventory",if report["complete"]==true{"passed"}else{"issue"},"inventory-integrity",if report["complete"]==true{"The recorded official inventory is complete. This is not functional validation."}else{"The inventory is incomplete; removed files and no-impact results cannot be certified."})];
+    let mut launch_contract = check("isolated.host.startup-first-visible-frame",
+        if crate::early_startup::presentation_contract_ok() {"passed"} else {"issue"},
+        "local-synthetic-contract","The production startup classifier covers timely composition, late acquisition, interrupted readback and missing cold-launch evidence.");
+    launch_contract["evidenceFor"]=json!("host.startup-first-visible-frame");
+    checks.push(launch_contract);
     let relay = crate::accounts::check_relay_header_contract();
     checks.push(check("regression.account-relay-headers", if relay {"passed"} else {"issue"}, "local-synthetic-contract", if relay {
         "The production header policy preserved official session/thread and turn state and kept them out of API routing. No account or upstream was contacted."
@@ -201,6 +219,8 @@ pub(crate) async fn run(endpoint: Option<CdpEndpoint>, force: bool, cancel: Opti
                     }
                     Err(_) => checks.push(check("host.connection","manual","actual-host-read-only","The qualified official document could not be observed. No functional failure was inferred; recheck when its connection is available.")),
                 }
+                let (status,detail)=crate::early_startup::presentation_check(endpoint.port());
+                checks.push(check("host.startup-first-visible-frame",status,"native-launch-observation",detail));
             } else { checks.push(check("host.connection","manual","actual-host-read-only","No launch-owned official endpoint was supplied. Package checks ran; host checks require an attached native window.")); }
         }
         Ok(Ok(_)) => checks.push(check("package.modules","manual","actual-installed-package","The currently installed package differs from this report. Historical behavior cannot be validated using another version.")),
@@ -213,7 +233,7 @@ pub(crate) async fn run(endpoint: Option<CdpEndpoint>, force: bool, cancel: Opti
     result["version"] = report["version"].clone();
     result["inventoryRegistryHash"] = report["registryHash"].clone();
     result["observedMs"] = json!(now());
-    result["status"] = json!(if report["type"]=="baseline"{"baseline"}else if result["counts"]["issues"].as_u64().unwrap_or(0)>0 || result["checkCounts"]["issues"].as_u64().unwrap_or(0)>0{"issues_found"}else if result["counts"]["manual"].as_u64().unwrap_or(0)>0 || result["checkCounts"]["manual"].as_u64().unwrap_or(0)>0{"manual_required"}else{"passed"});
+    result["status"] = json!(if report["type"]=="baseline"{"baseline"}else if result["counts"]["issues"].as_u64().unwrap_or(0)>0 || result["checkCounts"]["issues"].as_u64().unwrap_or(0)>0 || result["evidenceCounts"]["issues"].as_u64().unwrap_or(0)>0{"issues_found"}else if result["counts"]["manual"].as_u64().unwrap_or(0)>0 || result["checkCounts"]["manual"].as_u64().unwrap_or(0)>0{"manual_required"}else{"passed"});
     let runs = report_dir.join("validations");fs::create_dir_all(&runs)?;private_dir(&runs)?;
     let dest = tempfile::Builder::new().prefix(&format!("{}-",now())).tempdir_in(&runs)?.keep();
     let text = markdown(&result);
@@ -221,7 +241,7 @@ pub(crate) async fn run(endpoint: Option<CdpEndpoint>, force: bool, cancel: Opti
         let mut file=fs::OpenOptions::new().write(true).create_new(true).open(dest.join(name))?;file.write_all(&bytes)?;file.sync_all()?;
     }
     let relative = format!("reports/{id}/validations/{}",dest.file_name().unwrap().to_string_lossy());
-    let index=json!({"status":result["status"],"identity":result["identity"],"version":result["version"],"observedMs":result["observedMs"],"counts":result["counts"],"checkCounts":result["checkCounts"],"reportPath":format!("{relative}/validation.md")});
+    let index=json!({"status":result["status"],"identity":result["identity"],"version":result["version"],"observedMs":result["observedMs"],"counts":result["counts"],"checkCounts":result["checkCounts"],"evidenceCounts":result["evidenceCounts"],"reportPath":format!("{relative}/validation.md")});
     atomic(&index_path,&index)?;
     atomic(&dir.join("validation-latest.json"),&index)?;
     let mut temp=tempfile::NamedTempFile::new_in(&dir)?;temp.write_all(format!("Latest validation: {relative}/validation.md\n\n{text}").as_bytes())?;temp.as_file().sync_all()?;temp.persist(dir.join("VALIDATION.md")).map_err(|e|e.error)?;

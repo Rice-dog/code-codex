@@ -529,12 +529,12 @@
     "name": "Codex Startup Transition",
     "category": "appearance",
     "api": 1,
-    "version": "1.1.33",
-    "releaseTag": "plugin-assets-2026-11-11",
-    "asset": "CodeCodex-plugin-codex-startup-transition-1.1.33.js",
-    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.1.33.js",
-    "size": 42542,
-    "sha256": "0292d2b0c3b6c7d710fec898f2dcbfedfe4254a11cd5a522bcaadc162a7810cf",
+    "version": "1.1.34",
+    "releaseTag": "plugin-assets-2026-11-22",
+    "asset": "CodeCodex-plugin-codex-startup-transition-1.1.34.js",
+    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.1.34.js",
+    "size": 42585,
+    "sha256": "1d0fd13bc485c26de62458e15266f6200155d42b1c6a580df6eabc9f870290be",
     "resources": [],
     "capabilities": [
       "startup",
@@ -872,6 +872,24 @@
         "sha256": "5735febb4249f2fea35481266e47668eb890404f83714ec3d12f68e80c95d72f"
       }
     ],
+    "source": "https://github.com/Rice-dog/code-codex"
+  },
+  {
+    "id": "liquid-ascii",
+    "name": "Liquid ASCII Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.2",
+    "releaseTag": "plugin-assets-2026-11-22",
+    "capabilities": [
+      "background",
+      "preview"
+    ],
+    "asset": "CodeCodex-background-liquid-ascii-1.0.2.js",
+    "relativePath": "CodeCodex-background-liquid-ascii-1.0.2.js",
+    "size": 42876,
+    "sha256": "513a73d1f23874480f90e6f60c838cd957ed919453e4dd90ce2ad2787b5f1343",
+    "resources": [],
     "source": "https://github.com/Rice-dog/code-codex"
   }
 ]

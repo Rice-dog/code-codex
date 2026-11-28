@@ -16,9 +16,98 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+#[cfg(windows)]
+mod window_gate;
+#[cfg(windows)]
+type PresentationGate = Option<window_gate::Gate>;
+#[cfg(not(windows))]
+type PresentationGate = Option<()>;
+static PRESENTATION: std::sync::Mutex<Option<(u16, u8, &'static str)>> = std::sync::Mutex::new(None);
+
+pub(crate) fn presentation_check(port: u16) -> (&'static str, &'static str) {
+    let observed = *PRESENTATION.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    classify_presentation(observed.filter(|(observed_port, _, _)| *observed_port == port))
+}
+
+fn classify_presentation(observed: Option<(u16, u8, &'static str)>) -> (&'static str, &'static str) {
+    match observed {
+        Some((_, 1, "composited-animation-frame")) =>
+            ("passed","The initial window was held before display and released after the startup animation layer appeared in the compositor."),
+        Some((_, 2, _)) =>
+            ("issue","The official window was already visible at acquisition or lost its presentation hold at show. The native loading screen could appear first."),
+        Some((_, _, "deadline")) =>
+            ("manual","The first animation frame could not be verified within the presentation budget. Normal startup resumed. Review a recording of an enabled cold launch."),
+        Some((_, _, "compositor-unavailable")) =>
+            ("manual","Compositor readback was interrupted before the first visible frame could be verified. Review a recording of an enabled cold launch."),
+        _ => ("manual","This core has no valid first-visible-frame evidence for an enabled cold launch. A mounted player or market card does not verify the native presentation order."),
+    }
+}
+
+pub(crate) fn presentation_contract_ok() -> bool {
+    classify_presentation(Some((1, 1, "composited-animation-frame"))).0 == "passed"
+        && classify_presentation(Some((1, 2, "composited-animation-frame"))).0 == "issue"
+        && classify_presentation(Some((1, 1, "deadline"))).0 == "manual"
+        && classify_presentation(Some((1, 1, "compositor-unavailable"))).0 == "manual"
+        && classify_presentation(None).0 == "manual"
+}
+
+fn release_presentation(gate:&mut PresentationGate, port:u16, reason:&'static str) {
+    let Some(held)=gate.take() else { return; };
+    #[cfg(windows)]
+    let code=held.held();
+    #[cfg(not(windows))]
+    let code=0;
+    drop(held);
+    *PRESENTATION.lock().unwrap_or_else(std::sync::PoisonError::into_inner)=Some((port,code,reason));
+    event("native first window","released",json!({"stage":reason,"heldBeforeVisible":code==1,"heldAfterVisible":code==2}));
+}
+
 pub(super) const SOURCE: &str = include_str!("../../../packages/explorer-ui/dist/startup-early.js");
 const WINDOW: Duration = Duration::from_secs(120);
 const SNAPSHOT: &str = r#"JSON.stringify((()=>{const q=window[Symbol.for('code-codex:runtime-events:v1')];const events=q?q.events.filter(e=>e.source==='startup-animation'):[];if(q)q.events=q.events.filter(e=>e.source!=='startup-animation');const host=document.querySelector('.code-codex-startup-host');return {status:window.__CODE_CODEX_EARLY_STARTUP_STATUS__||{stage:'awaiting-document'},readyState:document.readyState,bodyPresent:!!document.body,videoPresent:!!(host&&host.shadowRoot&&host.shadowRoot.querySelector('video')),events}})())"#;
+const MARK_COMPOSITION: &str = r#"(()=>{
+    const layer=document.querySelector('.code-codex-startup-host')?.shadowRoot?.querySelector('.codex-startup--has-video');
+    if(!layer||getComputedStyle(layer).opacity!=='1')return false;
+    const marker=document.createElement('span');
+    marker.dataset.codeCodexPaintProbe='';marker.setAttribute('aria-hidden','true');
+    marker.style.cssText='position:absolute;inset:0 auto auto 0;width:6px;height:6px;background:#233c4c;z-index:2147483647;pointer-events:none';
+    layer.append(marker);return true;
+})()"#;
+const CLEAR_COMPOSITION: &str = "document.querySelector('.code-codex-startup-host')?.shadowRoot?.querySelector('[data-code-codex-paint-probe]')?.remove()";
+
+async fn animation_composited(
+    socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    id: &mut u64,
+) -> Result<bool, &'static str> {
+    let marker = command(socket,id,"Runtime.evaluate",json!({"expression":MARK_COMPOSITION,"returnByValue":true}))
+        .await.map_err(|_| "compositor-marker-command")?;
+    if marker.pointer("/result/value").and_then(Value::as_bool) != Some(true) { return Ok(false); }
+    let screenshot = command(socket,id,"Page.captureScreenshot",json!({
+        "format":"png","fromSurface":true,"clip":{"x":1,"y":1,"width":2,"height":2,"scale":1}
+    })).await;
+    let sample = screenshot.as_ref().ok().and_then(|reply|reply["data"].as_str())
+        .filter(|value|value.len() <= 8192 && value.bytes().all(|b|b.is_ascii_alphanumeric()||b"+/=".contains(&b)));
+    // Decode the tiny capture inside the same renderer. The pixel bytes never
+    // enter logging, and the marker is removed on both outcomes.
+    let expression = match sample {
+        Some(sample) => format!(r#"(async()=>{{
+            {CLEAR_COMPOSITION};
+            const bytes=Uint8Array.from(atob({sample}),v=>v.charCodeAt(0));
+            const image=await createImageBitmap(new Blob([bytes],{{type:'image/png'}}));
+            try{{
+                const ctx=new OffscreenCanvas(1,1).getContext('2d');
+                ctx.drawImage(image,0,0,1,1);
+                const [r,g,b,a]=ctx.getImageData(0,0,1,1).data;
+                return a===255&&Math.abs(r-35)<=3&&Math.abs(g-60)<=3&&Math.abs(b-76)<=3;
+            }}finally{{image.close();}}
+        }})()"#,sample=json!(sample)),
+        None => format!("(()=>{{{CLEAR_COMPOSITION};return false;}})()"),
+    };
+    let proof = command(socket,id,"Runtime.evaluate",json!({"expression":expression,"awaitPromise":true,"returnByValue":true})).await;
+    screenshot.map_err(|_| "compositor-capture-command")?;
+    let proof = proof.map_err(|_| "compositor-pixel-readback")?;
+    Ok(proof.pointer("/result/value").and_then(Value::as_bool)==Some(true))
+}
 
 pub struct Worker {
     cancellation: CancellationToken,
@@ -33,11 +122,19 @@ impl Drop for Worker {
 pub fn start(endpoint: CdpEndpoint, pid: u32, launched_after: SystemTime) -> Worker {
     let cancellation = CancellationToken::new();
     let cancel = cancellation.clone();
+    #[cfg(windows)]
+    let mut gate = window_gate::Gate::start(pid);
+    #[cfg(not(windows))]
+    let mut gate = None;
     let task = tokio::spawn(async move {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
         let result = tokio::select! {
             ()=cancel.cancelled()=>Err("launch cancelled".to_owned()),
-            result=supervise(endpoint,pid,launched_after,WINDOW)=>result,
+            result=supervise(endpoint,pid,launched_after,WINDOW,&mut gate,deadline)=>result,
         };
+        if gate.is_some() {
+            release_presentation(&mut gate,endpoint.port(),"worker-ended");
+        }
         match result {
             Ok(()) => event("worker", "finished", json!({})),
             Err(reason) => event(
@@ -186,6 +283,8 @@ async fn supervise(
     pid: u32,
     launched_after: SystemTime,
     timeout: Duration,
+    gate: &mut PresentationGate,
+    deadline: tokio::time::Instant,
 ) -> Result<(), String> {
     event(
         "worker",
@@ -200,6 +299,7 @@ async fn supervise(
     let mut last_error = String::new();
     let mut last_heartbeat = Instant::now();
     loop {
+        if tokio::time::Instant::now() >= deadline { release_presentation(gate, endpoint.port(),"deadline"); }
         if started.elapsed() >= timeout {
             return Err(format!(
                 "loading-screen discovery deadline; attempts={attempts}; candidates={}; last failure={last_error}",
@@ -247,7 +347,7 @@ async fn supervise(
                     let remaining = timeout.saturating_sub(started.elapsed());
                     match tokio::time::timeout(
                         remaining,
-                        session(endpoint, pid, launched_after, &url, number),
+                        session(endpoint, pid, launched_after, &url, number, gate, deadline),
                     )
                     .await
                     {
@@ -287,6 +387,8 @@ async fn session(
     launched_after: SystemTime,
     url: &Url,
     page: usize,
+    gate: &mut PresentationGate,
+    deadline: tokio::time::Instant,
 ) -> Result<(), String> {
     event(
         "listener ownership",
@@ -466,6 +568,7 @@ async fn session(
     }
     let mut previous = String::new();
     loop {
+        if tokio::time::Instant::now() >= deadline { release_presentation(gate, endpoint.port(),"deadline"); }
         let value = command(
             &mut socket,
             &mut id,
@@ -496,6 +599,16 @@ async fn session(
                 }
             }
         }
+        if gate.is_some() && snapshot["status"]["stage"]=="playing" {
+            match animation_composited(&mut socket,&mut id).await {
+                Ok(true) => release_presentation(gate,endpoint.port(),"composited-animation-frame"),
+                Ok(false) => {}
+                Err(stage) => {
+                    event("native first window","unavailable",json!({"stage":stage}));
+                    release_presentation(gate,endpoint.port(),"compositor-unavailable");
+                }
+            }
+        }
         let status = json!({"page":page,"status":snapshot["status"],"readyState":snapshot["readyState"],"bodyPresent":snapshot["bodyPresent"],"videoPresent":snapshot["videoPresent"]});
         let encoded = status.to_string();
         if encoded != previous {
@@ -506,6 +619,7 @@ async fn session(
             snapshot.pointer("/status/stage").and_then(Value::as_str),
             Some("complete" | "skipped" | "failed")
         ) {
+            release_presentation(gate, endpoint.port(),"player-ended");
             event(
                 "candidate session",
                 "completed",
@@ -606,6 +720,42 @@ async fn command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_compatibility_requires_positive_or_negative_presentation_evidence() {
+        assert_eq!(classify_presentation(Some((1, 1, "composited-animation-frame"))).0, "passed");
+        assert_eq!(classify_presentation(Some((1, 2, "composited-animation-frame"))).0, "issue");
+        assert_eq!(classify_presentation(Some((1, 2, "deadline"))).0, "issue");
+        for outcome in ["deadline", "compositor-unavailable", "player-ended"] {
+            assert_eq!(classify_presentation(Some((1, 1, outcome))).0, "manual");
+        }
+        assert_eq!(classify_presentation(None).0, "manual");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore = "Requires a fresh, disposable official desktop and isolated startup media."]
+    async fn isolated_official_desktop_first_frame() {
+        let number = |name: &str| std::env::var(name).unwrap().parse::<u64>().unwrap();
+        let pid = u32::try_from(number("CODE_CODEX_TEST_STARTUP_PID")).unwrap();
+        let port = u16::try_from(number("CODE_CODEX_TEST_STARTUP_PORT")).unwrap();
+        let born = SystemTime::UNIX_EPOCH + Duration::from_millis(number("CODE_CODEX_TEST_STARTUP_BORN"));
+        let image = std::path::PathBuf::from(std::env::var_os("CODE_CODEX_TEST_STARTUP_IMAGE").unwrap());
+        process_guard::verify_process_identity_native(pid, born, &image).unwrap();
+        runtime_log::begin("isolated-first-frame");
+        let _worker = start(CdpEndpoint::loopback(port), pid, born);
+        tokio::time::timeout(Duration::from_secs(27), async {
+            loop {
+                let (status, detail) = presentation_check(port);
+                if status != "manual" {
+                    runtime_log::flush();
+                    assert_eq!(status, "passed", "{detail}");
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }).await.expect("The isolated first frame was not verified");
+    }
     #[test]
     fn keeps_main_page_and_loopback_security_boundary() {
         assert!(eligible("page", "app://-/index.html"));
@@ -696,6 +846,8 @@ mod tests {
             std::process::id(),
             SystemTime::UNIX_EPOCH,
             Duration::from_secs(8),
+            &mut None,
+            tokio::time::Instant::now() + Duration::from_secs(8),
         )
         .await
         .unwrap();

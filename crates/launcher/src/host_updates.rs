@@ -76,7 +76,7 @@ fn registry_hash() -> String {
     hash(
         &[
             include_bytes!("../../../resources/host-update-dependencies.json").as_slice(),
-            b"path-scope-v5-runtime-msix-catalog",
+            b"path-scope-v6-runtime-relative-diff",
         ]
         .concat(),
     )
@@ -155,14 +155,46 @@ fn atomic(path: &Path, value: &impl Serialize) -> io::Result<()> {
     )
 }
 
+fn comparison_entries(snapshot: &Snapshot) -> BTreeMap<(bool, &str), (&str, &Entry)> {
+    // Snapshots keep exact installation paths. Only the inventoried Runtime
+    // contents share a namespace across generations; registrations keep theirs.
+    let prefix = runtime::inventory_package(&snapshot.runtimes)
+        .map(|package| format!("runtime/{}/", package.package));
+    snapshot.entries.iter().map(|(path, entry)| {
+        let relative = prefix.as_deref().and_then(|prefix| path.strip_prefix(prefix));
+        ((relative.is_some(), relative.unwrap_or(path)), (path.as_str(), entry))
+    }).collect()
+}
+
 fn changes(previous: Option<&Snapshot>, current: &Snapshot) -> Vec<Value> {
-    let empty = BTreeMap::new();
-    let old = previous.map(|p| &p.entries).unwrap_or(&empty);
-    let names: BTreeSet<_> = old.keys().chain(current.entries.keys()).collect();
-    names.into_iter().filter_map(|name|{let a=old.get(name);let b=current.entries.get(name);if a.zip(b).is_some_and(|(a,b)|a.sha256==b.sha256&&a.kind==b.kind&&a.dependencies==b.dependencies){return None}
- let dependencies:BTreeSet<_>=a.into_iter().chain(b).flat_map(|e|e.dependencies.iter().cloned()).collect();
- let category=if !dependencies.is_empty(){"plugin_dependency"}else if b.or(a).is_some_and(|e|e.kind=="resource"){"no_known_plugin_dependency"}else{"needs_review"};
- Some(json!({"path":name,"change":if a.is_none(){"added"}else if b.is_none(){if current.complete{"removed"}else{"not_observed"}}else if a.zip(b).is_some_and(|(a,b)|a.sha256==b.sha256&&a.kind==b.kind){"dependency_mapping_changed"}else{"modified"},"category":category,"dependencyIds":dependencies,"before":a,"after":b,"functionalImpact":"not_tested"}))}).collect()
+    let old = previous.map(comparison_entries).unwrap_or_default();
+    let new = comparison_entries(current);
+    let names: BTreeSet<_> = old.keys().chain(new.keys()).collect();
+    names.into_iter().filter_map(|name| {
+        let before = old.get(name).copied();
+        let after = new.get(name).copied();
+        let a = before.map(|(_, entry)| entry);
+        let b = after.map(|(_, entry)| entry);
+        let same_content = a.zip(b).is_some_and(|(a,b)| a.sha256 == b.sha256 && a.size == b.size && a.kind == b.kind);
+        if same_content && a.zip(b).is_some_and(|(a,b)| a.dependencies == b.dependencies) { return None; }
+        let dependencies: BTreeSet<_> = a.into_iter().chain(b).flat_map(|entry| entry.dependencies.iter()).collect();
+        let category = if !dependencies.is_empty() { "plugin_dependency" }
+            else if b.or(a).is_some_and(|entry| entry.kind == "resource") { "no_known_plugin_dependency" }
+            else { "needs_review" };
+        let kind = match (a, b) {
+            (None, _) => "added",
+            (_, None) if current.complete => "removed",
+            (_, None) => "not_observed",
+            _ if same_content => "dependency_mapping_changed",
+            _ => "modified",
+        };
+        let (path, _) = after.or(before).expect("comparison path");
+        let mut change = json!({"path":path,"change":kind,"category":category,"dependencyIds":dependencies,"before":a,"after":b,"functionalImpact":"not_tested"});
+        if let Some((before_path, _)) = before.filter(|(before_path, _)| *before_path != path) {
+            change["beforePath"] = json!(before_path);
+        }
+        Some(change)
+    }).collect()
 }
 fn report(previous: Option<&Snapshot>, current: &Snapshot) -> Value {
     let changes = changes(previous, current);
@@ -179,7 +211,7 @@ fn report(previous: Option<&Snapshot>, current: &Snapshot) -> Value {
         })
         .collect();
     let dependencies:Vec<_>=registry.iter().filter(|r|affected.contains(&r.id)).map(|r|json!({"id":r.id,"feature":r.feature,"sourceFiles":r.sources,"suggestedTests":r.tests,"requiredChecks":r.checks,"functionalImpact":"not_tested"})).collect();
-    json!({"schema":1,"dependencyRevision":dependency_revision(),"registryHash":current.registry_hash,"type":if previous.is_none(){"baseline"}else if previous.is_some_and(|p|p.version==current.version&&p.package==current.package&&p.runtimes==current.runtimes&&p.entries.len()==current.entries.len()&&p.entries.iter().all(|(name,a)|current.entries.get(name).is_some_and(|b|a.sha256==b.sha256&&a.kind==b.kind))){"analysis_refresh"}else{"update"},"observedMs":current.observed_ms,"previousVersion":previous.map(|s|&s.version),"version":current.version,"package":current.package,"runtimes":current.runtimes,"previousRuntimes":previous.map(|p|&p.runtimes),"complete":current.complete,"counts":{"all":changes.len(),"pluginDependency":changes.iter().filter(|v|v["category"]=="plugin_dependency").count(),"noKnownPluginDependency":changes.iter().filter(|v|v["category"]=="no_known_plugin_dependency").count(),"needsReview":changes.iter().filter(|v|v["category"]=="needs_review").count()},"dependencies":dependencies,"issues":current.issues,"changes":changes,"validation":{"status":"not_tested","reason":"Static dependency candidates only. Actual behavior must be tested separately; no inference, OAuth or account mutation was performed."},"coverage":"Observed desktop files, all official PrimaryRuntime registration metadata and official MSIX-declared per-file SHA-256 values of the newest registered Runtime distribution, with catalog/manifest/runtime metadata read directly. Runtime content matching uses paths; declared hashes are not local file integrity verification. Older catalogs without whole-file hashes fall back to direct reads. Desktop packed ASAR entries are expanded as before. Older side-by-side Runtime contents are not scanned. Registration does not establish which backend is active. Unobserved intermediate versions and server-side changes cannot be reconstructed. Resource classification means no registered dependency identified, not proof of no behavioral effect."})
+    json!({"schema":1,"dependencyRevision":dependency_revision(),"registryHash":current.registry_hash,"type":if previous.is_none(){"baseline"}else if previous.is_some_and(|p|p.version==current.version&&p.package==current.package&&p.runtimes==current.runtimes&&p.entries.len()==current.entries.len()&&p.entries.iter().all(|(name,a)|current.entries.get(name).is_some_and(|b|a.sha256==b.sha256&&a.kind==b.kind))){"analysis_refresh"}else{"update"},"observedMs":current.observed_ms,"previousVersion":previous.map(|s|&s.version),"version":current.version,"package":current.package,"runtimes":current.runtimes,"previousRuntimes":previous.map(|p|&p.runtimes),"complete":current.complete,"counts":{"all":changes.len(),"pluginDependency":changes.iter().filter(|v|v["category"]=="plugin_dependency").count(),"noKnownPluginDependency":changes.iter().filter(|v|v["category"]=="no_known_plugin_dependency").count(),"needsReview":changes.iter().filter(|v|v["category"]=="needs_review").count()},"dependencies":dependencies,"issues":current.issues,"changes":changes,"validation":{"status":"not_tested","reason":"Static dependency candidates only. Actual behavior must be tested separately; no inference, OAuth or account mutation was performed."},"coverage":"Observed desktop files, all official PrimaryRuntime registration metadata and official MSIX-declared per-file SHA-256 values of the newest registered Runtime distribution, with catalog/manifest/runtime metadata read directly. Runtime contents are matched by package-relative path across generations; registration changes are listed separately and original package paths remain in the evidence; declared hashes are not local file integrity verification. Older catalogs without whole-file hashes fall back to direct reads. Desktop packed ASAR entries are expanded as before. Older side-by-side Runtime contents are not scanned. Registration does not establish which backend is active. Unobserved intermediate versions and server-side changes cannot be reconstructed. Resource classification means no registered dependency identified, not proof of no behavioral effect."})
 }
 fn markdown(v: &Value) -> String {
     let mut s = format!(

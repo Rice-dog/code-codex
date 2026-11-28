@@ -10,7 +10,7 @@ import { TreeModel,parentPath } from "../../tree-model";
 export interface DirectoryJobsControllerPorts {
   readonly session: Readonly<WorkspaceSession<WorkspaceBridge>>;
   readonly element: HTMLElement;
-  readonly model: Pick<TreeModel,"beginLoad"|"commitLoad"|"failLoad"|"getNextCursor"|"loadedDirectories"|"markChange"|"nodeCount">;
+  readonly model: Pick<TreeModel,"beginLoad"|"cancelLoad"|"commitLoad"|"failLoad"|"getNextCursor"|"loadedDirectories"|"markChange"|"nodeCount">;
   readonly renderTree: () => void;
   readonly pendingMarks: Map<string,ChangeKind>;
   readonly setState: (state: ExplorerViewState,detail?: string) => void;
@@ -19,6 +19,14 @@ export interface DirectoryJobsControllerPorts {
 export class DirectoryJobsController {
   readonly loads = new Map<string,Promise<void>>();
   constructor(private readonly host: DirectoryJobsControllerPorts) { }
+
+  cancelPending(): string[] {
+    const pending=[...this.loads.keys()];
+    this.loads.clear();
+    for(const path of pending) this.host.model.cancelLoad(path);
+    return pending;
+  }
+
   async loadDirectory(path: string,append=false,waitForExisting=false,expectedGeneration?: number): Promise<void> {
     if(expectedGeneration!==undefined&&expectedGeneration!==this.host.session.generation) return;
     const existing=this.loads.get(path);
@@ -66,7 +74,7 @@ export class DirectoryJobsController {
       if(path==="") this.host.setState("error",errorCode(error));
     } finally {
       diagnostic.finish('discarded',{ reason: 'Workspace generation changed',currentGeneration: this.host.session.generation });
-      this.host.renderTree();
+      if(generation===this.host.session.generation) this.host.renderTree();
     }
   }
   async runDirectoryRefresh(): Promise<void> {

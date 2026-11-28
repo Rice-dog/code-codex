@@ -18,10 +18,79 @@ import {UpdatesController,type UpdatesControllerPorts} from './features/workspac
 import {DEFAULT_STARTUP_TRANSITION_SETTINGS,settingsForStartupVideo,startupDefaultClip,startupPlaybackVideoId} from './startup-transition-settings';
 import {clipFadeOpacity,moveTimelineBoundary,startupTimelineGeometry} from './startup-transition-timeline';
 import {inspectConversationToolbar,inspectNavigationDestination,inspectSecondaryPaint,inspectSecondaryPaintCoverage,inspectToolbarPanelPaint} from './host-navigation-inspection';
+import {AccountList} from './features/accounts/account-list';
+import {ACCOUNT_UI_CHANGED,type AccountsInfo} from './features/accounts/contracts';
+import {canRetainWorkspaceMount} from './host-update-mount';
+
+const documentOwnerKey=Symbol.for('code-codex:document-connection-owner:v2');
+function watchAccountHandoff():{settled:Promise<void>;dispose:()=>void}|undefined {
+ const globals=window as unknown as Record<symbol,{retainedAccounts?:unknown}|undefined>;
+ const original=globals[documentOwnerKey];
+ if(!original?.retainedAccounts)return;
+ const controller=new AbortController();
+ let dispose:()=>void=()=>{};
+ const settled=new Promise<void>(resolve=>{
+  dispose=()=>{controller.abort();clearTimeout(timer);resolve();};
+  const timer=setTimeout(dispose,4000);
+  const changed=()=>{if(globals[documentOwnerKey]!==original||!original.retainedAccounts)dispose();};
+  for(const name of [ACCOUNT_UI_CHANGED,'code-codex:accounts-connected','code-codex:account-handoff-committed'])
+    window.addEventListener(name,changed,{signal:controller.signal});
+  window.addEventListener('pagehide',dispose,{once:true,signal:controller.signal});
+ });
+ return {settled,dispose};
+}
+
+function inspectCachedAccountCards():Check[] {
+ const runtime=(window as unknown as Record<symbol,{adapter?:{info?:AccountsInfo;usage?:AccountUsageStore}}|undefined>)[Symbol.for('code-codex:multi-account-runtime:v1')];
+ const info=runtime?.adapter?.info;
+ const observations=(observer:(kind:'identity'|'quota')=>{status:Check['status'];detail:string}):Check[]=>
+  (['identity','quota'] as const).map(kind=>{
+   const id='host.account-panel-'+kind;
+   return {id:'isolated.'+id,evidenceFor:id,scope:'isolated-live-cache',...observer(kind)};
+  });
+ if(!info?.owner.id||!info.owner.label)
+  return observations(()=>({status:'manual',detail:'No previously observed account identity is available for isolated card rendering.'}));
+ const host=document.createElement('div');
+ const shadow=host.attachShadow({mode:'open'});
+ const panel=document.createElement('div');
+ panel.className='accounts-panel';
+ shadow.append(panel);
+ const list=new AccountList(shadow,panel,()=>{throw Error('Compatibility account cards have no actions.');});
+ try{
+  list.render(info,false,runtime?.adapter?.usage);
+  return observations(kind=>inspectAccountPanel(host,kind,true));
+ } finally{list.dispose();}
+}
+
+function checkAccountRoutingContract():Check[] {
+ const info={nativeRouting:true,selected:{fixture:'child'},nativeRoutes:{fixture:'child'}};
+ const globals:Record<symbol,unknown>={
+  [documentOwnerKey]:{nativeBinding:'new',retainedAccounts:{nativeBinding:'old'}},
+  [Symbol.for('code-codex:accounts-capability:v1')]:{request:{runtimeIdentity:'old'}},
+  [Symbol.for('code-codex:multi-account-runtime:v1')]:{enabled:true,adapter:{
+   request:{runtimeIdentity:'new'},info,
+   status:()=>({supported:true,active:true,conversationId:'fixture',sendBlocked:false}),
+  }},
+ };
+ const retained=inspectAccountExecution(globals);
+ globals[documentOwnerKey]={nativeBinding:'new'};
+ globals[Symbol.for('code-codex:accounts-capability:v1')]={request:{runtimeIdentity:'new'}};
+ const committed=inspectAccountExecution(globals);
+ info.nativeRoutes.fixture='host';
+ const stale=inspectAccountExecution(globals);
+ return [
+  {id:'isolated.host.account-execution-owner',evidenceFor:'host.account-execution-owner',scope:'controlled-production-regression',
+   status:retained.owner.status==='manual'&&committed.owner.status==='passed'?'passed':'issue',
+   detail:'The account owner probe distinguishes a retained executor from a committed endpoint.'},
+  {id:'isolated.host.account-execution-route',evidenceFor:'host.account-execution-route',scope:'controlled-production-regression',
+   status:committed.route.status==='passed'&&stale.route.status==='issue'?'passed':'issue',
+   detail:'The route probe accepts a matching saved route and rejects a stale route that can still send.'},
+ ];
+}
 
 export {inspectCollapsedTreePaint} from './host-update-background';
 
-type Check={id:string;status:'passed'|'issue'|'manual';scope:string;detail:string};
+type Check={id:string;status:'passed'|'issue'|'manual';scope:string;detail:string;evidenceFor?:string};
 export function inspectMarketScroll(root:Document):Pick<Check,'status'|'detail'> {
  const lists=Array.from(root.querySelectorAll<HTMLElement>('[data-code-codex-owned="true"]')).flatMap(h=>Array.from(h.shadowRoot?.querySelectorAll<HTMLElement>('.preview-market-list')??[])).filter(e=>!e.hidden&&e.getBoundingClientRect().height>0);
  if(!lists.length)return {status:'manual',detail:'Open Plugin Market to inspect its native scroll container; wheel, keyboard and scrollbar interaction need their separate scenario.'};
@@ -33,6 +102,7 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
  const add=(id:string,status:Check['status'],detail:string,scope='actual-host-read-only')=>checks.push({id,status,scope,detail});
  if(location.href!=='app://-/index.html')return {checks:[{id:'host.document',status:'manual',scope:'actual-host-read-only',detail:'The qualified official main document is not available.'}],documentVersion:null};
  const readiness = options ? waitForUpdateMount(options.version) : undefined;
+ const accountHandoff=options ? watchAccountHandoff() : undefined;
  // Controlled regressions reuse production functions in private objects and
  // detached DOM, so future update checks execute the negative cases too.
  const assert=(v:unknown)=>{if(!v)throw Error('probe regression');};
@@ -93,6 +163,32 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
   try{await run();add(id,'passed',detail,controlled);}
   catch{add(id,'issue',detail+' The controlled scenario failed.',controlled);}
  }
+ await regression('regression.tree-route-mount','The existing inline file tree keeps its slot during a conversation transition. Narrow and forced drawer modes, missing or ambiguous native rails, and retired mounts bypass retention.',()=>{
+  const row=document.createElement('div');
+  row.dataset.appShellWorkspaceRow='true';
+  row.dataset.codeCodexOwned='true';
+  row.style.cssText='position:fixed;left:-2000px;visibility:visible';
+  const rail=document.createElement('aside');
+  rail.className='app-shell-left-panel';
+  const explorer=document.createElement('div');
+  explorer.dataset.placement='inline';
+  explorer.dataset.mountStrategy='known:workspace-row';
+  row.append(rail,explorer);
+  document.body.append(row);
+  try{
+   assert(canRetainWorkspaceMount(explorer,1200,false));
+   assert(!canRetainWorkspaceMount(explorer,820,false)&&!canRetainWorkspaceMount(explorer,1200,true));
+   const duplicate=rail.cloneNode() as HTMLElement;
+   row.prepend(duplicate);
+   assert(!canRetainWorkspaceMount(explorer,1200,false));
+   duplicate.remove();
+   rail.hidden=true;
+   assert(!canRetainWorkspaceMount(explorer,1200,false));
+   rail.remove();
+   assert(!canRetainWorkspaceMount(explorer,1200,false));
+  }finally{row.remove();}
+  assert(!canRetainWorkspaceMount(explorer,1200,false));
+ });
  await regression('regression.account-api-continuation','The production continuation preserves an allowed API model, uses its safe fallback, skips official quota on API, and does not rotate on throttling, disconnect or user cancellation.',async()=>{
   const api={model:'fallback',models:['fallback','allowed']};
   const matched=apiContinuationSettings({model:'allowed',effort:'high'},api);
@@ -243,9 +339,6 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
  add('host.account-panel-actions',...fields(inspectAccountPanel(explorer,'actions')));
  add('host.account-panel-identity',...fields(inspectAccountPanel(explorer,'identity')));
  add('host.account-panel-quota',...fields(inspectAccountPanel(explorer,'quota')));
- const accountExecution=inspectAccountExecution(window as unknown as Record<symbol,unknown>);
- add('host.account-execution-owner',...fields(accountExecution.owner));
- add('host.account-execution-route',...fields(accountExecution.route));
  const updateHandoff=(window as unknown as Record<symbol,unknown>)[Symbol.for('code-codex:official-update-handoff:v1')];
  add('host.official-update-hook',typeof updateHandoff==='function'?'passed':explorer&&mains.length?'issue':'manual',
    typeof updateHandoff==='function'?'The production official update service wrapper owns this document.':'The official update service wrapper was not observed in this document.');
@@ -344,6 +437,17 @@ export async function probeHostUpdate(manifest:any, options?:{version:string;bac
  add('host.ownership',!owner||owner.pending?'manual':retired?.has?.(owner.nativeBinding)?'issue':'passed',!owner||owner.pending?'Document ownership has not completed in this page. Recheck when the file tree is ready.':'The current document owner is committed and its binding is not retired. No handoff was requested.');
  const marketScroll=inspectMarketScroll(document);
  add('host.market-scroll',marketScroll.status,marketScroll.detail);
- if(options)checks.push(...runBackgroundChecks(new Set(options.background),explorer));
+ if(options){
+  checks.push(...runBackgroundChecks(new Set(options.background),explorer));
+  checks.push(...inspectCachedAccountCards(),...checkAccountRoutingContract());
+ }
+ let accountExecution=inspectAccountExecution(window as unknown as Record<symbol,unknown>);
+ if(accountHandoff&&accountExecution.owner.status==='manual'){
+  await accountHandoff.settled;
+  accountExecution=inspectAccountExecution(window as unknown as Record<symbol,unknown>);
+ }
+ accountHandoff?.dispose();
+ add('host.account-execution-owner',...fields(accountExecution.owner));
+ add('host.account-execution-route',...fields(accountExecution.route));
  return {checks,documentVersion:manifest.version??null};
 }

@@ -100,6 +100,94 @@ fn capture_entries(
     Ok(entries)
 }
 
+pub(crate) fn loopback_listener_matches(
+    port: u16,
+    expected: &Path,
+) -> Result<bool, ProcessGuardError> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID,
+        TCP_TABLE_OWNER_PID_LISTENER,
+    };
+    use windows_sys::Win32::System::Threading::GetProcessTimes;
+
+    fn listeners<T: Copy>(
+        family: u32,
+        address: impl Fn(T) -> (bool, u32, u32),
+        port: u16,
+    ) -> Result<Vec<u32>, ProcessGuardError> {
+        let mut size = 0;
+        unsafe {
+            GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 0, family, TCP_TABLE_OWNER_PID_LISTENER, 0);
+        }
+        if !(4..=4 * 1024 * 1024).contains(&size) { return Err(failure("TCP table size")); }
+        let mut buffer = vec![0u32; (size as usize).div_ceil(4)];
+        if unsafe {
+            GetExtendedTcpTable(buffer.as_mut_ptr().cast(), &mut size, 0, family, TCP_TABLE_OWNER_PID_LISTENER, 0)
+        } != 0 { return Err(failure("TCP table snapshot")); }
+        let count = buffer[0] as usize;
+        if count > (size as usize).saturating_sub(4) / std::mem::size_of::<T>() {
+            return Err(failure("TCP table data"));
+        }
+        let records = unsafe { std::slice::from_raw_parts(buffer.as_ptr().add(1).cast::<T>(), count) };
+        Ok(records.iter().copied().filter_map(|record| {
+            let (loopback, local_port, pid) = address(record);
+            (loopback && u16::from_be(local_port as u16) == port).then_some(pid)
+        }).collect())
+    }
+
+    let mut owners = listeners::<MIB_TCPROW_OWNER_PID>(2, |row| {
+        (row.dwLocalAddr == u32::from_ne_bytes([127,0,0,1]), row.dwLocalPort, row.dwOwningPid)
+    }, port)?;
+    owners.extend(listeners::<MIB_TCP6ROW_OWNER_PID>(23, |row| {
+        (row.ucLocalAddr == std::net::Ipv6Addr::LOCALHOST.octets(), row.dwLocalPort, row.dwOwningPid)
+    }, port)?);
+    owners.sort_unstable();
+    owners.dedup();
+    if owners.is_empty() { return Err(failure("listeners unavailable")); }
+    let expected = dunce::canonicalize(expected).map_err(|_| failure("official image"))?;
+    let budget = Duration::from_millis(1500);
+    let started = Instant::now();
+    let entries: std::collections::HashMap<u32,u32> = capture_entries(started, budget)?.into_iter()
+        .map(|entry| (entry.th32ProcessID, entry.th32ParentProcessID)).collect();
+    for owner in owners {
+        let mut current = owner;
+        let mut child_creation = None;
+        let mut visited = std::collections::HashSet::new();
+        let mut proof = false;
+        let mut handles = Vec::new();
+        for _ in 0..64 {
+            if current == 0 || !visited.insert(current) || started.elapsed() >= budget { break; }
+            let Some(parent) = entries.get(&current) else { break; };
+            let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE, 0, current) };
+            if raw.is_null() { return Err(failure("listener process handle")); }
+            handles.push(unsafe { OwnedHandle::from_raw_handle(raw) });
+            let mut times = [FILETIME::default();4];
+            let times = times.as_mut_ptr();
+            if unsafe { GetProcessTimes(raw, times, times.add(1), times.add(2), times.add(3)) } == 0 {
+                return Err(failure("listener process creation time"));
+            }
+            let creation = unsafe { *times };
+            let creation = ((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64;
+            if child_creation.is_some_and(|child| creation > child) { break; }
+            let mut path = vec![0u16;32768];
+            let mut size = path.len() as u32;
+            if unsafe { QueryFullProcessImageNameW(raw, 0, path.as_mut_ptr(), &mut size) } == 0 {
+                return Err(failure("listener process image"));
+            }
+            let path = std::path::PathBuf::from(String::from_utf16_lossy(&path[..size as usize]));
+            if dunce::canonicalize(path).is_ok_and(|image| image.to_string_lossy().eq_ignore_ascii_case(&expected.to_string_lossy())) {
+                proof = handles.iter().all(|handle| unsafe { WaitForSingleObject(handle.as_raw_handle(),0) } == WAIT_TIMEOUT);
+                break;
+            }
+            child_creation = Some(creation);
+            current = *parent;
+        }
+        if !proof { return Ok(false); }
+    }
+    Ok(true)
+}
+
 fn reconcile_open_failure(
     pid: u32,
     os_code: Option<i32>,

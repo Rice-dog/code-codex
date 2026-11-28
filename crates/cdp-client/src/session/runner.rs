@@ -373,7 +373,7 @@ where
     let mut top_document_loaded = true;
     let mut navigation_in_progress = false;
     let mut navigation_awaiting_frame = false;
-    let mut navigation_started_at = None;
+    let mut requalification_started_at = None;
     let mut last_qualification = Instant::now();
     let mut qualification_tick = tokio::time::interval(Duration::from_millis(250));
     qualification_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -412,7 +412,7 @@ where
                 if top_document_loaded
                     && qualification_probe.is_none()
                     && last_qualification.elapsed()
-                        >= if navigation_in_progress {
+                        >= if !document_qualified {
                             NAVIGATION_QUALIFICATION_INTERVAL
                         } else {
                             STEADY_STATE_QUALIFICATION_INTERVAL
@@ -431,7 +431,7 @@ where
                     next_id += 1;
                 }
             }
-            outbound = outbound_receiver.recv() => {
+            outbound = outbound_receiver.recv(), if document_qualified || navigation_in_progress => {
                 let Some(mut outbound) = outbound else { break; };
                 if let Some(t)=outbound.trace.as_mut(){t.phase("outbound-dequeued");}
                 if !document_qualified
@@ -557,19 +557,28 @@ where
                             qualification_probe = None;
                             let probe = message.get("result").ok_or(CdpError::Protocol)?;
                             if !renderer_probe_matches(probe) {
-                                if navigation_in_progress
-                                    && navigation_started_at.is_some_and(|started: Instant| {
-                                        started.elapsed()
-                                            < TRUSTED_NAVIGATION_QUALIFICATION_TIMEOUT
-                                    })
-                                {
-                                    // React can mount the verified shell selectors after
-                                    // readyState reaches complete. Keep native dispatch
-                                    // blocked and retry only inside this navigation window.
-                                    last_qualification = Instant::now();
-                                    continue;
+                                let now = Instant::now();
+                                if document_qualified {
+                                    // A mounted shell can briefly disappear in the same
+                                    // document. Keep the transport and epoch, but block
+                                    // dispatch until the existing layout probe passes.
+                                    document_qualified = false;
+                                    requalification_started_at = Some(now);
+                                    if let Some(observer) = DIAGNOSTIC_OBSERVER.get() {
+                                        observer("cdp-session", "requalification", "waiting", json!({
+                                            "reason":"retained-document-layout",
+                                            "documentEpoch":document_epoch,
+                                            "budgetMs":TRUSTED_NAVIGATION_QUALIFICATION_TIMEOUT.as_millis()
+                                        }));
+                                    }
                                 }
-                                return Err(CdpError::IncompatibleRenderer);
+                                if requalification_started_at.is_none_or(|started: Instant| {
+                                    now.duration_since(started) >= TRUSTED_NAVIGATION_QUALIFICATION_TIMEOUT
+                                }) {
+                                    return Err(CdpError::IncompatibleRenderer);
+                                }
+                                last_qualification = now;
+                                continue;
                             }
                             last_qualification = Instant::now();
                             // A sign-in route can temporarily fail the probe while
@@ -590,9 +599,12 @@ where
                             }
                             if !document_qualified {
                                 document_qualified = true;
+                                let navigated = navigation_in_progress;
+                                let recovery_elapsed = requalification_started_at.take()
+                                    .map(|started| started.elapsed().as_millis());
                                 navigation_in_progress = false;
                                 navigation_awaiting_frame = false;
-                                navigation_started_at = None;
+                                let pending_count = pending_requests.len();
                                 while let Some(request) = pending_requests.pop_front() {
                                     dispatch_request(
                                         request,
@@ -603,15 +615,23 @@ where
                                         document_epoch,
                                     )?;
                                 }
-                                // A new document may have run the navigation bootstrap
-                                // before the trusted shell became ready. Reinstall only
-                                // after qualification, then notify retained clients.
-                                send_command(&mut writer, next_id, "Runtime.evaluate", json!({
-                                    "expression": injection.navigation_bootstrap_source.as_deref().unwrap_or(injection.bootstrap_source.as_ref()),
-                                    "awaitPromise": false
-                                })).await?;
-                                next_id += 1;
-                                let resync = json!({ "method": "explorer.resync", "params": {"reason":"document-requalified","documentEpoch":document_epoch} });
+                                if navigated {
+                                    // The new document's bootstrap may have run before its shell was ready.
+                                    send_command(&mut writer, next_id, "Runtime.evaluate", json!({
+                                        "expression": injection.navigation_bootstrap_source.as_deref().unwrap_or(injection.bootstrap_source.as_ref()),
+                                        "awaitPromise": false
+                                    })).await?;
+                                    next_id += 1;
+                                } else if let Some(observer) = DIAGNOSTIC_OBSERVER.get() {
+                                    observer("cdp-session", "requalification", "recovered", json!({
+                                        "reason":"retained-document-layout",
+                                        "documentEpoch":document_epoch,
+                                        "elapsedMs":recovery_elapsed,
+                                        "initialDispatches":pending_count,
+                                        "writesReplayed":false
+                                    }));
+                                }
+                                let resync = json!({ "method": "explorer.resync", "params": {"reason":if navigated {"document-requalified"} else {"retained-document-requalified"},"documentEpoch":document_epoch} });
                                 let expression = delivery_expression(&resync, &injection.receiver_name)?;
                                 send_command(
                                     &mut writer,
@@ -630,7 +650,7 @@ where
                                 document_epoch = document_epoch.wrapping_add(1);
                                 pending_requests.clear();
                                 gate.reset_for_new_document().await;
-                                navigation_started_at = Some(Instant::now());
+                                requalification_started_at = Some(Instant::now());
                             }
                             navigation_in_progress = true;
                             navigation_awaiting_frame = true;
@@ -667,7 +687,7 @@ where
                                 rejected_execution_contexts.clear();
                                 pending_requests.clear();
                                 gate.reset_for_new_document().await;
-                                navigation_started_at = Some(Instant::now());
+                                requalification_started_at = Some(Instant::now());
                             }
                             navigation_in_progress = true;
                             navigation_awaiting_frame = false;
@@ -689,7 +709,7 @@ where
                                 handler.invalidate_lifecycle();
                                 handler_tasks.abort_all();
                                 document_epoch = document_epoch.wrapping_add(1);
-                                navigation_started_at = Some(Instant::now());
+                                requalification_started_at = Some(Instant::now());
                             }
                             navigation_in_progress = true;
                             navigation_awaiting_frame = true;
@@ -746,7 +766,7 @@ where
                                     handler.invalidate_lifecycle();
                                     handler_tasks.abort_all();
                                     document_epoch = document_epoch.wrapping_add(1);
-                                    navigation_started_at = Some(Instant::now());
+                                    requalification_started_at = Some(Instant::now());
                                 }
                                 navigation_in_progress = true;
                                 navigation_awaiting_frame = true;

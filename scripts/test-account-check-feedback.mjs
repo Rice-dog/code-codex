@@ -35,7 +35,7 @@ try{
  await b.evaluate(click('reconcile'));await b.evaluate("finish('cleared');"+settle);
  await check('Cleared state is distinguishable from no tasks',`s.querySelector('.accounts-actions-menu [data-account-action=reconcile]').textContent==='Stale task state cleared'`);
  await b.evaluate(click('verify'));await b.evaluate("finish('fail');"+settle);
- await check('Failure stays visible in English and allows retry while raw error reaches the existing notice',`s.querySelector('.accounts-actions-menu [data-account-action=verify]').textContent==='Check failed. Try again.'&&!s.querySelector('.accounts-actions-menu [data-account-action=verify]').disabled&&calls.includes('ACCOUNT_FIXTURE_FAILED')`);
+ await check('Failure allows retry, with a short panel message and technical detail in runtime diagnostics',`s.querySelector('.accounts-actions-menu [data-account-action=verify]').textContent==='Check failed. Try again.'&&!s.querySelector('.accounts-actions-menu [data-account-action=verify]').disabled&&s.querySelector('.accounts-message').textContent===window[Symbol.for('code-codex:language-service:v1')].t('accounts.error.action')&&window[Symbol.for('code-codex:runtime-events:v1')].events.some(e=>e.action==='account.ui'&&e.details.error.includes('ACCOUNT_FIXTURE_FAILED'))`);
  await b.evaluate(click('verify'));await b.evaluate('finish(false);'+settle);
  await check('Retry reports signed-out without opening a login page',`s.querySelector('.accounts-actions-menu [data-account-action=verify]').textContent==='Signed out'&&actionCalls.at(-1)==='verify'`);
  await b.evaluate(`setLanguage({schema:1,locale:'zh-CN',revision:1,source:'menu'});plugin.render()`);

@@ -1,12 +1,14 @@
 {
   "schema": 1,
-  "revision": 59,
+  "revision": 69,
   "rules": [
     {
       "id": "layout",
       "feature": "File tree, workspace mount and composer",
       "sources": [
         "crates/cdp-client/src/lib.rs",
+        "crates/cdp-client/src/session/runner.rs",
+        "crates/cdp-client/src/session/gate.rs",
         "crates/cdp-client/src/renderer-layout-diagnostic.js",
         "packages/explorer-ui/src/adapters/codex-26.715.ts",
         "packages/explorer-ui/src/inject.ts",
@@ -32,10 +34,13 @@
         "crates/workspace-service/src/first_run.rs",
         "packages/explorer-ui/src/native-workspace-background.ts",
         "packages/explorer-ui/src/host-update-feature-inspection.ts",
-        "packages/explorer-ui/src/app/explorer-element.ts"
+        "packages/explorer-ui/src/app/explorer-element.ts",
+        "packages/explorer-ui/src/features/workspace/directory-jobs.ts",
+        "crates/launcher/src/bridge/routes/workspace.rs"
       ],
       "tests": [
         "scripts/test-codex-layout.mjs",
+        "scripts/test-codex-current-ui.mjs",
         "scripts/test-account-selector.mjs",
         "scripts/test-account-thread-identity.mjs",
         "scripts/test-host-update-probes.mjs",
@@ -73,7 +78,9 @@
       "paths": [],
       "checks": [
         "Managed renderer qualification and inline placement accept the native history-swipe MAIN with a direct contents wrapper, including a nested workspace. The signed-out desktop column holds a unique semantic login surface, heading and controls without a workspace. Reject a missing marker, wrong wrapper, duplicate rails and wrong order. In split view, the semantic main focus-area identifies the frame without the retired CSS module name.",
+        "An already qualified document may briefly lose its supported layout during a host transition. In the native CDP fixture, pause dispatch until the same document passes the unchanged probe, then deliver a queued primary promotion once without reloading its UI. A persistently invalid layout or navigation must never dispatch the old document's queued write. Confirm real account switching separately.",
         "Existing/new/unknown composer layouts, missing and ambiguous anchors, navigation and disposal.",
+        "During the inactive-page gap between a conversation and New Chat, retain the existing wide inline tree beside the same visible, unique native rail, then reconcile to the next qualified surface. Verify frame geometry and preserve narrow, forced and initial drawer behavior.",
         "Collapsed inert/aria-hidden sidebar rows do not compete with the active thread; A/B retain independent saved connections, true multiple active IDs remain ambiguous, and New Chat keeps draft selection.",
         "Native right split with expanded/collapsed file tree and narrow/wide panes keeps the main transcript and composer inside its actual viewport; single-pane/full-width and tree removal restore native sizing.",
         "Compare the mounted inline tree with its owning workspace's top edge. The former fixed 8 CSS px inset must report an issue; preserve the native conversation inset and use the same check for collapsed and expanded trees. Drawer and unmounted states remain manual.",
@@ -89,7 +96,8 @@
         "Toggle read-only/editing and exercise create, rename, move and trash in a disposable folder. Confirm read-only protection and no cross-workspace writes.",
         "Collapse, expand, drag the separator and use its keyboard controls. Hide until conversation selection and restore from menu. Verify no extra native header displacement after dismissal.",
         "Pin and unpin in the market and reorder through supported preferences. Verify open-only shortcut behavior, overflow menu keyboard navigation and focus return when the window narrows.",
-        "Verify workspace follow, retained tab/selection, no-project and deleted-project states, cached-directory updates and watcher recovery."
+        "Verify workspace follow, retained tab/selection, no-project and deleted-project states, cached-directory updates and watcher recovery.",
+        "Switch between two conversations with the same native workspace identity: keep expanded rows, filter and watcher, do not reread the root, and invalidate old context operations. Compare with a different root, an unbound conversation, a delayed reply and a legacy bridge."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -99,6 +107,7 @@
         "host.welcome-surface",
         "host.quick-tour-targets",
         "regression.layout",
+        "regression.tree-route-mount",
         "host.split-layout",
         "host.market-scroll",
         "background.market-layout",
@@ -134,6 +143,8 @@
         "packages/explorer-ui/src/features/accounts/quota.ts",
         "crates/launcher/src/accounts/backend_diagnostics.rs",
         "crates/launcher/src/accounts/worker.rs",
+        "crates/launcher/src/bridge.rs",
+        "packages/explorer-ui/src/app/composition.ts",
         "crates/launcher/src/accounts/worker_health.rs",
         "crates/launcher/src/accounts/credentials.rs",
         "crates/launcher/src/accounts/queries.rs",
@@ -158,6 +169,8 @@
         "crates/launcher/src/accounts/credentials.rs",
         "crates/launcher/src/accounts/queries.rs",
         "scripts/test-account-query-lifecycle.cjs",
+        "crates/launcher/src/accounts/worker.rs",
+        "scripts/test-hot-activation.mjs",
         "scripts/test-account-primary-host.mjs",
         "scripts/test-account-primary-diagnostics.mjs",
         "crates/launcher/src/accounts/primary.rs",
@@ -210,6 +223,7 @@
       "manualSteps": [
         "In an idle test conversation select a previously verified child, then the primary account. Confirm identity and quota update without another login.",
         "Separately test a signed-out/expired connection and an unavailable network; cached quota must not be described as a login failure.",
+        "Complete an isolated official browser sign-in and verify that the matching account/login/completed event refreshes the card without Verify. Check mismatched login IDs, cancellation, duplicate completion and inactive document epochs. Retain manual Verify as the path for unavailable notifications and record OAuth acceptance separately.",
         "In an idle disposable installation start/cancel a primary-account authorization, including an interrupted receipt. Confirm ordinary account switching and disable remain usable after interruption, and that canceled differs from notFound/unconfirmed. Do not change the active user login automatically."
       ],
       "area": "Account and execution / Routing and identity"
@@ -277,7 +291,11 @@
         "packages/explorer-ui/src/host-update-mount.ts",
         "packages/explorer-ui/src/native-workspace-background.ts",
         "packages/explorer-ui/src/host-update-feature-inspection.ts",
-        "resources/plugin-definitions.json"
+        "resources/plugin-definitions.json",
+        "packages/explorer-ui/src/plugin-host/backgrounds/liquid-ascii.ts",
+        "packages/explorer-ui/src/effects/liquid-ascii/model.ts",
+        "packages/explorer-ui/src/effects/liquid-ascii/worker.ts",
+        "packages/explorer-ui/src/features/plugin-settings/liquid-ascii.ts"
       ],
       "tests": [
         "scripts/test-appearance-adapter.mjs",
@@ -288,7 +306,8 @@
         "scripts/test-native-side-panel-opacity.mjs",
         "scripts/test-collapsed-tree-opacity.mjs",
         "scripts/test-ui-responsiveness.mjs",
-        "scripts/test-categorized-plugin-market.mjs"
+        "scripts/test-categorized-plugin-market.mjs",
+        "scripts/test-liquid-ascii.mjs"
       ],
       "tokens": [
         "app.appearance.get",
@@ -326,7 +345,8 @@
         "Late owned preview mounts and repeated notifications install one opacity stylesheet. Inactive renders and ordinary response insertions do not scan descendants; stop/start removes subscriptions and restores presentation. Existing fold/reopen and 0/mid/full paint checks still apply.",
         "One native-style isolated document checks footer backdrop, side panel and collapsed rail paint against supported opacity settings. It must not mark an absent live official surface as passed or leave nodes behind.",
         "The UI Surface Opacity card has an independent result. In an active conversation the official top edge-scroll decoration must add no fill or gradient over the shared mask at 0, mid, or full opacity. Detect residual paint even when the main backdrop already passes. Preserve unrelated controls and native paint when opacity is inactive.",
-        "Inspect the native page-frame backing and turn-diff file rows independently. The outer docked-sidebar gradient must not dim the whole background when Surface Opacity is active; zero change alpha must also leave the card and non-hovered file rows transparent. Preserve the native state outside the owned surfaces."
+        "Inspect the native page-frame backing and turn-diff file rows independently. The outer docked-sidebar gradient must not dim the whole background when Surface Opacity is active; zero change alpha must also leave the card and non-hovered file rows transparent. Preserve the native state outside the owned surfaces.",
+        "Liquid ASCII uses the shared background lease, mutual exclusion and settings panel. Verify a real Canvas2D Worker first frame, pointer interaction, opening replay, pause/reduced-motion/hidden suspension, independent startup copy and disposal; unknown host or unavailable worker leaves normal UI available."
       ],
       "automatedChecks": [
         "package.inventory",
@@ -569,9 +589,9 @@
         "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance.",
         "Official update installUpdate entry retains native confirmation/deployment; only a verified newer package after retained original process exit triggers handoff. New window must have one working tree and Bridge. Cancel/failed/same-version/ordinary close must not relaunch. Real update acceptance is separate from static matching.",
         "PackageUpdating subscription precedes readiness; matching newer same-family terminal completion gates discovery after original exit; unrelated/progress/error and completion-before-exit cases retain explicit boundaries.",
-        "Unchanged desktop plus changed official PrimaryRuntime registration triggers the existing background ledger; unchanged component identities traverse no files. Inventory newest registered Runtime distribution, record all registrations, reuse unchanged desktop entries. Discovery failure preserves baseline; old side-by-side contents and actual backend selection are not certified. Runtime files use official MSIX declared whole-file SHA-256 and path dependency mapping; direct catalog/manifest/runtime metadata reads and missing-hash fallback are separate from full local integrity verification. Native XML positive/missing/invalid/duplicate/DTD and real sampled declared hashes require checks.",
+        "Unchanged desktop plus changed official PrimaryRuntime registration triggers the existing background ledger; unchanged component identities traverse no files. Inventory newest registered Runtime distribution, record all registrations, reuse unchanged desktop entries. Discovery failure preserves baseline; old side-by-side contents and actual backend selection are not certified. Runtime files use official MSIX declared whole-file SHA-256 and path dependency mapping; direct catalog/manifest/runtime metadata reads and missing-hash fallback are separate from full local integrity verification. Compare the inventoried Runtime contents by package-relative path across versions, preserve both package paths for modified files and track registrations independently. Identical files in a new package folder are excluded; changed, added, removed and not-observed files remain distinct. Native XML positive/missing/invalid/duplicate/DTD and real sampled declared hashes require checks.",
         "Analysis refresh anchors only an update with matching desktop package and Runtime registration set; other Runtime generations cannot supply behavioral evidence.",
-        "After a confirmed official update, retain the exact successor identity and use non-forcing Restart Manager. After Windows error 351, invoke the qualified official File menu Quit item with Windows UI Automation. Verify an eligible exact window, a single enabled Quit item, modal/missing/ambiguous refusal, and process exit before one managed relaunch.",
+        "After a confirmed official update, retain the exact successor identity and use non-forcing Restart Manager. After Windows error 351, observe the retained official window with Windows UI Automation. A delayed or initially disabled File menu may become ready through structure or enabled notifications; the ready path acts immediately. Verify a unique enabled File and Quit, bounded missing-menu refusal, modal/identity/ambiguity refusal, and process exit before one managed relaunch.",
         "Official update button completes managed relaunch: prepare/register once, run the native installer, close verified temporary native relaunch if required, start the managed executable and verify the new official version, owner and visible file tree.",
         "Reject ambiguous or wrong native relaunch targets, preserve active work, and verify interrupted, cancelled and repaired handoff using its existing record. Confirm cleanup of the one-shot startup registration."
       ],
@@ -599,6 +619,9 @@
         "crates/launcher/src/app/runtime.rs",
         "crates/launcher/src/bootstrap.rs",
         "crates/launcher/src/accounts/primary_transport.rs",
+        "crates/launcher/src/accounts/primary.rs",
+        "crates/launcher/src/discovery.rs",
+        "crates/launcher/src/process_preflight.rs",
         "crates/launcher/src/accounts/credentials.rs",
         "crates/launcher/src/accounts/startup.rs",
         "crates/launcher/src/accounts/startup_broker.js",
@@ -623,6 +646,9 @@
         "packages/explorer-ui/src/host-update-feature-inspection.ts"
       ],
       "tests": [
+        "crates/launcher/src/accounts/primary_transport.rs",
+        "crates/launcher/src/accounts/primary.rs",
+        "crates/launcher/src/discovery.rs",
         "crates/launcher/src/accounts/startup.rs",
         "crates/launcher/src/accounts/startup_backend.rs",
         "crates/launcher/src/accounts/credentials.rs",
@@ -646,6 +672,8 @@
         "enable_request_compression",
         "cli_auth_credentials_store",
         "chatgptAuthTokens",
+        "getAuthStatus",
+        "account/login/start",
         "app-server",
         "thread/started",
         "parentThreadId",
@@ -676,6 +704,8 @@
         "New Chat refuses inference before the native thread binding and accepts it after binding on the same listener. Cover official/API routes, existing and new chats, disabled/re-enabled plugin and network reconnect separately; real provider success and timing require actual host/service acceptance.",
         "An old native binding cannot reclaim the same-version UI after a successful replacement, including while its account execution connection remains retained or the same window recreates its document. The newest committed launch epoch is scoped to that window; current reconnect and fresh sessions remain supported.",
         "Primary promotion confirms the current account and the managed store used on the next Code-Codex cold launch. Cover file-to-keyring and keyring-to-file transfers, a later official sign-in replacing the selected material, malformed or absent storage metadata, and outdated or unsupported broker capability. Verify real cold relaunch separately.",
+        "Primary promotion verifies the actual loopback renderer and broker identity, reuses a locked official stage only when its file identity and official bytes match, and falls back for older brokers or rejected stage evidence. Competing native preparations are refused without another owner query. Measure end to end with a deliberate signed-in promotion.",
+        "Returning to the official primary on a retained relay covers both file and verified native keyring stores. Verify no alternate identity, rollback or inference on missing, malformed, mismatched or expired credential evidence, and separate real service acceptance.",
         "Within one startup transport operation reuse the verified descriptor and HTTP client across status/route/bind. Preserve listener ownership, capability/proof, active-request rejection, legacy/API fallback, failed replies and default restore; no descriptor is cached across operations.",
         "Activation helper is compiled and embedded at build time, loaded from memory without runtime Add-Type or TEMP DLL output. Verify ASCII/Chinese/Arabic/emoji TEMP load and open-stdin supervision; real packaged activation/identity/armed termination remain separate acceptance.",
         "Official update installUpdate entry retains native confirmation/deployment; only a verified newer package after retained original process exit triggers handoff. New window must have one working tree and Bridge. Cancel/failed/same-version/ordinary close must not relaunch. Real update acceptance is separate from static matching.",
@@ -729,6 +759,8 @@
         "encrypted_content",
         "compaction",
         "previous_response_id",
+        "prompt_cache_key",
+        "cached_tokens",
         "custom_tool_call",
         "function_call_output",
         "local_shell_call",
@@ -752,6 +784,7 @@
         "For a request containing known rejected reasoning, rebuild its failed history without other encrypted reasoning before the latest user boundary; retain active-turn reasoning, native compaction and visible task/tool records. Count known rejections separately from other historical reasoning omitted. Clean native checkpoints without rejected bytes remain unchanged.",
         "Prepare loads recovery evidence once and transfers it to Handoff; ordinary reasoning builds response attribution without the former duplicate hashing pass. Exact rejected/history isolation, archive identity and no automatic replay remain.",
         "Diagnostic-only request-local encrypted-item indexes must survive overlapping HTTP/WS projections without changing recovery/forwarding policy. Rejection events correlate operation/sampling, native input cipher and current recovery index; missing association stays explicit. No extra credential read, ciphertext hash pass, archive scan, retry or wait.",
+        "Compare per-run full canonical instructions, tools and input fingerprints and bounded cumulative checkpoints on full official HTTP and WebSocket requests. Correlate connection, operation and actual server cached token counts. No raw content, mutation, replays, delta-as-full comparison, or provider-side root-cause inference.",
         "Actual encrypted-context root cause remains unproven without matching producer/route/request evidence. Native compact completion and unchanged original archive prefix are separate from ordinary chat acceptance; runtime logs retain their bounded5MiB/10-run scope."
       ],
       "automatedChecks": [
@@ -1048,6 +1081,9 @@
       "feature": "Appearance / Startup animation",
       "sources": [
         "packages/explorer-ui/src/host-update-feature-inspection.ts",
+        "crates/launcher/src/early_startup.rs",
+        "crates/launcher/src/early_startup/window_gate.rs",
+        "crates/launcher/src/host_updates/validation.rs",
         "resources/plugin-definitions.json",
         "packages/explorer-ui/src/startup-transition-early.ts",
         "packages/explorer-ui/src/startup-transition-player.ts",
@@ -1057,6 +1093,7 @@
         "packages/explorer-ui/src/startup-transition-retirement.ts"
       ],
       "tests": [
+        "crates/launcher/src/early_startup/window_gate.rs",
         "scripts/test-host-update-probes.mjs",
         "scripts/test-startup-image-backgrounds.mjs",
         "scripts/test-startup-video-library.mjs",
@@ -1077,21 +1114,23 @@
       "paths": [],
       "checks": [
         "Verify a unique startup animation entry and exercise production image/media source selection, skip, reduced motion, and overlay teardown on detached fixtures.",
-        "Desktop launch animation: verify enabled/disabled, selected background source, native startup splash handoff and first rendered frame without double-play.",
+        "Desktop launch animation: capture the process-owned top-level Chromium frame during creation before its caption or display. Verify alpha persists at the initial show and release only after Page.captureScreenshot confirms the animation layer in the compositor. A late or lost hold is an issue. Exercise enabled, disabled, missing media, and no double-play.",
         "Desktop startup video: import, validate, select, order and remove videos in an isolated media library; verify fallback on a removed or unreadable file.",
         "Actual video requests metadata, seeks to the trim start, applies rate/brightness/fit and finishes its clip with the configured fade or returns on media error.",
         "Video trim drag and preview: confirm handles stay in bounds, short clip defaults, minimum visible time, repeat playback and per-video settings persistence.",
-        "Startup interruption: verify skip, reduced motion, native sign-in, late attachment, navigation during playback, owner replacement and cleanup of the copied media surface."
+        "Startup interruption: verify skip, reduced motion, native sign-in, late attachment, navigation during playback, owner replacement and cleanup of the copied media surface.",
+        "After renderer validation, use this start's compositor and window-hold observation. Report a confirmed late or lost window hold as an issue. An interrupted readback without a visibility breach stays unverified; a confirmed sample after timely acquisition passes. Run a separate evidence-grading fixture for each outcome."
       ],
       "automatedChecks": [
         "package.inventory",
         "host.plugin-codex-startup-transition",
+        "host.startup-first-visible-frame",
         "regression.startup-video-selection",
         "regression.startup-video-timeline"
       ],
       "manualReason": "Live startup animation runs during a deliberate next launch.",
       "manualSteps": [
-        "Launch an isolated installation with animation enabled and confirm presentation, skip and handoff to a ready file tree.",
+        "Record an enabled cold launch from before window creation through the first visible frame. Native logo, blank flash, or late acquisition must be visible in the evidence. Verify disabled, missing media and deadline release without changing another window, then confirm handoff to a ready file tree.",
         "Start a disposable managed window with the configured background and then a locally available video. Inspect first frame, fit, end/fade and cleanup; keep the active desktop and media library unchanged."
       ],
       "area": "Plugin Market / Appearance"
@@ -1295,7 +1334,7 @@
       ],
       "paths": [],
       "checks": [
-        "Startup version number, checking indicator, latest and update-available feedback, failure, reduced motion and collapsed-tree feedback deferral.",
+        "Startup version number, checking indicator, latest and update-available feedback, failure, reduced motion and collapsed-tree feedback deferral. With intact controls, workspace loading defers the version assertion; a wrong running version after readiness or missing required controls is an issue.",
         "Footer manual recheck, no-change/ahead/available/error feedback, Later and focus restoration.",
         "Select an available release, validate actual download and hash, finish install, then verify current core, Bridge and visible footer owner agree before signing off hot activation."
       ],
