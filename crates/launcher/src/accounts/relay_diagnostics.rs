@@ -69,6 +69,52 @@ pub(super) fn request_state(value:&Value)->Option<Value> {
         "modelFingerprint":value["model"].as_str().map(fingerprint),"generating":value["generate"]!=false}))
 }
 
+/// Hashes the whole canonical input of a full generating request. The bounded
+/// checkpoints measure client-side JSON bytes, not provider token boundaries.
+pub(super) fn cache_prefix(value: &Value) -> Option<Value> {
+    use std::io::{self, Write};
+    use std::sync::LazyLock;
+    const CHECKPOINT: usize = 16 * 1024;
+    const CHECKPOINT_COUNT: usize = 16;
+    static SALT: LazyLock<String> = LazyLock::new(super::nonce);
+    static SCOPE_ID: LazyLock<String> = LazyLock::new(|| fingerprint(&SALT));
+    let input = value["input"].as_array()?;
+    if input.is_empty() || value["generate"] == false || !value["previous_response_id"].is_null() {
+        return None;
+    }
+
+    struct Prefix {
+        hash: Sha256,
+        bytes: usize,
+        marks: Vec<String>,
+    }
+    impl Write for Prefix {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if bytes.is_empty() { return Ok(0); }
+            let take = if self.marks.len() < CHECKPOINT_COUNT {
+                bytes.len().min(CHECKPOINT - self.bytes % CHECKPOINT)
+            } else {
+                bytes.len()
+            };
+            self.hash.update(&bytes[..take]);
+            self.bytes += take;
+            if self.marks.len() < CHECKPOINT_COUNT && self.bytes % CHECKPOINT == 0 {
+                self.marks.push(format!("{:x}",self.hash.clone().finalize()));
+            }
+            Ok(take)
+        }
+        fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    }
+    let mut prefix = Prefix { hash:Sha256::new(), bytes:0, marks:Vec::new() };
+    prefix.hash.update(SALT.as_bytes());
+    serde_json::to_writer(&mut prefix, &(&value["instructions"], &value["tools"], input)).ok()?;
+    Some(json!({
+        "schema":1,"scopeId":&*SCOPE_ID,"encoding":"canonical-json-instructions-tools-input",
+        "checkpointBytes":CHECKPOINT,"inputBytes":prefix.bytes,
+        "checkpoints":prefix.marks,"fullFingerprint":format!("{:x}",prefix.hash.finalize())
+    }))
+}
+
 /// Compare the already-selected headers once, without hashing or retaining any value.
 pub(super) fn routing_metadata(input: &reqwest::header::HeaderMap, output: &reqwest::header::HeaderMap) -> Value {
     let status = |name| match (input.get(name), output.get(name)) {
@@ -151,6 +197,29 @@ impl ErrorBody {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test]
+    fn cache_prefix_covers_the_tail_and_bounds_checkpoint_storage() {
+        let private = "private-input".repeat(33_000);
+        let mut request = json!({"instructions":"private-instructions","tools":[{"name":"private-tool"}],
+            "input":[{"role":"user","content":private},{"role":"user","content":"first-tail"}]});
+        let initial = cache_prefix(&request).unwrap();
+        assert!(initial["inputBytes"].as_u64().unwrap() > 256 * 1024);
+        assert_eq!(initial["checkpoints"].as_array().unwrap().len(),16);
+        assert_eq!(cache_prefix(&request),Some(initial.clone()));
+        request["input"][1]["content"] = json!("second-tail");
+        let modified = cache_prefix(&request).unwrap();
+        assert_eq!(modified["scopeId"],initial["scopeId"]);
+        assert_eq!(modified["checkpoints"],initial["checkpoints"]);
+        assert_ne!(modified["fullFingerprint"],initial["fullFingerprint"]);
+        assert!(!modified.to_string().contains("private-"));
+        request["tools"][0]["name"] = json!("changed-tool");
+        assert_ne!(cache_prefix(&request).unwrap()["checkpoints"][0],initial["checkpoints"][0]);
+        request["previous_response_id"] = json!("prior");
+        assert!(cache_prefix(&request).is_none());
+        request["previous_response_id"] = Value::Null;
+        request["generate"] = json!(false);
+        assert!(cache_prefix(&request).is_none());
+    }
     #[test] fn usage_and_route_metadata_are_bounded_private_and_observational() {
         let mut input=reqwest::header::HeaderMap::new();
         input.insert("session-id","PRIVATE_SESSION".parse().unwrap());

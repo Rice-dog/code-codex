@@ -1,0 +1,18 @@
+{
+  "id": "liquid-ascii",
+  "name": "Liquid ASCII Background",
+  "category": "appearance",
+  "api": 1,
+  "version": "1.0.2",
+  "releaseTag": "plugin-assets-2026-11-22",
+  "capabilities": [
+    "background",
+    "preview"
+  ],
+  "asset": "CodeCodex-background-liquid-ascii-1.0.2.js",
+  "relativePath": "CodeCodex-background-liquid-ascii-1.0.2.js",
+  "size": 42876,
+  "sha256": "513a73d1f23874480f90e6f60c838cd957ed919453e4dd90ce2ad2787b5f1343",
+  "resources": [],
+  "source": "https://github.com/Rice-dog/code-codex"
+}

@@ -11,6 +11,8 @@ pub(super) struct ContextResult {
     // The absolute workspace root. Sent once so the renderer can build absolute
     // paths (e.g. Copy Absolute Path) locally without a per-action round-trip.
     pub(super) root_path: String,
+    pub(super) workspace_revision: u64,
+    pub(super) watching: bool,
     pub(super) compatible: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) reason: Option<String>,
@@ -21,6 +23,8 @@ pub(super) struct ContextResult {
 pub(super) struct ContextParams {
     #[serde(default)]
     pub(super) thread_id: Option<String>,
+    #[serde(default)]
+    pub(super) reuse_workspace: bool,
 }
 
 #[derive(Debug, Deserialize)]

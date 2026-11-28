@@ -196,33 +196,82 @@ function Invoke-OfficialRestartQuitMenu($Candidate, $Windows) {
         $references = @([Windows.Automation.AutomationElement].Assembly.Location, [Windows.Automation.AutomationIdentifier].Assembly.Location)
         Add-Type -ReferencedAssemblies $references -TypeDefinition @"
 using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Automation;
 
 public static class CodeCodexOfficialQuitMenu {
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(IntPtr handle);
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+
     private static readonly Condition FileMenu = new PropertyCondition(AutomationElement.AutomationIdProperty, "application-menu-trigger-file-menu");
     private static readonly Condition Menu = new PropertyCondition(AutomationElement.AutomationIdProperty, "application-menu-content");
     private static readonly Condition MenuItem = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem);
 
-    public static void Invoke(AutomationElement window, int pid) {
-        AutomationElement file = window.FindFirst(TreeScope.Descendants, FileMenu);
-        if (file == null || file.Current.ProcessId != pid || !file.Current.IsEnabled)
-            throw new InvalidOperationException("The official File menu is not available.");
-        var expand = (ExpandCollapsePattern)file.GetCurrentPattern(ExpandCollapsePattern.Pattern);
-        bool opened = expand.Current.ExpandCollapseState != ExpandCollapseState.Expanded;
+    private static void CheckWindow(IntPtr handle, int pid) {
+        uint owner;
+        if (GetWindowThreadProcessId(handle, out owner) == 0 || owner != (uint)pid || !IsWindowEnabled(handle))
+            throw new InvalidOperationException("The official Codex window is no longer eligible for Quit.");
+    }
+
+    private static AutomationElement ReadyMenu(AutomationElement window, int pid, Condition condition, string description) {
+        var candidates = window.FindAll(TreeScope.Descendants, condition);
+        if (candidates.Count > 1)
+            throw new InvalidOperationException("The official " + description + " is ambiguous.");
+        if (candidates.Count == 0) return null;
+        var candidate = candidates[0];
+        if (candidate.Current.ProcessId != pid)
+            throw new InvalidOperationException("The official " + description + " ownership changed.");
+        return candidate.Current.IsEnabled ? candidate : null;
+    }
+
+    private static bool WaitForChange(AutoResetEvent changed, Stopwatch clock) {
+        var remaining = TimeSpan.FromSeconds(2) - clock.Elapsed;
+        if (remaining <= TimeSpan.Zero) return false;
+        // Re-read once at the deadline if the accessibility provider did not emit an event.
+        changed.WaitOne(remaining);
+        return true;
+    }
+
+    public static void Invoke(AutomationElement window, IntPtr handle, int pid) {
         using (var changed = new AutoResetEvent(false)) {
-            StructureChangedEventHandler notify = (sender, args) => {
+            Action signal = () => {
                 try { changed.Set(); } catch (ObjectDisposedException) {}
             };
+            StructureChangedEventHandler notify = (sender, args) => signal();
+            AutomationPropertyChangedEventHandler enabled = (sender, args) => signal();
             Automation.AddStructureChangedEventHandler(window, TreeScope.Subtree, notify);
+            bool enabledSubscribed = false;
+            ExpandCollapsePattern expand = null;
+            bool opened = false;
             bool invoked = false;
             try {
-                if (opened) expand.Expand();
-                var deadline = DateTime.UtcNow.AddSeconds(2);
+                Automation.AddAutomationPropertyChangedEventHandler(window, TreeScope.Subtree, enabled, AutomationElement.IsEnabledProperty);
+                enabledSubscribed = true;
+                var clock = Stopwatch.StartNew();
+                AutomationElement file;
                 while (true) {
-                    AutomationElement menu = window.FindFirst(TreeScope.Descendants, Menu);
-                    if (menu != null && menu.Current.ProcessId == pid
-                        && expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) {
+                    CheckWindow(handle, pid);
+                    file = ReadyMenu(window, pid, FileMenu, "File menu");
+                    if (file != null) break;
+                    if (!WaitForChange(changed, clock))
+                        throw new InvalidOperationException("The official File menu did not become available.");
+                }
+                expand = (ExpandCollapsePattern)file.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+                if (expand.Current.ExpandCollapseState != ExpandCollapseState.Expanded) {
+                    CheckWindow(handle, pid);
+                    expand.Expand();
+                    opened = true;
+                }
+                clock.Restart();
+                while (true) {
+                    CheckWindow(handle, pid);
+                    var menu = expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded
+                        ? ReadyMenu(window, pid, Menu, "File menu contents") : null;
+                    if (menu != null) {
                         AutomationElement quit = null;
                         foreach (AutomationElement item in menu.FindAll(TreeScope.Children, MenuItem)) {
                             if (!item.Current.Name.EndsWith(" Ctrl+Q", StringComparison.Ordinal)
@@ -231,17 +280,18 @@ public static class CodeCodexOfficialQuitMenu {
                             quit = item;
                         }
                         if (quit != null) {
+                            CheckWindow(handle, pid);
                             ((InvokePattern)quit.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
                             invoked = true;
                             return;
                         }
                     }
-                    var remaining = deadline - DateTime.UtcNow;
-                    if (remaining <= TimeSpan.Zero || !changed.WaitOne(remaining))
+                    if (!WaitForChange(changed, clock))
                         throw new InvalidOperationException("The official File menu did not expose its Quit item.");
                 }
             } finally {
                 Automation.RemoveStructureChangedEventHandler(window, notify);
+                if (enabledSubscribed) Automation.RemoveAutomationPropertyChangedEventHandler(window, enabled);
                 if (opened && !invoked) {
                     try {
                         if (expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) expand.Collapse();
@@ -253,7 +303,7 @@ public static class CodeCodexOfficialQuitMenu {
 }
 "@
     }
-    [CodeCodexOfficialQuitMenu]::Invoke($target, $Candidate.Pid)
+    [CodeCodexOfficialQuitMenu]::Invoke($target, $handle, $Candidate.Pid)
 }
 
 function Invoke-NativeRestartClose($Candidate, [string]$Image) {

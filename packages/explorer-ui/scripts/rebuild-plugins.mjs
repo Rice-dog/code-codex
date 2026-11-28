@@ -1,3 +1,4 @@
+import {buildLiquidAscii} from './build-liquid-ascii.mjs';
 import {buildSpectralDrape} from './build-spectral-drape.mjs';
 import {buildLanRemote} from './build-lan-remote.mjs';
 import {buildAsciiTiles} from './build-ascii-tiles.mjs';
@@ -24,6 +25,7 @@ export async function rebuildPlugins(root,options,selection){
  try{
   const catalog=await buildBackgroundPackages(root,options,stage);
   catalog.push(await buildLanRemote(root,options,stage));
+  catalog.push(await buildLiquidAscii(root,options,stage));
   catalog.push(await buildSpectralDrape(root,options,stage));
   catalog.push(await buildAsciiTiles(root,options,stage));
   catalog.push(await buildShallowOcean(root,options,stage));

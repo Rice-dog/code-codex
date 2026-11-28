@@ -33,7 +33,7 @@ async fn native_acceptance(roundtrip: bool) {
         let token = auth["tokens"]["id_token"].as_str().unwrap();
         let claims: Value = serde_json::from_slice(&base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(token.split('.').nth(1).unwrap()).unwrap()).unwrap();
         let email = claims["email"].as_str().or_else(|| claims["https://api.openai.com/profile"]["email"].as_str()).unwrap();
-        Some(relay::Route::prepare_official(email.into()).unwrap())
+        Some(relay::Route::prepare_official(email.into()).await.unwrap())
     } else { None };
     let initial_credential = official_credential.as_ref().unwrap_or(&api_credential).clone();
     let route = relay::Route::start("acceptance".into(), "draft-acceptance".into(), initial_credential).await.unwrap();
@@ -106,7 +106,7 @@ async fn native_acceptance(roundtrip: bool) {
             let api = stage == 1;
             let handoff = super::super::context_handoff::Handoff::for_route(home.path().into(), archive_path.clone(), thread.into(), home.path(), api).unwrap();
             handoff.commit().unwrap();
-            route.commit_credential(if api { api_credential.clone() } else { relay::Route::prepare_official(official_credential.as_ref().unwrap().email.clone()).unwrap() });
+            route.commit_credential(if api { api_credential.clone() } else { relay::Route::prepare_official(official_credential.as_ref().unwrap().email.clone()).await.unwrap() });
             route.set_handoff(handoff);
         }
         let current_model = if roundtrip && matches!(stage, 0 | 2) { initial_model } else { model };

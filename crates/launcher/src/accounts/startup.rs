@@ -107,6 +107,14 @@ async fn descriptor(endpoint: CdpEndpoint, primary: bool) -> Result<Option<Value
  tokio::task::spawn_blocking(move || {
      if control_only {
          let image = image.ok_or_else(|| error("renderer-image"))?;
+         #[cfg(windows)]
+         match crate::process_preflight::loopback_listener_matches(endpoint.port(), &image) {
+             Ok(true) => {}
+             Ok(false) => return Err(error("renderer-listener-owner")),
+             Err(_) => crate::process_guard::verify_listener_executable(endpoint.port(), &image)
+                 .map_err(|_| error("renderer-listener-owner"))?,
+         }
+         #[cfg(not(windows))]
          crate::process_guard::verify_listener_executable(endpoint.port(), &image)
              .map_err(|_| error("renderer-listener-owner"))?;
      } else {
@@ -133,13 +141,17 @@ async fn ready_descriptor(endpoint:CdpEndpoint)->Result<Option<(Value,reqwest::C
  Ok(Some((v,client)))
 }
 pub(super) async fn primary_capability(endpoint:CdpEndpoint)->Result<Value> {
- let Some(v)=descriptor(endpoint,true).await?else{return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","Internal primary switching requires a launch-owned native connection. No login or credential was changed."))};
+ let Some(mut v)=descriptor(endpoint,true).await?else{return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","Internal primary switching requires a launch-owned native connection. No login or credential was changed."))};
  let status=control(&control_client()?,&v,json!({"action":"status"})).await?;
- if status["schema"]!=1||status["pid"]!=v["pid"]||status["rendererPort"]!=endpoint.port()||status["ready"]!=true||!status["primarySwitch"].as_u64().is_some_and(|revision|revision>=2){return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","The running native connection cannot verify sign-in across restart. Restart Code-Codex once after active tasks finish. No login or credential was changed."))}Ok(v)
+ if status["schema"]!=1||status["pid"]!=v["pid"]||status["rendererPort"]!=endpoint.port()||status["ready"]!=true||!status["primarySwitch"].as_u64().is_some_and(|revision|revision>=2){return Err(AccountError::new("ACCOUNT_PRIMARY_CAPABILITY","The running native connection cannot verify sign-in across restart. Restart Code-Codex once after active tasks finish. No login or credential was changed."))}
+ v["primaryStageReuse"]=json!(status["primaryStageReuse"]==true);
+ Ok(v)
 }
-pub(super) async fn primary_switch(v:&Value,source:&std::path::Path,backup:&std::path::Path,email:&str,operation:&str)->Result<Value>{
+pub(super) async fn primary_switch(v:&Value,source:&std::path::Path,backup:&std::path::Path,email:&str,operation:&str,launch:Option<&crate::discovery::AppServerLaunch>)->Result<Value>{
  let client=reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(45)).build().map_err(|_|error("primary-client"))?;
- let response=client.post(format!("http://localhost:{}/{}/control",v["port"].as_u64().unwrap(),v["key"].as_str().unwrap())).header("x-code-codex-control",v["control"].as_str().unwrap()).json(&json!({"action":"primary-switch","source":source,"backup":backup,"email":email,"operationId":operation})).send().await.map_err(|_|AccountError::new("ACCOUNT_PRIMARY_OUTCOME_UNKNOWN","Native primary handoff did not return a receipt. Verify the current identity before retrying; the login was not replayed."))?;
+ let backend=v["backendSource"].as_str().filter(|_|v["primaryStageReuse"]==true).map(std::path::Path::new);
+ let ticket=launch.zip(backend).and_then(|(launch,backend)|launch.stage_ticket(backend));
+ let response=client.post(format!("http://localhost:{}/{}/control",v["port"].as_u64().unwrap(),v["key"].as_str().unwrap())).header("x-code-codex-control",v["control"].as_str().unwrap()).json(&json!({"action":"primary-switch","source":source,"backup":backup,"email":email,"operationId":operation,"runtimeStage":ticket})).send().await.map_err(|_|AccountError::new("ACCOUNT_PRIMARY_OUTCOME_UNKNOWN","Native primary handoff did not return a receipt. Verify the current identity before retrying; the login was not replayed."))?;
  let success=response.status().is_success();let bytes=response.bytes().await.map_err(|_|error("primary-receipt"))?;
  if bytes.len()>8192{return Err(error("primary-receipt-bound"))}
  if !success{return Err(AccountError::new("ACCOUNT_PRIMARY_NATIVE",String::from_utf8_lossy(&bytes).into_owned()))}
@@ -166,7 +178,7 @@ pub(crate) async fn verify_launch(endpoint:CdpEndpoint)->Result<bool>{
  if !ready{return Err(error("startup-confirmation"));}Ok(true)
 }
 async fn bind(client:&reqwest::Client,v:&Value,owner:&host::Owner,thread:&str,target:Option<&str>)->Result<()> {
- let proof=if target.is_some(){let auth=super::credentials::read(&super::credentials::official_home()?,&owner.label,true)?;let token=auth["accessToken"].as_str().ok_or_else(||error("owner-credential"))?;Some(format!("{:x}",Sha256::digest(format!("Bearer {token}").as_bytes())))}else{None};
+ let proof=if target.is_some(){let auth=super::credentials::read_primary(&super::credentials::official_home()?,&owner.label).await?;let token=auth["accessToken"].as_str().ok_or_else(||error("owner-credential"))?;Some(format!("{:x}",Sha256::digest(format!("Bearer {token}").as_bytes())))}else{None};
  let reply=control(client,v,json!({"action":"bind","owner":owner.id,"thread":thread,"target":target,"proof":proof})).await?;
  if reply["accepted"]!=true{return Err(error("binding-result"));}Ok(())
 }

@@ -25,6 +25,10 @@ export function normalizeContext(raw: unknown,requestedThreadId: string): Explor
   const rootName=typeof object.rootName==="string"&&object.rootName? object.rootName:projectName;
   const rootPath=typeof object.rootPath==="string"? object.rootPath:"";
   const context: ExplorerContext={ threadId,projectName,rootName,rootPath,compatible: object.compatible!==false };
+  if(typeof object.workspaceRevision==="number" && Number.isSafeInteger(object.workspaceRevision) && object.workspaceRevision>0 && typeof object.watching==="boolean") {
+    context.workspaceRevision=object.workspaceRevision;
+    context.watching=object.watching;
+  }
   if(typeof object.reason==="string") context.reason=object.reason;
   return context;
 }

@@ -92,8 +92,9 @@ pub(crate) async fn run(raw: std::ffi::OsString) -> Result<u8> {
         None
     };
     let mut child = command.spawn().map_err(|_| failure("backend-spawn"))?;
-    let transport=super::primary_transport::Transport::new(child.stdin.take().unwrap());
+    let transport=super::primary_transport::Transport::new(child.stdin.take().unwrap(),p["backend"].as_str().map(std::path::PathBuf::from));
     if let Some(listener) = listener {
+        p["backendSource"] = p["backend"].clone();
         p["brokerPid"] = json!(std::process::id());
         let official = parent_pid();
         if official == 0 {
@@ -193,7 +194,8 @@ async fn serve(
             "rendererPort": p["rendererPort"],
             "ready": true,
             "spawns": 1,
-            "primarySwitch": 2
+            "primarySwitch": 2,
+            "primaryStageReuse": true
         })),
         _ => Err(failure("control-action")),
     };

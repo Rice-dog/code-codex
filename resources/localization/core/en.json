@@ -199,5 +199,6 @@
   "lan.phase.error": "The connection ended. Enter the room code to try again.",
   "lan.phase.starting": "Approved. Opening the native connection…",
   "lan.phase.controlled": "Connected. The guest can control this computer.",
-  "lan.settings": "LAN Remote settings"
+  "lan.settings": "LAN Remote settings",
+  "plugin.name.liquid-ascii": "Liquid ASCII Background"
 }

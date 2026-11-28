@@ -1,25 +1,23 @@
-# Code-Codex v0.6.57
+# Code-Codex v0.6.67
 
 ## 简体中文
 
-以下为上一公开正式版 **v0.6.33 → v0.6.57** 的累计更新。[查看完整改动](https://github.com/Rice-dog/code-codex/compare/v0.6.33...v0.6.57)
+以下是 **v0.6.57 → v0.6.67** 的累计更新。[查看完整改动](https://github.com/Rice-dog/code-codex/compare/v0.6.57...v0.6.67)
 
-- **新版 Codex 界面兼容。** 修复文件树与主对话的顶部对齐、折叠栏和右侧分栏的挤压裁切。调整设置页、侧面板和输入框的透明底层，避免多层底色叠加或残留黑边。
-- **界面响应。** 减少打开输入框菜单时的重复布局计算，优化插件市场滚动、文件树更新及顶部子菜单的鼠标反馈。
-- **背景和透明度。** 优化普通背景从底色过渡到首帧的过程。自定义背景与界面透明度适配新版原生布局，保留原有素材和参数。
-- **安装和更新。** 改进已安装窗口的热更新接管以及官方 Codex 更新后的重开衔接。首次安装后提供欢迎页和快速介绍，顶部 Code-Codex 菜单可重新打开介绍。
-- **兼容检测。** 将报告和重新检查归入顶部兼容分析菜单，细化原生页面、分栏、透明度、各类插件和更新入口的检查。报告保留需要实际场景验收的项目。
+- **流体字符背景。** ASCII 字符随液面流动，可用鼠标激起涟漪。可调整字符密度、流动和开场效果，也可用作启动背景。代码独立实现，视觉参考 [React Bits Pro · Liquid ASCII](https://pro.reactbits.dev/docs/components/liquid-ascii?browse=components)。
+- **文件树切换。** 在同一项目的对话之间切换时保留已展开目录。修复从已有对话切到新对话时，文件树短暂跳到窗口最左侧的问题。
+- **启动动画与官方更新。** 修复启用启动动画时先露出原生加载 Logo 的问题。官方更新重开时，改进原生窗口的退出和 Code-Codex 接续启动。
+- **兼容检测。** 补充文件树过渡和启动首帧检查，并记录隔离场景的逐项结果。报告区分检查异常和仍需现场验证的项目。
 
-本机已核对安装文件，验证了已登录窗口中的文件树、背景和菜单。真实官方更新跨版本重启仍有待对应现场验证。Windows 用户可点击文件树右下角版本号更新，或下载下方安装包。下载后可用 `SHA256SUMS.txt` 校验。
+已核对本机安装文件与已登录窗口的接管。文件树过渡经过 Chromium 回归测试，启动首帧经过隔离的官方客户端冷启动验证。跨官方版本的完整更新重启仍待现场验证。Windows 用户可点击文件树右下角的版本号更新，或下载下方安装包并用 `SHA256SUMS.txt` 核对。
 
 ## English
 
-Cumulative changes since the previous public release, **v0.6.33 → v0.6.57**. [Compare the full changes](https://github.com/Rice-dog/code-codex/compare/v0.6.33...v0.6.57)
+Cumulative changes from **v0.6.57 to v0.6.67**. [Compare the full changes](https://github.com/Rice-dog/code-codex/compare/v0.6.57...v0.6.67)
 
-- **Compatibility with the newer Codex interface.** Fix alignment between the file tree and the conversation, and prevent clipping around the collapsed rail and right-side split views. Adjust native backings in Settings, side panels, and the composer to remove overlapping fills and stray dark edges.
-- **Interface responsiveness.** Reduce repeated layout work when opening composer menus. Improve plugin market scrolling, file tree refreshes, and pointer feedback in the top menu.
-- **Backgrounds and opacity.** Improve the transition from the base color to the first background frame. Update Custom Background and UI Surface Opacity for the newer native layout, retaining existing media and settings.
-- **Installation and updates.** Improve hot activation in the running window and the handoff after official Codex updates. First-time installs present a welcome screen and quick tour, which can be reopened from the top Code-Codex menu.
-- **Compatibility checks.** Group the report and recheck commands under Compatibility Analysis. Expand checks for native pages, split layouts, opacity, plugin categories, and update entry points. The report identifies scenarios that still need hands-on validation.
+- **Liquid ASCII background.** ASCII glyphs move with a fluid surface and ripple under the pointer. Adjust glyph density, fluid motion, and the opening effect, or use it as a startup background. Independently implemented using [React Bits Pro · Liquid ASCII](https://pro.reactbits.dev/docs/components/liquid-ascii?browse=components) as a visual reference.
+- **File tree transitions.** Keep expanded directories when switching chats within the same project. Fix the brief jump to the far left when opening a new chat from an existing one.
+- **Startup animation and official updates.** Prevent the native loading logo from flashing before the configured startup animation. Improve the native window exit and Code-Codex handoff when the official updater restarts the app.
+- **Compatibility checks.** Check file tree transitions and the first startup frame, and record individual results from isolated scenarios. Reports identify failures and scenarios that still need live verification.
 
-Installed files were verified locally, and the file tree, background, and menus were checked in a signed-in window. An end-to-end restart across a real official Codex update still needs corresponding live validation. On Windows, click the version number at the bottom-right of the file tree or download an installer below. Verify downloads against `SHA256SUMS.txt`.
+Local installed files and handoff in a signed-in window were verified. File tree transitions passed Chromium regression tests, and the first startup frame was checked in an isolated cold start of the official client. A full restart across an official Codex version update remains to be verified live. On Windows, click the version number at the bottom-right of the file tree or download an installer below and verify it against `SHA256SUMS.txt`.

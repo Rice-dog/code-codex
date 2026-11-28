@@ -241,6 +241,7 @@ $script:RemovalUiText = @'
   "heavenly cloud background": "极乐天境",
   "image preview": "图片预览",
   "lan remote": "局域网远控",
+  "liquid ascii background": "流体字符",
   "markdown preview": "Markdown 预览",
   "milky way background": "流动星河",
   "3d model preview": "3D 模型预览",

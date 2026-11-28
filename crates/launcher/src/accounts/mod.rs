@@ -178,6 +178,7 @@ impl AccountService {
         &self,
         params: Value,
         workspace: Option<PathBuf>,
+        login_notification: Option<worker::LoginNotification>,
         current: impl Fn() -> bool,
     ) -> Result<Value> {
         let endpoint = self
@@ -220,6 +221,11 @@ impl AccountService {
             if action == "primary.progress" {
                 return Err(AccountError::new("ACCOUNT_STALE_SESSION", "The local account session is unavailable."));
             }
+        }
+        if matches!(action.as_str(), "native.prepare" | "native.ensure" | "shared.prepare" | "draft.prepare")
+            && primary::promotion_in_progress()
+        {
+            return Err(AccountError::new("ACCOUNT_PRIMARY_PENDING", "The primary account is being switched. Wait for the current operation to finish."));
         }
         let observe_started=std::time::Instant::now();
         let owner=match host::observe(endpoint).await {
@@ -706,6 +712,7 @@ impl AccountService {
                             })?
                             .to_string();
                         state.login = Some((id.clone(), login_id.clone()));
+                        worker.watch_login(login_id.clone(), login_notification);
                         if let Err(error) = open_authorization(url) {
                             let _ = worker
                                 .request("account/login/cancel", json!({"loginId":login_id}))
@@ -1074,15 +1081,15 @@ mod lease_tests {
         let preparation=preparation::Preparation::start();
         service.preparations.lock().unwrap().insert(format!("{owner}:thread-one"),preparation.clone());
         let read=|action:&str,thread:&str|json!({"action":action,"owner":owner,"conversationId":thread});
-        assert_eq!(service.request(read("native.status","thread-one"),None,||true).await.unwrap()["routed"],false);
-        assert_eq!(service.request(read("shared.status","thread-one"),None,||true).await.unwrap()["status"],"preparing");
-        assert_eq!(service.request(read("shared.status","thread-two"),None,||true).await.unwrap()["status"],"none");
-        assert_eq!(service.request(read("native.status","thread-one"),None,||false).await.unwrap_err().code,"ACCOUNT_STALE_SESSION");
-        assert!(service.request(json!({"action":"shared.status","owner":format!("other-{}",nonce()),"conversationId":"thread-one"}),None,||true).await.is_err());
+        assert_eq!(service.request(read("native.status","thread-one"),None,None,||true).await.unwrap()["routed"],false);
+        assert_eq!(service.request(read("shared.status","thread-one"),None,None,||true).await.unwrap()["status"],"preparing");
+        assert_eq!(service.request(read("shared.status","thread-two"),None,None,||true).await.unwrap()["status"],"none");
+        assert_eq!(service.request(read("native.status","thread-one"),None,None,||false).await.unwrap_err().code,"ACCOUNT_STALE_SESSION");
+        assert!(service.request(json!({"action":"shared.status","owner":format!("other-{}",nonce()),"conversationId":"thread-one"}),None,None,||true).await.is_err());
         // A snapshot is never substituted for native.ensure admission.
-        assert!(service.request(json!({"action":"native.ensure","owner":owner,"conversationId":"thread-one","connectionId":"host"}),None,||true).await.is_err());
+        assert!(service.request(json!({"action":"native.ensure","owner":owner,"conversationId":"thread-one","connectionId":"host"}),None,None,||true).await.is_err());
         let root=owner_root(&owner).unwrap();crate_marker(&root,true).unwrap();
-        assert_eq!(service.request(read("native.status","thread-one"),None,||true).await.unwrap_err().code,"ACCOUNT_STALE_SESSION");
+        assert_eq!(service.request(read("native.status","thread-one"),None,None,||true).await.unwrap_err().code,"ACCOUNT_STALE_SESSION");
         crate_marker(&root,false).unwrap();std::fs::remove_dir(root).unwrap();
         assert!(service.state.lock().await[&owner].registry.selected.is_empty());
         assert_eq!(preparation.snapshot()["status"],"preparing");

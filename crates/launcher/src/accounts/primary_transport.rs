@@ -11,9 +11,10 @@ pub(super) struct Transport {
  prefix:String,next:AtomicU64,owned:AtomicBool,
  operation:AsyncMutex<()>,
  provider:AsyncMutex<Option<(String,Arc<Worker>)>>,
+ backend:Option<PathBuf>,
 }
 impl Transport {
- pub(super) fn new(writer:tokio::process::ChildStdin)->Arc<Self>{Arc::new(Self{writer:AsyncMutex::new(writer),pending:Mutex::new(HashMap::new()),prefix:format!("code-codex-primary-{}-",super::nonce()),next:AtomicU64::new(1),owned:AtomicBool::new(false),operation:AsyncMutex::new(()),provider:AsyncMutex::new(None)})}
+ pub(super) fn new(writer:tokio::process::ChildStdin,backend:Option<PathBuf>)->Arc<Self>{Arc::new(Self{writer:AsyncMutex::new(writer),pending:Mutex::new(HashMap::new()),prefix:format!("code-codex-primary-{}-",super::nonce()),next:AtomicU64::new(1),owned:AtomicBool::new(false),operation:AsyncMutex::new(()),provider:AsyncMutex::new(None),backend})}
  pub(super) async fn forward(&self,bytes:&[u8])->Result<()>{let mut writer=self.writer.lock().await;writer.write_all(bytes).await.map_err(|_|error("backend-write"))?;writer.flush().await.map_err(|_|error("backend-flush"))}
  async fn send(&self,value:Value)->Result<()>{let mut bytes=serde_json::to_vec(&value).map_err(|_|error("backend-encode"))?;bytes.push(b'\n');let result=self.forward(&bytes).await;bytes.fill(0);result}
  async fn request(&self,method:&str,params:Value)->Result<Value>{
@@ -64,16 +65,34 @@ impl Transport {
    credentials::replace_managed(&source,&official)?;
    stage="credential-source";
    let store=credentials::primary_launch_store(&official).ok_or_else(||error("credential-store"))?;
-   let worker=Worker::spawn(&official).await?;
+   let stage_at=std::time::Instant::now();
+   let stage_request=self.backend.clone().zip(serde_json::from_value(params["runtimeStage"].clone()).ok());
+   let launch=if let Some((source,ticket))=stage_request {
+    tokio::task::spawn_blocking(move||crate::discovery::accept_app_server_stage(&source,ticket)).await.ok().flatten()
+   }else{None};
+   let stage_ms=stage_at.elapsed().as_millis();
+   let reused_stage=launch.is_some();
+   let spawn_at=std::time::Instant::now();
+   let worker=match launch {
+    Some(launch)=>Worker::spawn_prepared(&official,launch).await?,
+    None=>Worker::spawn(&official).await?,
+   };
+   let spawn_ms=spawn_at.elapsed().as_millis();
+   let credential_at=std::time::Instant::now();
    let auth=match credentials::managed(&worker,&email).await {Ok(value)=>value,Err(e)=>{worker.stop().await;return Err(e)}};
+   let credential_ms=credential_at.elapsed().as_millis();
    let expected=auth["accessToken"].as_str().ok_or_else(||error("credential-contract"))?.to_owned();
    // Install the refresh source before login can emit a request/notification.
    *self.provider.lock().await=Some((email.clone(),worker));
+   let login_at=std::time::Instant::now();
    stage="official-login";self.owned.store(true,Ordering::Release);dispatched=true;let login=match self.request("account/login/start",auth).await {Ok(value)=>value,Err(issue)=>{login_rejected=issue.code=="ACCOUNT_PRIMARY_REJECTED";return Err(issue)}};
+   let login_ms=login_at.elapsed().as_millis();
    if login["type"]!="chatgptAuthTokens"{return Err(error("login-contract"))}
+   let identity_at=std::time::Instant::now();
    stage="identity-confirm";let observed=self.request("getAuthStatus",json!({"includeToken":true,"refreshToken":false})).await?;
    if observed["authToken"].as_str()!=Some(expected.as_str()){return Err(error("identity-confirm"))}
-   Ok(json!({"completed":true,"authorizationRequired":false,"browserOpened":false,"persistent":true,"startupStore":store}))
+   Ok(json!({"completed":true,"authorizationRequired":false,"browserOpened":false,"persistent":true,"startupStore":store,
+    "timings":{"runtimeStageReused":reused_stage,"runtimeStageVerifyMs":stage_ms,"workerStartMs":spawn_ms,"credentialReadMs":credential_ms,"officialLoginMs":login_ms,"identityConfirmMs":identity_at.elapsed().as_millis()}}))
   }.await;
   // Before dispatch, restoring the verified managed backup leaves live auth
   // unchanged. After dispatch, an unknown outcome is never replayed or guessed.
@@ -98,7 +117,7 @@ mod tests {
  use tokio::io::{AsyncBufReadExt,BufReader};
  async fn fixture()->(Arc<Transport>,tokio::process::Child,BufReader<tokio::process::ChildStdout>){
   let mut child=tokio::process::Command::new("powershell.exe").args(["-NoProfile","-Command","while($null -ne ($line=[Console]::ReadLine())){[Console]::Out.Write($line+[char]10)}"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).creation_flags(0x08000000).kill_on_drop(true).spawn().unwrap();
-  let transport=Transport::new(child.stdin.take().unwrap());let output=BufReader::new(child.stdout.take().unwrap());(transport,child,output)
+  let transport=Transport::new(child.stdin.take().unwrap(),None);let output=BufReader::new(child.stdout.take().unwrap());(transport,child,output)
  }
  #[tokio::test]
  async fn owned_responses_are_correlated_without_swallowing_official_messages(){

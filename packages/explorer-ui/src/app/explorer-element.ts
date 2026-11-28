@@ -8,10 +8,13 @@ import {attachPluginPins} from '../components/plugin-pins';
 import {attachPluginShortcuts} from '../components/plugin-shortcuts';
 import {AsciiTilesSettingsController,asciiTilesCardMarkup,asciiTilesPanelMarkup} from '../features/plugin-settings/ascii-tiles';
 import {SpectralDrapeSettingsController,spectralDrapeCardMarkup,spectralDrapePanelMarkup} from '../features/plugin-settings/spectral-drape';
+import {LiquidAsciiSettingsController,liquidAsciiCardMarkup,liquidAsciiPanelMarkup} from '../features/plugin-settings/liquid-ascii';
 import {getAsciiTilesBackgroundController} from '../plugin-host/backgrounds/ascii-tiles';
 import {getSpectralDrapeBackgroundController} from '../plugin-host/backgrounds/spectral-drape';
+import {getLiquidAsciiBackgroundController} from '../plugin-host/backgrounds/liquid-ascii';
 import {ASCII_TILES_BACKGROUND_PLUGIN_ID} from '../effects/ascii-tiles/model';
 import {SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID} from '../effects/spectral-drape/model';
+import {LIQUID_ASCII_BACKGROUND_PLUGIN_ID} from '../effects/liquid-ascii/model';
 import type { WorkspaceBridge } from "../contracts/bridge";
 import { BackgroundActions } from "../core/appearance/background-actions";
 import { AppearanceCoordinator } from '../core/lifecycle/appearance-coordinator';
@@ -172,6 +175,7 @@ export class CodeCodexElement extends HTMLElement {
         panels.register('shallow-ocean',focus=>this.#shallowOceanSettings.close(focus));
         panels.register('ascii-tiles',focus=>this.#asciiTilesSettings.close(focus));
         panels.register('spectral-drape',focus=>this.#spectralDrapeSettings.close(focus));
+        panels.register('liquid-ascii',focus=>this.#liquidAsciiSettings.close(focus));
         panels.register('particle',focus=>this.#particleSettings.closeParticleSettings(focus));
         panels.register('black-hole',focus=>this.#blackholeSettings.closeBlackHoleSettings(focus));
         panels.register('glow-horizon',focus=>this.#glowhorizonSettings.closeGlowHorizonSettings(focus));
@@ -191,7 +195,7 @@ export class CodeCodexElement extends HTMLElement {
     get #backgroundActions(): BackgroundActions {
       if (!this.#backgroundActionsValue) {
         const owner=this;
-        const entries=[{id:SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID,packageId:"spectral-drape",label:"Spectral Drape Background",runtime:this.#spectralDrapeRuntime},{id:SHALLOW_OCEAN_ID,packageId:"shallow-ocean",label:"Shallow Ocean Letters Background",runtime:this.#shallowOceanRuntime},{id:ASCII_TILES_BACKGROUND_PLUGIN_ID,packageId:"ascii-tiles",label:"ASCII Tiles Background",runtime:this.#asciiTilesRuntime},{id:PARTICLE_BACKGROUND_PLUGIN_ID,packageId:"particle-image",label:"Particle Image Background",runtime:this.#particleBackgroundController},{id:BLACK_HOLE_BACKGROUND_PLUGIN_ID,packageId:"black-hole",label:"Black Hole Background",runtime:this.#blackHoleBackgroundController},{id:GLOW_HORIZON_BACKGROUND_PLUGIN_ID,packageId:"glow-horizon",label:"Glow Horizon Background",runtime:this.#glowHorizonBackgroundController},{id:HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,packageId:"heavenly-cloud",label:"Heavenly Cloud Background",runtime:this.#heavenlyCloudBackgroundController},{id:AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,packageId:"aurora-ionosphere",label:"Aurora Ionosphere Background",runtime:this.#auroraIonosphereBackgroundController},{id:MILKY_WAY_BACKGROUND_PLUGIN_ID,packageId:"milky-way",label:"Milky Way Background",runtime:this.#milkyWayBackgroundController},{id:MOUNTAIN_BACKGROUND_PLUGIN_ID,packageId:"mountain",label:"Layered Mountain Background",runtime:this.#mountainController},{id:CLOUD_TRAIN_BACKGROUND_PLUGIN_ID,packageId:"cloud-train",label:"Cloud Train Background",runtime:this.#cloudTrainController},{id:PIXEL_SCULPT_BACKGROUND_PLUGIN_ID,packageId:"pixel-sculpt",label:"Pixel Sculpt Background",runtime:this.#pixelSculptController},{id:BLINKING_SQUARES_BACKGROUND_PLUGIN_ID,packageId:"blinking-squares",label:"Blinking Squares Background",runtime:this.#blinkingSquaresController}] as const;
+        const entries=[{id:LIQUID_ASCII_BACKGROUND_PLUGIN_ID,packageId:"liquid-ascii",label:"Liquid ASCII Background",runtime:this.#liquidAsciiRuntime},{id:SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID,packageId:"spectral-drape",label:"Spectral Drape Background",runtime:this.#spectralDrapeRuntime},{id:SHALLOW_OCEAN_ID,packageId:"shallow-ocean",label:"Shallow Ocean Letters Background",runtime:this.#shallowOceanRuntime},{id:ASCII_TILES_BACKGROUND_PLUGIN_ID,packageId:"ascii-tiles",label:"ASCII Tiles Background",runtime:this.#asciiTilesRuntime},{id:PARTICLE_BACKGROUND_PLUGIN_ID,packageId:"particle-image",label:"Particle Image Background",runtime:this.#particleBackgroundController},{id:BLACK_HOLE_BACKGROUND_PLUGIN_ID,packageId:"black-hole",label:"Black Hole Background",runtime:this.#blackHoleBackgroundController},{id:GLOW_HORIZON_BACKGROUND_PLUGIN_ID,packageId:"glow-horizon",label:"Glow Horizon Background",runtime:this.#glowHorizonBackgroundController},{id:HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID,packageId:"heavenly-cloud",label:"Heavenly Cloud Background",runtime:this.#heavenlyCloudBackgroundController},{id:AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID,packageId:"aurora-ionosphere",label:"Aurora Ionosphere Background",runtime:this.#auroraIonosphereBackgroundController},{id:MILKY_WAY_BACKGROUND_PLUGIN_ID,packageId:"milky-way",label:"Milky Way Background",runtime:this.#milkyWayBackgroundController},{id:MOUNTAIN_BACKGROUND_PLUGIN_ID,packageId:"mountain",label:"Layered Mountain Background",runtime:this.#mountainController},{id:CLOUD_TRAIN_BACKGROUND_PLUGIN_ID,packageId:"cloud-train",label:"Cloud Train Background",runtime:this.#cloudTrainController},{id:PIXEL_SCULPT_BACKGROUND_PLUGIN_ID,packageId:"pixel-sculpt",label:"Pixel Sculpt Background",runtime:this.#pixelSculptController},{id:BLINKING_SQUARES_BACKGROUND_PLUGIN_ID,packageId:"blinking-squares",label:"Blinking Squares Background",runtime:this.#blinkingSquaresController}] as const;
         this.#backgroundActionsValue=new BackgroundActions({
           coordinator:this.#appearanceCoordinator, entries:[...entries,{id:TRANSPARENT_BACKGROUND_PLUGIN_ID,label:'Transparent Background',runtime:this.#nativeWindowBackground,activationOrder:'before-exclusion',preserveThemeOnExclusion:false}], get enabled(){return owner.#enabledAppearancePlugins;},
           connected:()=>this.#connected&&!this.#dismissed,
@@ -346,12 +350,15 @@ export class CodeCodexElement extends HTMLElement {
     readonly #shadow: ShadowRoot;
     readonly #asciiTilesRuntime=getAsciiTilesBackgroundController();
     readonly #spectralDrapeRuntime=getSpectralDrapeBackgroundController();
+    readonly #liquidAsciiRuntime=getLiquidAsciiBackgroundController();
     readonly #shallowOceanRuntime=getShallowOceanBackgroundController();
     readonly #asciiTilesSettings:AsciiTilesSettingsController;
     readonly #spectralDrapeSettings:SpectralDrapeSettingsController;
+    readonly #liquidAsciiSettings:LiquidAsciiSettingsController;
     readonly #shallowOceanSettings:ShallowOceanSettingsController;
     #asciiTilesUnsubscribe:(()=>void)|undefined;
     #spectralDrapeUnsubscribe:(()=>void)|undefined;
+    #liquidAsciiUnsubscribe:(()=>void)|undefined;
     #shallowOceanUnsubscribe:(()=>void)|undefined;
     readonly #surfaceOpacity: SurfaceOpacityPlugin;
     #multiAccount: MultiAccountPlugin;
@@ -389,6 +396,7 @@ export class CodeCodexElement extends HTMLElement {
     #queuedNativeReconnect: Readonly<BootstrapConfig> | undefined;
     #settings: ExplorerSettings = { ...DEFAULT_SETTINGS };
     #watching = false;
+    #ownedTree: { revision: number; pendingRefresh: Set<string> } | undefined;
     #requestedPlacement = "inline";
     #inlineParent: Element | undefined;
     #inlineNextSibling: ChildNode | null = null;
@@ -620,7 +628,7 @@ export class CodeCodexElement extends HTMLElement {
                 <button class="preview-market-category" type="button" role="tab" aria-selected="false" aria-controls="cle-developer-tools-section" data-preview-market-category="developer-tools">Tools</button>
               </div>
               <section class="preview-market-section" id="cle-appearance-section" role="tabpanel" data-preview-market-section="appearance">
-                <div class="preview-market-section-list"><article class="preview-extension appearance-extension" data-appearance-plugin="code-codex.custom-background-background"><span class="preview-extension-icon" aria-hidden="true">${icons.preview}</span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4 data-plugin-name>Custom Background</h4><span class="preview-extension-status custom-background-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action custom-background-enable" aria-pressed="false">Enable</button><button type="button" class="particle-settings-trigger custom-background-settings" aria-label="Configure Custom Background" aria-haspopup="dialog" aria-controls="cle-custom-background-settings" aria-expanded="false">${icons.sliders}</button></div></article>${spectralDrapeCardMarkup()}${shallowOceanCardMarkup()}${asciiTilesCardMarkup()}${surfaceOpacityCardMarkup()}${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}${blinkingSquaresCardMarkup()}${startupTransitionCardMarkup()}</div>
+                <div class="preview-market-section-list"><article class="preview-extension appearance-extension" data-appearance-plugin="code-codex.custom-background-background"><span class="preview-extension-icon" aria-hidden="true">${icons.preview}</span><div class="preview-extension-copy"><div class="preview-extension-title-row"><h4 data-plugin-name>Custom Background</h4><span class="preview-extension-status custom-background-status">Disabled</span></div></div><div class="preview-extension-actions"><button type="button" class="preview-extension-action custom-background-enable" aria-pressed="false">Enable</button><button type="button" class="particle-settings-trigger custom-background-settings" aria-label="Configure Custom Background" aria-haspopup="dialog" aria-controls="cle-custom-background-settings" aria-expanded="false">${icons.sliders}</button></div></article>${liquidAsciiCardMarkup()}${spectralDrapeCardMarkup()}${shallowOceanCardMarkup()}${asciiTilesCardMarkup()}${surfaceOpacityCardMarkup()}${transparentBackgroundCardMarkup()}${particleBackgroundCardMarkup()}${blackHoleBackgroundCardMarkup()}${glowHorizonBackgroundCardMarkup()}${heavenlyCloudBackgroundCardMarkup()}${auroraIonosphereBackgroundCardMarkup()}${milkyWayBackgroundCardMarkup()}${mountainCardMarkup()}${cloudTrainCardMarkup()}${pixelSculptCardMarkup()}${blinkingSquaresCardMarkup()}${startupTransitionCardMarkup()}</div>
               </section>
               <section class="preview-market-section" id="cle-file-preview-section" role="tabpanel" data-preview-market-section="file-preview" hidden>
                 <div class="preview-market-section-list">${PREVIEWER_DEFINITIONS.map(previewerCardMarkup).join("")}</div>
@@ -656,7 +664,7 @@ export class CodeCodexElement extends HTMLElement {
       ${pixelSculptPanelMarkup()}
       ${blinkingSquaresPanelMarkup()}
       ${startupTransitionPanelMarkup()}
-      ${spectralDrapePanelMarkup()}${shallowOceanPanelMarkup()}${asciiTilesPanelMarkup()}${surfaceOpacityPanelMarkup(bilingualLabelMarkup)}${multiAccountPanelMarkup()}${lanRemotePanelMarkup()}
+      ${liquidAsciiPanelMarkup()}${spectralDrapePanelMarkup()}${shallowOceanPanelMarkup()}${asciiTilesPanelMarkup()}${surfaceOpacityPanelMarkup(bilingualLabelMarkup)}${multiAccountPanelMarkup()}${lanRemotePanelMarkup()}
       <button class="collapsed-tab" type="button" title="Open Code-Codex" aria-label="Open Code-Codex">${icons.collapse}</button>
       <div class="sr-only live-region" aria-live="polite" aria-atomic="true"></div>
     `;
@@ -666,6 +674,9 @@ export class CodeCodexElement extends HTMLElement {
         this.#lanRemote?.close();
         this.#multiAccount.close();},notice:message=>this.#showActionNotice(message,'error')});
         this.#spectralDrapeSettings=new SpectralDrapeSettingsController({shadow:this.#shadow,runtime:this.#spectralDrapeRuntime,actions:{toggle:id=>this.#backgroundActions.toggle(id),deactivate:id=>this.#backgroundActions.deactivate(id),initialize:(id,generation)=>this.#backgroundActions.initialize(id,generation),get busy(){return ownerForAscii.#backgroundActions.busy;}},enabled:()=>this.#enabledAppearancePlugins.has(SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID),closeOthers:()=>{this.#settingsPanels.closeOthers('spectral-drape');this.#surfaceOpacity.close();
+        this.#lanRemote?.close();
+        this.#multiAccount.close();},notice:message=>this.#showActionNotice(message,'error')});
+        this.#liquidAsciiSettings=new LiquidAsciiSettingsController({shadow:this.#shadow,runtime:this.#liquidAsciiRuntime,actions:{toggle:id=>this.#backgroundActions.toggle(id),deactivate:id=>this.#backgroundActions.deactivate(id),initialize:(id,generation)=>this.#backgroundActions.initialize(id,generation),get busy(){return ownerForAscii.#backgroundActions.busy;}},enabled:()=>this.#enabledAppearancePlugins.has(LIQUID_ASCII_BACKGROUND_PLUGIN_ID),closeOthers:()=>{this.#settingsPanels.closeOthers('liquid-ascii');this.#surfaceOpacity.close();
         this.#lanRemote?.close();
         this.#multiAccount.close();},notice:message=>this.#showActionNotice(message,'error')});
         this.#shallowOceanSettings=new ShallowOceanSettingsController({shadow:this.#shadow,runtime:this.#shallowOceanRuntime,actions:{toggle:id=>this.#backgroundActions.toggle(id),deactivate:id=>this.#backgroundActions.deactivate(id),initialize:(id,generation)=>this.#backgroundActions.initialize(id,generation),get busy(){return ownerForAscii.#backgroundActions.busy;}},enabled:()=>this.#enabledAppearancePlugins.has(SHALLOW_OCEAN_ID),closeOthers:()=>{this.#settingsPanels.closeOthers('shallow-ocean');this.#surfaceOpacity.close();
@@ -1089,19 +1100,22 @@ export class CodeCodexElement extends HTMLElement {
         this.#startupSettings.bindStartupTransition();
         this.#asciiTilesSettings.start();
         this.#spectralDrapeSettings.start();
+        this.#liquidAsciiSettings.start();
         this.#shallowOceanSettings.start();
         this.#asciiTilesUnsubscribe?.();
         this.#spectralDrapeUnsubscribe?.();
+        this.#liquidAsciiUnsubscribe?.();
         this.#shallowOceanUnsubscribe?.();
         this.#asciiTilesUnsubscribe=this.#asciiTilesRuntime.subscribe(()=>{if(!this.#connected)return;if(this.#asciiTilesRuntime.stoppedForExternalThemeChange&&this.#enabledAppearancePlugins.delete(ASCII_TILES_BACKGROUND_PLUGIN_ID))this.#writeEnabledAppearancePlugins();this.#renderPreviewMarket();});
         this.#spectralDrapeUnsubscribe=this.#spectralDrapeRuntime.subscribe(()=>{if(!this.#connected)return;if(this.#spectralDrapeRuntime.stoppedForExternalThemeChange&&this.#enabledAppearancePlugins.delete(SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID))this.#writeEnabledAppearancePlugins();this.#renderPreviewMarket();});
+        this.#liquidAsciiUnsubscribe=this.#liquidAsciiRuntime.subscribe(()=>{if(!this.#connected)return;if(this.#liquidAsciiRuntime.stoppedForExternalThemeChange&&this.#enabledAppearancePlugins.delete(LIQUID_ASCII_BACKGROUND_PLUGIN_ID))this.#writeEnabledAppearancePlugins();this.#renderPreviewMarket();});
         this.#shallowOceanUnsubscribe=this.#shallowOceanRuntime.subscribe(()=>{if(!this.#connected)return;if(this.#shallowOceanRuntime.stoppedForExternalThemeChange&&this.#enabledAppearancePlugins.delete(SHALLOW_OCEAN_ID))this.#writeEnabledAppearancePlugins();this.#renderPreviewMarket();});
         this.#backgroundInitialization = this.#backgroundActions.restore([
             PARTICLE_BACKGROUND_PLUGIN_ID, BLACK_HOLE_BACKGROUND_PLUGIN_ID, GLOW_HORIZON_BACKGROUND_PLUGIN_ID,
             HEAVENLY_CLOUD_BACKGROUND_PLUGIN_ID, AURORA_IONOSPHERE_BACKGROUND_PLUGIN_ID, MILKY_WAY_BACKGROUND_PLUGIN_ID,
             MOUNTAIN_BACKGROUND_PLUGIN_ID, CLOUD_TRAIN_BACKGROUND_PLUGIN_ID, PIXEL_SCULPT_BACKGROUND_PLUGIN_ID,
             BLINKING_SQUARES_BACKGROUND_PLUGIN_ID, ASCII_TILES_BACKGROUND_PLUGIN_ID, SHALLOW_OCEAN_ID,
-            SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID,
+            LIQUID_ASCII_BACKGROUND_PLUGIN_ID, SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID,
         ], appearanceInitializationGeneration);
         this.#surfaceOpacity.start();
         this.#multiAccount.start();
@@ -1168,9 +1182,11 @@ export class CodeCodexElement extends HTMLElement {
         this.#backgroundPackageMarket = undefined;
         this.#asciiTilesSettings.stop();
         this.#spectralDrapeSettings.stop();
+        this.#liquidAsciiSettings.stop();
         this.#shallowOceanSettings.stop();
         this.#asciiTilesUnsubscribe?.();this.#asciiTilesUnsubscribe=undefined;
         this.#spectralDrapeUnsubscribe?.();this.#spectralDrapeUnsubscribe=undefined;
+        this.#liquidAsciiUnsubscribe?.();this.#liquidAsciiUnsubscribe=undefined;
         this.#shallowOceanUnsubscribe?.();this.#shallowOceanUnsubscribe=undefined;
         this.#surfaceOpacity.stop();
         this.#lanRemote.dispose();
@@ -1324,8 +1340,10 @@ export class CodeCodexElement extends HTMLElement {
             return;
         this.#enabledAppearancePlugins.delete(ASCII_TILES_BACKGROUND_PLUGIN_ID);
         this.#enabledAppearancePlugins.delete(SPECTRAL_DRAPE_BACKGROUND_PLUGIN_ID);
+        this.#enabledAppearancePlugins.delete(LIQUID_ASCII_BACKGROUND_PLUGIN_ID);
         await this.#asciiTilesRuntime.disable();
         await this.#spectralDrapeRuntime.disable();
+        await this.#liquidAsciiRuntime.disable();
         await this.#shallowOceanRuntime.disable();
         window.dispatchEvent(new Event('code-codex:custom-background-stop'));
         this.#disableButton.disabled = true;
@@ -1526,6 +1544,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#unsubscribe?.();
         this.#unsubscribe = undefined;
         this.#watching = false;
+        this.#ownedTree = undefined;
         this.#workspaceSession.threadId = null;
         this.#workspaceSession.context = undefined;
         this.#appearanceCoordinator.pluginPending = false;
@@ -1590,6 +1609,7 @@ export class CodeCodexElement extends HTMLElement {
     #syncBackgroundSettingsLanguagePresentation(): void {
         this.#asciiTilesSettings.render();
         this.#spectralDrapeSettings.render();
+        this.#liquidAsciiSettings.render();
         this.#shallowOceanSettings.render();
         this.#surfaceOpacity.render();
         this.#lanRemote.render();
@@ -2122,6 +2142,7 @@ export class CodeCodexElement extends HTMLElement {
             return;
         if (this.#asciiTilesSettings.containsEvent(event))return;
         if (this.#spectralDrapeSettings.containsEvent(event))return;
+        if (this.#liquidAsciiSettings.containsEvent(event))return;
         if (this.#shallowOceanSettings.containsEvent(event))return;
         if(this.#lanRemote.containsEvent(event))return;
         if(this.#multiAccount.containsEvent(event))return;
@@ -2129,6 +2150,7 @@ export class CodeCodexElement extends HTMLElement {
             return;
         this.#asciiTilesSettings.close();
         this.#spectralDrapeSettings.close();
+        this.#liquidAsciiSettings.close();
         this.#shallowOceanSettings.close();
         this.#surfaceOpacity.close();
         this.#lanRemote?.close();
@@ -2372,7 +2394,7 @@ export class CodeCodexElement extends HTMLElement {
         try {
             runtimeEvent("renderer", "workspace selection", "requested", { from: runtimeTaskLabel(this.#workspaceSession.threadId), to: runtimeTaskLabel(threadId), hasTask: !!threadId, force, cached: threadId === this.#workspaceSession.threadId && !!this.#workspaceSession.context });
             this.#fileactionsSettings.closeContextMenu(false);
-            if (!force && threadId === this.#workspaceSession.threadId && this.#workspaceSession.context) {
+            if (!force && threadId === this.#workspaceSession.threadId && (this.#workspaceSession.context || (this.#ownedTree && this.#state === "ready"))) {
                 this.#queuedThreadSwitch = undefined;
                 diagnostic.finish('cached', { workspacePreserved: true });
                 return;
@@ -2390,16 +2412,17 @@ export class CodeCodexElement extends HTMLElement {
             }
             this.#previewWorkspace.purgePreviewTabs(false);
             const selectionChanged = threadId !== this.#workspaceSession.threadId;
-            if (selectionChanged) {
-                this.#treeinteractionSettings.clearFileFilter(false);
-                this.#treeinteractionSettings.clearSelection(false);
-                if (this.#treeinteractionSettings.allRowCount > 0)
-                    this.#treeinteractionSettings.renderTree();
-            }
+            const ownedTree = this.#ownedTree;
+            const retainWhileResolving = !!threadId && !!ownedTree && this.#watching && this.#state === "ready" && !force;
             this.#githistorySettings.prepareGitHistoryForThreadSwitch();
             const generation = ++this.#workspaceSession.generation;
             diagnosticGeneration = generation;
-            this.#clearWorkspaceTimers();
+            const pendingDirectories = this.#directoryjobsSettings.cancelPending();
+            if (retainWhileResolving) {
+                for (const path of pendingDirectories) ownedTree.pendingRefresh.add(path);
+            } else {
+                this.#clearWorkspaceTimers();
+            }
             this.#workspaceSession.threadId = threadId;
             this.#workspaceSession.context = undefined;
             const bridge = this.#workspaceSession.bridge;
@@ -2409,11 +2432,8 @@ export class CodeCodexElement extends HTMLElement {
                 this.#githistorySettings.showGitHistoryUnavailable("Code-Codex is not connected.");
                 return;
             }
-            this.#setState("loading");
+            if (!retainWhileResolving) this.#setState("loading");
             try {
-                await this.#stopWatch(bridge);
-                if (generation !== this.#workspaceSession.generation)
-                    return;
                 if (!threadId) {
                     await this.#clearNativeContext(bridge);
                     if (generation !== this.#workspaceSession.generation)
@@ -2422,7 +2442,13 @@ export class CodeCodexElement extends HTMLElement {
                     this.#githistorySettings.showGitHistoryUnavailable("Choose a local project to view its Git history.");
                     return;
                 }
-                const rawContext = await this.#requestBootstrap<unknown>(bridge, generation, "explorer.context", { threadId });
+                if (!ownedTree) {
+                    await this.#stopWatch(bridge);
+                    if (generation !== this.#workspaceSession.generation) return;
+                }
+                const rawContext = await this.#requestBootstrap<unknown>(
+                    bridge, generation, "explorer.context", ownedTree ? { threadId, reuseWorkspace: true } : { threadId },
+                );
                 if (generation !== this.#workspaceSession.generation)
                     return;
                 const context = normalizeContext(rawContext, threadId);
@@ -2432,6 +2458,25 @@ export class CodeCodexElement extends HTMLElement {
                     return;
                 }
                 this.#workspaceSession.context = context;
+                this.#watching = context.watching === true;
+                if (retainWhileResolving && this.#watching && context.workspaceRevision === ownedTree.revision) {
+                    diagnostic.event('workspace reuse', 'applied', { watcherRetained: true, generation });
+                    for (const path of ownedTree.pendingRefresh)
+                        void this.#directoryjobsSettings.loadDirectory(path);
+                    ownedTree.pendingRefresh.clear();
+                    this.#previeweditingSettings.restoreDetachedDraft(context);
+                    if (this.#githistorySettings.gitHistoryOpen)
+                        void this.#githistorySettings.loadGitHistory(true);
+                    diagnostic.finish('cached', { workspacePreserved: true, watching: true, generation });
+                    return;
+                }
+                this.#ownedTree = undefined;
+                this.#clearWorkspaceTimers();
+                if (selectionChanged) {
+                    this.#treeinteractionSettings.clearFileFilter(false);
+                    this.#treeinteractionSettings.clearSelection(false);
+                }
+                this.#setState("loading");
                 this.#setHeader(context.projectName, context.rootName);
                 const rawList = await this.#requestBootstrap<unknown>(bridge, generation, "explorer.list", { relativePath: "", limit: PAGE_SIZE });
                 if (generation !== this.#workspaceSession.generation)
@@ -2440,6 +2485,8 @@ export class CodeCodexElement extends HTMLElement {
                 this.#treeinteractionSettings.model.reset();
                 this.#treeinteractionSettings.model.beginLoad("");
                 this.#treeinteractionSettings.model.commitLoad("", list);
+                if (context.workspaceRevision !== undefined)
+                    this.#ownedTree = { revision: context.workspaceRevision, pendingRefresh: new Set() };
                 diagnostic.event('root listing', 'applied', { entryCount: list.entries.length, hasNextPage: !!list.nextCursor, generation });
                 this.#setState("ready");
                 this.#treeinteractionSettings.renderTree();
@@ -2447,6 +2494,7 @@ export class CodeCodexElement extends HTMLElement {
                     this.#announce(`${context.projectName} loaded`);
                 if (this.#githistorySettings.gitHistoryOpen)
                     void this.#githistorySettings.loadGitHistory(true);
+                if (this.#watching) return;
                 // Show the root before installing a recursive watcher (large projects
                 // can take time to subscribe). Re-read after subscription to close the
                 // gap between the initial listing and the first watched event.
@@ -2473,7 +2521,6 @@ export class CodeCodexElement extends HTMLElement {
                     return;
                 if (error instanceof ExplorerBridgeError && error.code === "NO_CONTEXT") {
                     try {
-                        await this.#stopWatch(bridge);
                         await this.#clearNativeContext(bridge);
                         if (generation !== this.#workspaceSession.generation)
                             return;
@@ -2536,6 +2583,8 @@ export class CodeCodexElement extends HTMLElement {
         await bridge.request("explorer.context.clear", {});
     }
     #showNoProject(): void {
+        this.#watching = false;
+        this.#ownedTree = undefined;
         this.#workspaceSession.context = undefined;
         this.#previewWorkspace.purgePreviewTabs(false);
         this.#treeinteractionSettings.model.reset();
@@ -2578,7 +2627,7 @@ export class CodeCodexElement extends HTMLElement {
             return;
         }
         if (method === "explorer.changed") {
-            if (!this.#workspaceSession.context || this.#state === "loading")
+            if (this.#state !== "ready" || (!this.#workspaceSession.context && !(this.#ownedTree && this.#watching)))
                 return;
             this.#applyChanges(params);
             return;
@@ -2677,6 +2726,10 @@ export class CodeCodexElement extends HTMLElement {
             clearTimeout(existing);
         this.#refreshTimers.set(path, setTimeout(() => {
             this.#refreshTimers.delete(path);
+            if (!this.#workspaceSession.context && this.#ownedTree && this.#state === "ready") {
+                this.#ownedTree.pendingRefresh.add(path);
+                return;
+            }
             void this.#directoryjobsSettings.loadDirectory(path);
         }, delay));
     }
@@ -3230,6 +3283,7 @@ export class CodeCodexElement extends HTMLElement {
         if (category !== "appearance") {
             this.#asciiTilesSettings.close();
             this.#spectralDrapeSettings.close();
+            this.#liquidAsciiSettings.close();
             this.#shallowOceanSettings.close();
             this.#blinkingsquaresSettings.closeBlinkingSquares();
             this.#pixelsculptSettings.closePixelSculpt();
@@ -3266,6 +3320,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#customBackground?.close();
         this.#asciiTilesSettings.close();
         this.#spectralDrapeSettings.close();
+        this.#liquidAsciiSettings.close();
         this.#shallowOceanSettings.close();
         this.#surfaceOpacity.close();
         this.#lanRemote?.close();
@@ -3354,7 +3409,7 @@ export class CodeCodexElement extends HTMLElement {
                 if (!lease) throw new Error('Another background transition is in progress. Retry after it completes.');
                 try {
                 const transparentWasEnabled = this.#enabledAppearancePlugins.has(TRANSPARENT_BACKGROUND_PLUGIN_ID) || document.documentElement.hasAttribute(TRANSPARENT_BACKGROUND_ATTRIBUTE);
-                for (const controller of [this.#spectralDrapeRuntime,this.#shallowOceanRuntime,this.#asciiTilesRuntime,this.#particleBackgroundController, this.#blackHoleBackgroundController, this.#glowHorizonBackgroundController, this.#heavenlyCloudBackgroundController, this.#auroraIonosphereBackgroundController, this.#milkyWayBackgroundController, this.#mountainController, this.#pixelSculptController, this.#blinkingSquaresController, this.#cloudTrainController])
+                for (const controller of [this.#liquidAsciiRuntime,this.#spectralDrapeRuntime,this.#shallowOceanRuntime,this.#asciiTilesRuntime,this.#particleBackgroundController, this.#blackHoleBackgroundController, this.#glowHorizonBackgroundController, this.#heavenlyCloudBackgroundController, this.#auroraIonosphereBackgroundController, this.#milkyWayBackgroundController, this.#mountainController, this.#pixelSculptController, this.#blinkingSquaresController, this.#cloudTrainController])
                     if (controller.enabled) {
                         await controller.disable(true);
                         lease.assertCurrent();
@@ -3399,6 +3454,7 @@ export class CodeCodexElement extends HTMLElement {
     #renderPreviewMarket(): void {
         this.#asciiTilesSettings.render();
         this.#spectralDrapeSettings.render();
+        this.#liquidAsciiSettings.render();
         this.#shallowOceanSettings.render();
         this.#surfaceOpacity.render();
         this.#lanRemote.render();
@@ -3462,6 +3518,7 @@ export class CodeCodexElement extends HTMLElement {
                 || this.#glowHorizonBackgroundController.pending
                 || this.#heavenlyCloudBackgroundController.pending
                 || this.#asciiTilesRuntime.pending
+                || this.#liquidAsciiRuntime.pending
                 || this.#spectralDrapeRuntime.pending
                 || this.#shallowOceanRuntime.pending
                 || this.#auroraIonosphereBackgroundController.pending

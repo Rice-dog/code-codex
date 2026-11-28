@@ -18,6 +18,8 @@ export interface ExplorerContext {
   // Absolute workspace root, used to build absolute paths locally. Empty when
   // the launcher did not report one (older builds).
   rootPath: string;
+  workspaceRevision?: number;
+  watching?: boolean;
   compatible: boolean;
   reason?: string;
 }

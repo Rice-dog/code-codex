@@ -296,7 +296,7 @@ async fn prepare(
             Some(progress.wait(relay::Route::prepare_credential(selected.clone(), worker, email,Some(progress))).await?)
         }
         _ if selected == "host" && (prior.is_some() || portable) && p["action"] != "native.detach" => {
-            Some(relay::Route::prepare_official(owner.label.clone())?)
+            Some(progress.wait(relay::Route::prepare_official(owner.label.clone())).await?)
         }
         _ => None,
     }};

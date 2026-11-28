@@ -7,13 +7,22 @@ import {CONVERSATION_TRANSPARENCY_SELECTOR,NATIVE_CONVERSATION_TOP_FADE_SELECTOR
 import {BACKGROUND_SURFACE_ATTRIBUTES} from './components/styles/background-surfaces';
 import {unexpectedPaint} from './host-paint-inspection';
 import {activePageElements,SPLIT_MAIN_VIEW_SELECTOR,SPLIT_MAIN_FRAME_SELECTOR} from './adapters/codex-26.715';
-import {inspectSecondaryPaint, inspectSecondaryPaintCoverage} from './host-navigation-inspection';
+import {inspectConversationToolbar, inspectSecondaryPaint, inspectSecondaryPaintCoverage, inspectToolbarPanelPaint} from './host-navigation-inspection';
+import {inspectClosedMenuIndicators} from './host-update-feature-inspection';
+import {nativeMenuCheckSvg} from './components/menu-check';
 
 export type ProbeResult = {status:'passed'|'issue'|'manual';detail:string};
-export type UpdateCheck = ProbeResult & {id:string;scope:string};
+export type UpdateCheck = ProbeResult & {id:string;scope:string;evidenceFor?:string};
 const treeSelector = '[data-code-codex-owned="true"]';
 const scope = 'isolated-mounted-regression';
 const backgroundAttribute = 'data-code-codex-glow-horizon-background';
+const sceneTargets = [
+  'host.market-scroll','host.tree-rail-paint','host.split-layout','host.composer-backdrop',
+  'host.conversation-top-paint','host.settings-paint','host.page-frame-paint','host.turn-change-paint',
+  'host.workspace-backing-paint','host.toolbar-summary','host.toolbar-share-paint','host.toolbar-summary-paint',
+  'host.toolbar-tabs-paint','host.menu-closed-indicators','host.nav-page-header','host.nav-page-edge',
+  'host.nav-page-content','host.nav-region-paint','host.side-panel-paint',
+] as const;
 
 export function mountedExplorer(): HTMLElement | undefined {
   const trees = [...document.querySelectorAll<HTMLElement>(treeSelector)].filter(tree =>
@@ -193,15 +202,16 @@ function mountExplorerStyles(doc:Document, tree:HTMLElement|undefined):ShadowRoo
   return shadow;
 }
 
-function checkMarket(doc:Document, tree:HTMLElement|undefined, shadow:ShadowRoot|undefined):ProbeResult {
+function checkMarket(doc:Document, tree:HTMLElement|undefined, shadow:ShadowRoot|undefined):[ProbeResult,ProbeResult] {
+  const incomplete=(status:'manual'|'issue',detail:string):[ProbeResult,ProbeResult]=>[{status,detail},{status,detail}];
   const market = tree?.shadowRoot?.querySelector<HTMLElement>('.preview-market-popover');
-  if (!shadow || !market) return {status:'manual',detail:'The production market template is unavailable in this installation.'};
+  if (!shadow || !market) return incomplete('manual','The production market template is unavailable in this installation.');
   const copy = doc.importNode(market,true);
   copy.hidden = false;
   shadow.append(copy);
   const list = copy.querySelector<HTMLElement>('.preview-market-list');
   const sections = [...copy.querySelectorAll<HTMLElement>('[data-preview-market-section]')];
-  if (!list || sections.length !== 3) return {status:'issue',detail:'The production market layout lacks its list or three categories.'};
+  if (!list || sections.length !== 3) return incomplete('issue','The production market layout lacks its list or three categories.');
   const results = sections.map(section => {
     const category = section.dataset.previewMarketSection;
     for (const candidate of sections) candidate.hidden = candidate !== section;
@@ -209,10 +219,16 @@ function checkMarket(doc:Document, tree:HTMLElement|undefined, shadow:ShadowRoot
     const viewport = list.clientHeight;
     const range = Math.max(0,list.scrollHeight-viewport);
     const overflow = doc.defaultView!.getComputedStyle(list).overflowY;
-    return {category,viewport,range,ok:viewport>0&&['auto','scroll'].includes(overflow)};
+    const start = list.scrollTop;
+    list.scrollTop = range;
+    const traversable = range === 0 || list.scrollTop > 0;
+    list.scrollTop = start;
+    return {category,viewport,range,ok:viewport>0&&['auto','scroll'].includes(overflow),traversable};
   });
-  return {status:results.every(item=>item.ok)?'passed':'issue',detail:results.map(item=>
-    `${item.category}: viewport=${item.viewport}px, verticalRange=${item.range}px${item.ok?'':' (blocked)'}`).join('. ') + '. No scrolling was performed.'};
+  const detail=results.map(item=>
+    `${item.category}: viewport=${item.viewport}px, verticalRange=${item.range}px${item.ok?'':' (blocked)'}`).join('. ');
+  return [{status:results.every(item=>item.ok)?'passed':'issue',detail},
+    {status:results.every(item=>item.ok&&item.traversable)?'passed':'issue',detail:detail+'. Verified movement in the isolated list where overflow exists.'}];
 }
 
 export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLElement|undefined):UpdateCheck[] {
@@ -224,9 +240,21 @@ export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLEle
       try {result.push({id,scope,...test()});}
       catch {result.push({id,scope,status:'manual',detail:'The isolated layout could not be measured.'});}
     };
+    const evidence = (id:string, observation:ProbeResult) => {
+      if (requested.has('background.surface-transitions'))
+        result.push({id:'isolated.'+id,scope,evidenceFor:id,...observation});
+    };
+    const linked = (id:string, observation:ProbeResult):ProbeResult => {
+      evidence(id,observation);
+      return observation;
+    };
     const explorer = requested.has('background.market-layout') || requested.has('background.tree-rail-paint') || requested.has('background.surface-transitions')
       ? mountExplorerStyles(doc,tree) : undefined;
-    add('background.market-layout',()=>checkMarket(doc,tree,explorer));
+    add('background.market-layout',()=>{
+      const [layout,scroll]=checkMarket(doc,tree,explorer);
+      evidence('host.market-scroll',scroll);
+      return layout;
+    });
     add('background.tree-rail-paint',()=>{
       const rail = tree?.shadowRoot?.querySelector('.collapsed-tab');
       if (!explorer || !rail) return {status:'manual',detail:'The production collapsed tree control is unavailable.'};
@@ -238,9 +266,9 @@ export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLEle
       for (const alpha of [0,.5,1]) {
         doc.documentElement.style.setProperty('--code-codex-mask-tree',String(alpha));
         const sample = inspectCollapsedTreePaint(doc);
-        if (sample.status !== 'passed') return sample;
+        if (sample.status !== 'passed') return linked('host.tree-rail-paint',sample);
       }
-      return {status:'passed',detail:'The production collapsed rail follows tree opacity 0%, 50%, and 100%.'};
+      return linked('host.tree-rail-paint',{status:'passed',detail:'The production collapsed rail follows tree opacity 0%, 50%, and 100%.'});
     });
     const nativeChecks = ['background.split-layout','background.composer-backdrop','background.conversation-top-paint','background.side-panel-paint','background.settings-paint','background.nav-page-paint','background.surface-transitions'];
     if (!nativeChecks.some(id=>requested.has(id))) return result;
@@ -256,18 +284,56 @@ export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLEle
     doc.documentElement.setAttribute(backgroundAttribute,'');
     const stage = doc.createElement('section');
     stage.innerHTML = `<div data-code-codex-owned="true" data-placement="inline" data-mount-strategy="known:workspace-row"></div>
-      <div><main class="main-surface">
+      <div data-app-shell-workspace="true" data-app-shell-frame="true" data-app-shell-page-surface="true">
+        <div data-app-shell-surface-backing="true" class="pointer-events-none contract-viewport contract-paint"></div><main class="main-surface">
+        <header data-app-shell-titlebar="true" data-pip-obstacle="app-shell-header" style="display:flex;gap:10px;width:240px">
+          <button aria-label="Share">Share</button><button aria-pressed="false" aria-label="Toggle pinned summary">Summary</button>
+          <button data-app-shell-workspace-layout-toggle="main" aria-label="Show tabs">Tabs</button></header>
         <div class="contract-view" data-app-shell-workspace-layout="split" data-app-shell-right-panel-full-width="false"><div class="MainContentFrame-contract contract-viewport"><div data-codex-composer-root class="contract-viewport"></div></div></div>
         <div data-app-shell-main-content-layout="thread-edge-scroll"><div class="contract-top pointer-events-none absolute top-0 h-[var(--app-shell-content-fade-height)]"></div></div>
+        <div><div class="group/turn-diff-header">Change</div><div class="group/turn-diff-file-row"><div data-state="ready"><button class="contract-paint">File</button></div></div></div>
         <div class="thread-scroll-container"><div class="pointer-events-none contract-footer"><div class="contract-viewport" data-thread-scroll-footer="true"></div></div></div>
         <div data-app-shell-focus-area="main"><div class="electron:bg-surface rounded-tl-lg contract-viewport contract-paint"></div></div>
       </main><aside class="contract-viewport contract-paint" data-app-shell-focus-area="right-panel"><div class="contract-paint contract-viewport" data-new-tab-scroll-root></div></aside></div>`;
     doc.body.append(stage);
     const paintTargets=new NativePaintTargets(doc);paintTargets.update();
-    add('background.split-layout',()=>inspectSplitLayout(doc));
-    add('background.composer-backdrop',()=>inspectComposerBackdrop(doc));
-    add('background.conversation-top-paint',()=>inspectConversationTopPaint(doc));
-    add('background.settings-paint',()=>inspectSettingsPaint(doc));
+    add('background.split-layout',()=>linked('host.split-layout',inspectSplitLayout(doc)));
+    add('background.composer-backdrop',()=>linked('host.composer-backdrop',inspectComposerBackdrop(doc)));
+    add('background.conversation-top-paint',()=>linked('host.conversation-top-paint',inspectConversationTopPaint(doc)));
+    add('background.settings-paint',()=>linked('host.settings-paint',inspectSettingsPaint(doc)));
+    if (requested.has('background.surface-transitions')) {
+      const main=stage.querySelector('main')!;
+      const root=doc.documentElement;
+      root.style.setProperty('--code-codex-mask-changes','0');
+      for (const [i,sample] of inspectNativeSurfaceLayers(doc,main).entries()) evidence(i?'host.turn-change-paint':'host.page-frame-paint',sample);
+      evidence('host.workspace-backing-paint',inspectWorkspaceBackingPaint(doc,main,undefined));
+      const summary=doc.createElement('aside');
+      summary.dataset.summaryPanelVariant='summary';
+      summary.dataset.summaryPanelDensity='comfortable';
+      summary.style.cssText='position:absolute;top:20px;left:390px;width:180px;height:100px';
+      doc.body.append(summary);
+      const toolbar=inspectConversationToolbar(doc);
+      evidence('host.toolbar-summary',toolbar('summary'));
+      evidence('host.toolbar-share-paint',toolbar('share',true));
+      root.style.setProperty('--code-codex-mask-utility','0');
+      evidence('host.toolbar-summary-paint',inspectToolbarPanelPaint(doc,'summary'));
+      evidence('host.toolbar-tabs-paint',inspectToolbarPanelPaint(doc,'tabs'));
+      summary.remove();
+      const language=document.getElementById('code-codex-language-popup');
+      const menuStyle=document.querySelector('style[data-code-codex-application-menu-style]');
+      if (language && menuStyle?.textContent) {
+        addStyle(doc,menuStyle.textContent);
+        const copy=doc.importNode(language,true);
+        copy.hidden=true;
+        const marker=doc.createElement('span');
+        marker.dataset.codeCodexMenuCheck='true';
+        marker.innerHTML=nativeMenuCheckSvg;
+        copy.querySelector('[role="menuitemradio"]')?.append(marker);
+        doc.body.append(copy);
+        evidence('host.menu-closed-indicators',inspectClosedMenuIndicators(doc));
+        copy.remove();
+      }
+    }
     add('background.nav-page-paint',()=>{
       const secondary = doc.createElement('main');
       secondary.className='main-surface';
@@ -284,10 +350,14 @@ export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLEle
       addStyle(doc,'.contract-sticky::before {content:"";background:black}');
       doc.body.append(secondary);
       try{
+        const samples:ProbeResult[]=[];
         for(const kind of ['header','edge','content'] as const){
           const sample=inspectSecondaryPaint(doc,kind);
-          if(sample.status!=='passed')return sample;
+          evidence('host.nav-page-'+kind,sample);
+          samples.push(sample);
         }
+        const failed=samples.find(sample=>sample.status!=='passed');
+        if(failed)return failed;
         if(!unexpectedPaint([secondary.querySelector('[role="dialog"]')!]).length)
           return {status:'issue',detail:'The independent dialog lost its own backing.'};
         return {status:'passed',detail:'New and legacy sticky headers, secondary top gradient, and full-bleed backing were measured with production CSS. A neighboring dialog kept its native backing.'};
@@ -310,6 +380,7 @@ export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLEle
         if (!unexpectedPaint([header]).length) return {status:'issue',detail:'Native header paint was not restored with the background off.'};
         root.setAttribute(backgroundAttribute, '');
         const page = inspectSecondaryPaintCoverage(doc);
+        evidence('host.nav-region-paint',page);
         if (page.status !== 'passed') return page;
         const unknown = doc.createElement('div');
         unknown.style.cssText = 'position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(black,transparent);pointer-events:none';
@@ -364,12 +435,17 @@ export function runBackgroundChecks(requested: ReadonlySet<string>, tree:HTMLEle
       for (const alpha of [0,.5,1]) {
         doc.documentElement.style.setProperty('--code-codex-mask-utility',String(alpha));
         const sample = inspectSidePanelOpacity(doc);
-        if (sample.status !== 'passed') return sample;
+        if (sample.status !== 'passed') return linked('host.side-panel-paint',sample);
       }
-      return {status:'passed',detail:'Production side-panel backings match opacity 0%, 50%, and 100% on the isolated layout.'};
+      return linked('host.side-panel-paint',{status:'passed',detail:'Production side-panel backings match opacity 0%, 50%, and 100% on the isolated layout.'});
     });
     return result;
   }) ?? [];
-  for (const id of requested) if (!checks.some(check=>check.id===id)) checks.push({id,scope,status:'manual',detail:'The production style or temporary layout document was unavailable.'});
+  const missing = {scope,status:'manual',detail:'The required production markup, styles or temporary layout document were unavailable.'} as const;
+  const observed=new Set(checks.map(check=>check.id));
+  for (const id of requested) if (!observed.has(id)) checks.push({id,...missing});
+  if(requested.has('background.surface-transitions')){
+    for (const id of sceneTargets) if (!observed.has('isolated.'+id)) checks.push({id:'isolated.'+id,evidenceFor:id,...missing});
+  }
   return checks;
 }

@@ -150,7 +150,7 @@ impl AppServerSource {
 /// directory handles plus the transient directory. The App Server read loop
 /// retains this value through actual child stdout EOF, preventing replacement
 /// or adjacent-file creation for the complete child lifetime.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AppServerLaunch {
     executable: PathBuf,
     #[cfg(windows)]
@@ -167,7 +167,8 @@ impl AppServerLaunch {
     pub fn hardened_working_directory(&self) -> Option<&Path> {
         #[cfg(windows)]
         {
-            self._stage.as_ref()?.directory.as_ref().map(TempDir::path)
+            self._stage.as_ref()?;
+            self.executable.parent()
         }
         #[cfg(not(windows))]
         {
@@ -200,6 +201,155 @@ struct StagedAppServer {
     ancestry_handles: Vec<File>,
     directory: Option<TempDir>,
     trusted_path: std::ffi::OsString,
+}
+
+#[cfg(windows)]
+static APP_SERVER_STAGES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Weak<StagedAppServer>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// The authenticated native control channel carries only references to locked
+/// handles held by the launcher for the lifetime of the promotion request.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AppServerStageTicket {
+    pid: u32,
+    source: PathBuf,
+    path: PathBuf,
+    image: usize,
+    directory: usize,
+    companions: Vec<usize>,
+}
+
+pub(crate) fn reuse_app_server_stage(source: &Path) -> Option<AppServerLaunch> {
+    #[cfg(windows)]
+    {
+        let stage = APP_SERVER_STAGES.lock().ok()?.get(source)?.upgrade()?;
+        let executable = stage.directory.as_ref()?.path().join("codex.exe");
+        Some(AppServerLaunch { executable, _stage: Some(stage) })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = source;
+        None
+    }
+}
+
+impl AppServerLaunch {
+    pub(crate) fn stage_ticket(&self, source: &Path) -> Option<AppServerStageTicket> {
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            let stage = self._stage.as_ref()?;
+            let registered = APP_SERVER_STAGES.lock().ok()?.get(source)?.upgrade()?;
+            if !std::sync::Arc::ptr_eq(stage, &registered) { return None; }
+            Some(AppServerStageTicket {
+                pid: std::process::id(),
+                source: source.to_owned(),
+                path: self.executable.clone(),
+                image: stage.executable_handle.as_ref()?.as_raw_handle() as usize,
+                directory: stage.directory_handle.as_ref()?.as_raw_handle() as usize,
+                companions: stage.companions.iter().map(|file| file.as_raw_handle() as usize).collect(),
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = source;
+            None
+        }
+    }
+}
+
+pub(crate) fn accept_app_server_stage(
+    source: &Path,
+    ticket: AppServerStageTicket,
+) -> Option<AppServerLaunch> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::{
+            Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle},
+            System::Threading::{GetCurrentProcess, OpenProcess, PROCESS_DUP_HANDLE},
+        };
+        if ticket.source != source || !is_windows_apps_anchor(source)
+            || ticket.companions.len() > RUNTIME_COMPANIONS.len()
+        {
+            return None;
+        }
+        let directory_path = ticket.path.parent()?;
+        let root = dunce::canonicalize(std::env::temp_dir()).ok()?.join(STAGE_ROOT_NAME);
+        if directory_path.parent()? != root || !valid_stage_directory_name(directory_path.file_name()?.to_str()?)
+            || ticket.path.file_name()? != "codex.exe"
+        {
+            return None;
+        }
+        let sender = unsafe { OpenProcess(PROCESS_DUP_HANDLE, 0, ticket.pid) };
+        if sender.is_null() { return None; }
+        let sender = unsafe { OwnedHandle::from_raw_handle(sender) };
+        let duplicate = |value: usize| {
+            let mut handle = std::ptr::null_mut();
+            if value == 0 || unsafe {
+                DuplicateHandle(sender.as_raw_handle(), value as _, GetCurrentProcess(), &mut handle, 0, 0, DUPLICATE_SAME_ACCESS)
+            } == 0 {
+                return None;
+            }
+            Some(unsafe { File::from_raw_handle(handle) })
+        };
+        let mut directory_handle = duplicate(ticket.directory)?;
+        let ancestry_handles = open_locked_directory_ancestry(&root).ok()?;
+        let opened_directory = open_locked_directory_nofollow(directory_path, false).ok()?;
+        if !same_file_identity(&directory_handle, &opened_directory).ok()? { return None; }
+        let open_image = |path: &Path| {
+            let opened = OpenOptions::new().read(true).share_mode(FILE_SHARE_READ)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(path).ok()?;
+            let metadata = opened.metadata().ok()?;
+            (metadata.file_attributes() & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY) == 0)
+                .then_some(opened)
+        };
+        let open_verified = |handle, staged: &Path, original: &Path| {
+            let mut staged = open_image(staged)?;
+            let mut original = open_image(original)?;
+            if !same_file_identity(&duplicate(handle)?, &staged).ok()?
+                || staged.metadata().ok()?.len() != original.metadata().ok()?.len()
+                || sha256_reader(&mut staged).ok()? != sha256_reader(&mut original).ok()?
+            {
+                return None;
+            }
+            Some(staged)
+        };
+        // Seal the same held directory in this process before checking its
+        // contents. Only bytes identical to the broker's official source may run.
+        deny_stage_child_creation(&mut directory_handle).ok()?;
+        ensure_stage_contains_only_executable(directory_path, &ticket.path).ok()?;
+        let executable_handle = open_verified(ticket.image, &ticket.path, source)?;
+        let mut companions = Vec::new();
+        let mut handles = ticket.companions.into_iter();
+        for name in RUNTIME_COMPANIONS {
+            let path = directory_path.join(name);
+            let original = source.parent()?.join(name);
+            match (path.try_exists().ok()?, original.try_exists().ok()?) {
+                (true, true) => companions.push(open_verified(handles.next()?, &path, &original)?),
+                (false, false) => {}
+                _ => return None,
+            }
+        }
+        if handles.next().is_some() { return None; }
+        let stage = StagedAppServer {
+            executable_handle: Some(executable_handle),
+            companions,
+            executable_acl_handle: None,
+            directory_handle: Some(directory_handle),
+            ancestry_handles,
+            directory: None,
+            trusted_path: trusted_windows_path().ok()?,
+        };
+        Some(AppServerLaunch { executable: ticket.path, _stage: Some(std::sync::Arc::new(stage)) })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (source, ticket);
+        None
+    }
 }
 
 #[cfg(windows)]
@@ -720,8 +870,7 @@ pub fn prepare_app_server_launch(
         AppServerSourceKind::PackagedOfficial => {
             #[cfg(windows)]
             {
-                static RUNTIMES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Weak<StagedAppServer>>>> = std::sync::LazyLock::new(Default::default);
-                let mut runtimes = RUNTIMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut runtimes = APP_SERVER_STAGES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(stage) = runtimes.get(&source.executable).and_then(std::sync::Weak::upgrade) {
                     let executable = stage.directory.as_ref().ok_or(DiscoveryError::AppServerNotFound)?.path().join("codex.exe");
                     return Ok(AppServerLaunch { executable, _stage: Some(stage) });
@@ -1364,18 +1513,60 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn companion_runtime_is_verified_locked_and_shared() {
+        const TICKET: &str = "CODE_CODEX_TEST_BORROWED_STAGE";
+        if let Some(raw) = std::env::var_os(TICKET) {
+            let ticket: AppServerStageTicket = serde_json::from_str(raw.to_str().unwrap()).unwrap();
+            let source = ticket.source.clone();
+            assert!(accept_app_server_stage(&source,ticket).is_some());
+            return;
+        }
         let source=tempfile::tempdir().unwrap();
-        let exe=source.path().join("codex.exe");std::fs::write(&exe,b"official-test-main").unwrap();
-        for name in RUNTIME_COMPANIONS { std::fs::write(source.path().join(name),name.as_bytes()).unwrap(); }
+        let package=source.path().join("WindowsApps");
+        std::fs::create_dir(&package).unwrap();
+        let exe=package.join("codex.exe");std::fs::write(&exe,b"official-test-main").unwrap();
+        for name in RUNTIME_COMPANIONS { std::fs::write(package.join(name),name.as_bytes()).unwrap(); }
         let first=prepare_app_server_launch(AppServerSource{executable:exe.clone(),kind:AppServerSourceKind::PackagedOfficial}).unwrap();
-        let second=prepare_app_server_launch(AppServerSource{executable:exe,kind:AppServerSourceKind::PackagedOfficial}).unwrap();
+        let second=reuse_app_server_stage(&exe).unwrap();
         assert_eq!(first.executable(),second.executable());
+        let ticket=second.stage_ticket(&exe).unwrap();
+        let borrowed=accept_app_server_stage(&exe,ticket).unwrap();
+        assert_eq!(borrowed.executable(),first.executable());
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "discovery::tests::companion_runtime_is_verified_locked_and_shared"])
+            .env(TICKET, serde_json::to_string(&second.stage_ticket(&exe).unwrap()).unwrap())
+            .output().unwrap();
+        assert!(child.status.success() && String::from_utf8_lossy(&child.stdout).contains("1 passed"),
+            "Child-stage validation failed: {}",String::from_utf8_lossy(&child.stdout));
+        assert!(accept_app_server_stage(&package.join("elsewhere").join("codex.exe"),second.stage_ticket(&exe).unwrap()).is_none());
+        let mut wrong=second.stage_ticket(&exe).unwrap();
+        wrong.image=0;
+        assert!(accept_app_server_stage(&exe,wrong).is_none());
+        let mut wrong=second.stage_ticket(&exe).unwrap();
+        wrong.companions.swap(0,1);
+        assert!(accept_app_server_stage(&exe,wrong).is_none());
         let dir=first.executable().parent().unwrap().to_path_buf();
         for name in RUNTIME_COMPANIONS {
             let path=dir.join(name);assert_eq!(std::fs::read(&path).unwrap(),name.as_bytes());
             assert!(OpenOptions::new().write(true).open(path).is_err());
         }
-        drop(first);assert!(dir.exists());drop(second);assert!(!dir.exists());
+        drop(borrowed);drop(first);assert!(dir.exists());drop(second);assert!(!dir.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Requires an explicitly prepared isolated broker fixture and installed official backend."]
+    fn installed_backend_stage_is_reused_by_the_broker_fixture() {
+        let source = PathBuf::from(std::env::var_os("CODE_CODEX_TEST_STAGE_SOURCE").unwrap());
+        let fixture = std::env::var_os("CODE_CODEX_TEST_STAGE_DRIVER").unwrap();
+        let out = std::env::var_os("CODE_CODEX_TEST_STAGE_EVIDENCE").unwrap();
+        let launch=prepare_app_server_launch(AppServerSource{
+            executable:source.clone(),kind:AppServerSourceKind::PackagedOfficial,
+        }).unwrap();
+        let ticket=serde_json::to_string(&launch.stage_ticket(&source).unwrap()).unwrap();
+        let status=std::process::Command::new("python").arg(fixture)
+            .arg("--backend").arg(&source).arg("--out").arg(out)
+            .env("CODE_CODEX_TEST_BORROWED_STAGE",ticket).status().unwrap();
+        assert!(status.success());
     }
 
     #[cfg(windows)]
